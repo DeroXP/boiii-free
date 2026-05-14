@@ -9,6 +9,10 @@
 
 namespace updater {
 void update() {
+  // bo3-bundle fork: always skip the self-updater. Otherwise our custom build
+  // gets overwritten by the upstream official binary on every launch and any
+  // patches we add (e.g. bundle_test_loadmod) disappear before main() finishes.
+  return;
   if (utils::flags::has_flag("noupdate")) {
     return;
   }

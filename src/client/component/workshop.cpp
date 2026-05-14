@@ -1009,6 +1009,38 @@ public:
       download_thread.detach();
     });
 
+    // bo3-bundle multi-mod experiment.
+    // Usage: bundle_test_loadmod <mod_folder_name> <reloadFS_0_or_1>
+    // Calls game::loadMod() a second time after a mod is already loaded, to
+    // probe whether BO3's runtime can handle multi-mod stacking. Pass the
+    // empty string ("") as mod name to unload everything.
+    command::add("bundle_test_loadmod",
+                 [](const command::params &params) {
+      if (params.size() < 2) {
+        printf("[ bo3-bundle ] Usage: bundle_test_loadmod <mod_name> "
+               "<reloadFS_0_or_1>\n");
+        printf("[ bo3-bundle ] Currently loaded: \"%s\"\n",
+               game::getPublisherIdFromLoadedMod());
+        return;
+      }
+      const std::string mod_name = params.get(1);
+      const bool reload_fs = (params.size() >= 3 && params.get(2)
+                              && std::string(params.get(2)) != "0");
+      printf("[ bo3-bundle ] before  loaded=\"%s\"\n",
+             game::getPublisherIdFromLoadedMod());
+      printf("[ bo3-bundle ] calling loadMod(\"%s\", reloadFS=%s)...\n",
+             mod_name.c_str(), reload_fs ? "true" : "false");
+      game::loadMod(game::LOCAL_CLIENT_0, mod_name.data(), reload_fs);
+      // Wait for completion; loadMod is async when reloadFS=true.
+      int waited_ms = 0;
+      while (game::isModLoading(game::LOCAL_CLIENT_0) && waited_ms < 30000) {
+        std::this_thread::sleep_for(100ms);
+        waited_ms += 100;
+      }
+      printf("[ bo3-bundle ] after   loaded=\"%s\"  (waited %dms)\n",
+             game::getPublisherIdFromLoadedMod(), waited_ms);
+    });
+
     utils::hook::call(game::select(0x1420D6AA6, 0x1404E2936),
                       va_mods_path_stub);
     utils::hook::call(game::select(0x1420D6577, 0x1404E24A7),
