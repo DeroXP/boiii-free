@@ -14,6 +14,7 @@
 namespace client_patches {
 namespace {
 utils::hook::detour preload_map_hook;
+utils::hook::detour fs_add_game_directory_fn_hook;
 
 const game::dvar_t *cl_yaw_speed;
 const game::dvar_t *cl_pitch_speed;
@@ -97,6 +98,10 @@ game::fileHandle_t
 fs_f_open_file_write_to_dir_stub(const char *filename,
                                  [[maybe_unused]] const char *dir,
                                  const char *os_base_path) {
+  printf("[fs-trace] FS_FOpenFileWriteToDir(\"%s\", \"%s\" -> \"boiii_players\", \"%s\")\n",
+         filename ? filename : "(null)",
+         dir ? dir : "(null)",
+         os_base_path ? os_base_path : "(null)");
   return game::FS_FOpenFileWriteToDir(filename, "boiii_players", os_base_path);
 }
 
@@ -104,6 +109,10 @@ game::fileHandle_t
 fs_f_open_file_read_from_dir_stub(const char *filename,
                                   [[maybe_unused]] const char *dir,
                                   const char *os_base_path) {
+  printf("[fs-trace] FS_FOpenFileReadFromDir(\"%s\", \"%s\" -> \"boiii_players\", \"%s\")\n",
+         filename ? filename : "(null)",
+         dir ? dir : "(null)",
+         os_base_path ? os_base_path : "(null)");
   return game::FS_FOpenFileReadFromDir(filename, "boiii_players", os_base_path);
 }
 
@@ -113,7 +122,26 @@ int i_stricmp_stub(const char *s0, [[maybe_unused]] const char *s1) {
 
 void fs_add_game_directory_stub(const char *path,
                                 [[maybe_unused]] const char *dir) {
+  printf("[fs-trace] FS_AddGameDirectory(\"%s\", \"%s\" -> \"boiii_players\")\n",
+         path ? path : "(null)",
+         dir ? dir : "(null)");
   utils::hook::invoke<void>(0x1422A2AF0_g, path, "boiii_players");
+}
+
+// Function-level detour. Unlike fs_add_game_directory_stub above (which only
+// catches the call site at 0x1422A45A4 that BOIII rewrites players ->
+// boiii_players), this fires for EVERY call to FS_AddGameDirectory. Useful
+// for finding where the workshop content path gets added.
+void fs_add_game_directory_fn_stub(const char *path, const char *dir) {
+  // Capture the caller's return address so we can correlate trace entries to
+  // BO3 code regions. Helps tell "the workshop call" apart from "the main
+  // call" without disassembling.
+  void *caller = _ReturnAddress();
+  printf("[fs-trace-fn] FS_AddGameDirectory(\"%s\", \"%s\") caller=0x%p\n",
+         path ? path : "(null)",
+         dir ? dir : "(null)",
+         caller);
+  fs_add_game_directory_fn_hook.invoke<void>(path, dir);
 }
 
 void patch_players_folder_name() {
@@ -155,6 +183,10 @@ public:
     utils::hook::set(0x15AAE9254_g, mixer_open_stub);
 
     preload_map_hook.create(0x14135A1E0_g, preload_map_stub);
+
+    // Trace every call to FS_AddGameDirectory regardless of call site.
+    fs_add_game_directory_fn_hook.create(0x1422A2AF0_g,
+                                         fs_add_game_directory_fn_stub);
 
     // Keep client ranked when mod loaded
     utils::hook::jump(0x1420D5BA0_g, is_mod_loaded_stub);

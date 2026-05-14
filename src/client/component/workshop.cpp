@@ -365,22 +365,30 @@ const char *va_mods_path_stub(const char *fmt, const char *root_dir,
   const auto original_path =
       utils::string::va(fmt, root_dir, mods_dir, dir_name);
 
-  if (utils::io::directory_exists(original_path)) {
-    return original_path;
-  }
-
-  return utils::string::va("%s/%s/%s", root_dir, mods_dir, dir_name);
+  const char *result = utils::io::directory_exists(original_path)
+      ? original_path
+      : utils::string::va("%s/%s/%s", root_dir, mods_dir, dir_name);
+  printf("[fs-trace] va_mods_path(fmt=\"%s\", root=\"%s\", mods=\"%s\", "
+         "name=\"%s\") -> \"%s\"\n",
+         fmt ? fmt : "(null)", root_dir ? root_dir : "(null)",
+         mods_dir ? mods_dir : "(null)", dir_name ? dir_name : "(null)",
+         result ? result : "(null)");
+  return result;
 }
 
 const char *va_user_content_path_stub(const char *fmt, const char *root_dir,
                                       const char *user_content_dir) {
   const auto original_path = utils::string::va(fmt, root_dir, user_content_dir);
 
-  if (utils::io::directory_exists(original_path)) {
-    return original_path;
-  }
-
-  return utils::string::va("%s/%s", root_dir, user_content_dir);
+  const char *result = utils::io::directory_exists(original_path)
+      ? original_path
+      : utils::string::va("%s/%s", root_dir, user_content_dir);
+  printf("[fs-trace] va_user_content_path(fmt=\"%s\", root=\"%s\", "
+         "user_content=\"%s\") -> \"%s\"\n",
+         fmt ? fmt : "(null)", root_dir ? root_dir : "(null)",
+         user_content_dir ? user_content_dir : "(null)",
+         result ? result : "(null)");
+  return result;
 }
 } // namespace
 
@@ -1007,6 +1015,172 @@ public:
       download_thread = utils::thread::create_named_thread(
           "workshop_download", steamcmd::initialize_download, id, type_str);
       download_thread.detach();
+    });
+
+    // bo3-bundle: dump a runtime disassembly window via udis86. Lets us
+    // inspect the *unpacked* code that Ghidra can't see (BO3.exe ships with
+    // obfuscated bytes on disk; the real instructions only appear in
+    // process memory after BO3's startup decoder runs).
+    //
+    // Usage: bundle_disasm <hex_address> [instr_count_default_30]
+    // Example: bundle_disasm 1422A4585 40
+    command::add("bundle_disasm",
+                 [](const command::params &params) {
+      if (params.size() < 2) {
+        printf("[ bo3-bundle ] Usage: bundle_disasm <hex_address> "
+               "[instr_count]\n");
+        return;
+      }
+      uint64_t addr = 0;
+      try {
+        addr = std::stoull(params.get(1), nullptr, 16);
+      } catch (...) {
+        printf("[ bo3-bundle ] Couldn't parse address \"%s\" as hex\n",
+               params.get(1));
+        return;
+      }
+      // If the address looks like a static BO3 address (preferred load
+      // base 0x140000000), auto-relocate via ASLR. Runtime addresses
+      // (0x00007FF...) skip this.
+      if (addr >= 0x140000000ULL && addr < 0x150000000ULL) {
+        const auto rebased = game::relocate(static_cast<size_t>(addr));
+        printf("[ bo3-bundle ] auto-rebased static 0x%llx -> runtime 0x%llx\n",
+               static_cast<unsigned long long>(addr),
+               static_cast<unsigned long long>(rebased));
+        addr = static_cast<uint64_t>(rebased);
+      }
+      unsigned int count = 30;
+      if (params.size() >= 3) {
+        try {
+          count = static_cast<unsigned int>(std::stoul(params.get(2)));
+        } catch (...) {
+          /* keep default */
+        }
+      }
+      // Read up to 16 bytes per instruction (max x86-64 length); generous
+      // buffer keeps us from undershooting the request.
+      const size_t buffer_size = static_cast<size_t>(count) * 16;
+      const uint8_t *bytes = reinterpret_cast<const uint8_t *>(addr);
+
+      ud_t ud;
+      ud_init(&ud);
+      ud_set_mode(&ud, 64);
+      ud_set_syntax(&ud, UD_SYN_INTEL);
+      ud_set_pc(&ud, addr);
+      ud_set_input_buffer(&ud, bytes, buffer_size);
+
+      printf("[ bo3-bundle ] disasm @ 0x%016llx (%u instr)\n",
+             static_cast<unsigned long long>(addr), count);
+      for (unsigned int i = 0; i < count; ++i) {
+        if (!ud_disassemble(&ud)) {
+          printf("[ bo3-bundle ]   <decode stopped after %u instr>\n", i);
+          break;
+        }
+        printf("[ bo3-bundle ]   0x%016llx: %-22s %s\n",
+               static_cast<unsigned long long>(ud_insn_off(&ud)),
+               ud_insn_hex(&ud),
+               ud_insn_asm(&ud));
+      }
+    });
+
+    // bo3-bundle: dump BO3's FS search-path linked list. Walks from the
+    // head pointer at static 0x157A6530F (computed from the rip-relative
+    // load inside FS_AddSearchPath at 0x1422A2942) and prints each entry's
+    // path + gamedir fields. Used to verify whether our manual
+    // FS_AddSearchPath calls actually insert a node into the live list.
+    command::add("bundle_dump_searchpath",
+                 [](const command::params & /*params*/) {
+      struct sp_node {
+        sp_node *next;       // offset 0
+        const char *data;    // offset 8 -- has path[0x100], gamedir[??]
+      };
+      // Head at static 0x157A65308 (computed from rip-relative load inside
+      // FS_AddSearchPath: instruction starts at 0x1422A293B, 7 bytes long;
+      // disp32 = 0x157C29C6 added to after-instruction RIP 0x1422A2942 ->
+      // target 0x157A65308). Earlier off-by-7 read garbage/zero.
+      auto **head_ptr = reinterpret_cast<sp_node **>(0x157A65308_g);
+      sp_node *node = *head_ptr;
+      printf("[ bo3-bundle ] === search path list (head @ %p, first node %p) ===\n",
+             head_ptr, node);
+      int i = 0;
+      while (node && i < 50) {
+        const char *data = node->data;
+        if (data) {
+          // Show first 0x80 chars of path field, then gamedir at offset 0x100.
+          printf("[ bo3-bundle ]   [%d] path=\"%.128s\" gamedir=\"%.32s\"\n",
+                 i, data, data + 0x100);
+        } else {
+          printf("[ bo3-bundle ]   [%d] (data=NULL)\n", i);
+        }
+        node = node->next;
+        ++i;
+      }
+      printf("[ bo3-bundle ] === %d entries ===\n", i);
+    });
+
+    // bo3-bundle: directly invoke BO3's FS_AddSearchPath (the function we
+    // identified at static 0x1422A28D0 -- the one that walks the search-path
+    // linked list at [rip+0x157c29c6] and inserts a new node). Used to test
+    // whether we can layer EXTRA workshop folders onto an already-loaded
+    // mod's search path without going through loadMod.
+    //
+    // Usage: bundle_addpath <basepath> <gamedir>
+    // Example: bundle_addpath "C:\Program Files (x86)\Steam\steamapps\workshop\content\311210" 3656779213
+    command::add("bundle_addpath",
+                 [](const command::params &params) {
+      if (params.size() < 3) {
+        printf("[ bo3-bundle ] Usage: bundle_addpath <basepath> <gamedir>\n");
+        return;
+      }
+      using add_search_path_t = void(__cdecl *)(const char *path,
+                                                 const char *gamedir,
+                                                 int flag1, int flag2);
+      const auto fn = reinterpret_cast<add_search_path_t>(0x1422A28D0_g);
+      const std::string basepath = params.get(1);
+      const std::string gamedir = params.get(2);
+      printf("[ bo3-bundle ] FS_AddSearchPath(\"%s\", \"%s\", 0, 0)\n",
+             basepath.c_str(), gamedir.c_str());
+      fn(basepath.c_str(), gamedir.c_str(), 0, 0);
+      printf("[ bo3-bundle ] returned. Use \\path or game's print to "
+             "verify the new entry is in the list.\n");
+    });
+
+    // bo3-bundle: same as bundle_addpath but lets us pass arbitrary values
+    // for the 3rd/4th args (which we passed 0,0 originally). Used to probe
+    // whether either flag controls insertion position in the linked list
+    // (vs. always appending). Possible behaviors when flag is non-zero:
+    // - prepend instead of append
+    // - format the gamedir differently (we saw a format-string branch in
+    //   FS_AddSearchPath when r8d != 0)
+    // - mark the entry "primary" / "writable" / "language-localized"
+    //
+    // Usage: bundle_addpath_flags <basepath> <gamedir> <flag1_dec> <flag2_dec>
+    command::add("bundle_addpath_flags",
+                 [](const command::params &params) {
+      if (params.size() < 5) {
+        printf("[ bo3-bundle ] Usage: bundle_addpath_flags <basepath> "
+               "<gamedir> <flag1> <flag2>\n");
+        return;
+      }
+      using add_search_path_t = void(__cdecl *)(const char *path,
+                                                 const char *gamedir,
+                                                 int flag1, int flag2);
+      const auto fn = reinterpret_cast<add_search_path_t>(0x1422A28D0_g);
+      const std::string basepath = params.get(1);
+      const std::string gamedir = params.get(2);
+      int flag1 = 0, flag2 = 0;
+      try {
+        flag1 = std::stoi(params.get(3));
+        flag2 = std::stoi(params.get(4));
+      } catch (...) {
+        printf("[ bo3-bundle ] flags must be decimal integers\n");
+        return;
+      }
+      printf("[ bo3-bundle ] FS_AddSearchPath(\"%s\", \"%s\", %d, %d)\n",
+             basepath.c_str(), gamedir.c_str(), flag1, flag2);
+      fn(basepath.c_str(), gamedir.c_str(), flag1, flag2);
+      printf("[ bo3-bundle ] returned. Run bundle_dump_searchpath to "
+             "see effect.\n");
     });
 
     // bo3-bundle multi-mod experiment.
