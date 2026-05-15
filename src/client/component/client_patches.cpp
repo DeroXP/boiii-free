@@ -15,6 +15,7 @@ namespace client_patches {
 namespace {
 utils::hook::detour preload_map_hook;
 utils::hook::detour fs_add_game_directory_fn_hook;
+utils::hook::detour db_load_xassets_hook;
 
 const game::dvar_t *cl_yaw_speed;
 const game::dvar_t *cl_pitch_speed;
@@ -144,6 +145,28 @@ void fs_add_game_directory_fn_stub(const char *path, const char *dir) {
   fs_add_game_directory_fn_hook.invoke<void>(path, dir);
 }
 
+// Trace every DB_LoadXAssets call to learn what XZoneInfo values BO3 uses
+// when loading mod fastfiles. We need this to replicate the call ourselves
+// for multi-mod loading -- BOIII documents the signature but never calls
+// the function, so the right allocFlags/freeFlags values aren't documented.
+void db_load_xassets_stub(game::XZoneInfo *zoneInfo, uint32_t zoneCount,
+                          bool sync, bool suppressSync) {
+  void *caller = _ReturnAddress();
+  printf("[db-trace] DB_LoadXAssets(count=%u, sync=%d, suppressSync=%d) caller=0x%p\n",
+         zoneCount, sync ? 1 : 0, suppressSync ? 1 : 0, caller);
+  for (uint32_t i = 0; i < zoneCount && i < 16; ++i) {
+    const auto &z = zoneInfo[i];
+    printf("[db-trace]   zone[%u] name=\"%s\" allocFlags=0x%X freeFlags=0x%X "
+           "allocSlot=%d freeSlot=%d\n",
+           i,
+           z.name ? z.name : "(null)",
+           static_cast<unsigned>(z.allocFlags),
+           static_cast<unsigned>(z.freeFlags),
+           z.allocSlot, z.freeSlot);
+  }
+  db_load_xassets_hook.invoke<void>(zoneInfo, zoneCount, sync, suppressSync);
+}
+
 void patch_players_folder_name() {
   // Override 'players' folder
   utils::hook::call(0x14134764F_g, fs_f_open_file_write_to_dir_stub); // ??
@@ -187,6 +210,12 @@ public:
     // Trace every call to FS_AddGameDirectory regardless of call site.
     fs_add_game_directory_fn_hook.create(0x1422A2AF0_g,
                                          fs_add_game_directory_fn_stub);
+
+    // Note: previously hooked DB_LoadXAssets (0x1414236A0) here for tracing,
+    // but that address either isn't DB_LoadXAssets in this BO3 build or is a
+    // function the hook can't safely intercept -- installing the detour
+    // caused the game to fail to boot. Removed until we identify the real
+    // fastfile loader.
 
     // Keep client ranked when mod loaded
     utils::hook::jump(0x1420D5BA0_g, is_mod_loaded_stub);

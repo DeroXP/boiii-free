@@ -1083,6 +1083,282 @@ public:
       }
     });
 
+    // bo3-bundle: find code references to a runtime address. Scans BO3's
+    // executable memory looking for instructions whose RIP-relative operand
+    // equals the target address. Useful after bundle_findstring locates a
+    // format string -- bundle_findxref then locates the function that
+    // references it.
+    //
+    // Usage: bundle_findxref <hex_target_runtime_address>
+    // Example: bundle_findxref 7ff77e7c0c30
+    command::add("bundle_findxref",
+                 [](const command::params &params) {
+      if (params.size() < 2) {
+        printf("[ bo3-bundle ] Usage: bundle_findxref <hex_runtime_addr>\n");
+        return;
+      }
+      uint64_t target = 0;
+      try {
+        target = std::stoull(params.get(1), nullptr, 16);
+      } catch (...) {
+        printf("[ bo3-bundle ] couldn't parse address as hex\n");
+        return;
+      }
+      printf("[ bo3-bundle ] scanning for xrefs to 0x%016llx...\n",
+             static_cast<unsigned long long>(target));
+
+      const HMODULE module = GetModuleHandleA("BlackOps3.exe");
+      MODULEINFO mi{};
+      if (!module || !GetModuleInformation(GetCurrentProcess(), module, &mi,
+                                            sizeof(mi))) {
+        printf("[ bo3-bundle ] couldn't get BO3.exe module info\n");
+        return;
+      }
+      const auto base = reinterpret_cast<uintptr_t>(mi.lpBaseOfDll);
+      const auto end = base + mi.SizeOfImage;
+
+      int hit_count = 0;
+      uintptr_t addr = base;
+      while (addr < end && hit_count < 25) {
+        MEMORY_BASIC_INFORMATION info{};
+        if (VirtualQuery(reinterpret_cast<void *>(addr), &info,
+                         sizeof(info)) == 0) {
+          break;
+        }
+        const auto region_end = reinterpret_cast<uintptr_t>(info.BaseAddress)
+                                + info.RegionSize;
+        const bool executable =
+            info.State == MEM_COMMIT &&
+            (info.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ
+                             | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY));
+        if (executable) {
+          // Walk this region 1 byte at a time, decoding each position.
+          // Slow but reliable -- udis86 handles arbitrary alignment.
+          ud_t ud;
+          ud_init(&ud);
+          ud_set_mode(&ud, 64);
+          ud_set_syntax(&ud, UD_SYN_INTEL);
+          const auto *bytes = reinterpret_cast<const uint8_t *>(info.BaseAddress);
+          for (size_t i = 0; i < info.RegionSize - 16; ++i) {
+            // Quick prefilter: any common RIP-relative instruction encoding.
+            //   4? 8d/8b <ModRM> <disp32>    -- LEA/MOV with REX prefix
+            //                                   (4? = 0x48..0x4F covers all
+            //                                   REX.W combinations including
+            //                                   r8-r15 destinations)
+            //   8d/8b <ModRM> <disp32>       -- 32-bit LEA/MOV (no REX)
+            //   ff 15/25 <ModRM> <disp32>    -- CALL/JMP [rip+]
+            //   e8/e9 <disp32>               -- CALL/JMP rel32
+            // ModRM = mod:00 (top 2 bits 0) + R/M:101 (low 3 bits 5)
+            //         => (modrm & 0xC7) == 0x05.
+            const uint8_t b0 = bytes[i];
+            const uint8_t b1 = bytes[i + 1];
+            const uint8_t b2 = bytes[i + 2];
+            bool maybe_riprel = false;
+            int disp_offset = 0;
+            if (b0 >= 0x48 && b0 <= 0x4F &&
+                (b1 == 0x8d || b1 == 0x8b || b1 == 0x89) &&
+                (b2 & 0xC7) == 0x05) {
+              maybe_riprel = true;
+              disp_offset = 3;
+            } else if ((b0 == 0x8d || b0 == 0x8b) &&
+                       (b1 & 0xC7) == 0x05) {
+              maybe_riprel = true;
+              disp_offset = 2;
+            } else if (b0 == 0xe8 || b0 == 0xe9) {
+              maybe_riprel = true;
+              disp_offset = 1;
+            } else if (b0 == 0xff && (b1 == 0x15 || b1 == 0x25)) {
+              maybe_riprel = true;
+              disp_offset = 2;
+            }
+            if (!maybe_riprel) continue;
+            const auto inst_addr = reinterpret_cast<uintptr_t>(
+                info.BaseAddress) + i;
+            ud_set_pc(&ud, inst_addr);
+            ud_set_input_buffer(&ud, bytes + i, 16);
+            if (!ud_disassemble(&ud)) continue;
+            const unsigned len = ud_insn_len(&ud);
+            // Compute the RIP-relative target. disp_offset is the byte
+            // offset of the disp32 within the instruction, set by the
+            // prefilter above based on which encoding matched.
+            int32_t disp = 0;
+            std::memcpy(&disp, bytes + i + disp_offset, 4);
+            const uint64_t computed = inst_addr + len
+                + static_cast<int64_t>(disp);
+            if (computed == target) {
+              printf("[ bo3-bundle ]   xref @ 0x%016llx: %-22s %s\n",
+                     static_cast<unsigned long long>(inst_addr),
+                     ud_insn_hex(&ud), ud_insn_asm(&ud));
+              ++hit_count;
+              if (hit_count >= 25) break;
+            }
+          }
+        }
+        addr = region_end;
+      }
+      printf("[ bo3-bundle ] done (%d xrefs; capped at 25)\n", hit_count);
+    });
+
+    // bo3-bundle: scan BO3's loaded memory for a literal string and report
+    // every address it appears at. Used to locate format-string constants
+    // (e.g. "FastFileLoad: Setting %s") so we can find the function that
+    // references them via subsequent disassembly.
+    //
+    // Usage: bundle_findstring <ascii_text>
+    // Example: bundle_findstring "FastFileLoad: Setting"
+    command::add("bundle_findstring",
+                 [](const command::params &params) {
+      if (params.size() < 2) {
+        printf("[ bo3-bundle ] Usage: bundle_findstring <text>\n");
+        return;
+      }
+      // Reassemble the search query from all args after the command name --
+      // BOIII's command parser splits on whitespace, so "FastFileLoad:
+      // Setting" comes through as two tokens.
+      std::string needle;
+      for (int i = 1; i < params.size(); ++i) {
+        if (i > 1) needle += ' ';
+        needle += params.get(i);
+      }
+      if (needle.empty()) {
+        printf("[ bo3-bundle ] empty needle\n");
+        return;
+      }
+      printf("[ bo3-bundle ] scanning for \"%s\" (%zu bytes)...\n",
+             needle.c_str(), needle.size());
+
+      // Walk BO3's loaded module's memory regions via VirtualQuery.
+      const HMODULE module = GetModuleHandleA("BlackOps3.exe");
+      if (!module) {
+        printf("[ bo3-bundle ] BlackOps3.exe module not found\n");
+        return;
+      }
+      MODULEINFO mi{};
+      if (!GetModuleInformation(GetCurrentProcess(), module, &mi,
+                                sizeof(mi))) {
+        printf("[ bo3-bundle ] GetModuleInformation failed\n");
+        return;
+      }
+      const auto base = reinterpret_cast<uintptr_t>(mi.lpBaseOfDll);
+      const auto end = base + mi.SizeOfImage;
+      printf("[ bo3-bundle ] BO3.exe range: 0x%llx - 0x%llx (%u MB)\n",
+             static_cast<unsigned long long>(base),
+             static_cast<unsigned long long>(end),
+             mi.SizeOfImage / (1024 * 1024));
+
+      int hit_count = 0;
+      uintptr_t addr = base;
+      while (addr < end && hit_count < 10) {
+        MEMORY_BASIC_INFORMATION info{};
+        if (VirtualQuery(reinterpret_cast<void *>(addr), &info,
+                         sizeof(info)) == 0) {
+          break;
+        }
+        const auto region_end = reinterpret_cast<uintptr_t>(info.BaseAddress)
+                                + info.RegionSize;
+        const bool readable =
+            info.State == MEM_COMMIT &&
+            (info.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ
+                             | PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY));
+        if (readable && info.RegionSize > needle.size()) {
+          const auto *bytes = reinterpret_cast<const char *>(info.BaseAddress);
+          const size_t scan_len = info.RegionSize - needle.size();
+          for (size_t i = 0; i < scan_len; ++i) {
+            if (bytes[i] == needle[0]
+                && std::memcmp(bytes + i, needle.data(), needle.size()) == 0) {
+              const auto match_addr =
+                  reinterpret_cast<uintptr_t>(info.BaseAddress) + i;
+              printf("[ bo3-bundle ]   match at 0x%016llx (region %p, "
+                     "protect=0x%X)\n",
+                     static_cast<unsigned long long>(match_addr),
+                     info.BaseAddress, info.Protect);
+              ++hit_count;
+              if (hit_count >= 10) break;
+            }
+          }
+        }
+        addr = region_end;
+      }
+      printf("[ bo3-bundle ] done (%d matches; capped at 10)\n", hit_count);
+    });
+
+    // bo3-bundle: directly invoke BO3's DB_LoadXAssets (the documented
+    // fastfile loader at 0x1414236A0) with a constructed XZoneInfo. We can
+    // CALL the function safely even though we couldn't HOOK it (hooking
+    // overwrites the prologue and the detour interfered with BO3's
+    // expectations; calling just routes through the normal entry).
+    //
+    // Usage: bundle_load_ff <fastfile_name_without_extension>
+    // Example: bundle_load_ff core_mod
+    //
+    // The fastfile is searched for via the FS search path, so the name
+    // resolves to whichever workshop folder finds it first. If you call
+    // bundle_addpath for a second mod first, then bundle_load_ff,
+    // BO3 will load that ff from whichever path's first match.
+    command::add("bundle_load_ff",
+                 [](const command::params &params) {
+      if (params.size() < 2) {
+        printf("[ bo3-bundle ] Usage: bundle_load_ff <ff_name>\n");
+        return;
+      }
+      static thread_local std::string saved_name;
+      saved_name = params.get(1);
+      game::XZoneInfo zi{};
+      zi.name = saved_name.c_str();
+      // allocFlags / allocSlot values are guesses based on BO3 conventions.
+      // 0x4 is a common "user mod" tier in similar COD engines. allocSlot=0
+      // tells BO3 to pick. We're trying minimal defaults and will iterate
+      // if the load fails or BO3 misbehaves.
+      zi.allocFlags = 0x4;
+      zi.freeFlags = 0;
+      zi.allocSlot = 0;
+      zi.freeSlot = 0;
+      // fileBuffer left zero-initialized -- means "load from disk via FS"
+      printf("[ bo3-bundle ] DB_LoadXAssets({name=\"%s\", allocFlags=0x%X, "
+             "allocSlot=%d}, count=1, sync=true, suppressSync=false)...\n",
+             zi.name, zi.allocFlags, zi.allocSlot);
+      game::DB_LoadXAssets(&zi, 1, true, false);
+      printf("[ bo3-bundle ] returned\n");
+    });
+
+    // bo3-bundle: take the LAST node in the search-path linked list and
+    // move it to the FRONT. Used after bundle_addpath to test whether
+    // putting our newly-added entry at the head changes which mod's
+    // content BO3 finds first via FS_FOpenFile.
+    //
+    // Linked list manipulation: O(N) walk to find tail + tail-1, detach,
+    // re-insert at head. Safe as long as no other thread is iterating the
+    // list during the swap (BOIII's fs_add_game_directory_stub doesn't
+    // run concurrently with console commands, so we're OK in practice).
+    command::add("bundle_promote_last",
+                 [](const command::params & /*params*/) {
+      struct sp_node {
+        sp_node *next;
+        const char *data;
+      };
+      auto **head_ptr = reinterpret_cast<sp_node **>(0x157A65308_g);
+      sp_node *head = *head_ptr;
+      if (!head || !head->next) {
+        printf("[ bo3-bundle ] list is empty or has only one entry; "
+               "nothing to promote.\n");
+        return;
+      }
+      // Find tail and the node before it.
+      sp_node *prev = head;
+      while (prev->next->next) {
+        prev = prev->next;
+      }
+      sp_node *tail = prev->next;
+      // Detach tail and re-insert at head.
+      prev->next = nullptr;
+      tail->next = head;
+      *head_ptr = tail;
+      const char *path = tail->data ? tail->data : "(null)";
+      const char *gamedir = tail->data ? tail->data + 0x100 : "(null)";
+      printf("[ bo3-bundle ] promoted last entry to front: "
+             "path=\"%.128s\" gamedir=\"%.32s\"\n", path, gamedir);
+    });
+
     // bo3-bundle: dump BO3's FS search-path linked list. Walks from the
     // head pointer at static 0x157A6530F (computed from the rip-relative
     // load inside FS_AddSearchPath at 0x1422A2942) and prints each entry's
