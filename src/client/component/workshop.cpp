@@ -1295,29 +1295,143 @@ public:
     // resolves to whichever workshop folder finds it first. If you call
     // bundle_addpath for a second mod first, then bundle_load_ff,
     // BO3 will load that ff from whichever path's first match.
+    // bo3-bundle: dump BO3's g_zoneNames[] -- the global table of currently
+    // loaded zones, their allocFlags, and state. Lets us see what flags
+    // Solo's en_core_mod / core_mod were loaded with so we can call
+    // DB_LoadXAssets with matching values.
+    //
+    // g_zoneNames is at static 0x14998FB80 (documented by BOIII in
+    // symbols.hpp). Each entry is 96 bytes (sizeof XZoneName); BO3's
+    // disassembly uses an upper bound of 0x32 entries iirc.
+    command::add("bundle_dump_zones",
+                 [](const command::params & /*params*/) {
+      // Layout matches the XZoneName struct in BOIII's structs.hpp.
+      struct zone_entry {
+        char name[64];
+        int flags;
+        int slot;
+        char unknown1[16];
+        int state;            // XZoneState enum
+        unsigned char streamPreloaded;
+        char padding[3];
+      };
+      static_assert(sizeof(zone_entry) == 96,
+                    "XZoneName must be 96 bytes");
+
+      auto *zones = reinterpret_cast<zone_entry *>(0x14998FB80_g);
+      printf("[ bo3-bundle ] === g_zoneNames[] @ %p ===\n", zones);
+      int loaded = 0;
+      for (int i = 0; i < 64; ++i) {
+        const auto &z = zones[i];
+        // Empty slot detection: name byte 0 == '\0' AND flags == 0
+        // (BO3 zeroes entries on unload).
+        if (z.name[0] == '\0' && z.flags == 0 && z.state == 0) {
+          continue;
+        }
+        const char *state_name = "?";
+        switch (z.state) {
+          case -1: state_name = "UNLOADING"; break;
+          case 0:  state_name = "EMPTY"; break;
+          case 1:  state_name = "LOADING"; break;
+          case 2:  state_name = "LOADED"; break;
+          case 3:  state_name = "COMPLETE"; break;
+          case 4:  state_name = "FAILED"; break;
+        }
+        printf("[ bo3-bundle ]   [%d] name=\"%.64s\" flags=0x%X slot=%d "
+               "state=%s\n",
+               i, z.name, static_cast<unsigned>(z.flags), z.slot,
+               state_name);
+        ++loaded;
+      }
+      printf("[ bo3-bundle ] === %d non-empty entries ===\n", loaded);
+    });
+
+    // bo3-bundle: load a fastfile + its language pair (en_X) in one
+    // DB_LoadXAssets call. BO3 always loads pairs together; loading just
+    // one half throws "Could not find zone 'en_X'" because internal
+    // references span both halves.
+    //
+    // Usage: bundle_load_ff_pair <base_name> [allocFlags_hex]
+    // Example: bundle_load_ff_pair core_mod
+    //   -> loads en_core_mod + core_mod with allocFlags=0x800
+    command::add("bundle_load_ff_pair",
+                 [](const command::params &params) {
+      if (params.size() < 2) {
+        printf("[ bo3-bundle ] Usage: bundle_load_ff_pair <base_name> "
+               "[allocFlags_hex]\n");
+        return;
+      }
+      static thread_local std::string en_name, base_name;
+      base_name = params.get(1);
+      en_name = "en_" + base_name;
+      int alloc_flags = 0x800;
+      if (params.size() >= 3) {
+        try {
+          alloc_flags = static_cast<int>(
+              std::stoul(params.get(2), nullptr, 16));
+        } catch (...) { /* keep default */ }
+      }
+      // BO3's own pattern: language pair first, then base fastfile. The
+      // language entry has the high bit 0x8000000 set in its allocFlags --
+      // observed in g_zoneNames[] where en_core_mod has flags=0x8000040
+      // and core_mod has flags=0x40. We assume BO3 uses this bit to
+      // distinguish "this IS the language pair, don't auto-prefix" so the
+      // name we pass ("en_X") is taken literally.
+      const int lang_alloc_flags = alloc_flags | 0x8000000;
+      game::XZoneInfo zi[2]{};
+      zi[0].name = en_name.c_str();
+      zi[0].allocFlags = lang_alloc_flags;
+      zi[1].name = base_name.c_str();
+      zi[1].allocFlags = alloc_flags;
+      printf("[ bo3-bundle ] DB_LoadXAssets([{\"%s\", 0x%X}, "
+             "{\"%s\", 0x%X}], count=2, sync=true)...\n",
+             zi[0].name, static_cast<unsigned>(lang_alloc_flags),
+             zi[1].name, static_cast<unsigned>(alloc_flags));
+      game::DB_LoadXAssets(zi, 2, true, false);
+      printf("[ bo3-bundle ] returned\n");
+    });
+
     command::add("bundle_load_ff",
                  [](const command::params &params) {
       if (params.size() < 2) {
-        printf("[ bo3-bundle ] Usage: bundle_load_ff <ff_name>\n");
+        printf("[ bo3-bundle ] Usage: bundle_load_ff <ff_name> "
+               "[allocFlags_hex] [sync_0_or_1]\n");
+        printf("[ bo3-bundle ] Default allocFlags=0x800 (observed at BO3's "
+               "own load-zone call site at 0x142148732). Other observed "
+               "values: 0x200, 0x800000, 0x400000.\n");
+        printf("[ bo3-bundle ] NOTE: BO3 typically loads fastfiles in PAIRS "
+               "(en_X + X). For mod fastfiles, prefer bundle_load_ff_pair.\n");
         return;
       }
       static thread_local std::string saved_name;
       saved_name = params.get(1);
       game::XZoneInfo zi{};
       zi.name = saved_name.c_str();
-      // allocFlags / allocSlot values are guesses based on BO3 conventions.
-      // 0x4 is a common "user mod" tier in similar COD engines. allocSlot=0
-      // tells BO3 to pick. We're trying minimal defaults and will iterate
-      // if the load fails or BO3 misbehaves.
-      zi.allocFlags = 0x4;
+      // 0x800 is what BO3 itself uses when calling DB_LoadXAssets to load a
+      // zone in this code path. 0x4 (our previous guess) freed too much
+      // vanilla content -- it was a different slot ID.
+      zi.allocFlags = 0x800;
+      if (params.size() >= 3) {
+        try {
+          zi.allocFlags = static_cast<int>(
+              std::stoul(params.get(2), nullptr, 16));
+        } catch (...) { /* keep default */ }
+      }
       zi.freeFlags = 0;
       zi.allocSlot = 0;
       zi.freeSlot = 0;
-      // fileBuffer left zero-initialized -- means "load from disk via FS"
+
+      bool sync = true;
+      if (params.size() >= 4) {
+        sync = std::string(params.get(3)) != "0";
+      }
+
       printf("[ bo3-bundle ] DB_LoadXAssets({name=\"%s\", allocFlags=0x%X, "
-             "allocSlot=%d}, count=1, sync=true, suppressSync=false)...\n",
-             zi.name, zi.allocFlags, zi.allocSlot);
-      game::DB_LoadXAssets(&zi, 1, true, false);
+             "freeFlags=0, allocSlot=0, freeSlot=0}, count=1, sync=%s, "
+             "suppressSync=false)...\n",
+             zi.name, static_cast<unsigned>(zi.allocFlags),
+             sync ? "true" : "false");
+      game::DB_LoadXAssets(&zi, 1, sync, false);
       printf("[ bo3-bundle ] returned\n");
     });
 
