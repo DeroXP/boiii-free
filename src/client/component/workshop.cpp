@@ -279,6 +279,106 @@ void arm_hw_bp_on_flag(int inst) {
   arm_hw_bp_write(flag_addr, 1, "begin-flag");
 }
 
+// bo3-bundle: track how often our thread-creation hooks fire (to verify
+// they're being used — if CreateThread/NtCreateThreadEx never fires for BO3
+// during Solo load, the thread we want is created some other way).
+std::atomic<int> g_workshop_create_thread_fires{0};
+std::atomic<int> g_workshop_nt_create_thread_fires{0};
+std::atomic<int> g_workshop_threads_armed{0};
+
+// bo3-bundle: CreateThread propagation hook. BOIII's anti-debug hook on
+// CreateThread (arxan.cpp) clears itself after first BO3-startup detection,
+// so by the time gameplay runs, CreateThread is back to default. We install
+// our own hook to: force CREATE_SUSPENDED, set DR0 on the new thread's
+// context, then resume. This way newly-spawned worker threads inherit our
+// queue-write breakpoint and can catch writes the parent-thread arm misses.
+// Set DR0 write-trap on the given thread handle to the configured queue
+// entry. Returns true if SetThreadContext succeeded.
+bool set_dr0_queue_trap_on_thread(HANDLE th) {
+  const auto base = reinterpret_cast<uintptr_t>(
+      GetModuleHandleA("BlackOps3.exe"));
+  if (!base) return false;
+  const auto list_global_addr = base + (0x1432E6000ULL - 0x140000000ULL);
+  const auto array_head =
+      *reinterpret_cast<uintptr_t *>(list_global_addr);
+  if (!array_head) return false;
+  const int entry_index = g_queue_bp_entry.load(std::memory_order_relaxed);
+  const auto target = array_head + static_cast<uintptr_t>(entry_index) * 8;
+  CONTEXT ctx{};
+  ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+  if (!GetThreadContext(th, &ctx)) return false;
+  ctx.Dr0 = target;
+  ctx.Dr7 &= ~(0xFULL << 16);
+  ctx.Dr7 &= ~0x3ULL;
+  ctx.Dr7 |= 0x1ULL;
+  ctx.Dr7 |= 0x100ULL;
+  ctx.Dr7 |= (0x1ULL << 16);          // type = WRITE
+  ctx.Dr7 |= (0b11ULL << 18);         // length = 4 bytes
+  ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+  return SetThreadContext(th, &ctx) != 0;
+}
+
+utils::hook::detour workshop_create_thread_hook;
+HANDLE WINAPI workshop_create_thread_stub(LPSECURITY_ATTRIBUTES sa,
+                                          SIZE_T stack_size,
+                                          LPTHREAD_START_ROUTINE start_address,
+                                          LPVOID parameter,
+                                          DWORD creation_flags,
+                                          LPDWORD thread_id) {
+  g_workshop_create_thread_fires.fetch_add(1, std::memory_order_relaxed);
+  const bool already_suspended = (creation_flags & CREATE_SUSPENDED) != 0;
+  HANDLE th = workshop_create_thread_hook.invoke<HANDLE>(
+      sa, stack_size, start_address, parameter,
+      creation_flags | CREATE_SUSPENDED, thread_id);
+  if (th && g_queue_bp_enabled.load(std::memory_order_relaxed)) {
+    if (set_dr0_queue_trap_on_thread(th)) {
+      g_workshop_threads_armed.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+  if (th && !already_suspended) {
+    ResumeThread(th);
+  }
+  return th;
+}
+
+// NtCreateThreadEx hook -- catches lower-level thread creation (used by
+// Win32 thread pools, some asset loaders, etc.) that bypasses CreateThread.
+// Signature (Windows undocumented but well known):
+using NtCreateThreadEx_t = NTSTATUS(NTAPI *)(
+    PHANDLE, ACCESS_MASK, void *, HANDLE, void *, void *, ULONG, ULONG_PTR,
+    SIZE_T, SIZE_T, void *);
+utils::hook::detour workshop_nt_create_thread_ex_hook;
+NTSTATUS NTAPI workshop_nt_create_thread_ex_stub(PHANDLE thread_handle,
+                                                 ACCESS_MASK desired_access,
+                                                 void *object_attributes,
+                                                 HANDLE process_handle,
+                                                 void *start_address,
+                                                 void *argument,
+                                                 ULONG create_flags,
+                                                 ULONG_PTR zero_bits,
+                                                 SIZE_T stack_size,
+                                                 SIZE_T max_stack_size,
+                                                 void *attribute_list) {
+  g_workshop_nt_create_thread_fires.fetch_add(1, std::memory_order_relaxed);
+  // 0x00000001 = THREAD_CREATE_FLAGS_CREATE_SUSPENDED (NT-level flag)
+  constexpr ULONG NT_CREATE_SUSPENDED = 0x00000001;
+  const bool already_suspended = (create_flags & NT_CREATE_SUSPENDED) != 0;
+  const auto status = workshop_nt_create_thread_ex_hook.invoke<NTSTATUS>(
+      thread_handle, desired_access, object_attributes, process_handle,
+      start_address, argument, create_flags | NT_CREATE_SUSPENDED, zero_bits,
+      stack_size, max_stack_size, attribute_list);
+  if (status >= 0 && thread_handle && *thread_handle &&
+      g_queue_bp_enabled.load(std::memory_order_relaxed)) {
+    if (set_dr0_queue_trap_on_thread(*thread_handle)) {
+      g_workshop_threads_armed.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+  if (status >= 0 && thread_handle && *thread_handle && !already_suspended) {
+    ResumeThread(*thread_handle);
+  }
+  return status;
+}
+
 // Arm DR0 on ALL THREADS in the current process (except the current
 // thread, which arm_hw_bp_write already set). Required when the target
 // write happens on a thread we don't have a hook on. Briefly suspends
@@ -2735,6 +2835,23 @@ public:
       }
     });
 
+    // bo3-bundle: dump thread-hook fire counts. Verifies CreateThread /
+    // NtCreateThreadEx hooks are catching thread creations and propagating
+    // DR0. If both counts are 0 after Solo load, BO3 creates threads via
+    // some mechanism that bypasses both (kernel callback? thread pool API
+    // we didn't hook?).
+    command::add("bundle_dump_thread_hook_stats",
+                 [](const command::params &) {
+      const auto ct = g_workshop_create_thread_fires.load();
+      const auto nt = g_workshop_nt_create_thread_fires.load();
+      const auto armed = g_workshop_threads_armed.load();
+      printf("[ bo3-bundle ] thread-hook stats:\n");
+      printf("[ bo3-bundle ]   CreateThread fires      : %d\n", ct);
+      printf("[ bo3-bundle ]   NtCreateThreadEx fires  : %d\n", nt);
+      printf("[ bo3-bundle ]   threads DR0-armed       : %d (only when hunt ON)\n",
+             armed);
+    });
+
     // bo3-bundle: dump histogram of Scr_LoadScript callers. Logs the top
     // call sites by frequency. The most-frequent caller is the mod-chain
     // script loader -- its body will reveal where queue-add happens.
@@ -3651,6 +3768,22 @@ public:
     utils::hook::call(0x14135CD84_g, has_workshop_item_stub);
     setup_server_map_hook.create(*game::CL_SetupForNewServerMap,
                                  setup_server_map_stub);
+
+    // bo3-bundle: hook CreateThread to propagate the queue-write HW BP to
+    // every newly-spawned thread (when g_queue_bp_enabled is ON). BOIII's
+    // arxan create_thread_hook clears itself after first BO3 startup
+    // detection, so by the time gameplay loads scripts on worker threads,
+    // CreateThread is unhooked; ours catches it.
+    workshop_create_thread_hook.create(CreateThread,
+                                       workshop_create_thread_stub);
+
+    // Also hook NtCreateThreadEx (ntdll) -- thread pools and some asset
+    // loaders bypass CreateThread and go directly to this Nt-level entry.
+    if (auto *nt =
+            GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtCreateThreadEx")) {
+      workshop_nt_create_thread_ex_hook.create(
+          nt, workshop_nt_create_thread_ex_stub);
+    }
 
     // bo3-bundle: hook the "Redundant %s asset" Com_PrintWarning call site
     // in the asset linker (client only). When bundle_load_ff is active,
