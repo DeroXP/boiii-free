@@ -26,6 +26,7 @@
 #include <set>
 #include <unordered_map>
 #include <shellapi.h>
+#include <tlhelp32.h>
 
 namespace workshop {
 namespace {
@@ -50,6 +51,13 @@ std::set<std::string> g_pending_bundle_scripts;
 // bo3-bundle: gates capture in the redundant-warning hook so we only collect
 // during a bundle_load_ff invocation (not during normal BO3 FF loads).
 std::atomic<bool> g_inside_bundle_load{false};
+
+// bo3-bundle: when ON, scr_begin_load_scripts_stub will re-arm HW BP DR0
+// on queue[g_queue_bp_entry].flags after each Begin call. The BP captures
+// the function that writes to that queue slot during script loading -- our
+// candidate for the autoexec-queue-add function.
+std::atomic<bool> g_queue_bp_enabled{false};
+std::atomic<int> g_queue_bp_entry{0xC};
 
 // bo3-bundle: hook on the "Redundant ... asset" Com_PrintWarning call site.
 // The original is called by the asset linker when a same-named asset is
@@ -198,45 +206,151 @@ LONG WINAPI hw_bp_handler(EXCEPTION_POINTERS *ep) {
   return EXCEPTION_CONTINUE_EXECUTION;
 }
 
-void arm_hw_bp_on_flag(int inst) {
+// Generic HW BP primitive: arm DR0 to trap WRITE access on `len_bytes` at
+// `addr`. `len_bytes` must be 1, 2, 4, or 8 (DR7 length encoding).
+// Returns true on success.
+bool arm_hw_bp_write(uintptr_t addr, int len_bytes, const char *label) {
   static std::atomic<bool> veh_installed{false};
   if (!veh_installed.exchange(true)) {
     AddVectoredExceptionHandler(1, hw_bp_handler);
   }
-  if (g_hw_bp_armed.load(std::memory_order_relaxed))
-    return;  // already armed, wait for fire
+  // Always allow re-arm (overwrites previous BP). One-shot fires reset
+  // g_hw_bp_armed.
+  uint64_t len_bits = 0;
+  switch (len_bytes) {
+    case 1: len_bits = 0b00; break;
+    case 2: len_bits = 0b01; break;
+    case 4: len_bits = 0b11; break;
+    case 8: len_bits = 0b10; break;
+    default:
+      printf("[ bo3-bundle ] arm_hw_bp_write: bad length %d (must be 1/2/4/8)\n",
+             len_bytes);
+      return false;
+  }
 
-  const auto base = reinterpret_cast<uintptr_t>(
-      GetModuleHandleA("BlackOps3.exe"));
-  const auto flag_addr =
-      base + 0x4d4e5cc + static_cast<uintptr_t>(inst) * 0x820;
-  g_hw_bp_addr.store(flag_addr, std::memory_order_relaxed);
+  g_hw_bp_addr.store(addr, std::memory_order_relaxed);
+  g_hw_bp_fires.store(0, std::memory_order_relaxed);
 
   HANDLE thread = GetCurrentThread();
   CONTEXT ctx{};
   ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
   if (!GetThreadContext(thread, &ctx)) {
-    printf("[ bo3-bundle ] arm_hw_bp: GetThreadContext failed err=%lu\n",
+    printf("[ bo3-bundle ] arm_hw_bp_write: GetThreadContext failed err=%lu\n",
            GetLastError());
-    return;
+    return false;
   }
-  ctx.Dr0 = flag_addr;
-  // DR7: enable DR0 locally, type=WRITE (01) at bits 16-17, length=1 byte
-  // (00) at bits 18-19. Set LE (bit 8) for exact match.
-  ctx.Dr7 &= ~(0xFULL << 16);  // clear DR0 config
-  ctx.Dr7 &= ~0x3ULL;           // clear L0/G0
-  ctx.Dr7 |= 0x1ULL;            // L0 = 1
-  ctx.Dr7 |= (0x1ULL << 16);    // type = 01 (WRITE)
-  ctx.Dr7 |= 0x100ULL;          // LE = 1
+  ctx.Dr0 = addr;
+  // DR7: clear DR0 config (bits 16-19) and L0/G0 (bits 0-1), then set
+  //   L0 = 1                (bit 0)
+  //   LE = 1                (bit 8, recommended for exact match)
+  //   type = 01 (WRITE)     (bits 16-17)
+  //   length = len_bits     (bits 18-19)
+  ctx.Dr7 &= ~(0xFULL << 16);
+  ctx.Dr7 &= ~0x3ULL;
+  ctx.Dr7 |= 0x1ULL;
+  ctx.Dr7 |= 0x100ULL;
+  ctx.Dr7 |= (0x1ULL << 16);          // type = WRITE
+  ctx.Dr7 |= (len_bits << 18);        // length encoding
   ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
   if (!SetThreadContext(thread, &ctx)) {
-    printf("[ bo3-bundle ] arm_hw_bp: SetThreadContext failed err=%lu\n",
+    printf("[ bo3-bundle ] arm_hw_bp_write: SetThreadContext failed err=%lu\n",
            GetLastError());
-    return;
+    return false;
   }
   g_hw_bp_armed.store(true, std::memory_order_relaxed);
-  printf("[ bo3-bundle ] HW BP armed: DR0=0x%llx (WRITE 1 byte) for inst=%d\n",
-         static_cast<unsigned long long>(flag_addr), inst);
+  // Quiet label suppresses per-call log (used by per-Scr_LoadScript arms
+  // that fire hundreds of times per cycle; only the FIRE log matters).
+  const bool quiet = label && std::strncmp(label, "qbp-per-", 8) == 0;
+  if (!quiet) {
+    printf("[ bo3-bundle ] HW BP armed (%s): DR0=0x%llx WRITE %d byte(s)\n",
+           label ? label : "anon",
+           static_cast<unsigned long long>(addr), len_bytes);
+  }
+  return true;
+}
+
+// Legacy wrapper that targets the per-instance begin/end flag. Used by the
+// scr_begin_load_scripts_stub. Kept for compatibility.
+void arm_hw_bp_on_flag(int inst) {
+  const auto base = reinterpret_cast<uintptr_t>(
+      GetModuleHandleA("BlackOps3.exe"));
+  const auto flag_addr =
+      base + 0x4d4e5cc + static_cast<uintptr_t>(inst) * 0x820;
+  arm_hw_bp_write(flag_addr, 1, "begin-flag");
+}
+
+// Arm DR0 on ALL THREADS in the current process (except the current
+// thread, which arm_hw_bp_write already set). Required when the target
+// write happens on a thread we don't have a hook on. Briefly suspends
+// each other thread to manipulate its context; this is normally safe but
+// could deadlock if a target thread holds a lock another waits on.
+// Returns the number of additional threads armed.
+int arm_hw_bp_all_threads(uintptr_t addr, int len_bytes, const char *label) {
+  // First arm on the current thread.
+  arm_hw_bp_write(addr, len_bytes, label);
+
+  uint64_t len_bits = 0;
+  switch (len_bytes) {
+    case 1: len_bits = 0b00; break;
+    case 2: len_bits = 0b01; break;
+    case 4: len_bits = 0b11; break;
+    case 8: len_bits = 0b10; break;
+    default: return 0;
+  }
+
+  const DWORD current_pid = GetCurrentProcessId();
+  const DWORD current_tid = GetCurrentThreadId();
+  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+  if (snap == INVALID_HANDLE_VALUE) {
+    printf("[ bo3-bundle ] arm_hw_bp_all_threads: snapshot failed err=%lu\n",
+           GetLastError());
+    return 0;
+  }
+
+  THREADENTRY32 te{};
+  te.dwSize = sizeof(te);
+  int armed = 0;
+  int skipped = 0;
+  if (Thread32First(snap, &te)) {
+    do {
+      if (te.th32OwnerProcessID != current_pid) continue;
+      if (te.th32ThreadID == current_tid) continue;
+      HANDLE th = OpenThread(
+          THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_SET_CONTEXT,
+          FALSE, te.th32ThreadID);
+      if (!th) { skipped++; continue; }
+      if (SuspendThread(th) == (DWORD)-1) {
+        CloseHandle(th); skipped++; continue;
+      }
+      CONTEXT ctx{};
+      ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+      if (GetThreadContext(th, &ctx)) {
+        ctx.Dr0 = addr;
+        ctx.Dr7 &= ~(0xFULL << 16);
+        ctx.Dr7 &= ~0x3ULL;
+        ctx.Dr7 |= 0x1ULL;
+        ctx.Dr7 |= 0x100ULL;
+        ctx.Dr7 |= (0x1ULL << 16);          // type = WRITE
+        ctx.Dr7 |= (len_bits << 18);
+        ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+        if (SetThreadContext(th, &ctx)) {
+          armed++;
+        } else {
+          skipped++;
+        }
+      } else {
+        skipped++;
+      }
+      ResumeThread(th);
+      CloseHandle(th);
+    } while (Thread32Next(snap, &te));
+  }
+  CloseHandle(snap);
+
+  printf("[ bo3-bundle ] arm_hw_bp_all_threads: armed %d other threads "
+         "(+ current), skipped %d (current_tid=%lu)\n",
+         armed, skipped, current_tid);
+  return armed;
 }
 
 // bo3-bundle: observation detour on Scr_BeginLoadScripts (0x1412C7DF0).
@@ -258,13 +372,26 @@ void scr_begin_load_scripts_stub(int inst, int user) {
   printf("[ bo3-bundle ] Scr_BeginLoadScripts(inst=%d) EXIT -- "
          "flag after=%d\n",
          inst, after);
-  // Arm hardware breakpoint (DR0) on the flag's exact byte after Begin sets
-  // it to 1. The next WRITE to this byte (probably the autoexec dispatcher
-  // clearing the flag) will trip a SINGLE_STEP exception that captures the
-  // writing RIP.
-  if (after == 1) {
-    arm_hw_bp_on_flag(inst);
+  // bo3-bundle queue-write hunt: arm DR0 on queue[12].flags HERE so the
+  // BP lives on the script-VM thread (this hook runs on it). The previous
+  // bundle_arm_queue_bp command tried from the file-watcher thread and
+  // never fired because HW BPs are per-thread. Set this each Begin cycle
+  // so it covers every map-load attempt.
+  //
+  // Gated on g_queue_bp_enabled so it's only armed when the user wants
+  // to hunt (default OFF -- bundle_hunt_queue_writer toggles it).
+  if (g_queue_bp_enabled.load(std::memory_order_relaxed) && after == 1) {
+    const auto list_global_addr =
+        base + (0x1432E6000ULL - 0x140000000ULL);
+    const auto array_head =
+        *reinterpret_cast<uintptr_t *>(list_global_addr);
+    if (array_head) {
+      const int entry_index = g_queue_bp_entry.load(std::memory_order_relaxed);
+      const auto target = array_head + static_cast<uintptr_t>(entry_index) * 8;
+      arm_hw_bp_all_threads(target, 4, "queue-entry");
+    }
   }
+  (void)arm_hw_bp_on_flag;  // suppress unused warning
 }
 
 // bo3-bundle: observation detour on Scr_LoadScript (0x1412C83F0).
@@ -273,8 +400,20 @@ void scr_begin_load_scripts_stub(int inst, int user) {
 //   - log if the per-inst flag at 0x4d4e5cc transitions (entry != exit)
 // Goal: find what flag-transition happens during Solo's mod scripts vs
 // our custom scripts, identifying the autoexec dispatch point.
+// bo3-bundle: track unique callers of Scr_LoadScript. Mod-chain script
+// loader is the high-frequency caller; identifying its address (and from
+// there its body) reveals the function that ALSO adds queue entries.
+std::mutex g_scrload_callers_mutex;
+std::unordered_map<uintptr_t, int> g_scrload_callers;
+
 utils::hook::detour scr_load_script_hook;
 unsigned int scr_load_script_stub(int inst, const char *filename) {
+  const auto caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
+  {
+    std::lock_guard lock(g_scrload_callers_mutex);
+    g_scrload_callers[caller]++;
+  }
+
   const auto base = reinterpret_cast<uintptr_t>(
       GetModuleHandleA("BlackOps3.exe"));
   const auto flag_addr =
@@ -284,6 +423,26 @@ unsigned int scr_load_script_stub(int inst, const char *filename) {
   const bool always_log = filename &&
       (std::strstr(filename, "_ds4c") != nullptr ||
        std::strstr(filename, "_test_autoexec") != nullptr);
+
+  // bo3-bundle queue hunt: re-arm DR0 on THIS thread before each
+  // Scr_LoadScript call. The mod-chain loader very likely writes the
+  // autoexec queue from inside Scr_LoadScript or a function it calls --
+  // both run on the current thread. The previous all-threads arm missed
+  // it because BO3 spawns worker threads after arm time; this approach
+  // arms the actual thread doing the script load.
+  if (g_queue_bp_enabled.load(std::memory_order_relaxed)) {
+    const auto list_global_addr =
+        base + (0x1432E6000ULL - 0x140000000ULL);
+    const auto array_head =
+        *reinterpret_cast<uintptr_t *>(list_global_addr);
+    if (array_head) {
+      const int entry_index =
+          g_queue_bp_entry.load(std::memory_order_relaxed);
+      const auto target =
+          array_head + static_cast<uintptr_t>(entry_index) * 8;
+      arm_hw_bp_write(target, 4, "qbp-per-load");
+    }
+  }
 
   const auto result =
       scr_load_script_hook.invoke<unsigned int>(inst, filename);
@@ -2574,6 +2733,114 @@ public:
           break;
         }
       }
+    });
+
+    // bo3-bundle: dump histogram of Scr_LoadScript callers. Logs the top
+    // call sites by frequency. The most-frequent caller is the mod-chain
+    // script loader -- its body will reveal where queue-add happens.
+    command::add("bundle_dump_scrload_callers",
+                 [](const command::params &) {
+      std::vector<std::pair<uintptr_t, int>> sorted;
+      {
+        std::lock_guard lock(g_scrload_callers_mutex);
+        sorted.reserve(g_scrload_callers.size());
+        for (const auto &kv : g_scrload_callers)
+          sorted.emplace_back(kv.first, kv.second);
+      }
+      std::sort(sorted.begin(), sorted.end(),
+                [](const auto &a, const auto &b){ return a.second > b.second; });
+      const auto base = reinterpret_cast<uintptr_t>(
+          GetModuleHandleA("BlackOps3.exe"));
+      printf("[ bo3-bundle ] Scr_LoadScript callers (%zu unique):\n",
+             sorted.size());
+      const int show = std::min<int>(20, static_cast<int>(sorted.size()));
+      for (int i = 0; i < show; i++) {
+        const auto rip = sorted[i].first;
+        const auto cnt = sorted[i].second;
+        const auto rip_off = rip > base ? (rip - base) : 0ULL;
+        const auto static_rip = rip_off ? (rip_off + 0x140000000ULL) : 0ULL;
+        printf("[ bo3-bundle ]   %5d calls @ RIP=0x%llx (BO3 +0x%llx, "
+               "static=0x%llx)\n", cnt,
+               static_cast<unsigned long long>(rip),
+               static_cast<unsigned long long>(rip_off),
+               static_cast<unsigned long long>(static_rip));
+      }
+    });
+
+    // bo3-bundle: clear the caller histogram (run before a specific event
+    // to get clean per-event counts).
+    command::add("bundle_clear_scrload_callers",
+                 [](const command::params &) {
+      std::lock_guard lock(g_scrload_callers_mutex);
+      const auto n = g_scrload_callers.size();
+      g_scrload_callers.clear();
+      printf("[ bo3-bundle ] cleared %zu caller entries\n", n);
+    });
+
+    // bo3-bundle: arm HW BP DR0 on queue[entry_index].flags ACROSS ALL
+    // BO3 threads NOW. Use this RIGHT BEFORE you trigger the action you
+    // want to trace (e.g., before clicking Solo in Mods menu). The
+    // Scr_BeginLoadScripts auto-arm misses writes that happen during the
+    // FF asset linker phase (which fires before Begin).
+    //
+    // Usage: bundle_arm_queue_bp_now [entry_index_hex]
+    command::add("bundle_arm_queue_bp_now",
+                 [](const command::params &params) {
+      int entry_index = 0xC;
+      if (params.size() >= 2) {
+        try {
+          entry_index = static_cast<int>(
+              std::stoul(params.get(1), nullptr, 16));
+        } catch (...) { /* keep default */ }
+      }
+      if (entry_index < 1 || entry_index > 0x400) {
+        printf("[ bo3-bundle ] entry_index out of range (1..0x400)\n");
+        return;
+      }
+      const auto base = reinterpret_cast<uintptr_t>(
+          GetModuleHandleA("BlackOps3.exe"));
+      const auto list_global_addr =
+          base + (0x1432E6000ULL - 0x140000000ULL);
+      const auto array_head =
+          *reinterpret_cast<uintptr_t *>(list_global_addr);
+      if (!array_head) {
+        printf("[ bo3-bundle ] queue head is NULL\n");
+        return;
+      }
+      const auto target = array_head + static_cast<uintptr_t>(entry_index) * 8;
+      char label[32];
+      std::snprintf(label, sizeof(label), "queue[%d]-now", entry_index);
+      arm_hw_bp_all_threads(target, 4, label);
+      printf("[ bo3-bundle ]   target = 0x%llx  (entry %d in queue)\n",
+             static_cast<unsigned long long>(target), entry_index);
+    });
+
+    // bo3-bundle: toggle the queue-writer HW BP hunt. When ON, every
+    // Scr_BeginLoadScripts call arms DR0 on queue[entry_index].flags from
+    // INSIDE the hook (so it lives on the right thread -- HW BPs are
+    // per-thread). When the mod-chain script loader writes that slot
+    // during script load, the BP fires and captures the writer's RIP.
+    //
+    // Earlier bundle_arm_queue_bp failed because it armed DR0 on the
+    // file-watcher thread, which never touches queue memory.
+    //
+    // Usage: bundle_hunt_queue_writer <0|1> [entry_index_hex]
+    command::add("bundle_hunt_queue_writer",
+                 [](const command::params &params) {
+      const bool enable = (params.size() >= 2
+                           && std::string(params.get(1)) != "0");
+      int entry_index = 0xC;
+      if (params.size() >= 3) {
+        try {
+          entry_index = static_cast<int>(
+              std::stoul(params.get(2), nullptr, 16));
+        } catch (...) { /* keep default */ }
+      }
+      g_queue_bp_enabled.store(enable, std::memory_order_relaxed);
+      g_queue_bp_entry.store(entry_index, std::memory_order_relaxed);
+      printf("[ bo3-bundle ] hunt_queue_writer: %s (entry=%d). HW BP will "
+             "re-arm on each Scr_BeginLoadScripts call.\n",
+             enable ? "ON" : "OFF", entry_index);
     });
 
     // bo3-bundle: dump the autoexec list at static 0x1432E6000.
