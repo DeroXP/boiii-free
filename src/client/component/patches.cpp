@@ -13,6 +13,10 @@ int resolve_hash_line(uint32_t hash, int num_params = -1);
 std::string get_source_line(const std::string &file, int line_num);
 } // namespace script
 
+namespace workshop {
+bool is_skip_unload_active();
+} // namespace workshop
+
 namespace patches {
 namespace {
 const game::dvar_t *lobby_min_players;
@@ -275,6 +279,31 @@ void com_error_stub(const char *file, int line, int code, const char *fmt,
                                 "Mod compatibility issue: %s\nThis mod may "
                                 "require additional patches for boiii.",
                                 buffer);
+    return;
+  }
+
+  // bo3-bundle multi-mod: when we're testing additive mod loads with
+  // skip_unload on, BO3 sometimes emits Com_Error("Could not load default
+  // asset") because cross-mod asset refs are stale. Don't longjmp on that
+  // -- just log and continue so we can see how far the load gets.
+  if (workshop::is_skip_unload_active()
+      && strstr(buffer, "Could not load default asset")) {
+    printf("[Com_Error] bo3-bundle: suppressing 'default asset' error during "
+           "skip_unload test: %s\n", buffer);
+    return;
+  }
+
+  // bo3-bundle multi-mod: PMem is a strict LIFO stack and gets confused when
+  // we have two FFs with the same name at different slots (Solo at slot 16,
+  // DS4C at slot 23, both named "core_mod"). When BO3 tries to free 'core_mod'
+  // during a map transition, the requested item isn't at the stack top and
+  // BO3 fires this fatal error. Suppressing it lets BO3's PMem_Free return
+  // and continue -- the original allocation is leaked but no memory is
+  // corrupted, and the second mod's data stays valid for continued use.
+  if (strstr(buffer, "PMem_Free") &&
+      strstr(buffer, "not at the top of the stack")) {
+    printf("[Com_Error] bo3-bundle: suppressing PMem LIFO mismatch "
+           "(additive multi-mod): %s\n", buffer);
     return;
   }
 

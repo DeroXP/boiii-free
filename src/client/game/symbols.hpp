@@ -289,6 +289,14 @@ WEAK symbol<unsigned int(scriptInstance_t inst, const char *filename)>
     Scr_LoadScript{0x1412C83F0, 0x140156610};
 WEAK symbol<void(scriptInstance_t inst, int user)> Scr_BeginLoadScripts{
     0x1412C7DF0, 0x140156010};
+// bo3-bundle: Scr_EndLoadScripts WRAPPER at 0x1412C8020. Does the
+// flag-check dance (reads [base+0x4d4e5cc+inst*0x820] which Begin sets),
+// calls internal autoexec runner at 0x1412C7F20 ONLY if flag set, then
+// conditionally fires EXPORT_PRIVATE via SomeFunc(1). Internal runner at
+// 0x1412C7F20 CRASHES if called without the flag/state set up correctly.
+// Signature: (rcx=inst, rdx=?unused, r8b=secondary_flag for EXPORT_PRIVATE)
+WEAK symbol<void(scriptInstance_t inst, int unused, char secondary)>
+    Scr_EndLoadScripts{0x1412C8020, 0x0};
 
 WEAK symbol<void(const char *name, const char *key, unsigned int playbackFlags,
                  float volume, void *callbackInfo, int id)>

@@ -15,6 +15,7 @@ namespace client_patches {
 namespace {
 utils::hook::detour preload_map_hook;
 utils::hook::detour fs_add_game_directory_fn_hook;
+utils::hook::detour fs_add_search_path_fn_hook;
 utils::hook::detour db_load_xassets_hook;
 
 const game::dvar_t *cl_yaw_speed;
@@ -145,6 +146,23 @@ void fs_add_game_directory_fn_stub(const char *path, const char *dir) {
   fs_add_game_directory_fn_hook.invoke<void>(path, dir);
 }
 
+// FS_AddSearchPath is the lower-level routine FS_AddGameDirectory wraps. The
+// "Current search path:" output during loadMod showed the workshop folder
+// in the search list, but FS_AddGameDirectory was NEVER called for it --
+// meaning loadMod calls FS_AddSearchPath directly (or some sibling routine
+// does). Tracing every call here will show us exactly which call adds the
+// workshop folder, with what gamedir argument, from which caller.
+void fs_add_search_path_fn_stub(const char *path, const char *gamedir,
+                                int flag1, int flag2) {
+  void *caller = _ReturnAddress();
+  printf("[fs-trace-sp] FS_AddSearchPath(\"%s\", \"%s\", %d, %d) "
+         "caller=0x%p\n",
+         path ? path : "(null)",
+         gamedir ? gamedir : "(null)",
+         flag1, flag2, caller);
+  fs_add_search_path_fn_hook.invoke<void>(path, gamedir, flag1, flag2);
+}
+
 // Trace every DB_LoadXAssets call to learn what XZoneInfo values BO3 uses
 // when loading mod fastfiles. We need this to replicate the call ourselves
 // for multi-mod loading -- BOIII documents the signature but never calls
@@ -210,6 +228,9 @@ public:
     // Trace every call to FS_AddGameDirectory regardless of call site.
     fs_add_game_directory_fn_hook.create(0x1422A2AF0_g,
                                          fs_add_game_directory_fn_stub);
+    // Trace every call to FS_AddSearchPath regardless of call site.
+    fs_add_search_path_fn_hook.create(0x1422A28D0_g,
+                                      fs_add_search_path_fn_stub);
 
     // Note: previously hooked DB_LoadXAssets (0x1414236A0) here for tracing,
     // but that address either isn't DB_LoadXAssets in this BO3 build or is a

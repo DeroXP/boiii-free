@@ -43,4 +43,13 @@ struct workshop_info {
   std::string title;
 };
 workshop_info get_steam_workshop_info(const std::string &workshop_id);
+
+// bo3-bundle: when bundle_auto_activate_scripts is ON, this gets called by
+// script.cpp's begin_load_scripts_stub. It walks the script_parse_tree pool
+// via DB_EnumXAssets and calls Scr_LoadScript on each asset matching the
+// current instance, fanning DS4C's bundle-loaded scripts into the active
+// list at the correct phase (before autoexec runs).
+//
+// inst: 0=server (.gsc), 1=client (.csc)
+void drain_pending_bundle_activations(int inst);
 } // namespace workshop

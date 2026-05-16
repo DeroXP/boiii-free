@@ -6,6 +6,7 @@
 #include "game_event.hpp"
 #include "gsc/gsc_compiler.hpp"
 #include "scheduler.hpp"
+#include "workshop.hpp"
 
 #include <utils/hook.hpp>
 #include <utils/string.hpp>
@@ -606,6 +607,13 @@ void begin_load_scripts_stub(game::scriptInstance_t inst, int user) {
     if (!pending_detours.empty()) {
       apply_pending_detours();
     }
+
+    workshop::drain_pending_bundle_activations(static_cast<int>(inst));
+
+    // REVERTED: Scr_EndLoadScripts_guessed at 0x1412C7F20 crashed with
+    // EXCEPTION_ACCESS_VIOLATION when called after our load_scripts. Either
+    // it isn't EndLoadScripts, OR it requires a specific call moment we
+    // missed. Need more careful RE to identify the actual autoexec runner.
   }
 }
 
