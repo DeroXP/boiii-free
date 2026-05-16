@@ -3,3 +3,5 @@
 build/
 usergenerate.bat
 nul
+release-staging/
+*.zip
