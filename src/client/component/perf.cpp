@@ -89,7 +89,6 @@ std::atomic<bool> g_sleep_skip_short_enabled{false};   // skip Sleep/SleepEx wit
 std::atomic<uint32_t> g_sleep_skip_threshold_ms{1};
 std::atomic<uint64_t> g_sleep_calls{0};
 std::atomic<uint64_t> g_sleep_ex_calls{0};
-std::atomic<uint64_t> g_nt_delay_calls{0};
 std::atomic<uint64_t> g_sleep_skipped{0};
 
 struct caller_stats {
@@ -132,7 +131,6 @@ bool caller_in_bo3(uintptr_t ret_addr) {
 
 utils::hook::detour g_sleep_hook;
 utils::hook::detour g_sleep_ex_hook;
-utils::hook::detour g_nt_delay_hook;
 
 void WINAPI perf_sleep_stub(DWORD ms) {
   g_sleep_calls.fetch_add(1, std::memory_order_relaxed);
@@ -164,22 +162,6 @@ DWORD WINAPI perf_sleep_ex_stub(DWORD ms, BOOL alertable) {
   return g_sleep_ex_hook.invoke<DWORD>(ms, alertable);
 }
 
-// NtDelayExecution is the ntdll primitive Sleep ends up calling. Some engines
-// reach it directly. We only LOG -- never skip -- because suppressing this
-// would also kill all the legitimate kernel-mode-style waits.
-NTSTATUS NTAPI perf_nt_delay_stub(BOOLEAN alertable, PLARGE_INTEGER interval) {
-  g_nt_delay_calls.fetch_add(1, std::memory_order_relaxed);
-  if (g_sleep_log_enabled.load(std::memory_order_relaxed) && interval) {
-    const auto ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
-    const int64_t units = interval->QuadPart;
-    const uint64_t abs_units = units < 0
-        ? static_cast<uint64_t>(-units)
-        : static_cast<uint64_t>(units);
-    record_sleep_caller(ret, static_cast<uint32_t>(abs_units / 10000ULL));
-  }
-  return g_nt_delay_hook.invoke<NTSTATUS>(alertable, interval);
-}
-
 void dump_sleep_histogram(int top_n) {
   std::vector<std::pair<uintptr_t, caller_stats>> snapshot;
   {
@@ -189,10 +171,9 @@ void dump_sleep_histogram(int top_n) {
   }
   std::sort(snapshot.begin(), snapshot.end(),
             [](const auto &a, const auto &b) { return a.second.count > b.second.count; });
-  printf("[ bo3-bundle perf ] sleep totals: Sleep=%llu  SleepEx=%llu  NtDelay=%llu  skipped=%llu\n",
+  printf("[ bo3-bundle perf ] sleep totals: Sleep=%llu  SleepEx=%llu  skipped=%llu\n",
          static_cast<unsigned long long>(g_sleep_calls.load()),
          static_cast<unsigned long long>(g_sleep_ex_calls.load()),
-         static_cast<unsigned long long>(g_nt_delay_calls.load()),
          static_cast<unsigned long long>(g_sleep_skipped.load()));
   printf("[ bo3-bundle perf ] %d busiest sleep callers (return-addr count avg_ms last min max in_bo3):\n", top_n);
   int shown = 0;
@@ -212,7 +193,6 @@ void reset_sleep_histogram() {
   g_sleep_callers.clear();
   g_sleep_calls.store(0);
   g_sleep_ex_calls.store(0);
-  g_nt_delay_calls.store(0);
   g_sleep_skipped.store(0);
 }
 
@@ -221,18 +201,17 @@ void reset_sleep_histogram() {
 struct component final : client_component {
   void post_load() override {
     resolve_nt();
-    SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
-    ensure_all_cores();
-    apply_min_timer_resolution();
-
-    g_sleep_hook.create(Sleep, perf_sleep_stub);
-    g_sleep_ex_hook.create(SleepEx, perf_sleep_ex_stub);
-    if (auto *nt = GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtDelayExecution")) {
-      g_nt_delay_hook.create(nt, perf_nt_delay_stub);
-    }
+    // INTENTIONALLY MINIMAL: ship-blocking crash at "Loading fastfile" was
+    // reproduced with full step-1 here. Defaulting everything off; user
+    // turns each on at runtime via the bundle_perf_* commands so we can
+    // identify which one BO3 doesn't tolerate.
   }
 
   void post_unpack() override {
+    // Sleep hook installation gated behind a command so we can isolate
+    // whether the hook itself or one of the step-1 boosts is the crash
+    // trigger. User runs bundle_perf_sleep_hook 1 to arm hooks.
+
     command::add("bundle_perf_status", [](const command::params &) {
       ULONG min_r = 0, max_r = 0, cur_r = 0;
       if (nt_query_timer_resolution) {
@@ -323,6 +302,35 @@ struct component final : client_component {
       g_sleep_skip_short_enabled.store(on);
       printf("[ bo3-bundle perf ] sleep skip-short %s (threshold <=%ums, BO3 callers only)\n",
              on ? "ON" : "off", g_sleep_skip_threshold_ms.load());
+    });
+
+    static std::atomic<bool> sleep_hooks_armed{false};
+    command::add("bundle_perf_sleep_hook", [](const command::params &params) {
+      if (params.size() < 2) {
+        printf("usage: bundle_perf_sleep_hook <0|1>  (1 installs Sleep/SleepEx detours)\n");
+        return;
+      }
+      if (params.get(1) == std::string("1")) {
+        if (sleep_hooks_armed.load()) {
+          printf("[ bo3-bundle perf ] sleep hooks already armed\n");
+          return;
+        }
+        g_sleep_hook.create(Sleep, perf_sleep_stub);
+        g_sleep_ex_hook.create(SleepEx, perf_sleep_ex_stub);
+        sleep_hooks_armed.store(true);
+        printf("[ bo3-bundle perf ] sleep hooks armed\n");
+      } else {
+        printf("[ bo3-bundle perf ] (detour disarm not supported -- restart BOIII to remove)\n");
+      }
+    });
+
+    command::add("bundle_perf_affinity_all", [](const command::params &) {
+      const auto ok = ensure_all_cores();
+      DWORD_PTR proc_m = 0, sys_m = 0;
+      GetProcessAffinityMask(GetCurrentProcess(), &proc_m, &sys_m);
+      printf("[ bo3-bundle perf ] affinity now 0x%llX / system 0x%llX  %s\n",
+             static_cast<unsigned long long>(proc_m),
+             static_cast<unsigned long long>(sys_m), ok ? "ok" : "FAIL");
     });
   }
 
