@@ -53,6 +53,228 @@ std::atomic<int>  g_target_max_latency{0};
 // render thread by capturing the TID inside intercept_present(). We only
 // account waits from that one thread.
 std::atomic<DWORD> g_render_tid{0};
+
+// Draw-call counting. Hooks ID3D11DeviceContext::Draw* methods to count
+// calls per frame. If BO3 does thousands of draw calls per frame, API
+// overhead is the render-thread bottleneck.
+std::atomic<uint64_t> g_draw_indexed_total{0};
+std::atomic<uint64_t> g_draw_total{0};
+std::atomic<uint64_t> g_draw_indexed_inst_total{0};
+std::atomic<uint64_t> g_draw_inst_total{0};
+std::atomic<uint64_t> g_draws_this_frame{0};
+std::atomic<uint64_t> g_draws_sum_for_avg{0};
+std::atomic<uint64_t> g_frames_for_avg{0};
+std::atomic<uint32_t> g_last_frame_draws{0};
+std::atomic<uint32_t> g_max_frame_draws{0};
+std::atomic<bool>    g_draw_hooks_installed{false};
+
+// Per-caller draw histogram. Lock-free fixed-size hash table with linear
+// probe (atomic CAS for insertion). At hot rate (~444K draws/sec) a mutex
+// would dominate -- this is wait-free for already-inserted callers and
+// only contended on first sighting of a new caller.
+constexpr size_t kCallerTableSize = 512;
+struct CallerEntry {
+  std::atomic<uintptr_t> addr{0};
+  std::atomic<uint64_t> count{0};
+};
+CallerEntry g_caller_table[kCallerTableSize];     // L1: direct caller of Draw* (likely a wrapper)
+CallerEntry g_caller_table_l2[kCallerTableSize];  // L2: grandparent (= the render loop)
+std::atomic<bool> g_capture_l2{false};            // toggle since RtlCaptureStackBackTrace is ~100ns/call
+
+// Skip list: up to 16 caller addresses. If a draw call's _ReturnAddress
+// matches, the draw is silently dropped (counted as skipped). Use to
+// experimentally remove specific draw sources after identifying them via
+// bundle_perf_draw_callers.
+constexpr size_t kSkipListSize = 16;
+std::atomic<uintptr_t> g_draw_skip_list[kSkipListSize]{};
+std::atomic<uint64_t> g_draws_skipped{0};
+
+void record_into(CallerEntry *table, uintptr_t ret) {
+  const uint32_t h = static_cast<uint32_t>(ret >> 4) & (kCallerTableSize - 1);
+  for (size_t i = 0; i < kCallerTableSize; ++i) {
+    const auto idx = (h + i) & (kCallerTableSize - 1);
+    auto cur = table[idx].addr.load(std::memory_order_relaxed);
+    if (cur == ret) {
+      table[idx].count.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+    if (cur == 0) {
+      uintptr_t expected = 0;
+      if (table[idx].addr.compare_exchange_strong(
+              expected, ret, std::memory_order_relaxed)) {
+        table[idx].count.fetch_add(1, std::memory_order_relaxed);
+        return;
+      }
+      if (table[idx].addr.load(std::memory_order_relaxed) == ret) {
+        table[idx].count.fetch_add(1, std::memory_order_relaxed);
+        return;
+      }
+    }
+  }
+}
+
+void record_draw_caller(uintptr_t ret) { record_into(g_caller_table, ret); }
+
+void record_draw_grandparent() {
+  // Skip count for grandparent: hook stub + record helper + wrapper's
+  // internal RA = 3. (Previous skip=2 gave the wrapper RA itself, which
+  // matches L1's _ReturnAddress() and isn't useful.)
+  void *frames[2];
+  const USHORT n = RtlCaptureStackBackTrace(3, 2, frames, nullptr);
+  if (n >= 1) {
+    record_into(g_caller_table_l2, reinterpret_cast<uintptr_t>(frames[0]));
+  }
+}
+
+bool draw_is_skipped(uintptr_t ret) {
+  for (size_t i = 0; i < kSkipListSize; ++i) {
+    const auto v = g_draw_skip_list[i].load(std::memory_order_relaxed);
+    if (v == 0) return false;
+    if (v == ret) return true;
+  }
+  return false;
+}
+
+utils::hook::detour g_di_hook;
+utils::hook::detour g_d_hook;
+utils::hook::detour g_dii_hook;
+utils::hook::detour g_di_inst_hook;
+
+void __stdcall draw_indexed_stub(ID3D11DeviceContext *ctx, UINT idx_count,
+                                 UINT start_idx, INT base_vertex) {
+  g_draw_indexed_total.fetch_add(1, std::memory_order_relaxed);
+  g_draws_this_frame.fetch_add(1, std::memory_order_relaxed);
+  const auto ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+  record_draw_caller(ret);
+  if (g_capture_l2.load(std::memory_order_relaxed)) {
+    record_draw_grandparent();
+  }
+  if (draw_is_skipped(ret)) {
+    g_draws_skipped.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  g_di_hook.invoke<void>(ctx, idx_count, start_idx, base_vertex);
+}
+
+void __stdcall draw_stub(ID3D11DeviceContext *ctx, UINT vertex_count,
+                         UINT start_vertex) {
+  g_draw_total.fetch_add(1, std::memory_order_relaxed);
+  g_draws_this_frame.fetch_add(1, std::memory_order_relaxed);
+  const auto ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+  record_draw_caller(ret);
+  if (g_capture_l2.load(std::memory_order_relaxed)) {
+    record_draw_grandparent();
+  }
+  if (draw_is_skipped(ret)) {
+    g_draws_skipped.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  g_d_hook.invoke<void>(ctx, vertex_count, start_vertex);
+}
+
+void __stdcall draw_indexed_instanced_stub(ID3D11DeviceContext *ctx,
+                                           UINT idx_count_per_inst,
+                                           UINT inst_count, UINT start_idx,
+                                           INT base_vertex, UINT start_inst) {
+  g_draw_indexed_inst_total.fetch_add(1, std::memory_order_relaxed);
+  g_draws_this_frame.fetch_add(1, std::memory_order_relaxed);
+  const auto ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+  record_draw_caller(ret);
+  if (g_capture_l2.load(std::memory_order_relaxed)) {
+    record_draw_grandparent();
+  }
+  if (draw_is_skipped(ret)) {
+    g_draws_skipped.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  g_dii_hook.invoke<void>(ctx, idx_count_per_inst, inst_count, start_idx,
+                          base_vertex, start_inst);
+}
+
+void __stdcall draw_instanced_stub(ID3D11DeviceContext *ctx,
+                                   UINT vertex_count_per_inst,
+                                   UINT inst_count, UINT start_vertex,
+                                   UINT start_inst) {
+  g_draw_inst_total.fetch_add(1, std::memory_order_relaxed);
+  g_draws_this_frame.fetch_add(1, std::memory_order_relaxed);
+  const auto ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+  record_draw_caller(ret);
+  if (g_capture_l2.load(std::memory_order_relaxed)) {
+    record_draw_grandparent();
+  }
+  if (draw_is_skipped(ret)) {
+    g_draws_skipped.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  g_di_inst_hook.invoke<void>(ctx, vertex_count_per_inst, inst_count,
+                              start_vertex, start_inst);
+}
+
+void install_draw_hooks() {
+  if (g_draw_hooks_installed.exchange(true)) return;
+
+  // Spin up a dummy device just to steal the ID3D11DeviceContext vtable.
+  // Same pattern as download_overlay's swap-chain theft.
+  WNDCLASSEXA wc{};
+  wc.cbSize = sizeof(wc);
+  wc.lpfnWndProc = DefWindowProcA;
+  wc.hInstance = GetModuleHandleA(nullptr);
+  wc.lpszClassName = "DX11Dummy_DrawHook";
+  RegisterClassExA(&wc);
+  HWND dummy_hwnd = CreateWindowExA(0, wc.lpszClassName, nullptr, WS_OVERLAPPED,
+                                    0, 0, 1, 1, nullptr, nullptr, wc.hInstance, nullptr);
+  if (!dummy_hwnd) { UnregisterClassA(wc.lpszClassName, wc.hInstance); return; }
+
+  DXGI_SWAP_CHAIN_DESC sd{};
+  sd.BufferCount = 1;
+  sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+  sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+  sd.OutputWindow = dummy_hwnd;
+  sd.SampleDesc.Count = 1;
+  sd.Windowed = TRUE;
+  sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+  ID3D11Device *dev = nullptr;
+  ID3D11DeviceContext *ctx = nullptr;
+  IDXGISwapChain *sc = nullptr;
+  D3D_FEATURE_LEVEL fl{};
+  const HRESULT hr = D3D11CreateDeviceAndSwapChain(
+      nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
+      D3D11_SDK_VERSION, &sd, &sc, &dev, &fl, &ctx);
+
+  DestroyWindow(dummy_hwnd);
+  UnregisterClassA(wc.lpszClassName, wc.hInstance);
+
+  if (FAILED(hr) || !ctx) {
+    printf("[ bo3-bundle engine ] draw-hook install: D3D11CreateDevice failed hr=0x%08lX\n", hr);
+    g_draw_hooks_installed.store(false);
+    return;
+  }
+
+  // ID3D11DeviceContext vtable indices:
+  //   12 = DrawIndexed
+  //   13 = Draw
+  //   20 = DrawIndexedInstanced
+  //   21 = DrawInstanced
+  void **vtable = *reinterpret_cast<void ***>(ctx);
+  try {
+    g_di_hook.create(vtable[12], draw_indexed_stub);
+    g_d_hook.create(vtable[13], draw_stub);
+    g_dii_hook.create(vtable[20], draw_indexed_instanced_stub);
+    g_di_inst_hook.create(vtable[21], draw_instanced_stub);
+    printf("[ bo3-bundle engine ] draw hooks installed (DrawIndexed/Draw/DrawIndexedInstanced/DrawInstanced)\n");
+  } catch (const std::exception &e) {
+    printf("[ bo3-bundle engine ] draw hook install threw: %s\n", e.what());
+  }
+
+  if (sc) sc->Release();
+  if (dev) dev->Release();
+  if (ctx) ctx->Release();
+}
+
+constexpr int kPresentStackDepth = 8;
+std::atomic<uintptr_t> g_present_stack[kPresentStackDepth]{};
+std::atomic<bool> g_present_stack_captured{false};
 std::atomic<bool>  g_wait_log_active{false};
 std::atomic<uint64_t> g_wait_calls_total{0};
 std::atomic<uint64_t> g_wait_calls_render{0};
@@ -150,6 +372,30 @@ void intercept_present(IDXGISwapChain *swap_chain, UINT &sync_interval,
   DWORD expected = 0;
   g_render_tid.compare_exchange_strong(expected, me, std::memory_order_relaxed);
 
+  // Per-frame draw-call snapshot. Done before any other work so the
+  // counter resets cleanly on each Present.
+  const auto df = g_draws_this_frame.exchange(0, std::memory_order_relaxed);
+  if (df > 0) {
+    g_last_frame_draws.store(static_cast<uint32_t>(df), std::memory_order_relaxed);
+    g_draws_sum_for_avg.fetch_add(df, std::memory_order_relaxed);
+    g_frames_for_avg.fetch_add(1, std::memory_order_relaxed);
+    uint32_t cur_max = g_max_frame_draws.load(std::memory_order_relaxed);
+    while (df > cur_max && !g_max_frame_draws.compare_exchange_weak(
+                              cur_max, static_cast<uint32_t>(df))) {}
+  }
+
+  // One-time stack-trace capture so we can disasm BO3's render path. Skip
+  // the first frame (intercept_present + download_overlay::present_stub).
+  if (!g_present_stack_captured.load(std::memory_order_relaxed)) {
+    void *frames[kPresentStackDepth] = {};
+    const USHORT n = RtlCaptureStackBackTrace(0, kPresentStackDepth, frames, nullptr);
+    for (USHORT i = 0; i < n && i < kPresentStackDepth; ++i) {
+      g_present_stack[i].store(reinterpret_cast<uintptr_t>(frames[i]),
+                               std::memory_order_relaxed);
+    }
+    g_present_stack_captured.store(true, std::memory_order_relaxed);
+  }
+
   try_apply_max_latency(swap_chain);
 
   if (g_present_log_active.load(std::memory_order_relaxed)) {
@@ -214,6 +460,187 @@ struct component final : client_component {
       g_target_max_latency.store(v);
       g_max_latency_applied.store(false);
       printf("[ bo3-bundle engine ] max latency target = %d (applies on next Present)\n", v);
+    });
+
+    command::add("bundle_perf_draw_hook", [](const command::params &) {
+      install_draw_hooks();
+    });
+
+    command::add("bundle_perf_draw_stats", [](const command::params &) {
+      const auto di = g_draw_indexed_total.load();
+      const auto d  = g_draw_total.load();
+      const auto dii= g_draw_indexed_inst_total.load();
+      const auto dinst = g_draw_inst_total.load();
+      const auto last = g_last_frame_draws.load();
+      const auto mx = g_max_frame_draws.load();
+      const auto sumavg = g_draws_sum_for_avg.load();
+      const auto frames = g_frames_for_avg.load();
+      const double avg = frames ? double(sumavg) / double(frames) : 0.0;
+      printf("[ bo3-bundle engine ] draw totals: DrawIndexed=%llu Draw=%llu DrawIndexedInstanced=%llu DrawInstanced=%llu\n",
+             (unsigned long long)di, (unsigned long long)d,
+             (unsigned long long)dii, (unsigned long long)dinst);
+      printf("[ bo3-bundle engine ] per-frame draws: last=%u  max=%u  avg=%.1f over %llu frames\n",
+             last, mx, avg, (unsigned long long)frames);
+    });
+
+    command::add("bundle_perf_draw_callers", [](const command::params &params) {
+      const int top_n = params.size() >= 2 ? std::atoi(params.get(1)) : 16;
+      std::vector<std::pair<uintptr_t, uint64_t>> snap;
+      snap.reserve(kCallerTableSize);
+      for (size_t i = 0; i < kCallerTableSize; ++i) {
+        const auto a = g_caller_table[i].addr.load();
+        const auto c = g_caller_table[i].count.load();
+        if (a && c) snap.emplace_back(a, c);
+      }
+      std::sort(snap.begin(), snap.end(),
+                [](auto &a, auto &b) { return a.second > b.second; });
+      // Figure out BO3 image base so we can show static offsets too
+      uintptr_t bo3_base = 0, bo3_end = 0;
+      if (auto *m = GetModuleHandleA("BlackOps3.exe")) {
+        MODULEINFO mi{};
+        if (GetModuleInformation(GetCurrentProcess(), m, &mi, sizeof(mi))) {
+          bo3_base = reinterpret_cast<uintptr_t>(mi.lpBaseOfDll);
+          bo3_end = bo3_base + mi.SizeOfImage;
+        }
+      }
+      printf("[ bo3-bundle engine ] top %d draw call sites (caller_addr  count  static_off  module):\n",
+             top_n);
+      const int shown = std::min<int>(top_n, static_cast<int>(snap.size()));
+      for (int i = 0; i < shown; ++i) {
+        const auto [a, c] = snap[i];
+        const bool in_bo3 = bo3_base && a >= bo3_base && a < bo3_end;
+        if (in_bo3) {
+          const uintptr_t off = a - bo3_base;
+          printf("[ bo3-bundle engine ]   0x%016llX  cnt=%llu  +0x%llX  BO3\n",
+                 (unsigned long long)a, (unsigned long long)c,
+                 (unsigned long long)off);
+        } else {
+          printf("[ bo3-bundle engine ]   0x%016llX  cnt=%llu  -            (other)\n",
+                 (unsigned long long)a, (unsigned long long)c);
+        }
+      }
+    });
+
+    command::add("bundle_perf_draw_l2", [](const command::params &params) {
+      const bool on = params.size() < 2 || params.get(1) == std::string("1");
+      g_capture_l2.store(on);
+      printf("[ bo3-bundle engine ] grandparent draw-caller capture: %s\n",
+             on ? "ON (~4%% perf cost)" : "off");
+    });
+
+    command::add("bundle_perf_draw_callers_l2", [](const command::params &params) {
+      const int top_n = params.size() >= 2 ? std::atoi(params.get(1)) : 16;
+      std::vector<std::pair<uintptr_t, uint64_t>> snap;
+      for (size_t i = 0; i < kCallerTableSize; ++i) {
+        const auto a = g_caller_table_l2[i].addr.load();
+        const auto c = g_caller_table_l2[i].count.load();
+        if (a && c) snap.emplace_back(a, c);
+      }
+      std::sort(snap.begin(), snap.end(),
+                [](auto &a, auto &b) { return a.second > b.second; });
+      uintptr_t bo3_base = 0, bo3_end = 0;
+      if (auto *m = GetModuleHandleA("BlackOps3.exe")) {
+        MODULEINFO mi{};
+        if (GetModuleInformation(GetCurrentProcess(), m, &mi, sizeof(mi))) {
+          bo3_base = reinterpret_cast<uintptr_t>(mi.lpBaseOfDll);
+          bo3_end = bo3_base + mi.SizeOfImage;
+        }
+      }
+      printf("[ bo3-bundle engine ] top %d grandparent (render-loop) sites:\n", top_n);
+      const int shown = std::min<int>(top_n, static_cast<int>(snap.size()));
+      for (int i = 0; i < shown; ++i) {
+        const auto [a, c] = snap[i];
+        const bool in_bo3 = bo3_base && a >= bo3_base && a < bo3_end;
+        if (in_bo3) {
+          printf("[ bo3-bundle engine ]   0x%016llX  cnt=%llu  +0x%llX  BO3\n",
+                 (unsigned long long)a, (unsigned long long)c,
+                 (unsigned long long)(a - bo3_base));
+        } else {
+          printf("[ bo3-bundle engine ]   0x%016llX  cnt=%llu  (other)\n",
+                 (unsigned long long)a, (unsigned long long)c);
+        }
+      }
+    });
+
+    command::add("bundle_perf_draw_skip_add", [](const command::params &params) {
+      if (params.size() < 2) {
+        printf("usage: bundle_perf_draw_skip_add <hex_runtime_addr>\n");
+        return;
+      }
+      uintptr_t addr = 0;
+      try { addr = std::stoull(params.get(1), nullptr, 16); }
+      catch (...) { printf("bad hex\n"); return; }
+      for (size_t i = 0; i < kSkipListSize; ++i) {
+        uintptr_t expected = 0;
+        if (g_draw_skip_list[i].compare_exchange_strong(expected, addr)) {
+          printf("[ bo3-bundle engine ] draw skip slot %zu = 0x%llX\n",
+                 i, (unsigned long long)addr);
+          return;
+        }
+        if (g_draw_skip_list[i].load() == addr) {
+          printf("[ bo3-bundle engine ] already in skip list at slot %zu\n", i);
+          return;
+        }
+      }
+      printf("[ bo3-bundle engine ] skip list full (max %zu)\n", kSkipListSize);
+    });
+
+    command::add("bundle_perf_draw_skip_clear", [](const command::params &) {
+      for (size_t i = 0; i < kSkipListSize; ++i) g_draw_skip_list[i].store(0);
+      g_draws_skipped.store(0);
+      printf("[ bo3-bundle engine ] draw skip list cleared\n");
+    });
+
+    command::add("bundle_perf_draw_skip_list", [](const command::params &) {
+      printf("[ bo3-bundle engine ] draw skip list (drawn skipped total = %llu):\n",
+             (unsigned long long)g_draws_skipped.load());
+      for (size_t i = 0; i < kSkipListSize; ++i) {
+        const auto v = g_draw_skip_list[i].load();
+        if (v) printf("[ bo3-bundle engine ]   [%zu] 0x%llX\n", i, (unsigned long long)v);
+      }
+    });
+
+    command::add("bundle_perf_draw_reset", [](const command::params &) {
+      g_draw_indexed_total.store(0);
+      g_draw_total.store(0);
+      g_draw_indexed_inst_total.store(0);
+      g_draw_inst_total.store(0);
+      g_draws_this_frame.store(0);
+      g_draws_sum_for_avg.store(0);
+      g_frames_for_avg.store(0);
+      g_last_frame_draws.store(0);
+      g_max_frame_draws.store(0);
+      for (size_t i = 0; i < kCallerTableSize; ++i) {
+        g_caller_table[i].addr.store(0);
+        g_caller_table[i].count.store(0);
+        g_caller_table_l2[i].addr.store(0);
+        g_caller_table_l2[i].count.store(0);
+      }
+      g_draws_skipped.store(0);
+      printf("[ bo3-bundle engine ] draw stats reset\n");
+    });
+
+    command::add("bundle_perf_present_stack", [](const command::params &) {
+      printf("[ bo3-bundle engine ] Present call stack (captured once, render tid=%lu):\n",
+             g_render_tid.load());
+      for (int i = 0; i < kPresentStackDepth; ++i) {
+        const auto a = g_present_stack[i].load();
+        if (!a) break;
+        const char *origin = "?";
+        auto *bo3 = GetModuleHandleA("BlackOps3.exe");
+        auto *boiii = GetModuleHandleA("boiii.exe");
+        MODULEINFO mi{};
+        if (bo3 && GetModuleInformation(GetCurrentProcess(), bo3, &mi, sizeof(mi))) {
+          const auto bo3_base = reinterpret_cast<uintptr_t>(mi.lpBaseOfDll);
+          if (a >= bo3_base && a < bo3_base + mi.SizeOfImage) origin = "BO3";
+        }
+        if (boiii && GetModuleInformation(GetCurrentProcess(), boiii, &mi, sizeof(mi))) {
+          const auto boiii_base = reinterpret_cast<uintptr_t>(mi.lpBaseOfDll);
+          if (a >= boiii_base && a < boiii_base + mi.SizeOfImage) origin = "boiii";
+        }
+        printf("[ bo3-bundle engine ]   [%d] 0x%016llX  %s\n",
+               i, static_cast<unsigned long long>(a), origin);
+      }
     });
 
     command::add("bundle_perf_wait_hook", [](const command::params &) {
