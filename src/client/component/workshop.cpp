@@ -1664,6 +1664,13 @@ void cmd_watch_loop() {
   } catch (...) {
     return;
   }
+  // Drop a debug breadcrumb to a sidecar file -- printf at startup goes
+  // through BO3's print_message which deadlocks/segfaults if called before
+  // its critical section is initialized.
+  try {
+    std::ofstream(path.parent_path() / "bundle_watcher_started.txt",
+                  std::ios::trunc) << "ok " << path.string() << "\n";
+  } catch (...) {}
   while (!g_cmd_watch_stop.load(std::memory_order_relaxed)) {
     std::this_thread::sleep_for(300ms);
     std::error_code ec;

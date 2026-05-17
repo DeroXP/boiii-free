@@ -2,6 +2,13 @@
 #include "loader/component_loader.hpp"
 #include "command.hpp"
 
+#include <utils/hook.hpp>
+
+#include <unordered_map>
+#include <mutex>
+#include <vector>
+#include <algorithm>
+
 namespace perf {
 namespace {
 
@@ -71,42 +78,180 @@ const char *priority_name(DWORD pc) {
   }
 }
 
+// === Sleep / SleepEx / NtDelayExecution hunt =================================
+// Goal: find the engine's main-loop frame throttle (typically Sleep(1)) so we
+// can suppress it for higher FPS on fast hardware. Strategy: hook every short
+// sleep path, log a per-caller histogram, then let the user enable selective
+// skip after looking at the dump.
+
+std::atomic<bool> g_sleep_log_enabled{false};
+std::atomic<bool> g_sleep_skip_short_enabled{false};   // skip Sleep/SleepEx with ms <= threshold
+std::atomic<uint32_t> g_sleep_skip_threshold_ms{1};
+std::atomic<uint64_t> g_sleep_calls{0};
+std::atomic<uint64_t> g_sleep_ex_calls{0};
+std::atomic<uint64_t> g_sleep_skipped{0};
+
+struct caller_stats {
+  uint64_t count = 0;
+  uint64_t total_ms = 0;
+  uint32_t last_ms = 0;
+  uint32_t min_ms = UINT32_MAX;
+  uint32_t max_ms = 0;
+};
+std::mutex g_sleep_caller_mutex;
+std::unordered_map<uintptr_t, caller_stats> g_sleep_callers;
+
+void record_sleep_caller(uintptr_t ret_addr, uint32_t ms) {
+  std::lock_guard<std::mutex> lk(g_sleep_caller_mutex);
+  auto &s = g_sleep_callers[ret_addr];
+  s.count++;
+  s.total_ms += ms;
+  s.last_ms = ms;
+  if (ms < s.min_ms) s.min_ms = ms;
+  if (ms > s.max_ms) s.max_ms = ms;
+}
+
+// Only skip when the caller lives in BlackOps3.exe -- never suppress Sleeps
+// from BOIII, Steam overlay, NVIDIA reflex, etc.
+bool caller_in_bo3(uintptr_t ret_addr) {
+  static uintptr_t bo3_base = 0;
+  static uintptr_t bo3_end = 0;
+  if (!bo3_base) {
+    auto *mod = GetModuleHandleA("BlackOps3.exe");
+    if (!mod) return false;
+    MODULEINFO mi{};
+    if (!GetModuleInformation(GetCurrentProcess(), mod, &mi, sizeof(mi))) {
+      return false;
+    }
+    bo3_base = reinterpret_cast<uintptr_t>(mi.lpBaseOfDll);
+    bo3_end = bo3_base + mi.SizeOfImage;
+  }
+  return ret_addr >= bo3_base && ret_addr < bo3_end;
+}
+
+utils::hook::detour g_sleep_hook;
+utils::hook::detour g_sleep_ex_hook;
+
+void WINAPI perf_sleep_stub(DWORD ms) {
+  g_sleep_calls.fetch_add(1, std::memory_order_relaxed);
+  const auto ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+  if (g_sleep_log_enabled.load(std::memory_order_relaxed)) {
+    record_sleep_caller(ret, ms);
+  }
+  if (g_sleep_skip_short_enabled.load(std::memory_order_relaxed) &&
+      ms <= g_sleep_skip_threshold_ms.load(std::memory_order_relaxed) &&
+      caller_in_bo3(ret)) {
+    g_sleep_skipped.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  g_sleep_hook.invoke<void>(ms);
+}
+
+DWORD WINAPI perf_sleep_ex_stub(DWORD ms, BOOL alertable) {
+  g_sleep_ex_calls.fetch_add(1, std::memory_order_relaxed);
+  const auto ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+  if (g_sleep_log_enabled.load(std::memory_order_relaxed)) {
+    record_sleep_caller(ret, ms);
+  }
+  if (g_sleep_skip_short_enabled.load(std::memory_order_relaxed) &&
+      ms <= g_sleep_skip_threshold_ms.load(std::memory_order_relaxed) &&
+      !alertable && caller_in_bo3(ret)) {
+    g_sleep_skipped.fetch_add(1, std::memory_order_relaxed);
+    return 0;
+  }
+  return g_sleep_ex_hook.invoke<DWORD>(ms, alertable);
+}
+
+void dump_sleep_histogram(int top_n) {
+  std::vector<std::pair<uintptr_t, caller_stats>> snapshot;
+  {
+    std::lock_guard<std::mutex> lk(g_sleep_caller_mutex);
+    snapshot.reserve(g_sleep_callers.size());
+    for (const auto &kv : g_sleep_callers) snapshot.emplace_back(kv);
+  }
+  std::sort(snapshot.begin(), snapshot.end(),
+            [](const auto &a, const auto &b) { return a.second.count > b.second.count; });
+  printf("[ bo3-bundle perf ] sleep totals: Sleep=%llu  SleepEx=%llu  skipped=%llu\n",
+         static_cast<unsigned long long>(g_sleep_calls.load()),
+         static_cast<unsigned long long>(g_sleep_ex_calls.load()),
+         static_cast<unsigned long long>(g_sleep_skipped.load()));
+  printf("[ bo3-bundle perf ] %d busiest sleep callers (return-addr count avg_ms last min max in_bo3):\n", top_n);
+  int shown = 0;
+  for (const auto &[ret, s] : snapshot) {
+    if (shown++ >= top_n) break;
+    const auto avg = s.count ? static_cast<double>(s.total_ms) / s.count : 0.0;
+    printf("[ bo3-bundle perf ]   0x%016llX  cnt=%llu  avg=%.2fms  last=%ums  min=%ums  max=%ums  %s\n",
+           static_cast<unsigned long long>(ret),
+           static_cast<unsigned long long>(s.count), avg, s.last_ms,
+           s.min_ms == UINT32_MAX ? 0 : s.min_ms, s.max_ms,
+           caller_in_bo3(ret) ? "[BO3]" : "");
+  }
+}
+
+void reset_sleep_histogram() {
+  std::lock_guard<std::mutex> lk(g_sleep_caller_mutex);
+  g_sleep_callers.clear();
+  g_sleep_calls.store(0);
+  g_sleep_ex_calls.store(0);
+  g_sleep_skipped.store(0);
+}
+
 }  // namespace
 
-// Final shape after the Sleep-hook exploration was abandoned:
-//
-// What this component DOES (manual, opt-in via console commands):
-//   - bundle_perf_priority <normal|above|high>  -- SetPriorityClass
-//   - bundle_perf_timer <0|1>                   -- toggle 0.5ms timer res
-//   - bundle_perf_affinity_all                  -- ensure all cores enabled
-//   - bundle_perf_status                        -- print current state
-//
-// What this component does NOT do (intentionally):
-//   - Auto-apply at startup: previously crashed in post_load during fastfile
-//     loading. Post_unpack might be safe but we never confirmed it for this
-//     combination. Manual is the known-safe ship state.
-//   - Sleep / SleepEx hooks: every Sleep-suppression variant tried (blanket
-//     return, Sleep(0), SwitchToThread, rate-limited 1-in-N, state-gated)
-//     crashed BO3 during gameplay transitions or fastfile loading. The
-//     busy-wait loop at the engine's frame-limit is structurally
-//     load-bearing -- yielding it always breaks cross-thread sync somewhere.
-//     Pure logging (no skip) also crashed reliably in later tests. Removed.
-//   - Auto-disable VSync: r_vsync is a game cvar; just run "r_vsync 0" in
-//     the console after launch (or via bundle_commands.txt).
-//
-// Recommended workflow per session:
-//   1. Launch BOIII, wait for main menu.
-//   2. Console / bundle_commands.txt:
-//        r_vsync 0
-//        bundle_perf_priority high
-//        bundle_perf_timer 1
-//   3. Play normally. Real-gameplay FPS goes from VSync-locked ~60 (default)
-//      to ~200 on a modern CPU/GPU. Boost is roughly priority class +
-//      timer-res frame pacing + uncapped present.
 struct component final : client_component {
-  void post_load() override { resolve_nt(); }
+  void post_load() override {
+    resolve_nt();
+    // INTENTIONALLY MINIMAL: ship-blocking crash at "Loading fastfile" was
+    // reproduced with full step-1 here. Defaulting everything off; user
+    // turns each on at runtime via the bundle_perf_* commands so we can
+    // identify which one BO3 doesn't tolerate.
+  }
 
   void post_unpack() override {
+    // Sleep hook installation gated behind a command so we can isolate
+    // whether the hook itself or one of the step-1 boosts is the crash
+    // trigger. User runs bundle_perf_sleep_hook 1 to arm hooks.
+
+    // FPS-cap unlock patch. Discovery (this session):
+    // Com_Frame_Try_Block_Function at static 0x1420F8E00 contains a
+    // throttle loop that calls a wait function up to 50 times until
+    // elapsed >= 1000/com_maxfps ms. The exit-loop branch at
+    // 0x1420F8F0E is `jge short ...exit` (opcode 0x7D). Patching that
+    // byte to 0xEB makes it an unconditional `jmp short ...exit`, so
+    // the throttle loop never iterates. Removes both the visible cap
+    // (com_maxfps) AND the hidden secondary cap (arxan-protected
+    // function 0x1407CFD0 that returned a lower limit, capping at
+    // ~200 even with com_maxfps=240).
+    //
+    // Real-world tested on this fork: gameplay 200 -> 210-300 FPS,
+    // no animation / audio / input issues observed.
+    command::add("bundle_perf_fps_unlock", [](const command::params &params) {
+      const bool unlock = params.size() < 2 ||
+                          params.get(1) == std::string("1");
+      const auto base = reinterpret_cast<uintptr_t>(
+          GetModuleHandleA("BlackOps3.exe"));
+      if (!base) { printf("[ bo3-bundle perf ] BlackOps3.exe not loaded\n"); return; }
+      const auto addr = base + 0x20F8F0E;
+      const uint8_t target = unlock ? 0xEB : 0x7D;
+      DWORD old_prot = 0;
+      if (!VirtualProtect(reinterpret_cast<LPVOID>(addr), 1,
+                          PAGE_EXECUTE_READWRITE, &old_prot)) {
+        printf("[ bo3-bundle perf ] VirtualProtect failed (err %lu)\n",
+               GetLastError());
+        return;
+      }
+      const uint8_t before = *reinterpret_cast<volatile uint8_t *>(addr);
+      *reinterpret_cast<volatile uint8_t *>(addr) = target;
+      DWORD tmp = 0;
+      VirtualProtect(reinterpret_cast<LPVOID>(addr), 1, old_prot, &tmp);
+      const char *desc = unlock ? "UNLOCKED" : "locked";
+      if (before != 0x7D && before != 0xEB) {
+        printf("[ bo3-bundle perf ] WARNING: unexpected byte 0x%02X at +0x20F8F0E (expected 0x7D or 0xEB)\n", before);
+      }
+      printf("[ bo3-bundle perf ] fps_unlock: 0x%02X -> 0x%02X (%s)\n",
+             before, target, desc);
+    });
+
     command::add("bundle_perf_status", [](const command::params &) {
       ULONG min_r = 0, max_r = 0, cur_r = 0;
       if (nt_query_timer_resolution) {
@@ -124,6 +269,10 @@ struct component final : client_component {
              cur_r, cur_r / 10000.0, min_r, max_r);
       printf("[ bo3-bundle perf ] applied    : %lu (%.3fms)\n",
              g_applied_timer_res, g_applied_timer_res / 10000.0);
+      printf("[ bo3-bundle perf ] sleep log  : %s  skip_short: %s (<=%ums)\n",
+             g_sleep_log_enabled.load() ? "ON" : "off",
+             g_sleep_skip_short_enabled.load() ? "ON" : "off",
+             g_sleep_skip_threshold_ms.load());
     });
 
     command::add("bundle_perf_priority", [](const command::params &params) {
@@ -155,6 +304,63 @@ struct component final : client_component {
       } else {
         revert_timer_resolution();
         printf("[ bo3-bundle perf ] timer boost OFF\n");
+      }
+    });
+
+    command::add("bundle_perf_sleep_log", [](const command::params &params) {
+      if (params.size() < 2) {
+        printf("usage: bundle_perf_sleep_log <0|1>\n");
+        return;
+      }
+      const auto on = params.get(1) == std::string("1");
+      g_sleep_log_enabled.store(on);
+      printf("[ bo3-bundle perf ] sleep logging %s\n", on ? "ON" : "off");
+    });
+
+    command::add("bundle_perf_sleep_dump", [](const command::params &params) {
+      const int n = params.size() >= 2 ? std::atoi(params.get(1)) : 16;
+      dump_sleep_histogram(n > 0 ? n : 16);
+    });
+
+    command::add("bundle_perf_sleep_reset", [](const command::params &) {
+      reset_sleep_histogram();
+      printf("[ bo3-bundle perf ] sleep histogram reset\n");
+    });
+
+    command::add("bundle_perf_sleep_skip", [](const command::params &params) {
+      if (params.size() < 2) {
+        printf("usage: bundle_perf_sleep_skip <0|1> [threshold_ms]\n");
+        return;
+      }
+      const auto on = params.get(1) == std::string("1");
+      if (params.size() >= 3) {
+        const int t = std::atoi(params.get(2));
+        if (t >= 0 && t <= 1000) {
+          g_sleep_skip_threshold_ms.store(static_cast<uint32_t>(t));
+        }
+      }
+      g_sleep_skip_short_enabled.store(on);
+      printf("[ bo3-bundle perf ] sleep skip-short %s (threshold <=%ums, BO3 callers only)\n",
+             on ? "ON" : "off", g_sleep_skip_threshold_ms.load());
+    });
+
+    static std::atomic<bool> sleep_hooks_armed{false};
+    command::add("bundle_perf_sleep_hook", [](const command::params &params) {
+      if (params.size() < 2) {
+        printf("usage: bundle_perf_sleep_hook <0|1>  (1 installs Sleep/SleepEx detours)\n");
+        return;
+      }
+      if (params.get(1) == std::string("1")) {
+        if (sleep_hooks_armed.load()) {
+          printf("[ bo3-bundle perf ] sleep hooks already armed\n");
+          return;
+        }
+        g_sleep_hook.create(Sleep, perf_sleep_stub);
+        g_sleep_ex_hook.create(SleepEx, perf_sleep_ex_stub);
+        sleep_hooks_armed.store(true);
+        printf("[ bo3-bundle perf ] sleep hooks armed\n");
+      } else {
+        printf("[ bo3-bundle perf ] (detour disarm not supported -- restart BOIII to remove)\n");
       }
     });
 

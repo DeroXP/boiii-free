@@ -5,6 +5,7 @@
 
 #include "download_overlay.hpp"
 #include "workshop.hpp"
+#include "engine_perf.hpp"
 
 #include <utils/hook.hpp>
 #include <utils/concurrency.hpp>
@@ -350,6 +351,11 @@ LRESULT CALLBACK wndproc_stub(HWND hwnd, UINT msg, WPARAM wparam,
 
 HRESULT __stdcall present_stub(IDXGISwapChain *swap_chain, UINT sync_interval,
                                UINT flags) {
+  // bo3-bundle: let engine_perf observe (and optionally override) the
+  // sync_interval / flags before we forward to original Present. This is
+  // the only place we get -- MinHook refuses a second hook on vtable[8].
+  engine_perf::intercept_present(swap_chain, sync_interval, flags);
+
   if (!imgui_initialized) {
     ID3D11Device *device = nullptr;
     if (SUCCEEDED(swap_chain->GetDevice(IID_PPV_ARGS(&device)))) {
