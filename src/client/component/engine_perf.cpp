@@ -210,6 +210,65 @@ void __stdcall draw_instanced_stub(ID3D11DeviceContext *ctx,
                               start_vertex, start_inst);
 }
 
+// RenderSurfaceList hook for the SurfaceList.count truncation experiment.
+// Static offset +0x1C53FD0 in BO3.exe. Signature inferred from disasm:
+//   void RenderSurfaceList(Renderer *rcx, SurfaceList *rdx);
+// SurfaceList layout (from our RE):
+//   +0x08: pointer to array of surface pointers
+//   +0x10: uint32 total surface count (the loop limit we want to cap)
+//
+// Approach: divide count by factor BEFORE invoking original, restore AFTER.
+// The original reads count into r13d at entry, so modifying mid-call doesn't
+// help -- we have to modify in the outer dispatcher (this function).
+utils::hook::detour g_render_surface_list_hook;
+std::atomic<int>  g_render_skip_factor{1};   // 1=off, 2=half draws, 4=quarter, etc.
+std::atomic<uint64_t> g_rsl_calls{0};
+std::atomic<uint64_t> g_rsl_truncated{0};
+
+void __fastcall render_surface_list_stub(void *renderer, void *surface_list) {
+  g_rsl_calls.fetch_add(1, std::memory_order_relaxed);
+  const int factor = g_render_skip_factor.load(std::memory_order_relaxed);
+  uint32_t saved_count = 0;
+  uint32_t *count_ptr = nullptr;
+  if (factor > 1 && surface_list) {
+    count_ptr = reinterpret_cast<uint32_t *>(
+        reinterpret_cast<uint8_t *>(surface_list) + 0x10);
+    saved_count = *count_ptr;
+    if (saved_count > 1) {
+      *count_ptr = saved_count / factor;
+      g_rsl_truncated.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+  g_render_surface_list_hook.invoke<void>(renderer, surface_list);
+  if (count_ptr && saved_count) {
+    *count_ptr = saved_count;
+  }
+}
+
+void install_render_surface_list_hook() {
+  static std::atomic<bool> installed{false};
+  if (installed.exchange(true)) return;
+  auto *base = GetModuleHandleA("BlackOps3.exe");
+  if (!base) {
+    printf("[ bo3-bundle engine ] BlackOps3.exe not loaded\n");
+    installed.store(false);
+    return;
+  }
+  const auto addr = reinterpret_cast<uintptr_t>(base) + 0x1C53FD0;
+  try {
+    g_render_surface_list_hook.create(reinterpret_cast<void *>(addr),
+                                      render_surface_list_stub);
+    printf("[ bo3-bundle engine ] RenderSurfaceList hook installed @ 0x%llX\n",
+           static_cast<unsigned long long>(addr));
+  } catch (const std::exception &e) {
+    printf("[ bo3-bundle engine ] RSL hook install threw: %s\n", e.what());
+    installed.store(false);
+  } catch (...) {
+    printf("[ bo3-bundle engine ] RSL hook install threw unknown\n");
+    installed.store(false);
+  }
+}
+
 void install_draw_hooks() {
   if (g_draw_hooks_installed.exchange(true)) return;
 
@@ -519,6 +578,26 @@ struct component final : client_component {
                  (unsigned long long)a, (unsigned long long)c);
         }
       }
+    });
+
+    command::add("bundle_perf_rsl_hook", [](const command::params &) {
+      install_render_surface_list_hook();
+    });
+
+    command::add("bundle_perf_render_skip", [](const command::params &params) {
+      if (params.size() < 2) {
+        printf("usage: bundle_perf_render_skip <factor>  (1=off, 2=half draws, 4=quarter)\n");
+        printf("       current factor=%d  rsl_calls=%llu  truncated=%llu\n",
+               g_render_skip_factor.load(),
+               (unsigned long long)g_rsl_calls.load(),
+               (unsigned long long)g_rsl_truncated.load());
+        return;
+      }
+      const int v = std::atoi(params.get(1));
+      if (v < 1 || v > 100) { printf("[ bo3-bundle engine ] out of range 1..100\n"); return; }
+      g_render_skip_factor.store(v);
+      printf("[ bo3-bundle engine ] render skip factor = %d (each pass draws 1/%d of surfaces)\n",
+             v, v);
     });
 
     command::add("bundle_perf_draw_l2", [](const command::params &params) {
