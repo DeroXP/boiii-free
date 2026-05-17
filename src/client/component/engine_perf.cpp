@@ -140,6 +140,31 @@ utils::hook::detour g_d_hook;
 utils::hook::detour g_dii_hook;
 utils::hook::detour g_di_inst_hook;
 
+// Map/Unmap counters -- constant buffer updates and dynamic texture writes.
+// Often 5-10x more calls than draws and each crosses the D3D11 driver
+// boundary, so they dominate render thread time when draws are cheap.
+std::atomic<uint64_t> g_map_total{0};
+std::atomic<uint64_t> g_unmap_total{0};
+std::atomic<uint64_t> g_map_this_frame{0};
+std::atomic<uint32_t> g_last_frame_maps{0};
+utils::hook::detour g_map_hook;
+utils::hook::detour g_unmap_hook;
+
+HRESULT __stdcall map_stub(ID3D11DeviceContext *ctx, ID3D11Resource *resource,
+                           UINT subresource, D3D11_MAP map_type, UINT flags,
+                           D3D11_MAPPED_SUBRESOURCE *mapped) {
+  g_map_total.fetch_add(1, std::memory_order_relaxed);
+  g_map_this_frame.fetch_add(1, std::memory_order_relaxed);
+  return g_map_hook.invoke<HRESULT>(ctx, resource, subresource, map_type,
+                                    flags, mapped);
+}
+
+void __stdcall unmap_stub(ID3D11DeviceContext *ctx, ID3D11Resource *resource,
+                          UINT subresource) {
+  g_unmap_total.fetch_add(1, std::memory_order_relaxed);
+  g_unmap_hook.invoke<void>(ctx, resource, subresource);
+}
+
 void __stdcall draw_indexed_stub(ID3D11DeviceContext *ctx, UINT idx_count,
                                  UINT start_idx, INT base_vertex) {
   g_draw_indexed_total.fetch_add(1, std::memory_order_relaxed);
@@ -313,15 +338,19 @@ void install_draw_hooks() {
   // ID3D11DeviceContext vtable indices:
   //   12 = DrawIndexed
   //   13 = Draw
+  //   14 = Map
+  //   15 = Unmap
   //   20 = DrawIndexedInstanced
   //   21 = DrawInstanced
   void **vtable = *reinterpret_cast<void ***>(ctx);
   try {
     g_di_hook.create(vtable[12], draw_indexed_stub);
     g_d_hook.create(vtable[13], draw_stub);
+    g_map_hook.create(vtable[14], map_stub);
+    g_unmap_hook.create(vtable[15], unmap_stub);
     g_dii_hook.create(vtable[20], draw_indexed_instanced_stub);
     g_di_inst_hook.create(vtable[21], draw_instanced_stub);
-    printf("[ bo3-bundle engine ] draw hooks installed (DrawIndexed/Draw/DrawIndexedInstanced/DrawInstanced)\n");
+    printf("[ bo3-bundle engine ] draw + map hooks installed\n");
   } catch (const std::exception &e) {
     printf("[ bo3-bundle engine ] draw hook install threw: %s\n", e.what());
   }
@@ -430,6 +459,10 @@ void intercept_present(IDXGISwapChain *swap_chain, UINT &sync_interval,
   const DWORD me = GetCurrentThreadId();
   DWORD expected = 0;
   g_render_tid.compare_exchange_strong(expected, me, std::memory_order_relaxed);
+
+  // Per-frame Map snapshot (constant buffer / dynamic texture updates).
+  const auto mf = g_map_this_frame.exchange(0, std::memory_order_relaxed);
+  if (mf > 0) g_last_frame_maps.store(static_cast<uint32_t>(mf), std::memory_order_relaxed);
 
   // Per-frame draw-call snapshot. Done before any other work so the
   // counter resets cleanly on each Present.
@@ -540,6 +573,10 @@ struct component final : client_component {
              (unsigned long long)dii, (unsigned long long)dinst);
       printf("[ bo3-bundle engine ] per-frame draws: last=%u  max=%u  avg=%.1f over %llu frames\n",
              last, mx, avg, (unsigned long long)frames);
+      printf("[ bo3-bundle engine ] map totals: Map=%llu Unmap=%llu  last_frame_maps=%u\n",
+             (unsigned long long)g_map_total.load(),
+             (unsigned long long)g_unmap_total.load(),
+             g_last_frame_maps.load());
     });
 
     command::add("bundle_perf_draw_callers", [](const command::params &params) {
