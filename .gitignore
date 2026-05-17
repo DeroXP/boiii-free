@@ -5,3 +5,5 @@ usergenerate.bat
 nul
 release-staging/
 *.zip
+tools/bo3_dump/
+tools/__pycache__/
