@@ -29,6 +29,7 @@ bool check_valid_usermap_id(const std::string_view &mapname,
 bool check_valid_mod_id(const std::string_view &pub_id,
                         const std::string_view &workshop_id,
                         const std::string_view &base_uri = {});
+bool check_valid_mod_stack(const std::string &list);
 struct content_info {
   std::string hash;
   uint64_t built{};

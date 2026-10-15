@@ -14,6 +14,7 @@
 
 #include <component/download_overlay.hpp>
 #include <component/fastdl.hpp>
+#include <component/mod_stack.hpp>
 #include <component/network.hpp>
 #include <component/party.hpp>
 #include <component/scheduler.hpp>
@@ -1377,6 +1378,35 @@ bool check_valid_mod_id(const std::string_view &mod,
   return true;
 }
 
+bool check_valid_mod_stack(const std::string &list) {
+  std::vector<std::string> missing;
+  for (const std::string &mod : utils::string::split(list, ',')) {
+    if (!mod.empty() && !has_mod(mod)) {
+      missing.push_back(mod);
+    }
+  }
+  if (missing.empty()) {
+    return true;
+  }
+
+  // Xerces: mod-stack offered to download missing mods here through upstream's
+  // anonymous downloaders, which Xerces never calls (docs/DESIGN.md D15, 9.5).
+  // The player is told which mods are missing instead.
+  const std::string names = utils::string::join(missing, ", ");
+  scheduler::once(
+      [names] {
+        game::ui::UI_OpenErrorPopupWithMessage(
+            game::LOCAL_CLIENT_0, game::errorCode::UI,
+            utils::string::va("This server uses mods you don't have: %s\n"
+                              "Subscribe to them on the Steam Workshop, or ask "
+                              "the server owner where to get them, then join "
+                              "again.",
+                              names.c_str()));
+      },
+      scheduler::main);
+  return false;
+}
+
 bool mod_load_requires_fs_reinitialization(const std::string_view &mod_name) {
   return !mod_name.empty() && mod_name != "usermaps";
 }
@@ -1404,7 +1434,7 @@ void setup_same_mod_as_host(game::LocalClientNum_t localClientNum,
       mod == "usermaps" && usermap.empty() && loaded_mod != "usermaps"
           ? std::string_view{}
           : mod;
-  if (loaded_mod != target) {
+  if (loaded_mod != target || !mod_stack::is_loaded()) {
     const bool fs_reinit_required =
         force_fs_reinit ||
         mod_switch_requires_fs_reinitialization(loaded_mod, target);
