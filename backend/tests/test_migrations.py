@@ -1,15 +1,32 @@
 """The Alembic migrations build exactly the schema the models describe."""
 
+import asyncio
+import contextlib
+from collections.abc import AsyncIterator
 from pathlib import Path
 
+import httpx
 import sqlalchemy as sa
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from fastapi import FastAPI
 
+from app.config import Settings
+from app.main import create_app
 from app.models import Base
+from tests.helpers import (
+    PASSWORD,
+    TestUser,
+    client_for,
+    make_settings,
+    make_tuning,
+    next_address,
+    register,
+    sqlite_url,
+)
 
 BACKEND = Path(__file__).resolve().parents[1]
 
@@ -57,6 +74,69 @@ def test_downgrade_to_base(tmp_path: Path) -> None:
     finally:
         engine.dispose()
     command.upgrade(config, "head")
+
+
+@contextlib.asynccontextmanager
+async def _running(settings: Settings) -> AsyncIterator[FastAPI]:
+    """An app on a migrated database, closed again (engine disposed) before the next migration."""
+    app = create_app(settings, tuning=make_tuning())
+    lifespan = app.router.lifespan_context(app)
+    await lifespan.__aenter__()
+    try:
+        yield app
+    finally:
+        await lifespan.__aexit__(None, None, None)
+
+
+async def _incoming(client: httpx.AsyncClient, user: TestUser) -> list[str]:
+    response = await client.get("/v1/friends/requests", headers=user.headers)
+    return [r["username"] for r in response.json()["incoming"]]
+
+
+async def test_rolling_0002_back_and_forward_keeps_hidden_requests_hidden_and_names_held(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "rollback.db"
+    config = _config(database)
+    settings = make_settings(tmp_path, DATABASE_URL=sqlite_url(database))
+    # migrations/env.py runs its own event loop, so Alembic gets a thread of its own.
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with _running(settings) as app, client_for(app) as client:
+        names = ("alice", "shyuser", "friendly", "mallory", "leaver")
+        alice, shy, friendly, mallory, leaver = [await register(client, name) for name in names]
+        await client.post("/v1/blocks", json={"username": "mallory"}, headers=alice.headers)
+        await client.patch("/v1/me/privacy", json={"friend_requests": "nobody"}, headers=shy.headers)
+        for name in ("alice", "shyuser", "friendly"):  # two kept hidden, one delivered
+            await client.post("/v1/friends/requests", json={"username": name}, headers=mallory.headers)
+        gone = await client.request(
+            "DELETE", "/v1/me", json={"password": leaver.password}, headers=leaver.headers
+        )
+        assert gone.status_code == 204
+
+    # Rolling a deploy back across 0002, and forward again.
+    await asyncio.to_thread(command.downgrade, config, "0001")
+    engine = sa.create_engine(f"sqlite:///{database.as_posix()}")
+    try:
+        with engine.connect() as connection:
+            # 0001 cannot keep a request from its recipient: the hidden ones went, not shown.
+            assert connection.scalar(sa.text("SELECT count(*) FROM friend_requests")) == 1
+            assert connection.scalar(sa.text("SELECT username_lower FROM deleted_usernames")) == (
+                "leaver"
+            )
+    finally:
+        engine.dispose()
+    await asyncio.to_thread(command.upgrade, config, "head")
+
+    async with _running(settings) as app, client_for(app) as client:
+        assert await _incoming(client, alice) == []
+        assert await _incoming(client, shy) == []
+        assert await _incoming(client, friendly) == ["mallory"]
+        again = await client.post(
+            "/v1/auth/register",
+            json={"username": "leaver", "password": PASSWORD},
+            headers={"X-Forwarded-For": next_address()},
+        )
+        assert again.status_code == 409  # still held
 
 
 def test_offline_sql_for_postgres(tmp_path: Path, capsys) -> None:

@@ -14,14 +14,19 @@ import uuid
 from datetime import timedelta
 
 from fastapi import APIRouter, Response
-from sqlalchemy import or_, select
+from sqlalchemy import delete, literal, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import DbDep, ServicesDep, UserDep
 from app.errors import not_found
 from app.models import Block, FriendRequest, User, utcnow
-from app.presence import PresenceHub, hide_presence_between, show_presence_between
+from app.presence import (
+    PresenceHub,
+    blocked_now,
+    hide_presence_between,
+    show_presence_between,
+)
 from app.schemas import (
     FriendOut,
     FriendRequestOut,
@@ -113,6 +118,11 @@ async def send_request(
         except IntegrityError:  # they accepted at the same moment; the friendship exists
             await db.rollback()
             return SENT
+        if await blocked_now(db, services.hub, user.id, target.id):
+            # A block committed while this was checked and written, and wins.
+            await remove_friendship(db, user.id, target.id)
+            await db.commit()
+            return SENT
         await announce_friendship(db, services.hub, user, target)
         return SENT
 
@@ -122,11 +132,24 @@ async def send_request(
         )
     )
     if existing is not None and existing.expires_at > now:
-        if existing.hidden and not hidden:
-            # Sent again now that the target would take it: from here on they see it. Its
-            # timestamps stay as they were, so the sender cannot tell anything changed.
-            existing.hidden = False
-            await db.commit()
+        # Sent again. If it was hidden and the target would take it now, from here on they see
+        # it; its timestamps stay as they were. Every resend runs the same statements (this
+        # UPDATE changes nothing unless it un-hides), so neither the answer nor its timing tells
+        # the sender whether the request had been hidden, or still is. A row deleted meanwhile
+        # (cancelled, or cut by a block) is simply not updated.
+        unhidden = await db.execute(
+            update(FriendRequest)
+            .where(
+                FriendRequest.id == existing.id,
+                FriendRequest.hidden.is_(True),
+                literal(not hidden),
+            )
+            .values(hidden=False)
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+        blocked = await blocked_now(db, services.hub, user.id, target.id)
+        if unhidden.rowcount == 1 and not blocked:
             services.hub.send(target.id, {"type": "friend_request"})
         return SENT
     if existing is not None:
@@ -134,9 +157,10 @@ async def send_request(
     if reverse is not None and not reverse_live:  # expired, so it no longer counts
         await db.delete(reverse)
     await db.flush()
+    request_id = uuid.uuid4()
     db.add(
         FriendRequest(
-            id=uuid.uuid4(),
+            id=request_id,
             from_user_id=user.id,
             to_user_id=target.id,
             created_at=now,
@@ -149,7 +173,19 @@ async def send_request(
     except IntegrityError:  # a concurrent duplicate won
         await db.rollback()
         return SENT
+    # Checked for hidden requests too, so both kinds take the same time.
+    blocked = await blocked_now(db, services.hub, user.id, target.id)
     if not hidden:
+        if blocked:
+            # A block committed while this was checked and written, and wins: the request goes,
+            # as it would have had it been sent a moment earlier.
+            await db.execute(
+                delete(FriendRequest)
+                .where(FriendRequest.id == request_id)
+                .execution_options(synchronize_session=False)
+            )
+            await db.commit()
+            return SENT
         services.hub.send(target.id, {"type": "friend_request"})
     return SENT
 
@@ -214,6 +250,11 @@ async def accept_request(
     except IntegrityError:  # accepted twice at once; the other request made the friendship
         await db.rollback()
         raise not_found("Friend request not found.") from None
+    if await blocked_now(db, services.hub, user.id, sender.id):
+        # A block committed while this was checked and written, and wins: as if it came first.
+        await remove_friendship(db, user.id, sender.id)
+        await db.commit()
+        raise not_found("Friend request not found.")
     await announce_friendship(db, services.hub, user, sender)
     return FriendOut(
         user_id=sender.id,

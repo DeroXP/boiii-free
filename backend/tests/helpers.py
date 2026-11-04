@@ -92,6 +92,26 @@ def services_of(app: FastAPI) -> Services:
     return app.state.services
 
 
+def hold_password_check(app: FastAPI, password: str) -> tuple[asyncio.Event, asyncio.Event]:
+    """Make the next check of `password` wait until released; returns (started, release).
+
+    It stands in for a slow hash (Argon2 plus the wait for a free hash slot), so that another
+    request can run in between. Every other check runs as usual.
+    """
+    passwords = services_of(app).passwords
+    original = passwords.verify
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def verify(password_hash: str, candidate: str) -> bool:
+        if candidate == password and not started.is_set():
+            started.set()
+            await release.wait()
+        return await original(password_hash, candidate)
+
+    passwords.verify = verify  # type: ignore[method-assign]
+    return started, release
+
+
 def client_for(app: FastAPI) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver")
 
@@ -171,11 +191,15 @@ class WSClosed(Exception):
 
 
 class WSClient:
-    """Speaks ASGI WebSocket to the app directly, in the test's own event loop."""
+    """Speaks ASGI WebSocket to the app directly, in the test's own event loop.
 
-    def __init__(self, app: FastAPI, path: str = "/v1/ws") -> None:
+    Every socket comes from 127.0.0.1 unless `address` is given (sent as X-Forwarded-For).
+    """
+
+    def __init__(self, app: FastAPI, path: str = "/v1/ws", *, address: str | None = None) -> None:
         self.app = app
         self.path = path
+        self.address = address
         self._to_app: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._from_app: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._task: asyncio.Task[None] | None = None
@@ -193,7 +217,8 @@ class WSClient:
             "path": self.path,
             "raw_path": self.path.encode(),
             "query_string": b"",
-            "headers": [(b"host", b"testserver")],
+            "headers": [(b"host", b"testserver")]
+            + ([(b"x-forwarded-for", self.address.encode())] if self.address else []),
             "subprotocols": [],
             "extensions": {},
         }
@@ -269,9 +294,11 @@ class WSClient:
         await self.close()
 
 
-async def ws_login(app: FastAPI, user: TestUser) -> tuple[WSClient, dict[str, Any]]:
+async def ws_login(
+    app: FastAPI, user: TestUser, *, address: str | None = None
+) -> tuple[WSClient, dict[str, Any]]:
     """Open /v1/ws as `user`; returns the client and its hello message."""
-    ws = await WSClient(app).connect()
+    ws = await WSClient(app, address=address).connect()
     await ws.send_json({"type": "auth", "token": user.access_token})
     hello = await ws.receive_json()
     assert hello["type"] == "hello", hello

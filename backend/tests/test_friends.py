@@ -1,10 +1,14 @@
 """Friend requests and friendships."""
 
+import asyncio
+import re
 from datetime import timedelta
+from typing import Any
 
 import httpx
 from fastapi import FastAPI
-from sqlalchemy import func, select, update
+from sqlalchemy import event, func, select, update
+from sqlalchemy.util import await_only
 
 from app.models import FriendRequest, Friendship, utcnow
 from tests.helpers import TestUser, befriend, register, services_of, ws_login
@@ -230,3 +234,72 @@ async def test_expired_requests_are_hidden_and_can_be_resent(
 async def test_friend_request_requires_auth(client: httpx.AsyncClient) -> None:
     response = await client.post("/v1/friends/requests", json={"username": "bob"})
     assert response.status_code == 401
+
+
+async def test_resend_racing_its_own_cancel_answers_202(client: httpx.AsyncClient, app: FastAPI) -> None:
+    mallory = await register(client, "mallory")
+    blocker = await register(client, "blocker")
+    await client.post("/v1/blocks", json={"username": "mallory"}, headers=blocker.headers)
+    await client.post("/v1/friends/requests", json={"username": "blocker"}, headers=mallory.headers)
+    request_id = (await _requests(client, mallory))["outgoing"][0]["id"]
+    await client.delete(f"/v1/blocks/{mallory.id}", headers=blocker.headers)  # Mallory is not told
+
+    engine = services_of(app).engine
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    def pause(_conn: Any, _cursor: Any, statement: str, *_args: Any) -> None:
+        # The resend has read the request and is about to un-hide it.
+        if statement.lstrip().upper().startswith("UPDATE FRIEND_REQUESTS") and not release.is_set():
+            entered.set()
+            await_only(release.wait())
+
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    event.listen(engine.sync_engine, "before_cursor_execute", pause)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as raw:
+            resend = asyncio.create_task(
+                raw.post("/v1/friends/requests", json={"username": "blocker"}, headers=mallory.headers)
+            )
+            await asyncio.wait_for(entered.wait(), 3)
+            cancel = await raw.delete(f"/v1/friends/requests/{request_id}", headers=mallory.headers)
+            assert cancel.status_code == 204
+            release.set()
+            sent = await resend
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", pause)
+    # The same answer as always, whether or not the request had been hidden.
+    assert sent.status_code == 202 and sent.json() == {"status": "sent"}
+    assert await _request_count(app) == 0
+
+
+async def test_every_resend_does_the_same_database_work(client: httpx.AsyncClient, app: FastAPI) -> None:
+    mallory = await register(client, "mallory")
+    names = ("blocker", "shyuser", "friendly")
+    blocker, shy, _friendly = [await register(client, name) for name in names]
+    await client.post("/v1/blocks", json={"username": "mallory"}, headers=blocker.headers)
+    await client.patch("/v1/me/privacy", json={"friend_requests": "nobody"}, headers=shy.headers)
+    statements: list[str] = []
+
+    def record(_conn: Any, _cursor: Any, statement: str, *_args: Any) -> None:
+        statements.append(re.sub(r"\s+", " ", statement).strip())
+
+    async def sending_to(name: str) -> list[str]:
+        statements.clear()
+        sent = await client.post("/v1/friends/requests", json={"username": name}, headers=mallory.headers)
+        assert sent.status_code == 202
+        return list(statements)
+
+    engine = services_of(app).engine
+    event.listen(engine.sync_engine, "before_cursor_execute", record)
+    try:
+        # A first request: kept hidden (blocked), kept hidden ('nobody'), delivered.
+        first = [await sending_to(name) for name in names]
+        await client.patch("/v1/me/privacy", json={"friend_requests": "everyone"}, headers=shy.headers)
+        # Sent again: still hidden, now delivered (it had been hidden), delivered again.
+        again = [await sending_to(name) for name in names]
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record)
+    # Same statements in the same order, so the timing gives nothing away either.
+    assert first[0] == first[1] == first[2]
+    assert again[0] == again[1] == again[2]
+    assert (await _requests(client, shy))["incoming"] != []

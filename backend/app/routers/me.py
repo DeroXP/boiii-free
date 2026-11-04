@@ -1,13 +1,16 @@
 """The signed-in account: profile, privacy, password, data export and deletion."""
 
 import asyncio
-from datetime import timedelta
+import uuid
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Response
 from sqlalchemy import delete, or_, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import DbDep, Services, ServicesDep, UserDep
+from app.deps import DbDep, Services, ServicesDep, UserDep, invalid_token
 from app.errors import ApiError
 from app.log import log_event
 from app.models import (
@@ -38,7 +41,7 @@ from app.schemas import (
     password_matches_username,
 )
 from app.social import usernames
-from app.tokens import revoke_all_for_user
+from app.tokens import lock_account, revoke_all_for_user
 
 router = APIRouter(prefix="/v1/me", tags=["me"])
 
@@ -46,17 +49,46 @@ router = APIRouter(prefix="/v1/me", tags=["me"])
 DELETED_USERNAME_HOLD = timedelta(days=90)
 
 
-async def _check_password(services: Services, user: User, password: str) -> None:
+def _invalid_password() -> ApiError:
+    return ApiError(403, "invalid_password", "Password is incorrect.")
+
+
+async def _check_password(
+    db: AsyncSession, services: Services, user: User, password: str
+) -> None:
     """Wrong passwords here are rate limited per account, like logins.
 
-    The check is paid for before the hash and refunded when the password is right, so a burst of
-    parallel guesses (say, with a stolen access token) cannot all slip in while the first hash.
+    The check is paid for before the hash and given back unless the password is wrong, so a burst
+    of parallel guesses (say, with a stolen access token) cannot all slip in while the first hash,
+    and a server error does not count. The read that loaded the account ends first, so no
+    database connection waits for the hash. Callers hold `services.passwords.admit()`.
     """
     key = str(user.id)
     services.limiter.enforce("password_check", key)
-    if not await services.passwords.verify(user.password_hash, password):
-        raise ApiError(403, "invalid_password", "Password is incorrect.")
-    services.limiter.refund("password_check", key)
+    counted = False
+    try:
+        await db.commit()
+        if not await services.passwords.verify(user.password_hash, password):
+            counted = True
+            raise _invalid_password()
+    finally:
+        if not counted:
+            services.limiter.refund("password_check", key)
+
+
+async def _lock_unchanged(db: AsyncSession, user_id: uuid.UUID, checked_hash: str) -> None:
+    """Lock the account (app.tokens.lock_account) and check its password is still the one checked.
+
+    A password change that committed while this request was hashing must win: this one answers
+    403 rather than overwrite it, or delete an account whose password is no longer the one given.
+    """
+    account = await lock_account(db, user_id)
+    if account is None:
+        await db.rollback()
+        raise invalid_token()  # deleted meanwhile
+    if account.password_hash != checked_hash:
+        await db.rollback()
+        raise _invalid_password()
 
 
 @router.get("", response_model=MeOut)
@@ -92,12 +124,17 @@ async def update_privacy(
 async def change_password(
     body: PasswordChangeIn, user: UserDep, db: DbDep, services: ServicesDep
 ) -> Response:
-    await _check_password(services, user, body.current_password)
-    if password_matches_username(body.new_password, user.username):
-        raise ApiError(
-            422, "invalid_request", "new_password: Password must not be the same as the username."
-        )
-    user.password_hash = await services.passwords.hash(body.new_password)
+    with services.passwords.admit():
+        await _check_password(db, services, user, body.current_password)
+        if password_matches_username(body.new_password, user.username):
+            raise ApiError(
+                422,
+                "invalid_request",
+                "new_password: Password must not be the same as the username.",
+            )
+        new_hash = await services.passwords.hash(body.new_password)
+    await _lock_unchanged(db, user.id, user.password_hash)
+    user.password_hash = new_hash
     now = utcnow()
     await revoke_all_for_user(db, user.id, now)
     # Access tokens issued until now stop working too, over HTTP and for opening a WebSocket.
@@ -122,40 +159,62 @@ async def export_me(user: UserDep, db: DbDep) -> dict[str, Any]:
 
     Reports other people filed about this user are listed by reason, status and day only: who
     filed them and what they wrote stay out, to protect the reporters.
+
+    Every list is in a fixed order (by creation). Without one, PostgreSQL hands rows back as they
+    lie on disk, and a row moves when it is updated: that would show the sender which of their
+    friend requests had been hidden, once sending one again made it visible.
     """
     me = user.id
     sessions = (
         await db.scalars(
             select(RefreshToken)
             .where(RefreshToken.user_id == me)
-            .order_by(RefreshToken.created_at)
+            .order_by(RefreshToken.created_at, RefreshToken.id)
         )
     ).all()
     friendships = (
         await db.scalars(
-            select(Friendship).where(or_(Friendship.user_low == me, Friendship.user_high == me))
+            select(Friendship)
+            .where(or_(Friendship.user_low == me, Friendship.user_high == me))
+            .order_by(Friendship.created_at, Friendship.user_low, Friendship.user_high)
         )
     ).all()
     requests = (
         await db.scalars(
-            select(FriendRequest).where(
-                or_(FriendRequest.from_user_id == me, FriendRequest.to_user_id == me)
-            )
+            select(FriendRequest)
+            .where(or_(FriendRequest.from_user_id == me, FriendRequest.to_user_id == me))
+            .order_by(FriendRequest.created_at, FriendRequest.id)
         )
     ).all()
-    blocks = (await db.scalars(select(Block).where(Block.blocker_id == me))).all()
-    reports = (await db.scalars(select(Report).where(Report.reporter_id == me))).all()
+    blocks = (
+        await db.scalars(
+            select(Block)
+            .where(Block.blocker_id == me)
+            .order_by(Block.created_at, Block.blocked_id)
+        )
+    ).all()
+    reports = (
+        await db.scalars(
+            select(Report).where(Report.reporter_id == me).order_by(Report.created_at, Report.id)
+        )
+    ).all()
     reports_about = (
         await db.scalars(
-            select(Report).where(Report.reported_id == me).order_by(Report.created_at)
+            select(Report).where(Report.reported_id == me).order_by(Report.created_at, Report.id)
         )
     ).all()
     invites = (
         await db.scalars(
-            select(Invite).where(or_(Invite.from_user_id == me, Invite.to_user_id == me))
+            select(Invite)
+            .where(or_(Invite.from_user_id == me, Invite.to_user_id == me))
+            .order_by(Invite.created_at, Invite.id)
         )
     ).all()
-    packs = (await db.scalars(select(Pack).where(Pack.owner_id == me))).all()
+    packs = (
+        await db.scalars(
+            select(Pack).where(Pack.owner_id == me).order_by(Pack.created_at, Pack.id)
+        )
+    ).all()
 
     other_ids = {f.user_high if f.user_low == me else f.user_low for f in friendships}
     other_ids |= {r.to_user_id if r.from_user_id == me else r.from_user_id for r in requests}
@@ -283,20 +342,39 @@ async def delete_me(
     The name stays taken for 90 days (kept with no link to the account), so nobody can register
     it at once and pass as the person who left.
     """
-    await _check_password(services, user, body.password)
-    user_id, username_lower = user.id, user.username_lower
+    with services.passwords.admit():
+        await _check_password(db, services, user, body.password)
+    user_id, checked_hash = user.id, user.password_hash
+    await _hold_username(db, user.username_lower)
+    await _lock_unchanged(db, user_id, checked_hash)
     watching = await presence_audience(db, services.hub, user_id)
     await db.execute(
         delete(User).where(User.id == user_id).execution_options(synchronize_session=False)
     )
-    held_until = utcnow() + DELETED_USERNAME_HOLD
+    await db.commit()
+    services.hub.kick(user_id, CLOSE_ACCOUNT_DELETED, "account deleted")
+    services.hub.send_many(watching, offline_event(user_id))
+    # No user id: with one, this line would tie the held name back to the account's other logs.
+    log_event("account_deleted")
+    return Response(status_code=204)
+
+
+async def _hold_username(db: AsyncSession, username_lower: str) -> None:
+    """Hold a name for 90 days, in a transaction of its own, before its account is deleted.
+
+    So the name is never free for a moment, and the hold shares nothing with the deletion, not
+    even a transaction id (PostgreSQL's xmin) that would match the reports it unlinks. Its expiry
+    is the midnight (UTC) after the 90 days: an exact time would match the deletion's log line.
+    """
+    held_until = datetime.combine(
+        (utcnow() + DELETED_USERNAME_HOLD).date() + timedelta(days=1), time.min, tzinfo=UTC
+    )
     hold = await db.get(DeletedUsername, username_lower)
     if hold is None:
         db.add(DeletedUsername(username_lower=username_lower, expires_at=held_until))
     else:  # an expired hold the cleanup task has not removed yet
         hold.expires_at = held_until
-    await db.commit()
-    services.hub.kick(user_id, CLOSE_ACCOUNT_DELETED, "account deleted")
-    services.hub.send_many(watching, offline_event(user_id))
-    log_event("account_deleted", user_id=str(user_id))
-    return Response(status_code=204)
+    try:
+        await db.commit()
+    except IntegrityError:  # deleted twice at once; the other request holds it
+        await db.rollback()

@@ -31,7 +31,6 @@ from app.presence import (
     presence_audience,
     visible_friend_presence,
 )
-from app.ratelimit import TokenBucket
 from app.schemas import PresenceIn
 from app.tokens import AccessClaims, TokenError, issued_before_cutoff
 
@@ -79,6 +78,11 @@ async def _check_token(token: Any, services: Services) -> AccessClaims | None:
 
 
 async def _authenticate(websocket: WebSocket, services: Services) -> AccessClaims | None:
+    """The claims of the first frame's token, or None once the socket is closed.
+
+    Return straight to the caller, which attaches the socket before its next await: a kick
+    (sign-out, password change, deletion) that lands later then closes this socket too.
+    """
     try:
         message = await asyncio.wait_for(
             websocket.receive(), timeout=services.tuning.ws_auth_timeout
@@ -93,7 +97,13 @@ async def _authenticate(websocket: WebSocket, services: Services) -> AccessClaim
         await _close(websocket, CLOSE_POLICY, "first message must be auth")
         return None
     try:
+        kicks = services.hub.kicks
         claims = await _check_token(data["token"], services)
+        # A kick that came while that check ran closed the sockets the hub held then, not this
+        # one; what it acted on has committed by now, so a second check sees it.
+        while claims is not None and services.hub.kicks != kicks:
+            kicks = services.hub.kicks
+            claims = await _check_token(data["token"], services)
     except Exception:
         logger.exception("ws_auth_failed")
         await _close(websocket, CLOSE_INTERNAL_ERROR, "server error")
@@ -137,8 +147,11 @@ async def _handle(message: dict[str, Any], conn: Connection, services: Services)
         except ValidationError:
             conn.send(_error("invalid_presence", "Presence message is not valid."))
             return
-        conn.status = update.status
-        conn.activity = update.activity.model_dump() if update.activity is not None else None
+        status = update.status
+        activity = update.activity.model_dump() if update.activity is not None else None
+        if (status, activity) == (conn.status, conn.activity):
+            return  # nothing changed: no queries, nothing to send
+        conn.status, conn.activity = status, activity
         if services.hub.connection(conn.user_id) is conn:
             async with services.sessionmaker() as db:
                 await broadcast_presence(db, services.hub, conn.user_id)
@@ -159,21 +172,33 @@ async def _announce_offline(services: Services, user_id: uuid.UUID) -> None:
 @router.websocket("/v1/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     services: Services = websocket.app.state.services
+    limiter = services.limiter
     await websocket.accept()
+    # Sockets are limited per address until they sign in, then per account (README: Rate
+    # limits); a socket that signs in gives its address's place back.
+    address = "address:" + services.address_key(websocket.scope)
+    if limiter.hit("ws_connect", address) > 0:
+        await _close(websocket, CLOSE_POLICY, "too many connections")
+        return
     claims = await _authenticate(websocket, services)
     if claims is None:
         return
+    limiter.refund("ws_connect", address)
     user_id = claims.user_id
+    if limiter.hit("ws_connect", f"user:{user_id}") > 0:
+        await _close(websocket, CLOSE_POLICY, "too many connections")
+        return
     hub = services.hub
     conn = hub.attach(user_id, websocket, expires_at=claims.expires_at)
-    log_event("ws_connected", user_id=str(user_id))
+    # No user id: the log would otherwise keep each account's online history, which presence
+    # privacy keeps from everyone else.
+    log_event("ws_connected", connections=len(hub))
     client_gone = False
     try:
         async with services.sessionmaker() as db:
             friends = await visible_friend_presence(db, hub, user_id)
             conn.send({"type": "hello", "user_id": str(user_id), "friends": friends})
             await broadcast_presence(db, hub, user_id)
-        bucket = TokenBucket(services.limiter.rules["ws_message"])
         while True:
             message = await websocket.receive()
             if message["type"] == "websocket.disconnect":
@@ -181,7 +206,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 break
             if conn.closing:
                 continue  # a close frame is on its way; wait for the client to go
-            if not bucket.take():
+            # Counted per account, so a new connection does not start a fresh allowance.
+            if limiter.hit("ws_message", str(user_id)) > 0:
                 conn.close(CLOSE_POLICY, "too many messages")
                 continue
             try:
@@ -196,4 +222,4 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         went_offline = await hub.detach(conn, client_gone=client_gone)
         if went_offline:
             await _announce_offline(services, user_id)
-        log_event("ws_disconnected", user_id=str(user_id))
+        log_event("ws_disconnected", connections=len(hub))

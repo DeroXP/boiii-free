@@ -1,6 +1,7 @@
 """Configuration: URL handling, production refusals, dev fallbacks, key formats and rotation."""
 
 import json
+import os
 import subprocess
 import sys
 import uuid
@@ -10,7 +11,9 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import ValidationError
+from sqlalchemy.engine import make_url
 
+import app.main as main_module
 from app.config import ConfigError, Settings, load_private_key, normalize_database_url, resolve
 from app.main import create_app
 from app.tokens import AccessTokens
@@ -61,6 +64,80 @@ def test_unsupported_database_url_does_not_echo_the_password() -> None:
     with pytest.raises(ConfigError) as error:
         normalize_database_url("mysql://user:hunter2@host/db")
     assert "hunter2" not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "password",
+    ["Sup3rS3cretPw?x", "p@ss:Sup3rS3cretPw", "a/b#c%40d", "with space", "plain"],
+)
+def test_special_characters_in_the_database_password(password: str) -> None:
+    # Railway writes the password into its DATABASE_URL as it is; '%40' was already encoded.
+    url = make_url(normalize_database_url(f"postgres://postgres:{password}@db.internal:5432/railway"))
+    assert url.password == password.replace("%40", "@")
+    assert (url.username, url.host, url.port, url.database) == ("postgres", "db.internal", 5432, "railway")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "postgres://postgres:Sup3rS3cretPw@db.internal:Sup3rS3cretPw/railway",
+        "postgres://postgres:Sup3rS3cretPw@[db.internal/railway",
+    ],
+)
+def test_an_unusable_database_url_is_not_echoed(value: str) -> None:
+    with pytest.raises(ConfigError) as error:
+        normalize_database_url(value)
+    message = str(error.value)
+    assert "DATABASE_URL" in message
+    assert "Sup3rS3cretPw" not in message and "db.internal" not in message
+    assert error.value.__cause__ is None and error.value.__suppress_context__
+
+
+def _environment(**values: str) -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("XERCES_", "DATABASE_URL"))}
+    env.update(PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8", **values)
+    return env
+
+
+@pytest.mark.parametrize(
+    "command",
+    [["-m", "alembic", "upgrade", "head"], ["-c", "from app.main import app"]],
+    ids=["migrations", "server"],
+)
+def test_startup_with_an_unusable_database_url_prints_no_part_of_it(command: list[str]) -> None:
+    # What start.sh runs first, and what uvicorn does when it loads the app.
+    env = _environment(
+        XERCES_ENV="production",
+        DATABASE_URL="postgres://postgres:Sup3rS3cretPw@db.internal:Sup3rS3cretPw/railway",
+        **dict(line.split("=", 1) for line in _genkey().splitlines()),
+    )
+    result = subprocess.run(
+        [sys.executable, *command],
+        cwd=BACKEND,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        stdin=subprocess.DEVNULL,
+        check=False,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "DATABASE_URL is not a valid database URL" in output
+    assert "Sup3rS3cretPw" not in output
+
+
+def test_engine_errors_name_the_error_type_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def broken(_url: str) -> None:
+        raise ValueError("invalid literal for int() with base 10: 'Sup3rS3cretPw'")
+
+    monkeypatch.setattr(main_module, "create_engine", broken)
+    with pytest.raises(ConfigError) as error:
+        create_app(make_settings(tmp_path), tuning=make_tuning())
+    assert str(error.value) == "DATABASE_URL could not be used (ValueError)."
+    assert "Sup3rS3cretPw" not in caplog.text
 
 
 def test_production_accepts_a_complete_environment() -> None:
@@ -170,14 +247,19 @@ async def test_app_refuses_to_start_in_production_without_secrets(tmp_path: Path
         create_app(settings, tuning=make_tuning())
 
 
-def test_genkey_output_is_a_valid_production_config() -> None:
+def _genkey(*args: str, stdin: str | None = None) -> str:
     result = subprocess.run(
-        [sys.executable, str(BACKEND / "scripts" / "genkey.py")],
+        [sys.executable, str(BACKEND / "scripts" / "genkey.py"), *args],
+        input=stdin,
         capture_output=True,
         text=True,
         check=True,
     )
-    values = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
+    return result.stdout.strip()
+
+
+def test_genkey_output_is_a_valid_production_config() -> None:
+    values = dict(line.split("=", 1) for line in _genkey().splitlines())
     assert set(values) == {"XERCES_TOKEN_PRIVATE_KEY", "XERCES_TOKEN_KEY_ID", "XERCES_RATE_LIMIT_SECRET"}
     config = resolve(
         _settings(
@@ -187,6 +269,16 @@ def test_genkey_output_is_a_valid_production_config() -> None:
         )
     )
     assert config.key_id == values["XERCES_TOKEN_KEY_ID"]
+
+
+def test_genkey_prints_the_public_key_of_a_seed_read_from_stdin() -> None:
+    seed = new_seed()
+    expected = load_private_key(seed).public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode().strip()
+    # '-' reads the seed from stdin, so it never sits in shell history.
+    assert _genkey("--public", "-", stdin=seed + "\n") == expected
+    assert _genkey("--public", seed) == expected
 
 
 async def test_old_tokens_survive_key_rotation(app_factory: AppFactory, tmp_path: Path) -> None:

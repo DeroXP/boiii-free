@@ -50,7 +50,13 @@ def create_app(settings: Settings | None = None, *, tuning: Tuning | None = None
     for warning in config.warnings:
         log_event("config_warning", logging.WARNING, detail=warning)
 
-    engine = create_engine(config.database_url)
+    try:
+        engine = create_engine(config.database_url)
+    except Exception as exc:
+        # Errors from parsing the URL can quote it, password included: name the type only.
+        error = ConfigError(f"DATABASE_URL could not be used ({type(exc).__name__}).")
+        log_event("config_error", logging.ERROR, detail=str(error))
+        raise error from None
     services = Services(
         config=config,
         tuning=tuning,
@@ -61,6 +67,7 @@ def create_app(settings: Settings | None = None, *, tuning: Tuning | None = None
             memory_kib=config.argon2_memory_kib,
             parallelism=config.argon2_parallelism,
             max_concurrency=tuning.hash_concurrency,
+            max_waiting=tuning.hash_queue,
         ),
         tokens=AccessTokens(config.signing_key, config.key_id, config.verify_keys),
         limiter=RateLimiter(tuning.rate_rules),

@@ -50,7 +50,7 @@ async def get_db(services: ServicesDep) -> AsyncIterator[AsyncSession]:
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 
 
-def _invalid_token() -> ApiError:
+def invalid_token() -> ApiError:
     return ApiError(
         401,
         "invalid_token",
@@ -69,11 +69,11 @@ async def current_user(request: Request, services: ServicesDep, db: DbDep) -> Us
     try:
         claims = services.tokens.decode(token)
     except TokenError:
-        raise _invalid_token() from None
+        raise invalid_token() from None
     user = await db.get(User, claims.user_id)
     # Gone: the account was deleted. Cut off: the password changed after the token was issued.
     if user is None or issued_before_cutoff(claims.issued_at, user.tokens_valid_after):
-        raise _invalid_token()
+        raise invalid_token()
     return user
 
 

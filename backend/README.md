@@ -91,14 +91,16 @@ server: {"type": "auth_ok"}
 ```
 
 Status is `online`, `away` or `in_game`, and `mode` is `zm`, `mp`, `cp` or null.
-A client may send 10 messages a second. A new connection for the same account
-closes the old one.
+A presence that repeats the current one is not passed on. An account may send 10
+messages a second, counted across its connections, and sign in 10 times a
+minute. A new connection for the same account closes the old one.
 
-The socket lives only as long as the access token it was opened with. To keep
-it open, send each fresh access token over it, as above, before the old one
+The socket lives only as long as the access token it was opened with. To keep it
+open, send each fresh access token over it, as above, before the old one
 expires; otherwise it closes with 4401. Logging out, a refresh token being used
 twice (which revokes its family) and a password change also close it with 4401,
-and after a password change only tokens issued since then can reconnect.
+a socket that was signing in at that moment included, and after a password
+change only tokens issued since then can reconnect.
 
 The server pushes:
 
@@ -115,7 +117,7 @@ The server pushes:
 | ---------- | ---------------------------------------------------------------------------------- |
 | 1001, 1012 | Server restarting. Reconnect.                                                      |
 | 1003       | Binary frame. Only JSON text frames are accepted.                                  |
-| 1008       | First frame was not auth, auth took over 10 seconds, or over 10 messages a second. |
+| 1008       | First frame was not auth, auth took over 10 seconds, or over a rate limit.         |
 | 1009       | Message too big.                                                                   |
 | 1011       | Server error. Reconnect after a short wait.                                        |
 | 1013       | The client stopped reading its messages.                                           |
@@ -130,28 +132,43 @@ Answers over a limit are 429 with `Retry-After` in seconds. Addresses are only
 used as an HMAC keyed with `XERCES_RATE_LIMIT_SECRET` and are never stored or
 logged.
 
-| What                       | Limit                                                                   |
-| -------------------------- | ----------------------------------------------------------------------- |
-| Registration               | 3 per hour per address, a taken name included                           |
-| Login                      | 10 per 15 minutes per address, and 5 failed per 15 minutes per username |
-| Token refresh              | 30 per minute per account                                               |
-| Friend requests            | 20 per day per account                                                  |
-| Invites                    | 30 per hour per account, and 1 per recipient per 30 seconds             |
-| Reports                    | 10 per day per account                                                  |
-| Pack creation              | 20 per day per account                                                  |
-| Pack lookup                | 120 per minute per address                                              |
-| Wrong password on `/v1/me` | 5 per 15 minutes per account                                            |
-| WebSocket messages         | 10 per second per connection, then close 1008                           |
+| What                       | Limit                                                          |
+| -------------------------- | -------------------------------------------------------------- |
+| Registration               | 3 per hour per address, a taken name included                  |
+| Login                      | 10 per 15 minutes per address                                  |
+| Failed logins              | 5 per 15 minutes per username and address, 50 per username     |
+| Token refresh              | 30 per minute per account, and per address for unusable tokens |
+| Friend requests            | 20 per day per account                                         |
+| Invites                    | 30 per hour per account, and 1 per recipient per 30 seconds    |
+| Reports                    | 10 per day per account                                         |
+| Pack creation              | 20 per day per account                                         |
+| Pack lookup                | 120 per minute per address                                     |
+| Wrong password on `/v1/me` | 5 per 15 minutes per account                                   |
+| WebSocket sign-ins         | 10 per minute per account, and per address for those that fail |
+| WebSocket messages         | 10 per second per account, then close 1008                     |
 
-Login attempts and password checks are counted before the password is hashed
-and given back when it is right, so successful logins do not count and a burst
-of parallel guesses gets no more tries than a slow one.
+Login attempts and password checks are counted before the password is hashed and
+given back unless it was wrong, so successful logins and attempts that end in a
+server error do not count, and a burst of parallel guesses gets no more tries
+than a slow one.
 
-The per-username login limit counts failures from every address together. That
-is what caps guessing at one account however many addresses an attacker has.
-The other side of it: anyone can make an account's password login answer 429
-for up to 15 minutes at a time. Launchers that are already signed in keep
-working, because they refresh their tokens instead of logging in.
+Failed logins count per username and address, and per username from every
+address together. So guessing at one account is capped at 50 per 15 minutes
+however many addresses are used, and locking its owner out takes at least ten
+addresses at once, since one address stops after its own five. Launchers that
+are already signed in are unaffected either way, because they refresh their
+tokens instead of logging in.
+
+Sign-up, login and the password checks on `/v1/me` hash the password, at most 4
+at a time with up to 64 more requests waiting. Past that they answer 503 with
+`Retry-After` straight away, which counts against no limit. No request holds a
+database connection while it waits for a hash, so a flood of made-up logins can
+slow sign-ins but nothing else.
+
+Each limit keeps track of at most 100,000 keys. A key with its full allowance
+left is the same as a new one and is forgotten first; if that frees no room, new
+keys for that limit get 429 until old ones refill, so a flood of new addresses
+cannot reset a limit that is holding someone back.
 
 On Railway the address comes from `X-Forwarded-For` (this needs
 `XERCES_TRUST_PROXY=1`). Railway's edge drops any `X-Forwarded-For` a client
@@ -175,27 +192,32 @@ per-username limits do not depend on any of this.
 - Refresh tokens are 256-bit random values stored only as SHA-256. Each refresh
   replaces the token; presenting a replaced token revokes its whole family (RFC
   9700). Logout revokes the family, and a password change or account deletion
-  revokes them all. A password change also ends every access token issued
-  before it, so a copied token stops working at once rather than after its 10
-  minutes.
+  revokes them all. A password change also ends every access token issued before
+  it, so a copied token stops working at once rather than after its 10 minutes.
+  Changes to one account's sessions take turns (a row lock), so a revocation
+  never misses a token issued at the same moment, and a login or password change
+  that checked the old password fails once a new one is set.
 - Request bodies over 128 KB are refused before parsing. Responses are marked as
   never to be cached (`no-store`) or sniffed (`nosniff`). There is no CORS,
   since the launcher is a desktop client.
-- Stored: username, password hash, optional email, privacy settings, the time
-  of the last password change, friends, pending requests, blocks, reports,
-  invites and packs, and for 90 days the names of deleted accounts. Never stored
-  or logged: IP addresses, user agents and tokens. Presence lives in memory
-  only.
-- Logs are JSON lines on stdout with event names and user ids. They never
-  contain tokens, passwords, emails or addresses.
+- Stored: username, password hash, optional email, privacy settings, the time of
+  the last password change, friends, pending requests, blocks, reports, invites
+  and packs, and for 90 days the names of deleted accounts. Never stored or
+  logged: IP addresses, user agents and tokens. Presence lives in memory only.
+- Logs are JSON lines on stdout with event names, and user ids on account events
+  such as logins. They never contain tokens, passwords, emails or addresses.
+  Sockets are logged with a connection count only, so the logs keep nobody's
+  online history, and an account deletion is logged without its id.
 - `GET /v1/me/export` returns every row about you. Reports other people filed
   about you appear with their reason, status and day, but not who filed them or
   what they wrote. Incoming requests that were never shown to you (sent while
   you had blocked the sender or accepted no requests) are marked `hidden`.
 - `DELETE /v1/me` removes the account and everything keyed to it at once.
   Reports keep the row but lose the link to the deleted account. The username
-  stays taken for 90 days, kept with no link to the account, so nobody can
-  register it straight away and pass as the person who left.
+  stays taken for 90 days, to the end of that day, so nobody can register it
+  straight away and pass as the person who left. It is kept with no link to the
+  account: written on its own just before the deletion, with only the day it
+  ends.
 - Every 10 minutes a background task deletes expired invites, friend requests,
   refresh tokens, packs and held usernames, and reports older than 90 days.
 
@@ -241,6 +263,15 @@ python -m alembic revision --autogenerate -m "describe the change"
 
 `tests/test_migrations.py` fails when the migrations and the models disagree.
 
+Rolling a deploy back across a migration needs a manual downgrade first. The old
+image's `start.sh` runs `alembic upgrade head`, which fails on a revision that
+image does not know, so the old deployment would never start. While the new
+deployment still runs, open a shell in it (`railway ssh`) and run
+`alembic downgrade <revision>` with the head revision of the image you go back
+to (`0001` to undo `0002`), then roll back. Downgrading 0002 deletes the friend
+requests that were hidden from their recipients, since 0001 could only show
+them, and keeps the names held for deleted accounts for when you upgrade again.
+
 ## Environment variables
 
 | Variable                         | On Railway     | Default                    | Purpose                                                                     |
@@ -262,15 +293,20 @@ In production the service refuses to start when the signing key, key id or
 rate-limit secret is missing, or when `DATABASE_URL` is missing or points at
 SQLite.
 
+`DATABASE_URL` can hold the password as Railway writes it: the app encodes `@`,
+`:`, `/`, `?` and `#` in the user name and password itself. Only a `%` must be
+written as `%25`. Errors about the URL name the variable and never repeat its
+value.
+
 Leave `XERCES_TRUST_PROXY` unset (or `0`) anywhere a client can reach the
 container without passing Railway's edge. Then `start.sh` also starts uvicorn
-with `--no-proxy-headers`, so a client cannot choose the address its rate
-limits are counted against by sending its own `X-Forwarded-For`.
+with `--no-proxy-headers`, so a client cannot choose the address its rate limits
+are counted against by sending its own `X-Forwarded-For`.
 
 ## Deploying on Railway
 
-Railway's config file (`railway.json`) is deprecated and new services cannot
-use it, so these settings are made in the dashboard.
+Railway's config file (`railway.json`) is deprecated and new services cannot use
+it, so these settings are made in the dashboard.
 
 1. In Railway, create a new project and choose Deploy from GitHub repo. Pick
    this repository and the branch that contains `backend/`. If Railway starts
@@ -311,18 +347,19 @@ use it, so these settings are made in the dashboard.
   values in the database and clients simply refresh. To avoid even one rejected
   request, keep the old public key in `XERCES_TOKEN_EXTRA_PUBLIC_KEYS` for 10
   minutes, written as `{"<old key id>": "<PEM>"}`. To print the old key's PEM,
-  run this with its seed: `python scripts/genkey.py --public <old seed>`
+  run `python scripts/genkey.py --public -` and paste its seed: read from the
+  input, the seed stays out of your shell history.
 - Back up the database: Railway's native backups on the Pro plan, or a cron
   service that runs `pg_dump` to encrypted storage outside Railway. Test a
   restore now and then, and keep retention at 30 days or less, or state it in
   the privacy policy.
-- After the first deploy, check that a client cannot pick its own address:
-  send 11 logins with made-up usernames, each with a different made-up
-  `X-Forwarded-For`. The 11th should be refused with 429. If it is not, Railway's
-  edge now passes the client's header on: set `XERCES_PROXY_HOPS=2`, redeploy
-  and check again. Then check from a second network (a phone off Wi-Fi) that a
-  login there is not refused, which would mean every client shares one address.
-  The per-account and per-username limits hold either way.
+- After the first deploy, check that a client cannot pick its own address: send
+  11 logins with made-up usernames, each with a different made-up
+  `X-Forwarded-For`. The 11th should be refused with 429. If it is not,
+  Railway's edge now passes the client's header on: set `XERCES_PROXY_HOPS=2`,
+  redeploy and check again. Then check from a second network (a phone off Wi-Fi)
+  that a login there is not refused, which would mean every client shares one
+  address. The per-account and per-username limits hold either way.
 - Point an external uptime check at `/healthz`. Logs are JSON lines, so the
   Railway log view can filter them by `event`.
 - There is no moderation UI yet. Reports stay 90 days in the `reports` table.

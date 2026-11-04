@@ -1,18 +1,24 @@
 """WebSocket /v1/ws: auth handshake, presence fan-out and pushes."""
 
 import asyncio
+import json
+import logging
 import time
+from typing import Any
 
 import httpx
 import pytest
 from fastapi import FastAPI
 
+import app.presence as presence_module
+from app.log import JsonFormatter
 from app.routers import ws as ws_router
 from app.tokens import ACCESS_TOKEN_TTL_SECONDS
 from tests.helpers import (
     AppFactory,
     TestUser,
     WSClient,
+    WSClosed,
     befriend,
     client_for,
     register,
@@ -233,6 +239,219 @@ async def test_message_rate_limit(app_factory: AppFactory) -> None:
         assert await ws.expect_closed() == 1008
     finally:
         await ws.close()
+
+
+async def test_reconnecting_does_not_reset_the_message_limit(app_factory: AppFactory) -> None:
+    app = await app_factory(rules=strict_rules("ws_message"))
+    async with client_for(app) as http:
+        alice = await register(http, "alice")
+    first, _ = await ws_login(app, alice)
+    second = None
+    try:
+        for _ in range(8):
+            await first.ping()
+        # A new socket for the same account does not start a fresh allowance.
+        second, _ = await ws_login(app, alice)
+        assert await first.expect_closed() == 4000
+        for _ in range(8):
+            await second.send_json({"type": "ping"})
+        assert await second.expect_closed() == 1008  # signed in, so too many messages
+    finally:
+        await first.close()
+        if second is not None:
+            await second.close()
+
+
+async def test_sign_ins_are_limited_per_account(app_factory: AppFactory) -> None:
+    app = await app_factory(rules=strict_rules("ws_connect"))
+    async with client_for(app) as http:
+        alice = await register(http, "alice")
+    sockets = []
+    try:
+        for i in range(10):  # each from its own address, so only the account counts
+            ws, _ = await ws_login(app, alice, address=f"203.0.113.{i}")
+            sockets.append(ws)
+        async with WSClient(app, address="203.0.113.99") as eleventh:
+            await eleventh.send_json({"type": "auth", "token": alice.access_token})
+            assert await _close_of(eleventh) == (1008, "too many connections")
+    finally:
+        for ws in sockets:
+            await ws.close()
+
+
+async def _close_of(ws: WSClient) -> tuple[int, str]:
+    with pytest.raises(WSClosed) as closed:
+        await ws.receive_json()
+    return closed.value.code, closed.value.reason
+
+
+async def test_sockets_that_never_sign_in_are_limited_per_address(app_factory: AppFactory) -> None:
+    app = await app_factory(rules=strict_rules("ws_connect"))
+    async with client_for(app) as http:
+        alice = await register(http, "alice")
+    # Sockets that sign in give their address's place back...
+    for _ in range(9):
+        ws, _ = await ws_login(app, alice, address="198.51.100.5")
+        await ws.close()
+    # ...so the address still has all ten tries for sockets that never do.
+    for _ in range(10):
+        async with WSClient(app, address="198.51.100.5") as ws:
+            await ws.send_json({"type": "auth", "token": "not a token"})
+            assert await ws.expect_closed() == 4401
+    async with WSClient(app, address="198.51.100.5") as ws:
+        # Turned away before it can sign in, even with a good token.
+        await ws.send_json({"type": "auth", "token": alice.access_token})
+        assert await _close_of(ws) == (1008, "too many connections")
+    async with WSClient(app, address="198.51.100.6") as ws:  # another address is unaffected
+        await ws.send_json({"type": "auth", "token": alice.access_token})
+        assert (await ws.receive_json())["type"] == "hello"
+
+
+def _pause_after_the_first_token_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[asyncio.Event, asyncio.Event]:
+    """Pause a sign-in between its token check and attaching to the hub, standing in for the
+    check's session closing and the task being scheduled again."""
+    original = ws_router._check_token
+    checked, release = asyncio.Event(), asyncio.Event()
+
+    async def check(token: object, services: object) -> object:
+        claims = await original(token, services)  # type: ignore[arg-type]
+        if not checked.is_set():
+            checked.set()
+            await release.wait()
+        return claims
+
+    monkeypatch.setattr(ws_router, "_check_token", check)
+    return checked, release
+
+
+async def test_socket_signing_in_during_a_password_change_is_closed(
+    client: httpx.AsyncClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alice = await register(client, "alice")
+    checked, release = _pause_after_the_first_token_check(monkeypatch)
+    async with WSClient(app) as thief:
+        await thief.send_json({"type": "auth", "token": alice.access_token})
+        await checked.wait()
+        changed = await client.post(
+            "/v1/me/password",
+            json={"current_password": alice.password, "new_password": "a brand new password"},
+            headers=alice.headers,
+        )
+        assert changed.status_code == 204
+        release.set()
+        assert await thief.expect_closed() == 4401
+
+
+async def test_socket_signing_in_during_account_deletion_is_closed(
+    client: httpx.AsyncClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alice = await register(client, "alice")
+    checked, release = _pause_after_the_first_token_check(monkeypatch)
+    async with WSClient(app) as ws:
+        await ws.send_json({"type": "auth", "token": alice.access_token})
+        await checked.wait()
+        deleted = await client.request(
+            "DELETE", "/v1/me", json={"password": alice.password}, headers=alice.headers
+        )
+        assert deleted.status_code == 204
+        release.set()
+        assert await ws.expect_closed() == 4401
+
+
+async def test_unchanged_presence_is_not_sent_again(
+    client: httpx.AsyncClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alice = await register(client, "alice")
+    bob = await register(client, "bob")
+    await befriend(client, alice, bob)
+    bob_ws, _ = await ws_login(app, bob)
+    alice_ws, _ = await ws_login(app, alice)
+    try:
+        assert (await bob_ws.receive_json())["type"] == "presence"  # Alice came online
+        broadcasts = []
+        original = ws_router.broadcast_presence
+
+        async def counting_broadcast(*args: Any) -> None:
+            broadcasts.append(args)
+            await original(*args)
+
+        monkeypatch.setattr(ws_router, "broadcast_presence", counting_broadcast)
+        online = {"type": "presence", "status": "online", "activity": None}
+        in_game = {"type": "presence", "status": "in_game", "activity": {"mode": "zm"}}
+        the_same = {"type": "presence", "status": "in_game", "activity": {"mode": "zm", "joinable": False}}
+        for message in (online, in_game, in_game, the_same, online):
+            await alice_ws.send_json(message)
+        await alice_ws.ping()
+        seen = await bob_ws.messages_before_pong()
+        assert [(m["status"], m["activity"]) for m in seen] == [
+            ("in_game", {"mode": "zm", "joinable": False, "pack_code": None}),
+            ("online", None),
+        ]
+        assert len(broadcasts) == 2  # the messages that changed nothing cost no queries
+    finally:
+        await alice_ws.close()
+        await bob_ws.close()
+
+
+async def test_a_presence_fan_out_sends_the_newest_status(
+    client: httpx.AsyncClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alice = await register(client, "alice")
+    bob = await register(client, "bob")
+    await befriend(client, alice, bob)
+    bob_ws, _ = await ws_login(app, bob)
+    first, _ = await ws_login(app, alice)
+    second = None
+    try:
+        assert (await bob_ws.receive_json())["status"] == "online"
+        entered, release = asyncio.Event(), asyncio.Event()
+        original = presence_module.block_partner_ids
+
+        async def paused(db: Any, user_id: Any) -> Any:
+            result = await original(db, user_id)
+            if user_id == alice.uuid and not entered.is_set():
+                entered.set()
+                await release.wait()  # the fan-out of "in_game" has its audience
+            return result
+
+        monkeypatch.setattr(presence_module, "block_partner_ids", paused)
+        await first.send_json({"type": "presence", "status": "in_game"})
+        await asyncio.wait_for(entered.wait(), 3)
+        # Meanwhile Alice reconnects: her presence is "online" again, and Bob is told so.
+        second, _ = await ws_login(app, alice)
+        assert (await bob_ws.receive_json())["status"] == "online"
+        release.set()
+        await asyncio.sleep(0.1)  # the fan-out that waited finishes
+        seen = await bob_ws.messages_before_pong()
+        # It sends what is true when it sends, never the status it started with.
+        assert [m["status"] for m in seen if m["type"] == "presence"] == ["online"]
+    finally:
+        await first.close()
+        if second is not None:
+            await second.close()
+        await bob_ws.close()
+
+
+async def test_socket_logs_carry_no_user_id(
+    client: httpx.AsyncClient, app: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="xerces_backend")
+    alice = await register(client, "alice")
+    ws, _ = await ws_login(app, alice)
+    await ws.close()
+    lines = [
+        json.loads(JsonFormatter().format(record))
+        for record in caplog.records
+        if record.getMessage() in ("ws_connected", "ws_disconnected")
+    ]
+    # Presence 'nobody' or not, the log keeps no online history of anyone.
+    assert [(line["event"], line["connections"]) for line in lines] == [
+        ("ws_connected", 1),
+        ("ws_disconnected", 0),
+    ]
+    assert alice.id not in json.dumps(lines)
 
 
 async def test_binary_frames_rejected(client: httpx.AsyncClient, app: FastAPI) -> None:

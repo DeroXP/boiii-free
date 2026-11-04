@@ -1,12 +1,13 @@
 """In-memory token-bucket rate limits.
 
 State lives in this process only, which is why the service runs as a single replica. Keys are user
-ids or HMACs of client addresses (see app.security); raw addresses never reach this module.
+ids, normalized usernames or HMACs of client addresses (see app.security); raw addresses never
+reach this module.
 """
 
 import math
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from app.errors import ApiError
@@ -30,7 +31,10 @@ DAY = 86400.0
 DEFAULT_RULES: Mapping[str, Rule] = {
     "register": Rule(3, HOUR),  # every attempt (taken names too), per hashed address
     "login_address": Rule(10, 15 * 60),  # every login attempt, per hashed address
-    "login_username": Rule(5, 15 * 60),  # failed logins, per username (refunded on success)
+    # Failed logins (paid before the hash, refunded unless the password was wrong): per username
+    # and hashed address, and per username from every address together.
+    "login_username_address": Rule(5, 15 * 60),
+    "login_username": Rule(50, 15 * 60),
     "refresh": Rule(30, 60),  # per user (per hashed address for unusable tokens)
     "friend_request": Rule(20, DAY),  # per user
     "invite": Rule(30, HOUR),  # per user
@@ -39,7 +43,9 @@ DEFAULT_RULES: Mapping[str, Rule] = {
     "pack_create": Rule(20, DAY),  # per user
     "pack_fetch": Rule(120, 60),  # per hashed address (codes are public, this stops scraping)
     "password_check": Rule(5, 15 * 60),  # wrong passwords on /v1/me, per user (refunded if right)
-    "ws_message": Rule(10, 1),  # per WebSocket connection
+    "ws_message": Rule(10, 1),  # per user, whichever socket the messages come over
+    # Per user, and per hashed address for sockets that do not sign in (refunded when they do).
+    "ws_connect": Rule(10, 60),
 }
 
 
@@ -54,7 +60,7 @@ def rate_limited(wait_seconds: float) -> ApiError:
 
 
 class TokenBucket:
-    """A single bucket, used directly for per-connection WebSocket limits."""
+    """A single bucket: one key of one rule."""
 
     __slots__ = ("_clock", "rule", "tokens", "updated")
 
@@ -76,8 +82,19 @@ class TokenBucket:
             return True
         return False
 
+    def full_at(self, now: float) -> bool:
+        return self.tokens + max(0.0, now - self.updated) * self.rule.rate >= self.rule.capacity
+
 
 class RateLimiter:
+    """Buckets per rule and key, each rule holding at most `max_buckets` of them (about 23 MB).
+
+    A full bucket acts exactly like a new one, so those are what gets forgotten. A bucket that is
+    still limiting someone never is: when a rule has no room left, its new keys are refused until
+    buckets refill. Forgetting one instead would let a flood of fresh keys (cheap with IPv6
+    addresses) reset the bucket of the account under attack.
+    """
+
     def __init__(
         self,
         rules: Mapping[str, Rule] | None = None,
@@ -90,23 +107,21 @@ class RateLimiter:
             self.rules.update(rules)
         self._clock = clock
         self._max_buckets = max_buckets
-        self._buckets: dict[tuple[str, str], TokenBucket] = {}
-
-    def _bucket(self, name: str, key: str) -> TokenBucket:
-        bucket = self._buckets.get((name, key))
-        if bucket is None:
-            if len(self._buckets) >= self._max_buckets:
-                self.prune()
-            bucket = TokenBucket(self.rules[name], self._clock)
-            self._buckets[(name, key)] = bucket
-        return bucket
+        self._stores: dict[str, dict[str, TokenBucket]] = {}
+        self._pruned_at: dict[str, float] = {}
 
     def hit(self, name: str, key: str, cost: float = 1.0) -> float:
         """Spend `cost` tokens. Returns 0 when allowed, else the seconds until it would be."""
-        bucket = self._bucket(name, key)
+        rule = self.rules[name]
+        store = self._stores.setdefault(name, {})
+        bucket = store.get(key)
+        if bucket is None:
+            if len(store) >= self._max_buckets and not self._make_room(name, store):
+                return rule.period / rule.capacity  # until one of them could have refilled
+            bucket = store[key] = TokenBucket(rule, self._clock)
         if bucket.take(cost):
             return 0.0
-        return (cost - bucket.tokens) / bucket.rule.rate
+        return (cost - bucket.tokens) / rule.rate
 
     def refund(self, name: str, key: str, amount: float = 1.0) -> None:
         """Give back what `hit` spent, for attempts that turn out not to count (a right password).
@@ -114,7 +129,7 @@ class RateLimiter:
         Spend first and refund later, never check first and spend later: requests that arrive
         while an earlier one is still awaiting (a password hash) would all pass the check.
         """
-        bucket = self._buckets.get((name, key))
+        bucket = self._stores.get(name, {}).get(key)
         if bucket is not None:
             bucket.tokens = min(bucket.rule.capacity, bucket.tokens + amount)
 
@@ -124,22 +139,39 @@ class RateLimiter:
         if wait > 0:
             raise rate_limited(wait)
 
+    def enforce_all(self, buckets: Sequence[tuple[str, str]]) -> None:
+        """Spend one token from each (rule, key), or none of them: raise 429 if any is empty."""
+        for index, (name, key) in enumerate(buckets):
+            wait = self.hit(name, key)
+            if wait > 0:
+                for spent in buckets[:index]:
+                    self.refund(*spent)
+                raise rate_limited(wait)
+
+    def refund_all(self, buckets: Sequence[tuple[str, str]]) -> None:
+        for name, key in buckets:
+            self.refund(name, key)
+
+    def _make_room(self, name: str, store: dict[str, TokenBucket]) -> bool:
+        # Scanning every bucket of a rule costs milliseconds, so a flood of new keys gets at most
+        # one scan a second; in between they are refused.
+        now = self._clock()
+        if now - self._pruned_at.get(name, -math.inf) >= 1.0:
+            self._pruned_at[name] = now
+            self._drop_full(store, now)
+        return len(store) < self._max_buckets
+
+    @staticmethod
+    def _drop_full(store: dict[str, TokenBucket], now: float) -> int:
+        full = [key for key, bucket in store.items() if bucket.full_at(now)]
+        for key in full:
+            del store[key]
+        return len(full)
+
     def prune(self) -> int:
         """Forget full buckets (they act exactly like new ones); returns how many went."""
         now = self._clock()
-        full = []
-        for key, bucket in self._buckets.items():
-            refilled = bucket.tokens + max(0.0, now - bucket.updated) * bucket.rule.rate
-            if refilled >= bucket.rule.capacity:
-                full.append(key)
-        for key in full:
-            del self._buckets[key]
-        if len(self._buckets) >= self._max_buckets:
-            # Flooded with distinct keys: drop the least recently used tenth.
-            oldest = sorted(self._buckets, key=lambda k: self._buckets[k].updated)
-            for key in oldest[: max(1, len(oldest) // 10)]:
-                del self._buckets[key]
-        return len(full)
+        return sum(self._drop_full(store, now) for store in self._stores.values())
 
     def __len__(self) -> int:
-        return len(self._buckets)
+        return sum(len(store) for store in self._stores.values())

@@ -1,6 +1,7 @@
 """Pack share codes."""
 
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -89,6 +90,22 @@ async def test_size_cap(client: httpx.AsyncClient) -> None:
         "file:///home/alice/x",
         "~/mods",
         "%USERPROFILE%\\mods",
+        # Homes and drives that are not at the start of the path, in any letter case.
+        "/var/home/alice/.local/share/Steam",  # Fedora Atomic, Bazzite
+        "/mnt/c/Users/alice/Downloads",  # WSL
+        "/c/Users/alice/Documents",  # Git Bash, MSYS2
+        "/cygdrive/c/Users/alice/mods",
+        "/run/media/alice/GAMES/BO3",  # removable drives
+        "/media/alice/GAMES/BO3",
+        "/users/alice/Library",  # macOS paths ignore case
+        "/root/.steam/steam",
+        "see /HOME/alice/mods",
+        # Network shares and file: URLs anywhere in a string.
+        "copied from \\\\NAS\\alice\\bo3-mods",
+        "built in \\\\wsl.localhost\\Ubuntu\\home\\alice",
+        "smb://nas/alice/mods",
+        "see file:///var/home/alice/mods/readme.txt",
+        "see ~/mods",
     ],
 )
 async def test_local_paths_are_rejected(client: httpx.AsyncClient, path: str) -> None:
@@ -108,8 +125,31 @@ def test_path_detector_allows_normal_values() -> None:
         ">=1.0",
         "0x6531394",
         "Weekend Zombies: 2:30 run",
+        "https://moddb.com/members/home/",
+        "Home/Away",
+        "home",
+        "Users",
+        "root beer",
+        "at home/work",
+        "Zombies / Home / Users",
+        "AC/DC",
+        "1/2 users",
+        "/r/zombies",
+        "example.com/home/page",
+        "mods/home/x",
+        "Config file: zm.cfg",
+        "profile: default",
+        "50% off",
     ):
         assert not looks_like_local_path(value), value
+
+
+def test_path_detector_takes_linear_time() -> None:
+    # Long runs that a regex with nested repeats would scan again from every position.
+    for value in ("a" * 65_536, "a." * 32_768, "/!" * 32_768, "\\\\" * 32_768, "x://" * 16_384):
+        started = time.perf_counter()
+        looks_like_local_path(value)
+        assert time.perf_counter() - started < 0.5, value[:8]
 
 
 @pytest.mark.parametrize(

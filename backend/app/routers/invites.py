@@ -4,13 +4,14 @@ import uuid
 from datetime import timedelta
 
 from fastapi import APIRouter, Response
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import DbDep, ServicesDep, UserDep
 from app.errors import ApiError, not_found
 from app.log import log_event
 from app.models import Invite, User, utcnow
+from app.presence import blocked_now
 from app.schemas import InviteIn, InviteOut, InvitesOut
 from app.social import are_friends, is_blocked_either_way, usernames
 
@@ -64,6 +65,15 @@ async def create_invite(
     )
     db.add(invite)
     await db.commit()
+    if await blocked_now(db, services.hub, user.id, target.id):
+        # A block committed while this was checked and written, and wins: as if it came first.
+        await db.execute(
+            delete(Invite)
+            .where(Invite.id == invite.id)
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+        raise ApiError(403, "forbidden", "You cannot invite this user.")
     out = invite_out(invite, {user.id: user.username, target.id: target.username})
     services.hub.send(target.id, {"type": "invite", **out.model_dump(mode="json")})
     log_event("invite_created", invite_id=str(invite.id), user_id=str(user.id))

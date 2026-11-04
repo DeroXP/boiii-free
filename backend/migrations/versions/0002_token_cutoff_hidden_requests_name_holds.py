@@ -25,21 +25,30 @@ def upgrade() -> None:
             sa.Column("hidden", sa.Boolean(), server_default=sa.false(), nullable=False)
         )
 
+    # A downgrade keeps this table (see below), so it may be here already, names and all.
     op.create_table(
         "deleted_usernames",
         sa.Column("username_lower", sa.String(length=24), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("username_lower", name=op.f("pk_deleted_usernames")),
+        if_not_exists=True,
     )
     op.create_index(
-        op.f("ix_deleted_usernames_expires_at"), "deleted_usernames", ["expires_at"]
+        op.f("ix_deleted_usernames_expires_at"),
+        "deleted_usernames",
+        ["expires_at"],
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_deleted_usernames_expires_at"), table_name="deleted_usernames")
-    op.drop_table("deleted_usernames")
+    # Revision 0001 has no way to keep a request from its recipient, so a hidden one would turn
+    # into an ordinary request, shown to someone who blocked the sender or accepts none. They go
+    # instead, which to their senders looks like a decline.
+    op.execute(sa.text("DELETE FROM friend_requests WHERE hidden"))
     with op.batch_alter_table("friend_requests") as batch:
         batch.drop_column("hidden")
     with op.batch_alter_table("users") as batch:
         batch.drop_column("tokens_valid_after")
+    # deleted_usernames stays: code at 0001 never reads it, and dropping it would free every held
+    # name for good. Upgrading again keeps using it (0001's downgrade drops it).

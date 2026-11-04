@@ -11,7 +11,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.config import Settings, resolve_database_url
+from app.config import ConfigError, Settings, resolve_database_url
 from app.log import configure_logging
 from app.models import Base
 
@@ -46,7 +46,12 @@ def _run_sync(connection: Connection) -> None:
 
 
 async def _run_async() -> None:
-    engine = create_async_engine(_database_url(), poolclass=pool.NullPool, hide_parameters=True)
+    url = _database_url()
+    try:
+        engine = create_async_engine(url, poolclass=pool.NullPool, hide_parameters=True)
+    except Exception as exc:
+        # Errors from parsing the URL can quote it, password included: name the type only.
+        raise ConfigError(f"DATABASE_URL could not be used ({type(exc).__name__}).") from None
     try:
         async with engine.connect() as connection:
             await connection.run_sync(_run_sync)

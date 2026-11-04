@@ -13,7 +13,7 @@ import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -22,6 +22,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 from app.ratelimit import Rule
 
@@ -31,6 +33,8 @@ OWASP_MIN_TIME_COST = 2
 OWASP_MIN_MEMORY_KIB = 19456
 MIN_RATE_LIMIT_SECRET_CHARS = 32
 KEY_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
+_POSTGRES_SCHEMES = frozenset({"postgres", "postgresql", "postgresql+asyncpg"})
+_SQLITE_SCHEMES = frozenset({"sqlite", "sqlite+aiosqlite"})
 
 
 class ConfigError(RuntimeError):
@@ -93,6 +97,8 @@ class Tuning:
     ws_auth_timeout: float = 10.0
     max_body_bytes: int = 128 * 1024
     hash_concurrency: int = 4
+    # Requests that may wait for a hash slot; more are turned away with 503 (app.passwords).
+    hash_queue: int = 64
     configure_logging: bool = True
 
 
@@ -113,7 +119,13 @@ class RuntimeConfig:
 
 
 def normalize_database_url(url: str) -> str:
-    """Return a SQLAlchemy async URL. Railway hands out postgres:// or postgresql:// URLs."""
+    """Return a SQLAlchemy async URL. Railway hands out postgres:// or postgresql:// URLs.
+
+    Railway writes the password into its URL as it is, so the user name and password (everything
+    before the last `@`) are percent-encoded here: `@`, `:`, `/`, `?` and `#` in a password work.
+    A `%` is taken as the start of an escape, as in any URL. No error quotes the URL, because the
+    rest of it holds the password (SQLAlchemy's parse errors do quote it).
+    """
     value = url.strip()
     scheme, separator, rest = value.partition("://")
     if not separator or not rest:
@@ -121,15 +133,31 @@ def normalize_database_url(url: str) -> str:
             "DATABASE_URL must look like postgresql://user:password@host:5432/database."
         )
     scheme = scheme.lower()
-    if scheme in {"postgres", "postgresql", "postgresql+asyncpg"}:
-        return _asyncpg_query("postgresql+asyncpg://" + rest)
-    if scheme in {"sqlite", "sqlite+aiosqlite"}:
-        return "sqlite+aiosqlite://" + rest
-    # Only the scheme is echoed: the rest of the URL holds the password.
-    raise ConfigError(
-        f"DATABASE_URL scheme {scheme!r} is not supported; use postgresql:// "
-        "(or sqlite+aiosqlite:// for local tests)."
-    )
+    if scheme not in _POSTGRES_SCHEMES | _SQLITE_SCHEMES:
+        # Only the scheme is echoed.
+        raise ConfigError(
+            f"DATABASE_URL scheme {scheme!r} is not supported; use postgresql:// "
+            "(or sqlite+aiosqlite:// for local tests)."
+        )
+    try:
+        if scheme in _SQLITE_SCHEMES:
+            normalized = "sqlite+aiosqlite://" + rest
+        else:
+            normalized = _asyncpg_query("postgresql+asyncpg://" + _quote_userinfo(rest))
+        make_url(normalized)
+    except (ArgumentError, ValueError):
+        raise ConfigError(
+            "DATABASE_URL is not a valid database URL; check its host, port and database name."
+        ) from None
+    return normalized
+
+
+def _quote_userinfo(rest: str) -> str:
+    userinfo, at, location = rest.rpartition("@")
+    if not at:
+        return rest
+    user, colon, password = userinfo.partition(":")
+    return quote(user, safe="%") + colon + quote(password, safe="%") + at + location
 
 
 def _asyncpg_query(url: str) -> str:

@@ -1,6 +1,7 @@
 """Rate limits: the production rules, 429 with Retry-After, and the bucket maths."""
 
 import asyncio
+import logging
 import os
 import shutil
 import subprocess
@@ -12,6 +13,9 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import FastAPI
+from sqlalchemy import event
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.ratelimit import DEFAULT_RULES, RateLimiter, Rule, TokenBucket
@@ -20,6 +24,7 @@ from tests.helpers import (
     PASSWORD,
     AppFactory,
     client_for,
+    hold_password_check,
     make_settings,
     register,
     services_of,
@@ -104,29 +109,67 @@ async def test_login_limit_per_address(app_factory: AppFactory) -> None:
         assert int(limited.headers["retry-after"]) >= 1
 
 
+LOGIN_LIMITS = ("login_address", "login_username_address", "login_username")
+
+
+def _count_password_checks(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Count the passwords that reach the hash (each check is slow, as in `_slow_password_checks`)."""
+    passwords = services_of(app).passwords
+    original = passwords.verify
+    checked: list[str] = []
+
+    async def counting_verify(password_hash: str, password: str) -> bool:
+        checked.append(password)
+        await asyncio.sleep(0.05)
+        return await original(password_hash, password)
+
+    monkeypatch.setattr(passwords, "verify", counting_verify)
+    return checked
+
+
+async def _login(
+    client: httpx.AsyncClient, username: str, password: str, address: str
+) -> httpx.Response:
+    return await client.post(
+        "/v1/auth/login",
+        json={"username": username, "password": password},
+        headers={"X-Forwarded-For": address},
+    )
+
+
 async def test_login_limit_per_username(app_factory: AppFactory) -> None:
-    app = await app_factory(rules=strict_rules("login_username"))
+    app = await app_factory(rules=strict_rules(*LOGIN_LIMITS))
     async with client_for(app) as client:
         user = await register(client, "target")
-        for i in range(5):
-            response = await client.post(
-                "/v1/auth/login",
-                json={"username": "target", "password": "wrong password"},
-                headers={"X-Forwarded-For": f"192.0.2.{i + 1}"},
-            )
-            assert response.status_code == 401
-        # Even from a new address and with the right password, the name is locked for a while.
-        limited = await client.post(
-            "/v1/auth/login",
-            json={"username": "TARGET", "password": user.password},
-            headers={"X-Forwarded-For": "192.0.2.99"},
-        )
+        # Ten addresses with five guesses each: fifty failures for one name.
+        for address in range(10):
+            for _ in range(5):
+                response = await _login(client, "target", "wrong password", f"192.0.2.{address}")
+                assert response.status_code == 401
+        # From then on even the right password, from an address that never guessed, waits.
+        limited = await _login(client, "TARGET", user.password, "192.0.2.99")
         assert limited.status_code == 429
         assert "retry-after" in limited.headers
 
 
+async def test_one_address_cannot_lock_the_owner_out(app_factory: AppFactory) -> None:
+    app = await app_factory(rules=strict_rules(*LOGIN_LIMITS))
+    async with client_for(app) as client:
+        owner = await register(client, "target")
+        for _ in range(5):
+            assert (await _login(client, "target", "wrong password", "192.0.2.1")).status_code == 401
+        # That address has had its five guesses at this name...
+        limited = await _login(client, "target", "wrong password", "192.0.2.1")
+        assert limited.status_code == 429
+        assert int(limited.headers["retry-after"]) > 0
+        # ...even with the right password (it cannot tell who is typing)...
+        assert (await _login(client, "target", owner.password, "192.0.2.1")).status_code == 429
+        # ...but the owner, from their own address, signs in as usual.
+        assert (await _login(client, "TARGET", owner.password, "198.51.100.7")).status_code == 200
+
+
 async def test_successful_logins_do_not_count_per_username(app_factory: AppFactory) -> None:
-    app = await app_factory(rules=strict_rules("login_username"))
+    app = await app_factory(rules=strict_rules("login_username_address", "login_username"))
     async with client_for(app) as client:
         user = await register(client, "regular")
         for _ in range(8):
@@ -136,31 +179,159 @@ async def test_successful_logins_do_not_count_per_username(app_factory: AppFacto
             assert ok.status_code == 200
 
 
-async def test_parallel_guesses_cannot_pass_the_username_limit(
+async def test_parallel_guesses_from_one_address_get_five_checks(
     app_factory: AppFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    app = await app_factory(rules=strict_rules("login_address", "login_username"))
-    _slow_password_checks(app, monkeypatch)
+    app = await app_factory(rules=strict_rules(*LOGIN_LIMITS))
+    checked = _count_password_checks(app, monkeypatch)
     async with client_for(app) as client:
         victim = await register(client, "victim")
-
-        async def guess(i: int) -> httpx.Response:
-            # Each from its own address, well inside that address's 10 per 15 minutes.
-            return await client.post(
-                "/v1/auth/login",
-                json={"username": "victim", "password": f"wrong guess {i}"},
-                headers={"X-Forwarded-For": f"198.51.100.{i + 1}"},
-            )
-
-        results = await asyncio.gather(*(guess(i) for i in range(40)))
+        results = await asyncio.gather(
+            *(_login(client, "victim", f"wrong guess {i}", "198.51.100.1") for i in range(40))
+        )
         # Only 5 guesses reach the password check, however many arrive at once.
         assert Counter(r.status_code for r in results) == {401: 5, 429: 35}
-        right = await client.post(
-            "/v1/auth/login",
-            json={"username": "victim", "password": victim.password},
-            headers={"X-Forwarded-For": "198.51.100.200"},
+        assert len(checked) == 5
+        # The owner is not locked out by it.
+        assert (await _login(client, "victim", victim.password, "203.0.113.1")).status_code == 200
+
+
+async def test_parallel_guesses_from_many_addresses_get_fifty_checks(
+    app_factory: AppFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = await app_factory(rules=strict_rules(*LOGIN_LIMITS))
+    checked = _count_password_checks(app, monkeypatch)
+    async with client_for(app) as client:
+        victim = await register(client, "victim")
+        # Each from its own address, well inside that address's own limits.
+        results = await asyncio.gather(
+            *(_login(client, "victim", f"wrong guess {i}", f"2001:db8:{i:x}::1") for i in range(80))
         )
-        assert right.status_code == 429
+        # However many addresses, 50 guesses per 15 minutes reach the check for one name.
+        assert Counter(r.status_code for r in results) == {401: 50, 429: 30}
+        assert len(checked) == 50
+        locked = await _login(client, "victim", victim.password, "203.0.113.1")
+        assert locked.status_code == 429
+
+
+async def test_server_errors_during_login_do_not_count(
+    app_factory: AppFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = await app_factory(rules=strict_rules("login_username_address", "login_username"))
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        owner = await register(client, "owner")
+        original_scalar = AsyncSession.scalar
+        outage = [True]
+
+        async def flaky_scalar(self: AsyncSession, *args: Any, **kwargs: Any) -> Any:
+            if outage[0]:
+                raise OperationalError("SELECT", {}, ConnectionResetError("connection reset"))
+            return await original_scalar(self, *args, **kwargs)
+
+        monkeypatch.setattr(AsyncSession, "scalar", flaky_scalar)
+        # A launcher keeps retrying its sign-in through a short database outage...
+        for _ in range(8):
+            login = await _login(client, "owner", owner.password, "192.0.2.50")
+            assert login.status_code == 500
+        outage[0] = False
+        # ...and no password was checked, so none of it counted against the name.
+        after = await _login(client, "owner", owner.password, "192.0.2.50")
+        assert after.status_code == 200
+
+
+async def test_a_full_hash_queue_answers_503_without_touching_the_database(
+    app_factory: AppFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = await app_factory(
+        rules=strict_rules("login_username_address"), hash_concurrency=1, hash_queue=2
+    )
+    services = services_of(app)
+    async with client_for(app) as client:
+        await register(client, "owner")
+        original = services.passwords.verify
+        release = asyncio.Event()
+
+        async def held_verify(password_hash: str, password: str) -> bool:
+            await release.wait()
+            return await original(password_hash, password)
+
+        monkeypatch.setattr(services.passwords, "verify", held_verify)
+        lookups: list[str] = []
+
+        def record(_conn: Any, _cursor: Any, statement: str, *_args: Any) -> None:
+            if statement.lstrip().upper().startswith("SELECT") and "FROM users" in statement:
+                lookups.append(statement)
+
+        event.listen(services.engine.sync_engine, "before_cursor_execute", record)
+        try:
+            # One hashing and two waiting fill the line; the other two are turned away at once.
+            burst = [
+                asyncio.create_task(_login(client, "owner", f"guess {i}", "192.0.2.60"))
+                for i in range(5)
+            ]
+            pending: set[asyncio.Task[httpx.Response]] = set(burst)
+            while len(pending) > 3:
+                done, pending = await asyncio.wait(
+                    pending, timeout=5, return_when=asyncio.FIRST_COMPLETED
+                )
+                assert done, "nobody was turned away"
+            release.set()
+            await asyncio.gather(*burst)
+        finally:
+            event.remove(services.engine.sync_engine, "before_cursor_execute", record)
+        responses = [task.result() for task in burst]
+        assert Counter(r.status_code for r in responses) == {401: 3, 503: 2}
+        turned_away = [r for r in responses if r.status_code == 503]
+        assert all(r.headers["retry-after"] == "1" for r in turned_away)
+        assert turned_away[0].json()["error"]["code"] == "busy"
+        assert len(lookups) == 3  # the ones turned away never reached the database
+        # Turned away is not a wrong password: of this address's 5 guesses, 2 are left.
+        statuses = [
+            (await _login(client, "owner", "guess", "192.0.2.60")).status_code for _ in range(3)
+        ]
+        assert statuses == [401, 401, 429]
+
+
+async def test_requests_turned_away_busy_cost_their_address_nothing(
+    app_factory: AppFactory,
+) -> None:
+    # Launchers retry a 503 after its Retry-After. Were each one counted, a flood of made-up
+    # logins would also use up the logins and sign-ups of everyone retrying meanwhile.
+    app = await app_factory(
+        rules=strict_rules("login_address", "register"), hash_concurrency=1, hash_queue=0
+    )
+    async with client_for(app) as client:
+        await register(client, "owner")
+        started, release = hold_password_check(app, "held guess")
+        held = asyncio.create_task(_login(client, "owner", "held guess", "192.0.2.70"))
+        await started.wait()  # it fills the line
+        here = "192.0.2.71"
+        try:
+            logins = [(await _login(client, "owner", PASSWORD, here)).status_code for _ in range(12)]
+            sign_ups = [
+                (
+                    await client.post(
+                        "/v1/auth/register",
+                        json={"username": f"busy{i}", "password": PASSWORD},
+                        headers={"X-Forwarded-For": here},
+                    )
+                ).status_code
+                for i in range(4)
+            ]
+        finally:
+            release.set()
+            await held
+        assert logins == [503] * 12
+        assert sign_ups == [503] * 4
+        # The address still has all 10 of its logins and all 3 of its sign-ups.
+        assert (await _login(client, "owner", PASSWORD, here)).status_code == 200
+        signed_up = await client.post(
+            "/v1/auth/register",
+            json={"username": "busy4", "password": PASSWORD},
+            headers={"X-Forwarded-For": here},
+        )
+        assert signed_up.status_code == 201
 
 
 async def test_parallel_guesses_cannot_pass_the_password_check_limit(
@@ -186,6 +357,29 @@ async def test_parallel_guesses_cannot_pass_the_password_check_limit(
             "/v1/auth/login", json={"username": "victim", "password": victim.password}
         )
         assert unchanged.status_code == 200
+
+
+async def test_server_errors_during_a_password_check_do_not_count(
+    app_factory: AppFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = await app_factory(rules=strict_rules("password_check"))
+    passwords = services_of(app).passwords
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        user = await register(client, "owner")
+        original = passwords.verify
+
+        async def broken_verify(*_args: Any) -> bool:
+            raise RuntimeError("the hashing thread failed")
+
+        body = {"current_password": user.password, "new_password": "a brand new password"}
+        monkeypatch.setattr(passwords, "verify", broken_verify)
+        for _ in range(7):
+            failed = await client.post("/v1/me/password", json=body, headers=user.headers)
+            assert failed.status_code == 500
+        monkeypatch.setattr(passwords, "verify", original)
+        changed = await client.post("/v1/me/password", json=body, headers=user.headers)
+        assert changed.status_code == 204
 
 
 async def test_friend_request_daily_limit(app_factory: AppFactory) -> None:
@@ -233,20 +427,114 @@ def test_limiter_bounds_memory() -> None:
     assert len(limiter) <= 100
 
 
+def test_flooding_new_keys_never_resets_an_exhausted_bucket() -> None:
+    now = [0.0]
+    limiter = RateLimiter(clock=lambda: now[0], max_buckets=1_000)
+    for _ in range(50):  # fifty wrong passwords for the victim's name
+        assert limiter.hit("login_username", "victim") == 0
+    assert limiter.hit("login_username", "victim") > 0
+    now[0] += 1.0
+    # A flood of fresh keys for another rule (cheap: one registration attempt per address)
+    # cannot touch this rule's buckets...
+    for i in range(5_000):
+        limiter.hit("register", f"address-{i}")
+    # ...and fresh keys for the same rule are refused once it is full, rather than making room
+    # by forgetting the bucket that is holding the name.
+    refused = sum(limiter.hit("login_username", f"name-{i}") > 0 for i in range(5_000))
+    assert refused == 5_000 - 999
+    assert limiter.hit("login_username", "victim") > 0
+    assert len(limiter) == 2_000
+
+
+def test_full_buckets_make_room_and_scans_are_rationed() -> None:
+    now = [0.0]
+    limiter = RateLimiter({"x": Rule(1, 10)}, clock=lambda: now[0], max_buckets=10)
+    scans = [0]
+    drop_full = limiter._drop_full
+
+    def counting_drop_full(*args: Any) -> int:
+        scans[0] += 1
+        return drop_full(*args)
+
+    limiter._drop_full = counting_drop_full  # type: ignore[method-assign]
+    for i in range(10):
+        assert limiter.hit("x", f"spent-{i}") == 0
+    # Every bucket still limits someone: new keys wait, and only one scan a second looks for room.
+    for i in range(100):
+        assert limiter.hit("x", f"new-{i}") > 0
+    assert scans[0] == 1
+    now[0] = 10.0  # all ten have refilled, so they are as good as new and can go
+    assert limiter.hit("x", "new") == 0
+    assert scans[0] == 2
+    assert len(limiter) == 1
+
+
+async def test_login_username_keys_are_bounded(client: httpx.AsyncClient, app: FastAPI) -> None:
+    # 64 characters that NFKC turns into over 1,000; no account can have such a name.
+    name = "\U0001f600" + "ﷺ" * 63
+    response = await client.post("/v1/auth/login", json={"username": name, "password": "whatever"})
+    assert response.status_code == 401
+    await register(client, "named")
+    await client.post("/v1/auth/login", json={"username": "NAMED", "password": "wrong password"})
+    stores = services_of(app).limiter._stores
+    assert list(stores["login_username"]) == ["named"]
+    assert all(len(key) <= 24 + 1 + 32 for key in stores["login_username_address"])
+
+
+async def test_replaying_a_spent_refresh_token_is_limited_before_any_work(
+    app_factory: AppFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    app = await app_factory(rules=strict_rules("refresh"))
+    engine = services_of(app).engine
+    async with client_for(app) as client:
+        mine = await register(client, "replayer")  # anyone can make such a token for themselves
+        first = mine.refresh_token
+        assert (await client.post("/v1/auth/refresh", json={"refresh_token": first})).status_code == 200
+        writes: list[str] = []
+
+        def record(_conn: Any, _cursor: Any, statement: str, *_args: Any) -> None:
+            if statement.lstrip().upper().startswith("UPDATE"):
+                writes.append(statement)
+
+        caplog.set_level(logging.WARNING, logger="xerces_backend")
+        event.listen(engine.sync_engine, "before_cursor_execute", record)
+        try:
+            responses = [
+                await client.post(
+                    "/v1/auth/refresh",
+                    json={"refresh_token": first},
+                    headers={"X-Forwarded-For": "203.0.113.9"},
+                )
+                for _ in range(100)
+            ]
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", record)
+    statuses = Counter(r.status_code for r in responses)
+    assert set(statuses) == {401, 429} and statuses[429] >= 60  # 30 a minute, plus any refill
+    # Only those inside the limit reached reuse detection (which locks the account and
+    # revokes), and the theft warning went out once, when the family actually died.
+    assert len([w for w in writes if "refresh_tokens" in w]) == statuses[401]
+    warnings = [r for r in caplog.records if r.getMessage() == "refresh_token_reuse"]
+    assert len(warnings) == 1
+
+
 def test_default_rules_match_the_spec() -> None:
     def per(rule: Rule) -> tuple[float, float]:
         return rule.capacity, rule.period
 
     assert per(DEFAULT_RULES["register"]) == (3, 3600)
     assert per(DEFAULT_RULES["login_address"]) == (10, 900)
-    assert per(DEFAULT_RULES["login_username"]) == (5, 900)
+    assert per(DEFAULT_RULES["login_username_address"]) == (5, 900)
+    assert per(DEFAULT_RULES["login_username"]) == (50, 900)
     assert per(DEFAULT_RULES["refresh"]) == (30, 60)
     assert per(DEFAULT_RULES["friend_request"]) == (20, 86400)
     assert per(DEFAULT_RULES["invite"]) == (30, 3600)
     assert per(DEFAULT_RULES["invite_recipient"]) == (1, 30)
     assert per(DEFAULT_RULES["report"]) == (10, 86400)
     assert per(DEFAULT_RULES["pack_create"]) == (20, 86400)
+    assert per(DEFAULT_RULES["password_check"]) == (5, 900)
     assert per(DEFAULT_RULES["ws_message"]) == (10, 1)
+    assert per(DEFAULT_RULES["ws_connect"]) == (10, 60)
 
 
 async def test_client_addresses_are_hashed(app_factory: AppFactory) -> None:

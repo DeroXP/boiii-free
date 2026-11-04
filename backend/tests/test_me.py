@@ -1,10 +1,13 @@
 """The account itself: export and deletion."""
 
-from datetime import timedelta
+import logging
+from datetime import time, timedelta
+from typing import Any
 
 import httpx
+import pytest
 from fastapi import FastAPI
-from sqlalchemy import func, select, update
+from sqlalchemy import event, func, select, update
 
 from app.models import (
     Block,
@@ -157,12 +160,79 @@ async def test_deleted_username_is_held_for_90_days(client: httpx.AsyncClient, a
     async with services_of(app).sessionmaker() as db:
         holds = (await db.scalars(select(DeletedUsername))).all()
         assert [hold.username_lower for hold in holds] == ["alice"]  # the name only, no account link
-        held_for = holds[0].expires_at - utcnow()
-        assert timedelta(days=89, hours=23) < held_for <= timedelta(days=90)
+        # Until the first midnight (UTC) 90 days on: the day, not the moment it was deleted.
+        expires = holds[0].expires_at
+        assert expires.time() == time.min and expires.tzinfo is not None
+        assert timedelta(days=90) <= expires - utcnow() <= timedelta(days=91)
         # 90 days later the name is free again.
         await db.execute(update(DeletedUsername).values(expires_at=utcnow() - timedelta(seconds=1)))
         await db.commit()
     assert (await register(client, "alice")).username == "alice"
+
+
+async def test_name_hold_is_written_on_its_own_before_the_deletion(
+    client: httpx.AsyncClient, app: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="xerces_backend")
+    alice = await register(client, "alice")
+    steps: list[str] = []
+    engine = services_of(app).engine.sync_engine
+
+    def statement(_conn: Any, _cursor: Any, sql: str, *_args: Any) -> None:
+        words = sql.split()
+        if words[0].upper() in {"INSERT", "UPDATE", "DELETE"}:
+            steps.append(" ".join(words[:3]).upper())
+
+    def commit(_conn: Any) -> None:
+        steps.append("COMMIT")
+
+    event.listen(engine, "before_cursor_execute", statement)
+    event.listen(engine, "commit", commit)
+    try:
+        deleted = await client.request(
+            "DELETE", "/v1/me", json={"password": alice.password}, headers=alice.headers
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", statement)
+        event.remove(engine, "commit", commit)
+    assert deleted.status_code == 204
+    # The hold commits first, by itself: no moment when the name is free, and nothing it shares
+    # with the deletion (on PostgreSQL not even the transaction id that the unlinked reports get).
+    hold = steps.index("INSERT INTO DELETED_USERNAMES")
+    removal = steps.index("DELETE FROM USERS")
+    assert "COMMIT" in steps[hold:removal]
+    # The log line has no user id that would tie the held name back to the account's history.
+    record = next(r for r in caplog.records if r.getMessage() == "account_deleted")
+    assert "user_id" not in record.fields and alice.id not in str(record.fields)
+
+
+async def test_export_lists_come_in_creation_order(client: httpx.AsyncClient, app: FastAPI) -> None:
+    alice = await register(client, "alice")
+    names = [f"user{i}" for i in range(6)]
+    for name in names:
+        await register(client, name)
+        await client.post("/v1/friends/requests", json={"username": name}, headers=alice.headers)
+    for i in range(3):
+        created = await client.post(
+            "/v1/packs",
+            json={"pack": {"schema": 1, "name": f"Pack {i}", "mods": []}},
+            headers=alice.headers,
+        )
+        assert created.status_code == 201
+    # Make creation order differ from insertion order (and from the order of the ids).
+    now = utcnow()
+    async with services_of(app).sessionmaker() as db:
+        requests = (await db.scalars(select(FriendRequest))).all()
+        by_name = {r.to_user_id: r for r in requests}
+        users = {u.username: u.id for u in (await db.scalars(select(User))).all()}
+        for age, name in enumerate(names):  # user0 newest, user5 oldest
+            by_name[users[name]].created_at = now - timedelta(minutes=age)
+        for pack in (await db.scalars(select(Pack))).all():  # Pack 0 newest, Pack 2 oldest
+            pack.created_at = now - timedelta(minutes=int(pack.data["name"].split()[1]))
+        await db.commit()
+    data = (await client.get("/v1/me/export", headers=alice.headers)).json()
+    assert [r["to_username"] for r in data["friend_requests"]["outgoing"]] == names[::-1]
+    assert [p["pack"]["name"] for p in data["packs"]] == ["Pack 2", "Pack 1", "Pack 0"]
 
 
 async def test_export_marks_hidden_requests_for_the_recipient_only(client: httpx.AsyncClient) -> None:

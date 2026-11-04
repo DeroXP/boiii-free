@@ -13,13 +13,7 @@ from app.log import log_event
 from app.models import Block, utcnow
 from app.presence import hide_presence_between
 from app.schemas import BlockOut, UsernameIn
-from app.social import (
-    delete_invites_between,
-    delete_requests_between,
-    find_user,
-    remove_friendship,
-    usernames,
-)
+from app.social import cut_ties, find_user, usernames
 
 router = APIRouter(prefix="/v1/blocks", tags=["blocks"])
 
@@ -50,14 +44,19 @@ async def block_user(
         raise ApiError(422, "invalid_request", "You cannot block yourself.")
     if await db.get(Block, (user.id, target.id)) is None:
         db.add(Block(blocker_id=user.id, blocked_id=target.id, created_at=utcnow()))
-    were_friends = await remove_friendship(db, user.id, target.id)
-    await delete_requests_between(db, user.id, target.id)
-    await delete_invites_between(db, user.id, target.id)
+    were_friends = await cut_ties(db, user.id, target.id)
     try:
         await db.commit()
     except IntegrityError:  # blocked twice at once; the other request did the work
         await db.rollback()
         were_friends = False
+    # A request, invite or acceptance that checked for a block before this one committed may still
+    # be on its way. From here on each reads again before it pushes anything (app.presence), and
+    # whatever it wrote after the cut above is cut now. A request kept hidden from the blocker
+    # stays: it is what anyone sending one now gets.
+    services.hub.note_block()
+    were_friends = await cut_ties(db, user.id, target.id, keep_hidden=True) or were_friends
+    await db.commit()
     # Only friends saw each other's presence, so only they are told it went away. Telling anyone
     # else would let a block (and unblock) reveal whether a stranger is online.
     if were_friends:

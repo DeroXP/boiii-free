@@ -1,18 +1,32 @@
 """Register, login, access tokens and refresh-token rotation."""
 
+import asyncio
 import time
 import uuid
+from datetime import timedelta
 
 import httpx
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from app.models import RefreshToken, User
+from app.models import RefreshToken, User, utcnow
 from app.passwords import PasswordService
-from tests.helpers import AppFactory, client_for, make_settings, register, services_of
+from app.routers import auth as auth_router
+from tests.helpers import (
+    AppFactory,
+    TestUser,
+    client_for,
+    hold_password_check,
+    make_settings,
+    register,
+    services_of,
+    ws_login,
+)
+
+NEW_PASSWORD = "the owner's new password"
 
 
 async def test_register_returns_tokens_and_user(client: httpx.AsyncClient) -> None:
@@ -325,3 +339,211 @@ async def test_password_service_needs_rehash() -> None:
     assert strong.needs_rehash(password_hash)
     assert not weak.needs_rehash(password_hash)
     assert not await weak.verify("not a hash", "some password here")
+
+
+async def _live_tokens(app: FastAPI, user: TestUser) -> list[RefreshToken]:
+    async with services_of(app).sessionmaker() as db:
+        rows = await db.scalars(
+            select(RefreshToken).where(
+                RefreshToken.user_id == user.uuid, RefreshToken.revoked_at.is_(None)
+            )
+        )
+        return list(rows.all())
+
+
+async def _change_password(
+    client: httpx.AsyncClient, user: TestUser, new_password: str = NEW_PASSWORD
+) -> httpx.Response:
+    return await client.post(
+        "/v1/me/password",
+        json={"current_password": user.password, "new_password": new_password},
+        headers=user.headers,
+    )
+
+
+async def _login(client: httpx.AsyncClient, username: str, password: str) -> httpx.Response:
+    return await client.post("/v1/auth/login", json={"username": username, "password": password})
+
+
+async def test_login_racing_a_password_change_gets_no_session(
+    client: httpx.AsyncClient, app: FastAPI
+) -> None:
+    owner = await register(client, "owner")
+    started, release = hold_password_check(app, owner.password)
+    # Someone who knows the old password signs in, and their hash takes a while...
+    thief = asyncio.create_task(_login(client, "owner", owner.password))
+    await started.wait()
+    # ...while the owner changes the password to lock them out.
+    assert (await _change_password(client, owner)).status_code == 204
+    release.set()
+    login = await thief
+    assert login.status_code == 401
+    assert login.json()["error"]["code"] == "invalid_credentials"
+    assert await _live_tokens(app, owner) == []
+
+
+async def test_login_racing_a_password_change_cannot_bring_the_old_password_back(
+    app_factory: AppFactory, tmp_path
+) -> None:
+    # Created under weaker Argon2 settings, so the next login with it rehashes the password.
+    weak = await app_factory(settings=make_settings(tmp_path))
+    async with client_for(weak) as client:
+        owner = await register(client, "owner")
+    stronger = make_settings(tmp_path, XERCES_ARGON2_TIME_COST=2, XERCES_ARGON2_MEMORY_KIB=64)
+    app = await app_factory(settings=stronger, schema=False)
+    async with client_for(app) as client:
+        refreshed = await client.post("/v1/auth/refresh", json={"refresh_token": owner.refresh_token})
+        owner.access_token = refreshed.json()["access_token"]  # tokens of the old key do not work
+        started, release = hold_password_check(app, owner.password)
+        thief = asyncio.create_task(_login(client, "owner", owner.password))
+        await started.wait()
+        assert (await _change_password(client, owner)).status_code == 204
+        release.set()
+        assert (await thief).status_code == 401
+        # The rehash of the old password never landed on top of the new one.
+        assert (await _login(client, "owner", NEW_PASSWORD)).status_code == 200
+        assert (await _login(client, "owner", owner.password)).status_code == 401
+
+
+async def test_password_changes_racing_each_other_cannot_both_win(
+    client: httpx.AsyncClient, app: FastAPI
+) -> None:
+    owner = await register(client, "owner")
+    started, release = hold_password_check(app, owner.password)
+    # A thief with a copy of the access token and the old password changes it too, slowly.
+    thief = asyncio.create_task(_change_password(client, owner, "the thief's password"))
+    await started.wait()
+    assert (await _change_password(client, owner)).status_code == 204
+    release.set()
+    answer = await thief
+    assert answer.status_code == 403
+    assert answer.json()["error"]["code"] == "invalid_password"
+    assert (await _login(client, "owner", NEW_PASSWORD)).status_code == 200
+    assert (await _login(client, "owner", "the thief's password")).status_code == 401
+
+
+async def test_deletion_racing_a_password_change_keeps_the_account(
+    client: httpx.AsyncClient, app: FastAPI
+) -> None:
+    owner = await register(client, "owner")
+    started, release = hold_password_check(app, owner.password)
+    deleting = asyncio.create_task(
+        client.request("DELETE", "/v1/me", json={"password": owner.password}, headers=owner.headers)
+    )
+    await started.wait()
+    assert (await _change_password(client, owner)).status_code == 204
+    release.set()
+    assert (await deleting).status_code == 403
+    assert (await _login(client, "owner", NEW_PASSWORD)).status_code == 200
+
+
+async def test_login_racing_account_deletion_answers_401(
+    client: httpx.AsyncClient, app: FastAPI
+) -> None:
+    owner = await register(client, "owner")
+    started, release = hold_password_check(app, owner.password)
+    login = asyncio.create_task(_login(client, "owner", owner.password))
+    await started.wait()
+    deleted = await client.request(
+        "DELETE", "/v1/me", json={"password": owner.password}, headers=owner.headers
+    )
+    assert deleted.status_code == 204
+    release.set()
+    response = await login
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_credentials"
+
+
+def _pause_after_rotating(monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
+    """Rotate as usual, then wait before the commit, as latency to the database would.
+
+    On PostgreSQL a revocation running in that gap used to miss the new token (a single UPDATE
+    does not see a row inserted after it began). On SQLite the database's one writer at a time
+    serializes them anyway, so there these pass either way.
+    """
+    original = auth_router.rotate_refresh_token
+    rotated = asyncio.Event()
+
+    async def rotate(*args: object) -> str | None:
+        new_token = await original(*args)  # type: ignore[arg-type]
+        rotated.set()
+        await asyncio.sleep(0.3)
+        return new_token
+
+    monkeypatch.setattr(auth_router, "rotate_refresh_token", rotate)
+    return rotated
+
+
+async def test_password_change_revokes_a_refresh_in_flight(
+    client: httpx.AsyncClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = await register(client, "owner")
+    rotated = _pause_after_rotating(monkeypatch)
+    refreshing = asyncio.create_task(
+        client.post("/v1/auth/refresh", json={"refresh_token": owner.refresh_token})
+    )
+    await rotated.wait()
+    assert (await _change_password(client, owner)).status_code == 204
+    refreshed = await refreshing
+    assert await _live_tokens(app, owner) == []
+    monkeypatch.undo()
+    again = await client.post(
+        "/v1/auth/refresh", json={"refresh_token": refreshed.json()["refresh_token"]}
+    )
+    assert again.status_code == 401
+
+
+async def test_logout_revokes_a_refresh_of_its_own_session_in_flight(
+    client: httpx.AsyncClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = await register(client, "owner")
+    socket, _ = await ws_login(app, owner)
+    try:
+        rotated = _pause_after_rotating(monkeypatch)
+        refreshing = asyncio.create_task(
+            client.post("/v1/auth/refresh", json={"refresh_token": owner.refresh_token})
+        )
+        await rotated.wait()
+        out = await client.post("/v1/auth/logout", json={"refresh_token": owner.refresh_token})
+        assert out.status_code == 204
+        await refreshing
+        assert await _live_tokens(app, owner) == []
+        assert await socket.expect_closed() == 4401
+    finally:
+        await socket.close()
+
+
+async def test_reuse_detection_revokes_a_rotation_in_flight(
+    client: httpx.AsyncClient, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = await register(client, "owner")
+    r1 = owner.refresh_token
+    # A thief with a copy of R1 got there first, and keeps refreshing.
+    r2 = (await client.post("/v1/auth/refresh", json={"refresh_token": r1})).json()["refresh_token"]
+    rotated = _pause_after_rotating(monkeypatch)
+    thief_next = asyncio.create_task(client.post("/v1/auth/refresh", json={"refresh_token": r2}))
+    await rotated.wait()
+    owner_attempt = await client.post("/v1/auth/refresh", json={"refresh_token": r1})
+    assert owner_attempt.status_code == 401  # reuse detected...
+    r3 = (await thief_next).json()["refresh_token"]
+    monkeypatch.undo()
+    # ...and the family dies with the token that was being added to it at that moment.
+    assert (await client.post("/v1/auth/refresh", json={"refresh_token": r3})).status_code == 401
+    assert await _live_tokens(app, owner) == []
+
+
+async def test_refresh_token_older_than_a_password_change_is_refused(
+    client: httpx.AsyncClient, app: FastAPI
+) -> None:
+    user = await register(client, "olduser")
+    async with services_of(app).sessionmaker() as db:
+        # As if a password change had somehow missed this token: the cut-off is past it.
+        await db.execute(
+            update(User)
+            .where(User.id == user.uuid)
+            .values(tokens_valid_after=utcnow() + timedelta(seconds=5))
+        )
+        await db.commit()
+    response = await client.post("/v1/auth/refresh", json={"refresh_token": user.refresh_token})
+    assert response.status_code == 401
+    assert await _live_tokens(app, user) == []

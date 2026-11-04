@@ -176,6 +176,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Left behind on purpose by 0002's downgrade; gone with everything else here.
+    op.drop_table("deleted_usernames", if_exists=True)
     for table in (
         "packs",
         "invites",

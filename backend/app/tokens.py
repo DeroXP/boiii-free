@@ -19,10 +19,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
-from sqlalchemy import select, update
+from sqlalchemy import Row, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import RefreshToken
+from app.models import RefreshToken, User
 
 ISSUER = "xerces"
 AUDIENCE = "xerces-client"
@@ -130,6 +130,35 @@ def new_refresh_token() -> tuple[str, str]:
     return raw, hash_refresh_token(raw)
 
 
+async def lock_account(
+    db: AsyncSession, user_id: uuid.UUID
+) -> Row[tuple[str, datetime | None]] | None:
+    """Lock the user's row until the transaction ends; return its password hash and cut-off.
+
+    Sign-in, refresh, logout, reuse detection, password change and account deletion each take this
+    lock before they touch the user's sessions, so per user they happen one at a time. Otherwise a
+    revocation (one UPDATE) misses the token that a refresh in flight is adding, and a login whose
+    password was checked against the old hash is handed a session after the password changed.
+    Hashing must never happen while it is held. None when the account is gone.
+    """
+    if db.get_bind().dialect.name == "sqlite":
+        # SQLite has no row locks (it ignores FOR UPDATE); a write takes its database-wide write
+        # lock instead, which serializes these just the same.
+        await db.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(tokens_valid_after=User.tokens_valid_after)
+            .execution_options(synchronize_session=False)
+        )
+    row = await db.execute(
+        select(User.password_hash, User.tokens_valid_after)
+        .where(User.id == user_id)
+        # FOR NO KEY UPDATE: rows that reference the user (invites, requests) can still be added.
+        .with_for_update(key_share=True)
+    )
+    return row.first()
+
+
 async def issue_refresh_token(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -160,7 +189,7 @@ async def find_refresh_token(db: AsyncSession, raw: str) -> RefreshToken | None:
 
 
 async def rotate_refresh_token(db: AsyncSession, row: RefreshToken, now: datetime) -> str | None:
-    """Swap an active token for a new one in its family.
+    """Swap an active token for a new one in its family. Call it with the account locked.
 
     Returns None when the row was rotated or revoked concurrently, which the caller treats as
     reuse. The conditional UPDATE makes the swap atomic on both PostgreSQL and SQLite.

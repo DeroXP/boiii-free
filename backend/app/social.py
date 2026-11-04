@@ -98,17 +98,31 @@ async def remove_friendship(db: AsyncSession, a: uuid.UUID, b: uuid.UUID) -> boo
     return bool(result.rowcount)
 
 
-async def delete_requests_between(db: AsyncSession, a: uuid.UUID, b: uuid.UUID) -> None:
-    await db.execute(
-        delete(FriendRequest)
-        .where(
-            or_(
-                and_(FriendRequest.from_user_id == a, FriendRequest.to_user_id == b),
-                and_(FriendRequest.from_user_id == b, FriendRequest.to_user_id == a),
-            )
+async def delete_requests_between(
+    db: AsyncSession, a: uuid.UUID, b: uuid.UUID, *, keep_hidden: bool = False
+) -> None:
+    statement = delete(FriendRequest).where(
+        or_(
+            and_(FriendRequest.from_user_id == a, FriendRequest.to_user_id == b),
+            and_(FriendRequest.from_user_id == b, FriendRequest.to_user_id == a),
         )
-        .execution_options(synchronize_session=False)
     )
+    if keep_hidden:
+        statement = statement.where(FriendRequest.hidden.is_(False))
+    await db.execute(statement.execution_options(synchronize_session=False))
+
+
+async def cut_ties(
+    db: AsyncSession, a: uuid.UUID, b: uuid.UUID, *, keep_hidden: bool = False
+) -> bool:
+    """Remove the friendship, friend requests and invites between two users (a block does this).
+
+    With `keep_hidden`, requests the recipient never sees stay. Returns whether they were friends.
+    """
+    were_friends = await remove_friendship(db, a, b)
+    await delete_requests_between(db, a, b, keep_hidden=keep_hidden)
+    await delete_invites_between(db, a, b)
+    return were_friends
 
 
 async def delete_invites_between(db: AsyncSession, a: uuid.UUID, b: uuid.UUID) -> None:

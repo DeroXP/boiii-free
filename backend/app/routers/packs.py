@@ -33,13 +33,25 @@ MAX_PACK_DEPTH = 32
 CODE_ATTEMPTS = 5
 
 MOD_ID = re.compile(r"[a-z0-9][a-z0-9._+-]{1,127}")
+# file:///... and smb://server/share (a network share, like \\server\share), anywhere.
+_FILE_URL = re.compile(r"(?<![A-Za-z0-9+.-])(?:file|smb):[\\/]", re.IGNORECASE)
+# Other URLs (https://, steam://) name places on someone's server, not on this machine. The
+# scheme's length is capped so that a long run of letters cannot make this quadratic.
+_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]{0,31}://[^\s\"'<>]*")
 _LOCAL_PATH_PATTERNS = (
     re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]"),  # C:\... or D:/...
-    re.compile(r"^\s*\\"),  # \\server\share and \rooted\path
-    re.compile(r"(?:^|[^A-Za-z0-9_.~-])/(?:home|Users)/"),  # /home/<name>/, /Users/<name>/
-    re.compile(r"^\s*file:", re.IGNORECASE),
-    re.compile(r"^\s*~[\\/]"),
+    re.compile(r"\\\\[^\\/\s]+[\\/]"),  # \\server\share\..., anywhere
+    re.compile(r"^\s*\\"),  # \rooted\path
+    re.compile(r"(?<![\w.~+-])~[\\/]"),  # ~/...
     re.compile(r"%(?:USERPROFILE|APPDATA|LOCALAPPDATA|HOMEPATH|TEMP|TMP)%", re.IGNORECASE),
+)
+# An absolute path: a slash or backslash that starts a word, up to the next space or quote.
+_ABSOLUTE_PATH = re.compile(r"(?<![\w.~+-])[\\/][^\s\"'<>|]*")
+# A folder in one that holds user names or local drives, in any letter case: /home/<name>,
+# /var/home/<name>, /Users/<name>, /root/, /media/<name>, /run/media/<name>, /mnt/c/ and
+# /cygdrive/c/.
+_HOME_FOLDER = re.compile(
+    r"[\\/](?:home|users|root|media|cygdrive|mnt[\\/][a-z])(?:[\\/]|$)", re.IGNORECASE
 )
 
 
@@ -48,7 +60,14 @@ class PackError(ValueError):
 
 
 def looks_like_local_path(value: str) -> bool:
-    return any(pattern.search(value) for pattern in _LOCAL_PATH_PATTERNS)
+    if _FILE_URL.search(value):
+        return True
+    text = _URL.sub(" ", value)
+    if any(pattern.search(text) for pattern in _LOCAL_PATH_PATTERNS):
+        return True
+    # Two simple passes instead of one regex with nested repeats, which a 64 KB string of slashes
+    # could make take quadratic time.
+    return any(_HOME_FOLDER.search(path.group()) for path in _ABSOLUTE_PATH.finditer(text))
 
 
 def _check_string(value: str) -> None:

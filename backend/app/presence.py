@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocket
 
 from app.models import User
-from app.social import block_partner_ids, friend_ids
+from app.social import block_partner_ids, friend_ids, is_blocked_either_way
 
 # Close codes (documented in README.md).
 CLOSE_NORMAL = 1000
@@ -120,6 +120,11 @@ class Connection:
 class PresenceHub:
     def __init__(self) -> None:
         self._connections: dict[uuid.UUID, Connection] = {}
+        # Counts of kicks and of new blocks. Work that reads the database, then acts on what it
+        # read (a sign-in attaching its socket, a push choosing its audience), compares them
+        # before and after and reads again if one moved: the change committed in between.
+        self.kicks = 0
+        self.blocks = 0
 
     def connection(self, user_id: uuid.UUID) -> Connection | None:
         return self._connections.get(user_id)
@@ -159,9 +164,15 @@ class PresenceHub:
             self.send(user_id, message)
 
     def kick(self, user_id: uuid.UUID, code: int, reason: str) -> None:
+        """Close the user's socket. Call it after the change that requires it has committed."""
+        self.kicks += 1
         conn = self._connections.get(user_id)
         if conn is not None:
             conn.close(code, reason)
+
+    def note_block(self) -> None:
+        """A block has just committed: anything that read block state before must read again."""
+        self.blocks += 1
 
     async def close_all(self, code: int = CLOSE_GOING_AWAY, reason: str = "server restarting") -> None:
         connections = list(self._connections.values())
@@ -190,7 +201,21 @@ async def presence_audience(
     *,
     respect_privacy: bool = True,
 ) -> list[uuid.UUID]:
-    """Online friends allowed to see `user_id`'s presence (never anyone in a block)."""
+    """Online friends allowed to see `user_id`'s presence (never anyone in a block).
+
+    Send to them before the next await: a block that commits while this reads makes it read
+    again (PresenceHub.blocks), so nothing sent after a block reaches the blocker.
+    """
+    while True:
+        blocks = hub.blocks
+        audience = await _audience(db, hub, user_id, respect_privacy)
+        if hub.blocks == blocks:
+            return audience
+
+
+async def _audience(
+    db: AsyncSession, hub: PresenceHub, user_id: uuid.UUID, respect_privacy: bool
+) -> list[uuid.UUID]:
     if respect_privacy:
         privacy = await db.scalar(select(User.privacy_presence).where(User.id == user_id))
         if privacy != "friends":
@@ -204,15 +229,23 @@ async def presence_audience(
 async def visible_friend_presence(
     db: AsyncSession, hub: PresenceHub, user_id: uuid.UUID
 ) -> list[dict[str, Any]]:
-    """Presence of `user_id`'s online friends who let friends see it."""
-    online = {friend for friend in await friend_ids(db, user_id) if hub.is_online(friend)}
-    if online:
-        online -= await block_partner_ids(db, user_id)
-    if not online:
-        return []
-    visible = await db.scalars(
-        select(User.id).where(User.id.in_(sorted(online)), User.privacy_presence == "friends")
-    )
+    """Presence of `user_id`'s online friends who let friends see it (as presence_audience)."""
+    while True:
+        blocks = hub.blocks
+        online = {friend for friend in await friend_ids(db, user_id) if hub.is_online(friend)}
+        if online:
+            online -= await block_partner_ids(db, user_id)
+        visible = []
+        if online:
+            visible = list(
+                await db.scalars(
+                    select(User.id).where(
+                        User.id.in_(sorted(online)), User.privacy_presence == "friends"
+                    )
+                )
+            )
+        if hub.blocks == blocks:
+            break
     result = []
     for friend in visible:
         presence = hub.presence(friend)
@@ -222,23 +255,48 @@ async def visible_friend_presence(
 
 
 async def broadcast_presence(db: AsyncSession, hub: PresenceHub, user_id: uuid.UUID) -> None:
-    presence = hub.presence(user_id)
-    if presence is None:
+    if hub.presence(user_id) is None:
         return
-    hub.send_many(await presence_audience(db, hub, user_id), presence_event(user_id, presence))
+    audience = await presence_audience(db, hub, user_id)
+    # Read after the await, so what goes out is the newest, even if it changed meanwhile.
+    presence = hub.presence(user_id)
+    if presence is not None:
+        hub.send_many(audience, presence_event(user_id, presence))
 
 
 async def show_presence_between(
     db: AsyncSession, hub: PresenceHub, a: uuid.UUID, b: uuid.UUID
 ) -> None:
     """Two users just became friends: show each the other's presence where allowed."""
+    while True:
+        blocks = hub.blocks
+        visible = set(
+            await db.scalars(
+                select(User.id).where(User.id.in_((a, b)), User.privacy_presence == "friends")
+            )
+        )
+        if hub.blocks == blocks:
+            break
+        if await is_blocked_either_way(db, a, b):  # a block came in between, and wins
+            return
     for viewer, subject in ((a, b), (b, a)):
         presence = hub.presence(subject)
-        if presence is None or not hub.is_online(viewer):
-            continue
-        privacy = await db.scalar(select(User.privacy_presence).where(User.id == subject))
-        if privacy == "friends":
+        if subject in visible and presence is not None and hub.is_online(viewer):
             hub.send(viewer, presence_event(subject, presence))
+
+
+async def blocked_now(db: AsyncSession, hub: PresenceHub, a: uuid.UUID, b: uuid.UUID) -> bool:
+    """Whether either user blocks the other, read after every block the hub has been told of.
+
+    For a request, invite or friendship that checked for a block, was written, and is about to be
+    pushed: a block that committed in between must win. Push before the next await.
+    """
+    while True:
+        blocks = hub.blocks
+        if await is_blocked_either_way(db, a, b):
+            return True
+        if hub.blocks == blocks:
+            return False
 
 
 async def hide_presence_between(
