@@ -3,7 +3,7 @@
 Status: **draft 2, for review** (2026-11-04). Draft 1 was reviewed by four independent reviewers
 (completeness against your brief, technical accuracy, security, privacy and licensing, internal
 consistency); this version fixes what they found. Nothing in the game client is implemented yet. The
-first slice of the backend is being built now at your request (section 10.9).
+first slice of the backend was built at your request and is ready to deploy (section 10.9).
 
 Xerces is a rename and redesign of the Ezz BOIII client (itself a fork of momo5502's boiii, GPL-3.0)
 into a multi-mod launcher and loader for Call of Duty: Black Ops III. It stays open source under the
@@ -75,7 +75,7 @@ My recommendation comes first. "Needed by" says which milestone waits on the ans
 | D3 | M0 | One supervised game session for runtime checks | Yes, with you nearby, using a build whose updater is already disabled (2.2) | You run a checklist yourself |
 | D4 | M3 | Launcher UI technology | RmlUi, gated by a one-week spike | WebView2 (what upstream uses) |
 | D5 | M3 | Visual direction | C / Signal, which you picked from the logos; please confirm now that all nine screens are on the canvas | A / Monolith, B / Vector |
-| D6 | decided | Backend language | Python 3.12 + FastAPI + Postgres (being built now, 10.9) | |
+| D6 | decided | Backend language | Python 3.12 + FastAPI + Postgres (slice M5a built, 10.9) | |
 | D7 | M6 | Relay | Cloudflare Realtime TURN, coturn on Fly.io or Hetzner as fallback. Your brief asked for a relay on Railway; Railway cannot accept UDP, and a TCP or WebSocket relay there would share the spend limit that also stops the API and database, so I recommend dropping it | A WebSocket relay in a separate Railway project with its own spend limit |
 | D8 | now (backend) | Railway plan | Pro ($20/month): native backups, point-in-time recovery, monitors | Hobby, plus a nightly `pg_dump` to storage outside Railway |
 | D9 | M0 | Upstream download and swap features | Remove: the archive.org `BlackOps3.exe` download that deletes your exe, the launcher's version picker, the dedicated-server `-beta` self-download (all run executables without verification), and the "download page" popup for official Zombies DLC (replace with "this server uses DLC you don't own" and the Steam store page) | Keep them |
@@ -103,7 +103,7 @@ through Steam.
 
 M0 foundation → M1 loader and manifest → M2 conflict system → M3 launcher UI and rename → M4 packs and
 Workshop = **v1.0** (published publicly once code signing is in place, per your TODO; preview builds
-before that) → M5 backend and friends (slice M5a started now) → M6 servers → M7 performance → M8 extra
+before that) → M5 backend and friends (slice M5a built) → M6 servers → M7 performance → M8 extra
 features → M9 upscaling. Section 18.
 
 ---
@@ -1041,16 +1041,22 @@ REST under `/v1` plus one WebSocket. Slice M5a (10.9) has the first block; the r
 - Clients keep the refresh token encrypted with Windows DPAPI (current user) in its own file, never in
   config, backups, sync, logs or diagnostics bundles.
 - WebSockets authenticate in the first frame, never in the URL. A socket closes when its token expires
-  unless a fresh one arrives over it, and the hub drops sockets on logout, deletion, password change,
-  token-family revocation and new blocks.
+  unless a fresh one arrives over it, and the hub drops sockets on logout, deletion, password change and
+  token-family revocation. A new block stops every event between the two users at once.
 - Password change needs the current password and revokes every session. Deleting the account needs the
   password. Password recovery needs a mail provider (Railway's SMTP is Pro-only); until one is chosen,
   email is optional and unused, and a forgotten password cannot be recovered (the sign-up screen says so).
 - Rate limits are in the app (Railway has none built in): per account, and per client address keyed by an
-  HMAC that is never stored. The client address is the one Railway's edge supplies (exact header confirmed
-  with a forged-header test against the deployed service in M5a); IPv6 addresses are keyed by /64. Login is
-  limited per (account, address) with growing back-off rather than hard lockouts. Counters are in memory
-  in the slice and move to Postgres for registration in M5.
+  HMAC that is never stored; IPv6 addresses are keyed by /64. The client address is the first
+  `X-Forwarded-For` entry. Railway staff say the edge replaces any header a client sends and puts the
+  client first, and a forum measurement from September 2026 agrees, but Railway's docs do not say so, and
+  one staff answer contradicts it. So the M5a deploy steps include a forged-header test, and
+  `XERCES_PROXY_HOPS` counts from the right instead if the edge ever appends.
+- Failed logins are limited per (account, address), 5 per 15 minutes, and per account across all addresses,
+  50 per 15 minutes. Guessing at one account stays capped however many addresses are used, and locking an
+  owner out takes at least ten addresses at once. Signed-in launchers refresh instead of logging in, so a
+  lockout never signs anyone out. In M5, device tokens (OWASP's "device cookies") can let a known launcher
+  skip the per-account cap. Counters are in memory in the slice and move to Postgres for registration in M5.
 - Every input has a Pydantic model with length limits. Usernames are normalized (NFKC) and limited to
   `A-Z a-z 0-9 _ . -`. Pack JSON is schema-checked and rejects local paths.
 - Secrets carry key ids and have a rotation runbook. Railway reported a security incident on 2026-10-20 to
@@ -1087,13 +1093,20 @@ What the backend stores is in 10.2. What the product as a whole processes, and m
 - Privacy settings: who can send friend requests (everyone, nobody), who can see presence (friends,
   nobody), who can invite (friends, nobody), who can send packs (friends, nobody).
 - Invite limits: a per-recipient cooldown, hourly caps, and invites only between friends.
-- Friend requests and reports return the same response whether or not the target exists, so they cannot
-  be used to find out who has an account.
+- Friend requests, blocks and reports answer the same whether or not the target exists, has blocked you or
+  accepts no requests, and a request that is held back (blocked or "nobody") still shows in the sender's
+  outgoing list like any other. Whether a username exists cannot be hidden completely (registration has
+  to say a name is taken, and the outgoing list only holds requests to real accounts), so registration
+  attempts are rate limited instead.
 
 ### 10.7 Operations
 
 - **Deploy**: Railway's GitHub integration, root directory `backend`, Dockerfile build, health check
-  `/healthz`; migrations run in the start script before the server starts (safe with one replica).
+  `/healthz`; migrations run in the start script before the server starts (safe with one replica). These
+  are set in the dashboard. Railway's config file (`railway.json`) is deprecated: new services cannot use
+  it, and existing ones stop reading it on 2026-12-01. Its replacement, Infrastructure as Code
+  (`.railway/railway.ts`, applied with the Railway CLI and Node), is worth adopting once there are more
+  services than this one.
 - **One replica**: presence and rate limits live in memory, so they reset on each deploy and clients
   reconnect with jitter. Going to several replicas needs Redis first.
 - **Monitoring and alerting**: an external uptime check on `/healthz` and error-rate alerts to a Discord
@@ -1121,13 +1134,19 @@ What the backend stores is in 10.2. What the product as a whole processes, and m
   servers. Test: a three-player party plays two consecutive matches, one on a dedicated server, without
   re-inviting.
 
-### 10.9 Slice M5a: the Railway service being built now
+### 10.9 Slice M5a: the Railway service
 
 At your request the first backend slice is built ahead of v1.0, in `backend/`: accounts and tokens,
 friends, blocks, reports, privacy settings, presence over WebSocket, invites, short pack codes, export,
-deletion, rate limits, health check, Dockerfile, `railway.json`, Alembic migrations and tests. It has no
-game-server sessions, relay credentials, server list, parties or pack sharing yet, and the game client does
-not talk to it until M5. `backend/README.md` has the deployment steps.
+deletion, rate limits, health check, Dockerfile, Alembic migrations and tests. It has no game-server
+sessions, relay credentials, server list, parties or pack sharing yet, and the game client does not talk
+to it until M5. `backend/README.md` has the deployment steps.
+
+It went through two rounds of adversarial review, each followed by fixes with regression tests. The tests
+run on SQLite, Python 3.12 and 3.14, and against a local PostgreSQL 16, plus a smoke test against a real
+uvicorn server. Not verified before the first deploy: the Docker build (no Docker on the build PC), how
+Railway's edge fills `X-Forwarded-For` (the README's forged-header check), and the Markdown formatting
+check (no Node on the build PC).
 
 ---
 
@@ -1596,7 +1615,7 @@ you, and the docs updated.
 | **M2 Conflict system** (driven by the CLI) | asset index (capture, cache, index runs with stock maps, stock index); ownership map; rules; CLI reports; stringtable, config and localized-string merges; GSC chain spike, then chains or the fallback; per-stacked-mod loose loader; loose fixtures (CI) and fastfile fixtures (Mod Tools, local); maps through the pipeline; determinism tests; per-script winners as a stretch | both-apply passes on both pairs; the pre-launch report matches runtime events for indexed tiers | L |
 | **M3 Launcher UI and rename** | RmlUi spike (gate); tokens; the M3 screens in 7.3; boot; first run and BOIII import; keyboard and controller; themes; translatable strings; in-game Lua menu with origin checks; rename script; update client (D16); launcher display settings (14); upstream parity table | the whole flow works without upstream's launcher; every row of the parity table is placed or explicitly dropped | L |
 | **M4 Packs and Workshop = v1.0** | pack format; offline share codes; import, export, apply, validate; profiles; backup and rollback; dry-run; Workshop subscriptions, guided queue, updates, manifest dependencies; installer (D20); release pipeline (installer, zip, checksums, source archive with submodules, PDB archive); licence gates (16.5); `TRUST.md`; docs site v1; D11 | the release candidate passes the full manual checklist; public release once code signing is in place (16.4) | M |
-| **M5 Backend and friends** (M5a started now) | the rest of the API (pack sharing, parties, Workshop proxy); client integration (Friends screen, presence, invites, token storage); forged-header and other security tests; privacy policy and terms; monitoring, backups with a tested restore, cost alerts; Discord (opt-in); curl update | security tests green; a restore test passed; two accounts can become friends, see presence, invite and share a pack | M |
+| **M5 Backend and friends** (M5a built) | the rest of the API (pack sharing, parties, Workshop proxy); client integration (Friends screen, presence, invites, token storage); forged-header and other security tests; privacy policy and terms; monitoring, backups with a tested restore, cost alerts; Discord (opt-in); curl update | security tests green; a restore test passed; two accounts can become friends, see presence, invite and share a pack | M |
 | **M6 Servers** | network research redone on the base; net shim; signed tickets and the mutual handshake; ICE and TURN; host flow and NAT probe; the 11.4 table; `content_id` check and join downloads; Lua capabilities; the author-manifest signing format; server browser with signed listings; dedicated servers (D22); parties joining automatically; latency report | a friend on another network joins through each path; the relay budget stops credentials at 100 percent; a three-player party plays two matches in a row without re-inviting; a Xerces build sends nothing to `*.ezz.lol` | L |
 | **M7 Performance** | benchmark harness; baselines; profiling; optimizations; per-mod profiler; engine display fixes (14) | the published comparison meets the 12.3 threshold | M |
 | **M8 Extra features** | mod signing UI; GSC capabilities; dependency auto-resolver; opt-in crash upload; cloud sync; author tools and hot reload; translations; accessibility polish | per-feature checklists | L |

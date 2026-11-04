@@ -15,7 +15,7 @@ multi-mod launcher and loader for Call of Duty: Black Ops III. Self-hosted and o
   `xerces-design` is upstream `main` 5aa7fac plus the design docs and `backend/`. Remotes: `origin` =
   DeroXP/boiii-free, `upstream` = Ezz-lol/boiii-free (branches `main`, `beta`, `mod-stack`).
 - A tag named `main` exists, so always write `refs/heads/main` for the fork branch.
-- `backend/` is backend slice M5a (FastAPI + Postgres), deployed on Railway by the user. The game client
+- `backend/` is backend slice M5a (FastAPI + Postgres), which the user deploys on Railway. The game client
   does not talk to it yet.
 
 ## Build (client)
@@ -43,6 +43,11 @@ cd backend
 ```
 
 Deployment steps are in `backend/README.md`. Keep one replica (presence and rate limits are in memory).
+Railway settings live in its dashboard: Railway's `railway.json` is deprecated, new services cannot use
+it, and existing ones stop reading it on 2026-12-01. Behind Railway's edge the client address is the first
+`X-Forwarded-For` entry (`XERCES_TRUST_PROXY=1`). Railway's docs do not say this, so re-check it with the
+README's forged-header test after deploys. Tests run on SQLite. For PostgreSQL there is no install on this
+PC; earlier runs used the `pgserver` wheel in a throwaway venv.
 
 ## Hard rules
 
