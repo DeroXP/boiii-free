@@ -535,7 +535,10 @@ launch_outcome services::launch(const std::string &mode, bool modded,
     return out;
   }
   std::error_code ec;
-  if (!fs::exists(paths_.client, ec)) {
+  const bool client_present = fs::exists(paths_.client, ec);
+  // A dry launch starts nothing, so a checkout without boiii.exe can still
+  // check its command lines; it says what a real launch would refuse.
+  if (!client_present && !dry_launch_) {
     out.message = "The game client (" + utf8(paths_.client.filename()) +
                   ") is missing next to Xerces.exe.";
     out.diags.error("launch.client", "", out.message);
@@ -566,7 +569,11 @@ launch_outcome services::launch(const std::string &mode, bool modded,
   }
   if (dry_launch_) {
     out.dry_run = true;
-    out.message = "Dry launch: the command was written to the log.";
+    out.message = client_present
+                      ? "Dry launch: the command was written to the log."
+                      : "Dry launch: the command was written to the log (a "
+                        "real launch would stop: " +
+                            utf8(paths_.client.filename()) + " is missing).";
     log_info("launcher.launch.dry", out.command_line,
              "{\"plan_id\":" + xerces_core::json::quote(out.plan_id) + "}");
     return out; // no journal: nothing ran that could crash

@@ -63,6 +63,10 @@ body
 
 div, p, h1, h2, h3, section, header, footer, nav, main, aside, ul, ol, li, form { display: block; }
 span, em, strong { display: inline; }
+/* A click on a button's label focuses the button, not the span (focus is
+   inherited and defaults to auto). Never on div: navigation skips every
+   child of an element with focus: none. */
+span { focus: none; }
 strong { font-weight: 700; }
 
 .mono { font-family: "IBM Plex Mono"; }
@@ -139,7 +143,9 @@ scrollbarhorizontal sliderbar { background-color: var(--line); }
 	min-height: 48dp;
 	padding: 0dp 32dp 0dp 24dp;
 }
-.mark { display: flex; flex-direction: row; flex-wrap: wrap; width: 14dp; height: 14dp; gap: 2dp; }
+/* 15 dp for two 6 dp squares and a 2 dp gap: the spare dp keeps rounding at
+   125 % from wrapping the mark into a column. */
+.mark { display: flex; flex-direction: row; flex-wrap: wrap; flex: 0 0 15dp; width: 15dp; height: 14dp; gap: 2dp; }
 .mark div { width: 6dp; height: 6dp; background-color: var(--text); }
 .mark .on { background-color: var(--accent); }
 .wordmark { font-weight: 800; font-size: 18dp; line-height: 18dp; letter-spacing: -0.72dp; }
@@ -396,10 +402,12 @@ input.range sliderarrowdec, input.range sliderarrowinc { width: 0dp; }
 .hints { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 20dp; row-gap: 6dp; }
 .hint { display: flex; flex-direction: row; align-items: center; gap: 6dp; }
 
-.footer-end { display: flex; flex-direction: row; align-items: center; gap: 20dp; margin-left: auto; }
-.footer-link { min-height: 24dp; padding: 0dp 2dp; font-family: "IBM Plex Mono"; font-size: 11dp; color: var(--text2); }
-.footer-link:hover, .footer-link:focus { color: var(--text); }
-#notice { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text); opacity: 0; transition: opacity 0.2s cubic-out; }
+.footer-end { display: flex; flex-direction: row; align-items: center; gap: 20dp; margin-left: auto; min-width: 0dp; flex: 0 1 auto; }
+/* #footer in the selector: a screen's own .link rule loads later. */
+#footer .footer-link { min-height: 24dp; padding: 0dp 2dp; font-family: "IBM Plex Mono"; font-size: 11dp; color: var(--text2); }
+#footer .footer-link:hover, #footer .footer-link:focus { color: var(--text); }
+/* One line, cut with an ellipsis: a wrapped notice fell below the window. */
+#notice { flex: 0 1 auto; min-width: 0dp; max-width: 900dp; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text); opacity: 0; transition: opacity 0.2s cubic-out; }
 #notice.on { opacity: 1; }
 #notice.error { color: var(--accent-text); }
 
@@ -426,3 +434,22 @@ body.dialog
 #dialog-title { font-size: 24dp; font-weight: 800; line-height: 28dp; letter-spacing: -0.5dp; }
 #dialog-body { margin-top: 12dp; font-size: 14dp; line-height: 20dp; color: var(--text2); word-break: break-word; white-space: pre-wrap; }
 #dialog-buttons { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; gap: 12dp; margin-top: 24dp; }
+
+/* Empty text fields show their hint in the secondary colour. */
+input.text:placeholder-shown { color: var(--text2); }
+
+/* A narrow window or a large UI scale (both make the width in dp smaller):
+   the header drops the tab numbers and the badge, then the version, so the
+   tabs and the window buttons keep their room. */
+@media (max-width: 1180dp)
+{
+	.tab .num { display: none; }
+	.badge { display: none; }
+	.brand { flex-shrink: 0; }
+}
+@media (max-width: 1000dp)
+{
+	.version { display: none; }
+	.tab { padding: 0dp 8dp; }
+	.brand { padding: 0dp 16dp 0dp 16dp; }
+}

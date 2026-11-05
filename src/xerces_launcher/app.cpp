@@ -85,7 +85,14 @@ bool inside(const Rml::Element *element, const char *id) {
 // Pseudo-locale (7.5): accented, 30 % longer and bracketed, so truncation and
 // untranslated strings show.
 std::string pseudo(const std::string &text) {
-  if (text.find("{{") != std::string::npos || text.empty()) {
+  // Left alone: data bindings, the indentation between elements (RmlUi
+  // passes every text node, whitespace too), and text already made pseudo
+  // (RmlUi translates bound text that C++ already passed through tr()).
+  const bool blank = text.find_first_not_of(" \t\r\n") == std::string::npos;
+  // Every pseudo segment ends in "~]", so text holding one was built from
+  // strings already translated (a C++ line made of tr() parts).
+  const bool done = text.find("~]") != std::string::npos;
+  if (blank || done || text.find("{{") != std::string::npos) {
     return text;
   }
   std::string out = "[";
@@ -352,6 +359,13 @@ void app::shutdown() {
   // RmlUi first, with the services still there: closing the documents moves
   // focus, so blur handlers in the screens run (and may save settings).
   if (rml_started_) {
+    // A text field the player typed into and never left saves on blur;
+    // RmlUi's shutdown does not send one, so blur it here first.
+    if (context_) {
+      if (Rml::Element *focus = context_->GetFocusElement()) {
+        focus->Blur();
+      }
+    }
     rml_started_ = false;
     Rml::Shutdown(); // documents and data models go first
   }
@@ -431,6 +445,16 @@ std::string app::escape(const std::string &text) {
     case '<': out += "&lt;"; break;
     case '>': out += "&gt;"; break;
     case '"': out += "&quot;"; break;
+    // RmlUi reads "{{" in text as a data binding even after entities are
+    // decoded, so a mod or server name holding it would become an
+    // expression. A space between the braces keeps it text.
+    case '{':
+    case '}':
+      if (!out.empty() && out.back() == c) {
+        out.push_back(' ');
+      }
+      out.push_back(c);
+      break;
     default: out.push_back(c); break;
     }
   }
@@ -959,7 +983,20 @@ void app::run_script(double seconds) {
     const script_step step = script_[script_next_++];
     log_info("launcher.check.step", step.verb + " " + step.arg);
     if (step.verb == "key") {
-      inject_key(key_by_name(step.arg));
+      // "key ctrl+up", "key shift+tab"; "numlock+q" adds the lock flag a real
+      // keyboard sends, to check that it is ignored.
+      int modifiers = 0;
+      std::string name = step.arg;
+      for (std::size_t plus; (plus = name.find('+')) != std::string::npos;) {
+        const std::string part = name.substr(0, plus);
+        name.erase(0, plus + 1);
+        modifiers |= part == "ctrl"      ? Rml::Input::KM_CTRL
+                     : part == "shift"   ? Rml::Input::KM_SHIFT
+                     : part == "alt"     ? Rml::Input::KM_ALT
+                     : part == "numlock" ? Rml::Input::KM_NUMLOCK
+                                         : 0;
+      }
+      inject_key(key_by_name(name), modifiers);
     } else if (step.verb == "pad") {
       const Rml::Input::KeyIdentifier key =
           step.arg == "a"       ? Rml::Input::KI_RETURN
@@ -1001,6 +1038,7 @@ void app::run_script(double seconds) {
       view *v = find(current_);
       if (Rml::Element *element = v && v->doc ? v->doc->GetElementById(step.arg) : nullptr) {
         element->Focus(true);
+        element->ScrollIntoView(Rml::ScrollAlignment::Adaptive);
       }
     } else if (step.verb == "type") {
       context_->ProcessTextInput(step.arg);

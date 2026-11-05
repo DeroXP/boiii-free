@@ -14,6 +14,8 @@
 #include <xerces_core/launch.hpp>
 #include <xerces_core/servers_book.hpp>
 
+#include <xerces_core/log.hpp>
+
 #include "../app.hpp"
 #include "../log.hpp"
 
@@ -383,9 +385,11 @@ private:
   bool launch_join(const std::string &address, bool modded, bool mods_off) {
     services &svc = owner_->svc();
     const std::string mode = owner_->mode();
-    log_info("launcher.servers.join", address + (mods_off ? " mods off"
-                                                 : modded ? " modded"
-                                                          : " vanilla"));
+    // Logs never hold a server address (DESIGN.md 15.1, log.hpp): a host
+    // name without a port is not something the log's scrubber can spot.
+    log_info("launcher.servers.join",
+             std::string(xerces_core::redacted_address) +
+                 (mods_off ? " mods off" : modded ? " modded" : " vanilla"));
     const launch_outcome outcome = svc.launch(mode, modded, mods_off, address);
     const bool ok = outcome.started || outcome.dry_run;
 
@@ -457,7 +461,8 @@ private:
       return;
     }
     const xerces_core::favorite_server server = favorites[std::size_t(index)];
-    log_info("launcher.servers.favorite", action + " " + server.address);
+    log_info("launcher.servers.favorite",
+             action + " " + std::string(xerces_core::redacted_address));
     if (action == "join") {
       join(server.address, enter_modded_);
     } else if (action == "edit") {
@@ -656,7 +661,8 @@ private:
       return;
     }
     const std::string address = recent[std::size_t(index)];
-    log_info("launcher.servers.recent", action + " " + address);
+    log_info("launcher.servers.recent",
+             action + " " + std::string(xerces_core::redacted_address));
     if (action == "join") {
       // A joined server moves to the top: focus follows its Join button.
       if (join(address, enter_modded_) && index != 0) {
