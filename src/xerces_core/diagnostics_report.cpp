@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <ratio>
 
 #include "log.hpp"
 
@@ -15,11 +16,21 @@ std::string utf8(const std::filesystem::path &path) {
   return {reinterpret_cast<const char *>(text.data()), text.size()};
 }
 
+// MSVC's file_clock is the Windows FILETIME: 100 ns ticks since 1601-01-01
+// UTC. Moving the epoch to 1970 gives Unix time. std::chrono::clock_cast
+// gets the same number, but in MSVC it goes through utc_clock, which loads
+// the whole time-zone database from Windows' ICU on first use and throws
+// when ICU is missing (Wine/Proton, Windows before 1903): too much risk and
+// work for printing a date.
+static_assert(std::ratio_equal_v<std::filesystem::file_time_type::period,
+                                  std::ratio<1, 10'000'000>>,
+              "file_time_type is expected to count 100 ns FILETIME ticks");
+constexpr std::int64_t filetime_to_unix_seconds = 11'644'473'600LL;
+
 std::int64_t unix_seconds(std::filesystem::file_time_type time) {
-  const auto system = std::chrono::clock_cast<std::chrono::system_clock>(time);
-  return std::chrono::duration_cast<std::chrono::seconds>(
-             system.time_since_epoch())
-      .count();
+  return std::chrono::floor<std::chrono::seconds>(time.time_since_epoch())
+             .count() -
+         filetime_to_unix_seconds;
 }
 
 // A crash bundle may be a folder of files (dump, logs, plan); its size is

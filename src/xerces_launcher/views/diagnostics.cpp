@@ -238,6 +238,14 @@ public:
   }
 
   void shown() override {
+    // Focus goes back to Copy report at the top of the page, and focusing an
+    // element does not scroll to it: start at the top too, so the focused
+    // button is never off-screen after a tab round trip.
+    if (Rml::Element *content = doc ? doc->GetElementById("content") : nullptr) {
+      content->SetScrollTop(0);
+    }
+    nudge_ = 0;
+    nudge_from_ = nullptr;
     // Files outside the services' counters: the journal, the logs and the
     // crash folder can change while another screen is up.
     refresh_launch();
@@ -263,8 +271,8 @@ public:
         busy != busy_) {
       seen_game_ = svc.game_rev();
       seen_config_ = svc.config_rev();
-      if (busy_ && !busy && refresh_asked_) {
-        refresh_asked_ = false;
+      if (refresh_until_ != 0 && !busy && svc.game_rev() >= refresh_until_) {
+        refresh_until_ = 0;
         owner_->notify(owner_->tr("Refreshed: the reports show the game and "
                                   "mods as they are now."));
       }
@@ -300,7 +308,12 @@ public:
 
   bool key(Rml::Input::KeyIdentifier key, int modifiers) override {
     Rml::Element *content = doc ? doc->GetElementById("content") : nullptr;
-    if (modifiers != 0 || !content) {
+    // A real keyboard reports Caps Lock, Num Lock and Scroll Lock as
+    // modifiers whenever they are toggled on; they do not change what a key
+    // means here, so only Shift, Ctrl, Alt and the Windows key count.
+    constexpr int locks = Rml::Input::KM_CAPSLOCK | Rml::Input::KM_NUMLOCK |
+                          Rml::Input::KM_SCROLLLOCK;
+    if ((modifiers & ~locks) != 0 || !content) {
       return false;
     }
     // Page Up and Page Down scroll a page of reports.
@@ -924,9 +937,14 @@ private:
           "Report copied. Paste it into your bug report; your user folder "
           "shows as %USERPROFILE%."));
     } else if (action == "refresh") {
+      // Done means this refresh's own detection has landed (each one bumps
+      // game_rev) and the scan after it has ended. If a detection is still
+      // running (start-up, an earlier Refresh), the services queue this one
+      // behind it and that earlier detection lands first, so wait for two;
+      // the end of the earlier scan alone says nothing about this request.
+      refresh_until_ = svc.game_rev() + (svc.detecting() ? 2 : 1);
       svc.reload_signatures();
       svc.refresh(true);
-      refresh_asked_ = true;
       refresh_launch();
       refresh_files();
       handle_.DirtyAllVariables();
@@ -1018,7 +1036,9 @@ private:
   std::vector<xerces_core::crash_entry> crash_entries_;
 
   bool busy_ = false;
-  bool refresh_asked_ = false; // say so when the player's refresh finishes
+  // Say so when the player's refresh finishes: the game_rev its detection
+  // reaches (0 = no refresh asked for).
+  std::uint64_t refresh_until_ = 0;
   Rml::String refresh_label_ = "Refresh";
   Rml::String build_value_, build_detail_, build_note_, build_count_;
   bool build_ok_ = true, game_found_ = false;
