@@ -23,6 +23,7 @@
 #include <xerces_core/journal.hpp>
 #include <xerces_core/json.hpp>
 
+#include "perf.hpp"
 #include "runtime.hpp"
 #include "signatures.hpp"
 
@@ -130,8 +131,7 @@ std::optional<std::string> extras_param(const std::string &params,
         item.IsString() ? std::string(item.GetString(), item.GetStringLength())
                         : std::string();
     const bool ok =
-        !id.empty() && id.size() <= 37 &&
-        std::ranges::all_of(id, [](char c) {
+        !id.empty() && id.size() <= 37 && std::ranges::all_of(id, [](char c) {
           return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                  (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.' ||
                  c == ' ';
@@ -211,6 +211,7 @@ public:
     }
     std::string error;
     if (server.start(xerces_runtime::home() / "run", "game", handle, &error)) {
+      xerces_perf::note_ipc_start();
       xerces_runtime::log_info("ipc.start", server.pipe_name());
     } else {
       xerces_runtime::log_error("ipc.failed", error);

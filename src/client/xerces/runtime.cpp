@@ -17,6 +17,8 @@
 #include <xerces_core/launch.hpp>
 #include <xerces_core/text_tail.hpp>
 
+#include "perf.hpp"
+
 namespace xerces_runtime {
 namespace {
 std::optional<std::wstring> env(const wchar_t *name) {
@@ -214,21 +216,30 @@ void write_phase(xerces_core::launch_phase phase) {
   if (!journal_owned || phase == journal_current) {
     return;
   }
-  auto journal = xerces_core::parse_journal(read_file(journal_path()));
-  if (!journal || journal->phase == xerces_core::launch_phase::clean_exit ||
-      !journal->launch_id.empty()) {
-    // Closed already, or the launcher recorded a newer launch: leave it.
-    journal_owned = false;
-    return;
+  std::string plan_id;
+  {
+    // Read, parse and write on the caller's thread, timed for perf.io. The
+    // loader.phase line below is left out: its flushed write is log.cpp's.
+    xerces_perf::timed timing(xerces_perf::step_kind::io, "journal");
+    auto journal = xerces_core::parse_journal(read_file(journal_path()));
+    if (!journal || journal->phase == xerces_core::launch_phase::clean_exit ||
+        !journal->launch_id.empty()) {
+      // Closed already, or the launcher recorded a newer launch: leave it.
+      journal_owned = false;
+      return;
+    }
+    journal_current = phase;
+    journal->phase = phase;
+    journal->updated = xerces_core::json_log::now_utc();
+    const std::string text = xerces_core::journal_to_json(*journal);
+    write_file(journal_path(), text);
+    timing.set_bytes(text.size());
+    plan_id = std::move(journal->plan_id);
   }
-  journal_current = phase;
-  journal->phase = phase;
-  journal->updated = xerces_core::json_log::now_utc();
-  write_file(journal_path(), xerces_core::journal_to_json(*journal));
   log_info(
       "loader.phase", xerces_core::to_string(phase),
       "{\"phase\":" + xerces_core::json::quote(xerces_core::to_string(phase)) +
-          ",\"plan_id\":" + xerces_core::json::quote(journal->plan_id) + "}");
+          ",\"plan_id\":" + xerces_core::json::quote(plan_id) + "}");
 }
 } // namespace
 

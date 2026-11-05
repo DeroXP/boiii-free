@@ -23,6 +23,8 @@
 #include <utils/io.hpp>
 #include <utils/string.hpp>
 
+#include <xerces/perf.hpp>
+
 namespace game {
 namespace ugc {
 
@@ -94,7 +96,16 @@ inline void UGC_LoadPool_Patches(ExtendedUGCPool *pool, ZoneType zoneType) {
     workshop::supplement_usermaps_from_disk();
   }
 
-  workshop::supplement_ugc_from_workshop(zoneType);
+  {
+    // Xerces: timed for perf.load_step (docs/DESIGN.md 12.2).
+    xerces_perf::timed timing(xerces_perf::step_kind::load,
+                              zoneType == ZoneType::MOD
+                                  ? "workshop_supplement.mods"
+                                  : "workshop_supplement.usermaps");
+    const uint32_t before = pool->count;
+    workshop::supplement_ugc_from_workshop(zoneType);
+    timing.set_items(pool->count - before);
+  }
 
   for (UGCItem &ugc : pool->iter()) {
     if (ugc.internalName[0] &&
@@ -259,8 +270,11 @@ void UGC_LoadUsermapsPool_Impl() {
 }
 
 void UGC_LoadPools_Impl() {
+  // Xerces: timed for perf.load_step (docs/DESIGN.md 12.2).
+  xerces_perf::timed timing(xerces_perf::step_kind::load, "ugc_pools");
   UGC_LoadUsermapsPool_Impl();
   UGC_LoadModsPool_Impl();
+  timing.set_items(usermapsPool.count + modsPool.count);
 }
 
 void UGC_LoadItem_PrepareAssetPool(const std::filesystem::path &root) {

@@ -442,6 +442,55 @@ extra).
       explained; the client now logs an uncaught C++ exception as
       `loader.terminate` before the fail-fast (none was logged since).
 
+### Performance instrumentation (2026-11-05)
+
+What DESIGN.md 12.2 describes was built on `launcher/perf-probe` and covered by
+unit tests (rings, CSV, meta, `XERCES_BENCH_AUTO`, the output check); none of it
+has run in the game. Each item needs a game start, so each waits for your
+go-ahead. Use a home outside AppData (`C:\Users\Ginld\XercesHome-bench`) and an
+output folder outside the game and Workshop folders
+(`XERCES_BENCH_OUT=C:\Users\Ginld\XercesDev\bench\<session>`). PresentMon 2.4.1
+is installed
+(`C:\Program Files\Intel\PresentMon\PresentMonConsoleApplication\PresentMon-2.4.1-x64.exe`);
+it needs an elevated terminal, which only you can open. Never read the console
+during a measurement window.
+
+- [ ] A normal start (no `XERCES_BENCH`) logs `perf.swapchain` once, at the
+      overlay's first Present (well before the menu), and `perf.startup` and
+      `perf.hooks` once each, after the menu (or after 180 s with
+      `menu_timed_out`); `frontend_ms` agrees with the launcher's
+      `launch.started` to first main frame (34.0-34.7 s on 2026-11-05) less the
+      launcher's own time; `perf.hooks` names how many detours there were and
+      how much of the start their enables took. `perf.io` lines appear for
+      `journal` and, 10 s after a setting changes, `config.cfg`;
+      `perf.load_step` for `hash_names` and the Workshop pools. The start-up
+      `journal` lines (`symbols`, then back to `launching`) say
+      `"thread":"main"`, and `perf.startup`'s `unpack_thread_id` and
+      `main_thread_id` are the same id.
+- [ ] The overlay's dialog still works with the idle skip: join a server whose
+      map or mod is not installed. The dialog shows, takes the mouse, "Yes"
+      opens the item's Workshop page in Steam (now from the main thread), "No"
+      closes it, and a second dialog appears centred as the first did.
+- [ ] Probe overhead: front-end idle, 60 s, with `XERCES_BENCH=1` and
+      `XERCES_BENCH_AUTO=menu:10:60`, against the same scene without
+      `XERCES_BENCH` timed by PresentMon alone; 3 runs each in A-B-B-A order.
+      The mean frame time and the 99th percentile must agree within run-to-run
+      noise.
+- [ ] Probe against PresentMon: one probe run with PresentMon recording
+      `--process_name boiii.exe --qpc_time` over the same window. The probe's
+      frame count (`perf.bench.written`, `<run>.frames.csv`) and PresentMon's
+      present count for the game's swap chain agree within a frame or two at
+      each end, and the dt series match frame by frame when joined on QPC
+      (`t0_qpc` and `qpc_frequency` in `<run>.meta.json`).
+- [ ] `overlay_us` stays near 0 in front-end idle (the F4 idle skip), and the
+      `cpu` column shows which cores the render thread presents from.
+- [ ] `xerces_bench_map zm_ccube` from the console logs `perf.load` with the
+      time to the first main frame with the client active, near what the
+      journal's `loading_map` to `in_game` shows;
+      `XERCES_BENCH_AUTO=ingame:15:60` writes one run after the level starts.
+- [ ] `XERCES_BENCH_OUT` under AppData or in the game folder logs
+      `perf.bench.refused` and writes nothing.
+
 ### Launcher (M3)
 
 `tools\build.ps1 -Launcher` builds `build\bin\x64\Release\Xerces.exe` from the

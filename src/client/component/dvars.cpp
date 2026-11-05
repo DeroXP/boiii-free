@@ -10,6 +10,7 @@
 #include <utils/io.hpp>
 #include <utils/string.hpp>
 #include <xerces/launch_dvars.hpp>
+#include <xerces/perf.hpp>
 
 namespace dvars {
 namespace {
@@ -96,6 +97,8 @@ inline bool is_archive_dvar(game::EngineDependentDvar dvar) {
 }
 
 void write_archive_dvars() {
+  // Xerces: timed for perf.io (main thread; docs/DESIGN.md 12.2).
+  xerces_perf::timed timing(xerces_perf::step_kind::io, "config.cfg");
   std::string config_buffer;
   game::EngineDependentDvarPool pool = game::dvar_pool();
 
@@ -119,6 +122,7 @@ void write_archive_dvars() {
   if (!config_buffer.empty()) {
     utils::io::write_file(CONFIG_FILE_PATH, config_buffer);
   }
+  timing.set_bytes(config_buffer.size());
 }
 
 void schedule_dvar_write() {

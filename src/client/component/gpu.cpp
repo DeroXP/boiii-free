@@ -44,22 +44,6 @@ bool same_adapter(const DXGI_ADAPTER_DESC &a, const DXGI_ADAPTER_DESC1 &b) {
          a.AdapterLuid.HighPart == b.AdapterLuid.HighPart;
 }
 
-bool on_main_menu() {
-  game::lua::hks::lua_State *state = *game::lua::hks::primary_luaVM;
-  if (!state || game::com::Com_IsInGame()) {
-    return false;
-  }
-
-  try {
-    const ui_scripting::table globals{state->globals.v.table};
-    const ui_scripting::arguments screen =
-        globals["Engine"]["GetLobbyUIScreen"]();
-    return !screen.empty() && screen[0].as<int>() != 0;
-  } catch (const std::exception &) {
-    return false;
-  }
-}
-
 std::optional<DXGI_ADAPTER_DESC1> fastest_adapter() {
   IDXGIFactory1 *factory = nullptr;
   if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
@@ -82,6 +66,22 @@ std::optional<DXGI_ADAPTER_DESC1> fastest_adapter() {
   return result;
 }
 } // namespace
+
+bool on_main_menu() {
+  game::lua::hks::lua_State *state = *game::lua::hks::primary_luaVM;
+  if (!state || game::com::Com_IsInGame()) {
+    return false;
+  }
+
+  try {
+    const ui_scripting::table globals{state->globals.v.table};
+    const ui_scripting::arguments screen =
+        globals["Engine"]["GetLobbyUIScreen"]();
+    return !screen.empty() && screen[0].as<int>() != 0;
+  } catch (const std::exception &) {
+    return false;
+  }
+}
 
 int get_preference() {
   const std::wstring preferences = read_preferences();

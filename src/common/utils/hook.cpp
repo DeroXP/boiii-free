@@ -2,6 +2,9 @@
 
 #include <MinHook.h>
 
+#include <algorithm>
+#include <atomic>
+
 #include "concurrency.hpp"
 #include "nt.hpp"
 #include "string.hpp"
@@ -138,6 +141,69 @@ void *get_memory_near(const void *address, const size_t size) {
   });
 }
 
+// Detour timing (hook.hpp, detour_stats). Plain atomics with constant
+// initialisation: creates can run on any thread, before or after main().
+int64_t qpc_now() {
+  LARGE_INTEGER value{};
+  QueryPerformanceCounter(&value);
+  return value.QuadPart;
+}
+
+std::atomic<uint32_t> stats_created{0};
+std::atomic<uint32_t> stats_enables{0};
+std::atomic<int64_t> stats_create_ticks{0};
+std::atomic<int64_t> stats_enable_ticks{0};
+std::atomic<int64_t> stats_max_enable{0};
+std::atomic<int64_t> stats_first_qpc{0};
+std::atomic<int64_t> stats_last_qpc{0};
+
+struct timeline_slot {
+  std::atomic<int64_t> qpc{0}; // written last; 0 while the slot fills
+  std::atomic<uint32_t> create_ticks{0};
+  std::atomic<uint32_t> enable_ticks{0};
+};
+timeline_slot timeline[detour_timeline_capacity];
+std::atomic<uint32_t> timeline_next{0};
+
+uint32_t clamp_ticks(const int64_t ticks) {
+  return ticks <= 0                    ? 0
+         : ticks > int64_t(UINT32_MAX) ? UINT32_MAX
+                                       : static_cast<uint32_t>(ticks);
+}
+
+void raise_to(std::atomic<int64_t> &target, const int64_t value) {
+  int64_t current = target.load(std::memory_order_relaxed);
+  while (value > current && !target.compare_exchange_weak(
+                                current, value, std::memory_order_relaxed)) {
+  }
+}
+
+void note_enable(const int64_t ticks) {
+  stats_enables.fetch_add(1, std::memory_order_relaxed);
+  stats_enable_ticks.fetch_add(ticks, std::memory_order_relaxed);
+  raise_to(stats_max_enable, ticks);
+}
+
+void note_create(const int64_t start, const int64_t create_ticks,
+                 const int64_t enable_ticks, const int64_t end) {
+  stats_created.fetch_add(1, std::memory_order_relaxed);
+  stats_create_ticks.fetch_add(create_ticks, std::memory_order_relaxed);
+  int64_t none = 0;
+  stats_first_qpc.compare_exchange_strong(none, start,
+                                          std::memory_order_relaxed);
+  raise_to(stats_last_qpc, end);
+
+  const uint32_t index = timeline_next.fetch_add(1, std::memory_order_relaxed);
+  if (index < detour_timeline_capacity) {
+    timeline_slot &slot = timeline[index];
+    slot.create_ticks.store(clamp_ticks(create_ticks),
+                            std::memory_order_relaxed);
+    slot.enable_ticks.store(clamp_ticks(enable_ticks),
+                            std::memory_order_relaxed);
+    slot.qpc.store(start > 0 ? start : 1, std::memory_order_release);
+  }
+}
+
 void *initialize_min_hook() {
   static class min_hook_init {
   public:
@@ -234,12 +300,18 @@ detour::detour(void *place, void *target) : detour() {
 
 detour::~detour() { this->clear(); }
 
-void detour::enable() {
+void detour::enable() { (void)this->enable_timed(); }
+
+int64_t detour::enable_timed() {
+  const int64_t start = qpc_now();
   MH_EnableHook(this->place_);
 
   if (!this->moved_data_.empty()) {
     this->move();
   }
+  const int64_t ticks = qpc_now() - start;
+  note_enable(ticks);
+  return ticks;
 }
 
 void detour::disable() {
@@ -251,8 +323,10 @@ void detour::create(void *place, void *target) {
   this->clear();
   this->place_ = place;
 
+  const int64_t start = qpc_now();
   const MH_STATUS status =
       MH_CreateHook(this->place_, target, &this->original_);
+  const int64_t create_ticks = qpc_now() - start;
   if (status != MH_OK) {
     throw std::runtime_error(string::va(
         "Unable to hook %s with %s: %s", describe_address(place).c_str(),
@@ -262,7 +336,40 @@ void detour::create(void *place, void *target) {
             : MH_StatusToString(status)));
   }
 
-  this->enable();
+  const int64_t enable_ticks = this->enable_timed();
+  note_create(start, create_ticks, enable_ticks,
+              start + create_ticks + enable_ticks);
+}
+
+detour_stats get_detour_stats() {
+  detour_stats stats{};
+  stats.created = stats_created.load(std::memory_order_relaxed);
+  stats.enables = stats_enables.load(std::memory_order_relaxed);
+  stats.create_ticks = stats_create_ticks.load(std::memory_order_relaxed);
+  stats.enable_ticks = stats_enable_ticks.load(std::memory_order_relaxed);
+  stats.max_enable_ticks = stats_max_enable.load(std::memory_order_relaxed);
+  stats.first_qpc = stats_first_qpc.load(std::memory_order_relaxed);
+  stats.last_qpc = stats_last_qpc.load(std::memory_order_relaxed);
+  return stats;
+}
+
+size_t get_detour_timeline(detour_timeline_entry *out, const size_t capacity) {
+  const size_t reserved = std::min<size_t>(
+      timeline_next.load(std::memory_order_relaxed), detour_timeline_capacity);
+  size_t count = 0;
+  for (size_t i = 0; i < reserved && count < capacity; ++i) {
+    const int64_t qpc = timeline[i].qpc.load(std::memory_order_acquire);
+    if (qpc == 0) {
+      continue; // still being filled
+    }
+    out[count].qpc = qpc;
+    out[count].create_ticks =
+        timeline[i].create_ticks.load(std::memory_order_relaxed);
+    out[count].enable_ticks =
+        timeline[i].enable_ticks.load(std::memory_order_relaxed);
+    ++count;
+  }
+  return count;
 }
 
 void detour::create(const size_t place, void *target) {

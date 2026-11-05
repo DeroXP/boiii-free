@@ -10,6 +10,8 @@
 #include <utils/concurrency.hpp>
 #include <utils/hook.hpp>
 
+#include <xerces/perf_probe.hpp>
+
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
@@ -25,6 +27,18 @@ utils::hook::detour present_hook{};
 bool imgui_initialized{false};
 HWND game_hwnd{nullptr};
 WNDPROC original_wndproc{nullptr};
+
+// Xerces (docs/DESIGN.md 12.4 item 1): what is on screen, so Present skips
+// all ImGui and DX11 state work while nothing is. Set and cleared inside the
+// containers' locks, next to the state they describe.
+constexpr unsigned progress_shown = 1; // state_: active and not hidden
+constexpr unsigned dialog_shown = 2;   // confirm_: active
+std::atomic<unsigned> visible{0};
+
+// Render thread only: the first Present was handled (the GPU check,
+// perf.swapchain), and ImGui drew on the last Present.
+bool first_present_done{false};
+bool drew_last_frame{false};
 
 // Confirmation dialog state
 struct confirm_state {
@@ -196,9 +210,14 @@ void render_confirmation() {
                         ImVec4(0.70f, 0.35f, 0.04f, 1.f));
   if (ImGui::Button("Yes", ImVec2(button_width, btn_h))) {
     const auto cb = cstate.on_yes;
-    confirm_.access([](confirm_state &s) { s = {}; });
+    confirm_.access([](confirm_state &s) {
+      s = {};
+      visible.fetch_and(~dialog_shown);
+    });
+    // Xerces: the answer runs on the main thread, not inside Present
+    // (opening a Workshop page calls ShellExecute).
     if (cb)
-      cb();
+      scheduler::once(cb, scheduler::main);
   }
   ImGui::PopStyleColor(3);
 
@@ -212,9 +231,12 @@ void render_confirmation() {
                         ImVec4(0.16f, 0.16f, 0.18f, 1.f));
   if (ImGui::Button("No", ImVec2(button_width, btn_h))) {
     const auto no_cb = cstate.on_no;
-    confirm_.access([](confirm_state &s) { s = {}; });
+    confirm_.access([](confirm_state &s) {
+      s = {};
+      visible.fetch_and(~dialog_shown);
+    });
     if (no_cb)
-      no_cb();
+      scheduler::once(no_cb, scheduler::main);
   }
   ImGui::PopStyleColor(3);
 
@@ -336,61 +358,80 @@ void render() {
 
 LRESULT CALLBACK wndproc_stub(HWND hwnd, UINT msg, WPARAM wparam,
                               LPARAM lparam) {
-  if (imgui_initialized) {
-    const auto s = state_.copy();
-    const auto c = confirm_.copy();
-
-    if ((s.active && !s.hidden) || c.active) {
-      if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wparam, lparam)) {
-        return TRUE;
-      }
+  // Xerces: the visible flag instead of copying both states per message.
+  if (imgui_initialized && visible.load(std::memory_order_acquire) != 0) {
+    if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wparam, lparam)) {
+      return TRUE;
     }
   }
   return CallWindowProcA(original_wndproc, hwnd, msg, wparam, lparam);
 }
 
+// Xerces: the first Present runs the GPU check and logs perf.swapchain;
+// ImGui itself starts the first time something is shown (init_imgui).
+void first_present(IDXGISwapChain *swap_chain, const UINT sync_interval,
+                   const UINT flags) {
+  ID3D11Device *device = nullptr;
+  if (FAILED(swap_chain->GetDevice(IID_PPV_ARGS(&device)))) {
+    return; // tried again on the next Present
+  }
+  gpu::check_device(device);
+  device->Release();
+  xerces_perf::on_first_present(swap_chain, sync_interval, flags);
+  first_present_done = true;
+}
+
+bool init_imgui(IDXGISwapChain *swap_chain) {
+  ID3D11Device *device = nullptr;
+  if (FAILED(swap_chain->GetDevice(IID_PPV_ARGS(&device)))) {
+    return false;
+  }
+  ID3D11DeviceContext *context = nullptr;
+  device->GetImmediateContext(&context);
+
+  DXGI_SWAP_CHAIN_DESC desc{};
+  swap_chain->GetDesc(&desc);
+
+  ImGui::CreateContext();
+  ImGui::GetIO().IniFilename = nullptr;
+  ImGui::GetIO().LogFilename = nullptr;
+  ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+
+  apply_cod_theme();
+
+  ImGui_ImplWin32_Init(desc.OutputWindow);
+  ImGui_ImplDX11_Init(device, context);
+
+  // Hook WndProc so mouse/keyboard reach ImGui (needed for the Stop button)
+  game_hwnd = desc.OutputWindow;
+  original_wndproc = reinterpret_cast<WNDPROC>(SetWindowLongPtrA(
+      game_hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(wndproc_stub)));
+
+  device->Release();
+  context->Release();
+  imgui_initialized = true;
+  return true;
+}
+
 HRESULT __stdcall present_stub(IDXGISwapChain *swap_chain, UINT sync_interval,
                                UINT flags) {
-  if (!imgui_initialized) {
-    ID3D11Device *device = nullptr;
-    if (SUCCEEDED(swap_chain->GetDevice(IID_PPV_ARGS(&device)))) {
-      ID3D11DeviceContext *context = nullptr;
-      device->GetImmediateContext(&context);
-      gpu::check_device(device);
+  // Xerces: the frame probe (XERCES_BENCH=1 only; xerces/perf_probe.hpp).
+  const bool probing = xerces_perf::probe_armed();
+  const xerces_perf::probe_entry entry =
+      probing ? xerces_perf::probe_enter() : xerces_perf::probe_entry{};
 
-      DXGI_SWAP_CHAIN_DESC desc{};
-      swap_chain->GetDesc(&desc);
-
-      ImGui::CreateContext();
-      ImGui::GetIO().IniFilename = nullptr;
-      ImGui::GetIO().LogFilename = nullptr;
-      ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
-
-      apply_cod_theme();
-
-      ImGui_ImplWin32_Init(desc.OutputWindow);
-      ImGui_ImplDX11_Init(device, context);
-
-      // Hook WndProc so mouse/keyboard reach ImGui (needed for the Stop button)
-      game_hwnd = desc.OutputWindow;
-      original_wndproc = reinterpret_cast<WNDPROC>(SetWindowLongPtrA(
-          game_hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(wndproc_stub)));
-
-      device->Release();
-      context->Release();
-      imgui_initialized = true;
-    }
+  if (!first_present_done) {
+    first_present(swap_chain, sync_interval, flags);
   }
 
-  if (imgui_initialized) {
-    // Ensure DisplaySize is always correct by reading from the swap chain
-    DXGI_SWAP_CHAIN_DESC sc_desc{};
-    if (SUCCEEDED(swap_chain->GetDesc(&sc_desc))) {
-      ImGui::GetIO().DisplaySize =
-          ImVec2(static_cast<float>(sc_desc.BufferDesc.Width),
-                 static_cast<float>(sc_desc.BufferDesc.Height));
-    }
-
+  // Xerces: ImGui and its DX11 state save and restore run only while a
+  // dialog or progress is shown, plus one empty frame after, so a window
+  // shown again "appears" as it did when ImGui drew every frame. ImGui's
+  // Win32 NewFrame sets DisplaySize from the window, so no GetDesc here.
+  const bool shown = visible.load(std::memory_order_acquire) != 0;
+  bool drew = false;
+  if ((shown || drew_last_frame) &&
+      (imgui_initialized || init_imgui(swap_chain))) {
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
@@ -398,9 +439,20 @@ HRESULT __stdcall present_stub(IDXGISwapChain *swap_chain, UINT sync_interval,
     render();
     ImGui::Render();
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+    drew = true;
+    drew_last_frame = shown;
   }
 
-  return present_hook.invoke<HRESULT>(swap_chain, sync_interval, flags);
+  if (!probing) {
+    return present_hook.invoke<HRESULT>(swap_chain, sync_interval, flags);
+  }
+  const std::int64_t before = xerces_perf::probe_clock();
+  const HRESULT result =
+      present_hook.invoke<HRESULT>(swap_chain, sync_interval, flags);
+  xerces_perf::probe_present(swap_chain, entry, before,
+                             xerces_perf::probe_clock(), result, sync_interval,
+                             drew);
+  return result;
 }
 
 void setup_present_hook() {
@@ -456,11 +508,21 @@ void setup_present_hook() {
 } // namespace
 
 void update(const download_state &s) {
-  state_.access([&](download_state &st) { st = s; });
+  state_.access([&](download_state &st) {
+    st = s;
+    if (st.active && !st.hidden) {
+      visible.fetch_or(progress_shown);
+    } else {
+      visible.fetch_and(~progress_shown);
+    }
+  });
 }
 
 void clear() {
-  state_.access([](download_state &st) { st = {}; });
+  state_.access([](download_state &st) {
+    st = {};
+    visible.fetch_and(~progress_shown);
+  });
 }
 
 download_state get_state() { return state_.copy(); }
@@ -478,6 +540,7 @@ void show_confirmation(const std::string &title, const std::string &message,
     cstate.message = message;
     cstate.on_yes = std::move(on_yes);
     cstate.on_no = std::move(on_no);
+    visible.fetch_or(dialog_shown);
   });
   if (replaced) {
     replaced();
@@ -504,6 +567,11 @@ struct component final : client_component {
       ImGui_ImplDX11_Shutdown();
       ImGui_ImplWin32_Shutdown();
       ImGui::DestroyContext();
+    } else if (first_present_done) {
+      // Xerces: ImGui starts only when something is shown; the hook is
+      // still taken out at shutdown, as when ImGui always started. Never
+      // with no hook: disable() on a null place disables every hook.
+      present_hook.disable();
     }
   }
 };

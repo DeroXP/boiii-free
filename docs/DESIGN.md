@@ -1852,10 +1852,92 @@ Status (2026-11-05, perf plan H1 and H2, offline only):
   above 2%).
 - `xerces_cli bench loads`, `bench launcher`, `bench analyze` and
   `bench compare` work on files that already exist (docs/TESTING.md,
-  Performance). Not built yet: the swap-chain probe, the other in-game timing
-  (H3), and the launcher and game drivers (H4, H5). No frame times have been
-  recorded yet. Load times come from the journal and the console, and the map
-  command itself is not timestamped yet.
+  Performance). The in-game timing (H3) is described below and the launcher
+  driver (H4) is tools/dev/bench/launcher-bench.ps1; the game driver (H5) is not
+  built. No frame times have been recorded yet. Load times come from the journal
+  and the console, and the map command itself is not timestamped yet. What the
+  game role measures today (built 2026-11-05, not yet run in the game):
+
+Always on, in the game log (`<home>\logs\*-game-*.jsonl`), each event logged
+from the async thread, never from the thread that did the work:
+
+- **`perf.startup`**, once, when the main menu is first ready (polled with
+  `gpu::on_main_menu` every 100 ms from the first main frame; after 180 s
+  without a menu it logs anyway with `menu_timed_out`). Milliseconds since the
+  process was created (`GetProcessTimes`, anchored to QPC once): the first and
+  the last detour created before the first main frame, `ipc.start` when the
+  command pipe is served, the first main frame (`frontend_ms`) and the menu
+  (`menu_ready_ms`), and two thread ids: `unpack_thread_id` (the thread
+  `post_unpack` ran on, the game's start-up thread) and `main_thread_id` (the
+  first main frame's), expected to be the same.
+- **`perf.hooks`**, with it: `src/common/utils/hook.cpp` counts every detour's
+  QPC ticks inside `MH_CreateHook` and inside `enable()` (MinHook's
+  `MH_EnableHook`, which freezes threads through a system-wide snapshot), the
+  slowest single enable, and a 512-entry timeline of the first creates (start,
+  create µs, enable µs). About four QPC calls per detour.
+  `utils::hook::get_detour_stats()` and `get_detour_timeline()` read them. This
+  decides whether batching enables (12.4) is worth asking for.
+- **`perf.swapchain`**, once, from the overlay's first Present: swap effect,
+  buffer count, flags, windowed, size, refresh rate, the first sync interval and
+  Present flags, and whether the chain answers `IDXGISwapChain1` and
+  `IDXGISwapChain2`.
+- **`perf.io`** and **`perf.load_step`**: the duration (`ms`), start (`at_ms`
+  since process creation and raw `qpc`, to line up with the probe's frames),
+  thread (`main`, `render` or an id; `main` is the `post_unpack` thread until
+  the first main frame, then the main frame's, so start-up records are labelled
+  too), bytes and items of: `config.cfg` (`write_archive_dvars`, main thread),
+  `journal` (each journal phase write: read, parse and write, not the
+  `loader.phase` log line after it), `hash_names` (the first load of
+  `hash_names.txt`), `workshop_supplement.usermaps` / `.mods` and `ugc_pools`
+  (the Workshop pool loads). Records go through a fixed lock-free ring
+  (`xerces_core::event_ring`) and are written every 250 ms.
+
+Only with `XERCES_BENCH=1` in the game's environment (the frame probe,
+`src/client/xerces/perf_probe.*`):
+
+- The overlay's Present hook (the only one) stamps QPC at its entry, before the
+  original Present and after it. Each Present of the game's swap chain becomes a
+  16-byte sample in a ring of 2^18 set aside at startup (18 minutes at 240 FPS):
+  entry time, ticks inside the original Present, the overlay's own time in µs,
+  the logical CPU and flags (1 the overlay drew, 2 sync interval > 0, 4 Present
+  did not return `S_OK`, 8 the game window was not in front, 16 first frame of a
+  new swap chain). No locks or allocation on that path; with the probe off the
+  hook pays one relaxed atomic load and a branch.
+- A `scheduler::main` loop with no interval stamps every main frame into a
+  second ring (2^17) and checks the foreground window.
+- Runs: console commands `xerces_bench_begin [name]` and `xerces_bench_end`;
+  `xerces_bench_map <map>` stamps QPC and queues `map <map>`, and logs
+  `perf.load` at the first main frame with the client active in a level
+  (`perf.load` with `timed_out` after 10 minutes); or
+  `XERCES_BENCH_AUTO=menu:<start_s>:<len_s>` (from the menu being ready) or
+  `ingame:<start_s>:<len_s>` (from the client first being active in a level),
+  one automatic run per game start (`xerces_bench_end` during it ends it for
+  good, so its end time never cuts a manual run started later).
+- Output: `XERCES_BENCH_OUT`, else `<home>\bench`. A folder under AppData, the
+  game folder or the Workshop folder, or a relative one, is refused
+  (`perf.bench.refused`) and the probe stays off. Each run writes, from the
+  async thread, `<run>.frames.csv`
+  (`i,t_ms,dt_ms,present_ms,overlay_us,cpu,flags`), `<run>.main.csv`
+  (`i,t_ms,dt_ms`) and `<run>.meta.json` (QPC frequency and the run's start and
+  end QPC, so PresentMon's `--qpc_time` output joins on the same clock; the swap
+  chain; a few dvars; thread ids; focus losses), then logs `perf.bench.written`
+  with the frame count, mean FPS and largest frame time. The pure parts (rings,
+  CSV, meta, `XERCES_BENCH_AUTO`, the output check) are
+  `xerces_core/frame_ring.hpp` and `xerces_core/perf_bench.*`, with tests.
+
+For example, from the launcher's environment or `start-game.ps1`'s:
+`XERCES_BENCH=1`, `XERCES_BENCH_OUT=C:\Users\Ginld\XercesDev\bench\<session>`,
+`XERCES_BENCH_AUTO=menu:10:60`. The checks this still needs in the game are in
+docs/TESTING.md (Performance instrumentation).
+
+The download overlay (12.4 item 1) now keeps its Present hook but does no ImGui
+or DX11 state work while nothing is shown: an atomic flag is set when a dialog
+or progress is shown and cleared when it is answered or cleared, ImGui starts
+the first time something is shown (the GPU check still runs on the first
+Present), one empty ImGui frame follows each dialog so the next one appears as
+before, the per-frame `GetDesc` is gone (ImGui's Win32 backend sets the display
+size from the window), and the dialog's Yes and No callbacks run on
+`scheduler::main` instead of inside Present.
 
 ### 12.3 The benchmark
 
@@ -1890,9 +1972,10 @@ The first load and launcher baseline from existing logs is in
 
 ### 12.4 Candidate optimizations, in order
 
-1. Hook overhead: the download overlay runs ImGui and a full DX11 state save and
-   restore every frame even when nothing is shown; skip it when idle. Bind GSC
-   chains only when they exist.
+1. Hook overhead: the download overlay ran ImGui and a full DX11 state save and
+   restore every frame even when nothing is shown; it now skips them when idle
+   (12.2, built 2026-11-05, gain not yet measured). Bind GSC chains only when
+   they exist.
 2. Load times: pools sized once, background preloading (upstream `beta` added
    it), cached file handles, I/O priority.
 3. Shader compilation hitches: measure first-time material hitches,
