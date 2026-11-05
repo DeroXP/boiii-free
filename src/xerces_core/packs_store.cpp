@@ -31,6 +31,32 @@ bool is_space(char c) {
          c == '\v';
 }
 
+// Writes text to <file>.tmp and renames it over file. On any failure (the
+// open, a write or flush on a full or pulled drive, the close, the rename)
+// the temporary file is removed, so a failed write leaves nothing behind.
+bool write_through_temporary(const fs::path &file, std::string_view text) {
+  fs::path temporary = file;
+  temporary += ".tmp";
+  bool written = false;
+  {
+    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+    if (out) {
+      out.write(text.data(), static_cast<std::streamsize>(text.size()));
+      out.close(); // flushes; failbit when the data did not reach the file
+      written = !out.fail();
+    }
+  }
+  std::error_code ec;
+  if (written) {
+    fs::rename(temporary, file, ec);
+    if (!ec) {
+      return true;
+    }
+  }
+  fs::remove(temporary, ec);
+  return false;
+}
+
 std::optional<std::string> read_all(const fs::path &file) {
   std::ifstream in(file, std::ios::binary);
   if (!in) {
@@ -151,32 +177,16 @@ bool write_pack(const fs::path &folder, const pack &value,
   std::error_code ec;
   fs::create_directories(folder, ec);
   const fs::path file = pack_library_file(folder, value.id);
-  fs::path temporary = file;
-  temporary += ".tmp";
-  {
-    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    if (!out) {
-      diags.error("packs.write", to_utf8(file.filename()),
-                  "The pack could not be written to the packs folder.");
-      return false;
-    }
-    out.write(text.data(), static_cast<std::streamsize>(text.size()));
-    if (!out.flush()) {
-      out.close();
-      fs::remove(temporary, ec);
-      diags.error("packs.write", to_utf8(file.filename()),
-                  "The pack could not be written to the packs folder.");
-      return false;
-    }
-  }
-  fs::rename(temporary, file, ec);
-  if (ec) {
-    fs::remove(temporary, ec);
+  if (!write_through_temporary(file, text)) {
     diags.error("packs.write", to_utf8(file.filename()),
                 "The pack could not be written to the packs folder.");
     return false;
   }
   return true;
+}
+
+bool write_pack_file(const fs::path &file, const pack &value) {
+  return write_through_temporary(file, pack_to_json(value));
 }
 
 bool remove_pack(const fs::path &folder, std::string_view id) {

@@ -71,7 +71,8 @@ plan_request pack_to_request(const pack &value, const std::string &game_build,
                              const version &xerces_version);
 // Applying a pack checks the installed content is what the pack pinned (8.3).
 diagnostics verify_pack_content(const pack &value, const plan &resolved);
-// Exports a resolved plan as a pack.
+// Exports a resolved plan as a pack: its mods with their settings, its map
+// and the declared conflicts it allowed (plan::allowed_conflicts).
 pack pack_from_plan(const plan &resolved, const std::string &name,
                     const std::string &id,
                     const std::map<std::string, std::uint64_t> &workshop_ids);

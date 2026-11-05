@@ -100,7 +100,8 @@ struct pool_report {
 
 // Something the player can do to fix a problem (9.4).
 struct fix_action {
-  // install, update, unpin, remove, reorder, allow_conflict, update_xerces
+  // install, update, unpin, remove, reorder, allow_conflict (detail: the
+  // other mod), reset_setting (detail: the setting's key), update_xerces
   std::string kind;
   std::string id;
   std::string detail;
@@ -112,6 +113,11 @@ struct plan {
   std::optional<plan_entry> map;
   std::vector<explanation> explanations;
   std::vector<fix_action> fixes;
+  // The declared conflicts this plan loads because the request allowed them
+  // (5.3 step 2), as sorted id pairs; a pack made from the plan keeps them.
+  // Allowed pairs that are not both in the plan, or not declared, are left
+  // out.
+  std::set<std::pair<std::string, std::string>> allowed_conflicts;
   diagnostics diags;
   std::size_t zones_added = 0;
   std::optional<std::size_t> zones_total;

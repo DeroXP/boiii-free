@@ -12,7 +12,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
-#include <fstream>
 
 #include <xerces_core/backup.hpp>
 #include <xerces_core/pack.hpp>
@@ -70,27 +69,6 @@ std::string backup_stamp() {
 std::string quoted(const std::string &text) { return "\"" + text + "\""; }
 
 std::string short_id(const std::string &id) { return id.substr(0, 8); }
-
-bool write_file(const fs::path &file, const std::string &text) {
-  fs::path temporary = file;
-  temporary += ".tmp";
-  {
-    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    if (!out) {
-      return false;
-    }
-    out.write(text.data(), static_cast<std::streamsize>(text.size()));
-    if (!out.flush()) {
-      return false;
-    }
-  }
-  std::error_code ec;
-  fs::rename(temporary, file, ec);
-  if (ec) {
-    fs::remove(temporary, ec);
-  }
-  return !ec;
-}
 
 class packs_view final : public view {
 public:
@@ -769,6 +747,8 @@ private:
         workshop_ids[entry.id] = *content->info.workshop_id;
       }
     }
+    // With the mods' settings and the conflicts allowed in Mods, which
+    // apply_now gives back to the profile.
     core::pack p =
         core::pack_from_plan(plan, name, core::new_pack_id(), workshop_ids);
     // The build it was made on, as the CLI's export records it; information
@@ -999,7 +979,7 @@ private:
   }
 
   void write_export(const fs::path &file, const core::pack &p) {
-    if (!write_file(file, core::pack_to_json(p))) {
+    if (!core::write_pack_file(file, p)) {
       notify(owner_->tr("The pack could not be written to") + " " +
                  utf8(file.filename()) + ".",
              true);

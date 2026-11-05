@@ -466,9 +466,12 @@ bool setting_value_fits(const setting_decl &setting, const Value &value) {
   return false;
 }
 
+// The request's values over the declared defaults. A stored value the
+// chosen version no longer accepts (its type or range changed in an update)
+// is an error with a fix: drop it and use the default.
 std::map<std::string, std::string>
 resolve_settings(const installed_content &content, const plan_request &request,
-                 diagnostics &diags) {
+                 diagnostics &diags, std::vector<fix_action> &fixes) {
   std::map<std::string, std::string> out;
   const auto &id = content.info.id;
   const auto requested = request.settings.find(id);
@@ -486,6 +489,7 @@ resolve_settings(const installed_content &content, const plan_request &request,
       diags.error("plan.setting.invalid", "/settings/" + id + "/" + setting.key,
                   "\"" + value->second + "\" is not a valid value for " +
                       content.info.name + "'s \"" + setting.label + "\".");
+      fixes.push_back({"reset_setting", id, setting.key});
       continue;
     }
     out[setting.key] = json::canonical(parsed.document);
@@ -503,7 +507,8 @@ resolve_settings(const installed_content &content, const plan_request &request,
 }
 
 plan_entry make_entry(const installed_content &content, bool requested,
-                      const plan_request &request, diagnostics &diags) {
+                      const plan_request &request, diagnostics &diags,
+                      std::vector<fix_action> &fixes) {
   plan_entry entry;
   entry.id = content.info.id;
   entry.name = content.info.name;
@@ -514,7 +519,7 @@ plan_entry make_entry(const installed_content &content, bool requested,
   entry.requested = requested;
   entry.legacy = content.info.legacy;
   entry.zones = count_zone_files(content.files, request.mode);
-  entry.settings = resolve_settings(content, request, diags);
+  entry.settings = resolve_settings(content, request, diags, fixes);
   return entry;
 }
 
@@ -750,7 +755,7 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
         diags.error("plan.map.kind", "/map",
                     "\"" + *request.map + "\" is a mod, not a map.");
       } else {
-        out.map = make_entry(*it->second, true, request, diags);
+        out.map = make_entry(*it->second, true, request, diags, out.fixes);
       }
     }
   }
@@ -792,6 +797,7 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
                                " are declared incompatible" + reason + ".";
       if (request.allowed_conflicts.contains({a->first, b->first})) {
         diags.warning("plan.conflict.allowed", "", text + " Allowed by you.");
+        out.allowed_conflicts.insert({a->first, b->first});
         continue;
       }
       diags.error("plan.conflict.declared", "", text);
@@ -907,7 +913,7 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
 
   for (const auto &id : order) {
     out.stack.push_back(make_entry(*selected.at(id), requested_ids.contains(id),
-                                   request, diags));
+                                   request, diags, out.fixes));
   }
 
   for (const auto &[edge, why] : graph.edges()) {

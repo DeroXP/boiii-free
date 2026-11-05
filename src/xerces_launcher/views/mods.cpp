@@ -539,6 +539,19 @@ private:
     return item ? plain(item->info, id) : id;
   }
 
+  // A setting's label in the version the plan uses, else its key.
+  std::string setting_label(const std::string &id,
+                            const std::string &key) const {
+    if (const xc::installed_content *item = chosen(id)) {
+      for (const auto &setting : item->info.settings) {
+        if (setting.key == key && !setting.label.empty()) {
+          return setting.label;
+        }
+      }
+    }
+    return key;
+  }
+
   std::vector<note_row> notes_for(const std::string &id,
                                   const xc::installed_content *item) const {
     std::vector<note_row> out;
@@ -1119,7 +1132,9 @@ private:
       field("Workshop id", d_ws_);
       field("Folder", d_path_);
       field("Files", std::to_string(item->files.size()));
-      field("Zones", std::to_string(xc::count_zone_files(item->files)));
+      // In this screen's mode, as the plan line counts them (no mp_mod in
+      // Zombies).
+      field("Zones", std::to_string(xc::count_zone_files(item->files, mode_)));
       field("Content hash", xc::mods_short_hash(item->content_hash));
       if (const xc::mode_profile *p = profile()) {
         if (const auto pin = p->pins.find(id); pin != p->pins.end()) {
@@ -1178,37 +1193,9 @@ private:
                       "load it."),
            true});
     }
-    const bool is_plan_map = plan_.map && plan_.map->id == id;
-    if (on || is_plan_map) {
-      for (const auto &fix : plan_.fixes) {
-        if (fix.id == id) {
-          add_fix(fix);
-        }
-      }
-    }
-    // The planner files a missing, pinned or outdated dependency under the
-    // dependency's id, which has no row of its own; the mod that needs it
-    // offers the fix. Also for a mod that is only in the plan as another
-    // mod's dependency.
-    const bool in_plan =
-        on || is_plan_map ||
-        std::ranges::any_of(
-            plan_.stack, [&](const xc::plan_entry &e) { return e.id == id; });
-    if (item && in_plan) {
-      for (const auto &dep : item->info.dependencies) {
-        for (const auto &fix : plan_.fixes) {
-          if (fix.id != dep.id || fix.id == id) {
-            continue;
-          }
-          if (fix.kind == "install" || fix.kind == "update") {
-            // The planner gives one range for every mod that asks; this
-            // mod's own is the one to show here.
-            add_fix({fix.kind, fix.id, dep.range_text});
-          } else if (fix.kind == "unpin") {
-            add_fix(fix);
-          }
-        }
-      }
+    // Which mod offers which fix: mods_fixes_for (unit tested).
+    for (const auto &fix : xc::mods_fixes_for(plan_, id, on, item)) {
+      add_fix(fix);
     }
     // Why this order: the planner's decisions that name this mod.
     for (const auto &why : plan_.explanations) {
@@ -1227,7 +1214,12 @@ private:
     } else if (fix.kind == "reorder" && enabled(fix.detail)) {
       label = owner_->tr("Move below") + " " + name_of(fix.detail);
     } else if (fix.kind == "allow_conflict") {
-      label = owner_->tr("Allow this conflict");
+      // Named: a mod can conflict with more than one other.
+      label = owner_->tr("Allow the conflict with") + " " +
+              name_of(fix.id == sel_.id ? fix.detail : fix.id);
+    } else if (fix.kind == "reset_setting") {
+      label = owner_->tr("Use the default for") + " \"" +
+              setting_label(fix.id, fix.detail) + "\"";
     } else if (fix.kind == "unpin") {
       // A dependency's pin names the dependency; the mod's own does not.
       label =
@@ -1478,6 +1470,18 @@ private:
           [&] {
             return name + " " + owner_->tr("and") + " " + name_of(fix.detail) +
                    " " + owner_->tr("may load together");
+          });
+    } else if (fix.kind == "reset_setting") {
+      // A stored value (from a pack) that the version the plan uses no
+      // longer accepts: the mod's default takes its place.
+      const std::string label = setting_label(fix.id, fix.detail);
+      edit(
+          [&](xc::mode_profile &p) {
+            return xc::mods_reset_setting(p, fix.id, fix.detail);
+          },
+          [&] {
+            return name + ": \"" + label + "\" " +
+                   owner_->tr("uses its default again");
           });
     } else if (fix.kind == "install" || fix.kind == "update") {
       open_steam(fix.id.substr(3));

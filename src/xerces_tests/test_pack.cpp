@@ -149,6 +149,68 @@ TEST_CASE("packs: export and import reproduce the same plan") {
   CHECK(verify_pack_content(changed, again).has("pack.hash.mismatch"));
 }
 
+TEST_CASE("packs: a conflict allowed in Mods stays allowed in the pack") {
+  // aa.one declares it does not work with bb.two, and the map declares the
+  // same of cc.three. The player allowed both in Mods, and the profile also
+  // holds a pair the plan does not declare and one it does not hold.
+  const auto content = [](const std::string &fields) {
+    const manifest_result parsed =
+        parse_manifest("{\"schema\":1," + fields + "}");
+    REQUIRE(!parsed.diags.has_errors());
+    installed_content out;
+    out.info = parsed.value;
+    out.folder = out.info.id;
+    out.content_hash = hash_a;
+    return out;
+  };
+  const std::vector<installed_content> catalog = {
+      content(R"("id":"aa.one","name":"One","version":"1.0.0",)"
+              R"("conflicts":[{"id":"bb.two","reason":"Both rewrite perks"}])"),
+      content(R"("id":"bb.two","name":"Two","version":"1.0.0")"),
+      content(R"("id":"cc.three","name":"Three","version":"1.0.0")"),
+      content(R"("id":"ws.42","name":"Map","version":"0.0.0","kind":"map",)"
+              R"("conflicts":[{"id":"cc.three"}])")};
+  plan_request request;
+  request.mode = "zm";
+  request.mods = {"aa.one", "bb.two", "cc.three"};
+  request.map = "ws.42";
+  request.game_build = "0x6531394";
+  request.xerces_version = *version::parse("1.0.0");
+  request.allowed_conflicts = {{"aa.one", "bb.two"},
+                               {"cc.three", "ws.42"},
+                               {"aa.one", "cc.three"},  // not declared
+                               {"dd.four", "ee.five"}}; // not in the plan
+  const plan original = resolve_plan(catalog, request);
+  REQUIRE(original.ok());
+  const std::set<std::pair<std::string, std::string>> allowed = {
+      {"aa.one", "bb.two"}, {"cc.three", "ws.42"}};
+  CHECK(original.allowed_conflicts == allowed);
+
+  // Save as pack: the pack, its file and its share code keep both pairs.
+  const pack saved = pack_from_plan(original, "Weekend", new_pack_id(), {});
+  CHECK(saved.decisions.allow_conflicts == allowed);
+  const pack_result from_file = parse_pack(pack_to_json(saved));
+  REQUIRE(from_file.ok());
+  CHECK(from_file.value.decisions.allow_conflicts == allowed);
+  const pack_result from_code = decode_share_code(encode_share_code(saved));
+  REQUIRE(from_code.ok());
+  CHECK(from_code.value.decisions.allow_conflicts == allowed);
+
+  // Applying it gives the same plan, with the conflicts still allowed.
+  const version xerces = *version::parse("1.0.0");
+  const plan applied = resolve_plan(
+      catalog, pack_to_request(from_code.value, "0x6531394", xerces));
+  CHECK(applied.ok());
+  CHECK(applied.diags.has("plan.conflict.allowed"));
+  CHECK_EQ(applied.plan_id, original.plan_id);
+
+  // A pack without them (as saved before) fails where the plan did not.
+  pack bare = saved;
+  bare.decisions = {};
+  CHECK(resolve_plan(catalog, pack_to_request(bare, "0x6531394", xerces))
+            .diags.has("plan.conflict.declared"));
+}
+
 TEST_CASE("packs: new ids are random version 4 UUIDs") {
   const std::string a = new_pack_id();
   const std::string b = new_pack_id();

@@ -50,6 +50,10 @@ pack_library read_pack_library(const std::filesystem::path &folder);
 // with the reasons in diags, when it is not a valid pack or the write failed.
 bool write_pack(const std::filesystem::path &folder, const pack &value,
                 diagnostics &diags);
+// An export to a file the player chose: the pack's canonical JSON, written
+// through <file>.tmp and renamed into place. False when it could not be
+// written; the temporary file never stays behind.
+bool write_pack_file(const std::filesystem::path &file, const pack &value);
 
 // Removes <folder>\<id>.json and every other .json file in folder that holds
 // a pack with this id (copies would bring it back on the next read). False if

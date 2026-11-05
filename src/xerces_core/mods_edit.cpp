@@ -100,6 +100,18 @@ bool mods_unpin(mode_profile &profile, const std::string &id) {
   return profile.pins.erase(id) > 0;
 }
 
+bool mods_reset_setting(mode_profile &profile, const std::string &id,
+                        const std::string &key) {
+  const auto it = profile.settings.find(id);
+  if (it == profile.settings.end() || it->second.erase(key) == 0) {
+    return false;
+  }
+  if (it->second.empty()) {
+    profile.settings.erase(it);
+  }
+  return true;
+}
+
 std::string mods_hand_edit(launcher_config &config, const std::string &mode) {
   mode_profile &profile = profile_for(config, mode);
   std::string detached =
@@ -108,7 +120,9 @@ std::string mods_hand_edit(launcher_config &config, const std::string &mode) {
   profile.pack_name.clear();
   profile.pack_id.clear();
   // Allowed conflicts and per-mod settings stay: they are decisions about
-  // these mods, which a hand edit of the order does not undo.
+  // these mods, which a hand edit of the order does not undo. A setting the
+  // installed version no longer accepts gets the planner's reset_setting
+  // fix (mods_reset_setting), so a kept value never blocks the plan for good.
   for (std::size_t i = 0; i < profile.mods.size(); ++i) {
     config.saved_positions[profile.mods[i]] = static_cast<std::int64_t>(i);
   }
@@ -315,6 +329,55 @@ mods_attribute(const plan &resolved,
     }
     for (const auto &id : ids) {
       out.by_id[id].push_back(note);
+    }
+  }
+  return out;
+}
+
+std::vector<fix_action> mods_fixes_for(const plan &resolved,
+                                       const std::string &id, bool enabled,
+                                       const installed_content *item) {
+  std::vector<fix_action> out;
+  const auto add = [&](fix_action fix) {
+    if (std::ranges::none_of(out, [&](const fix_action &f) {
+          return f.kind == fix.kind && f.id == fix.id && f.detail == fix.detail;
+        })) {
+      out.push_back(std::move(fix));
+    }
+  };
+  const bool is_map = resolved.map && resolved.map->id == id;
+  for (const auto &fix : resolved.fixes) {
+    if (fix.kind == "allow_conflict") {
+      if (fix.id == id || fix.detail == id) {
+        add(fix);
+      }
+    } else if (fix.kind == "reset_setting") {
+      if (fix.id == id) {
+        add(fix);
+      }
+    } else if (fix.id == id && (enabled || is_map)) {
+      add(fix);
+    }
+  }
+  const bool in_plan =
+      enabled || is_map ||
+      std::ranges::any_of(resolved.stack,
+                          [&](const plan_entry &e) { return e.id == id; });
+  if (item == nullptr || !in_plan) {
+    return out;
+  }
+  for (const auto &dep : item->info.dependencies) {
+    for (const auto &fix : resolved.fixes) {
+      if (fix.id != dep.id || fix.id == id) {
+        continue;
+      }
+      if (fix.kind == "install" || fix.kind == "update") {
+        // The planner gives one range for every mod that asks; this mod's
+        // own is the one to show.
+        add({fix.kind, fix.id, dep.range_text});
+      } else if (fix.kind == "unpin") {
+        add(fix);
+      }
     }
   }
   return out;
