@@ -490,7 +490,16 @@ during a measurement window.
       `perf.hooks`: enabling them took 9.2 s in all (about 40 ms each, the
       slowest 77 ms: MinHook's system-wide thread snapshot on a PC with about
       8,100 threads), creating them 2.0 s. About a quarter of the time to the
-      first main frame is hook enabling (DESIGN.md 12.4 item 2, "L1").
+      first main frame is hook enabling (DESIGN.md 12.4 item 1).
+- [x] (2026-11-05, 941b25b, MinHook's thread walk over the game's own threads,
+      28d7d494; the same Cheese Cube run with the D3 stack: loaded in 27.2 s,
+      played 30 s, back to the menu, journal `clean_exit`, the same 60 script
+      errors as before, all from DS4C, no Xerces warnings) `perf.hooks`: 212
+      enables took 41.6 ms in all (the slowest 0.44 ms; was 9.2 s), creates 3.7
+      ms (was 2.0 s); every detour was created by 7.9 s (was 17.2 s).
+      `perf.startup`: first main frame 25.5 s (was 34.7 s), menu ready 31.8 s
+      (was 41.1 s); `map-check.ps1` saw the menu 29.9 s after the launch (39.7 s
+      the run before).
 - [ ] A normal start (no `XERCES_BENCH`) logs `perf.swapchain` once, at the
       overlay's first Present (well before the menu), and `perf.startup` and
       `perf.hooks` once each, after the menu (or after 180 s with

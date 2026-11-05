@@ -705,16 +705,16 @@ All in `xerces_core`:
      settings pass `-xerces-db-pool`, the profile's request is checked against
      4096 MiB (`zone_budget::larger_pool`; the notes then say "the larger zone
      memory"); safe mode and the culprit search's tests launch without it, so
-     their plans are checked against the stock pool. Without it, a map over
-     the stock pool that fits 4096 MiB with the plan's mods is marked
+     their plans are checked against the stock pool. Without it, a map over the
+     stock pool that fits 4096 MiB with the plan's mods is marked
      `fits_larger_pool` and the notes add "Turn on Larger zone memory
      (experimental) in Settings" (never when a counted zone's header was not
-     read). Only a build whose pool is the stock 2048 MiB the client raises
-     gets that figure (`larger_pool_mib`, 0 otherwise). The plan JSON carries
+     read). Only a build whose pool is the stock 2048 MiB the client raises gets
+     that figure (`larger_pool_mib`, 0 otherwise). The plan JSON carries
      `larger_pool`, `larger_pool_mib` and each map's `fits_larger_pool`;
      `xerces_cli plan resolve --db-pool` checks against the larger pool. If the
-     client's `db_pool` signatures miss, the game keeps the stock pool and a
-     map past it ends in the out-of-memory report (5.6), not a silent exit.
+     client's `db_pool` signatures miss, the game keeps the stock pool and a map
+     past it ends in the out-of-memory report (5.6), not a silent exit.
    - Not known yet: whether the baseline moves with the player's language, the
      stock zones a map pulls in, or settings; the in-game check is in
      `docs/TESTING.md` (Loader and manifest).
@@ -1947,7 +1947,7 @@ from the async thread, never from the thread that did the work:
   first main frame's), expected to be the same.
 - **`perf.hooks`**, with it: `src/common/utils/hook.cpp` counts every detour's
   QPC ticks inside `MH_CreateHook` and inside `enable()` (MinHook's
-  `MH_EnableHook`, which freezes threads through a system-wide snapshot), the
+  `MH_EnableHook`, which freezes the process's other threads; 12.4 item 1), the
   slowest single enable, and a 512-entry timeline of the first creates (start,
   create µs, enable µs). About four QPC calls per detour.
   `utils::hook::get_detour_stats()` and `get_detour_timeline()` read them. This
@@ -2050,7 +2050,16 @@ The first load and launcher baseline from existing logs is in
 1. Hook overhead: the download overlay ran ImGui and a full DX11 state save and
    restore every frame even when nothing is shown; it now skips them when idle
    (12.2, built 2026-11-05, gain not yet measured). Bind GSC chains only when
-   they exist.
+   they exist. Hook enabling at start-up (done 2026-11-05): before each hook
+   MinHook suspends the process's other threads, and it found them through a
+   Toolhelp snapshot of every thread on the PC (about 8,100 here): 40-77 ms per
+   hook, 9.2 s for 212 hooks. The build compiles a generated copy of MinHook's
+   `hook.c` (`deps/premake/minhook.lua`; `deps/minhook` itself is untouched)
+   whose thread list comes from `NtGetNextThread` over this process only
+   (`src/xerces_deps/minhook/minhook_threads.inc`), falling back to the snapshot
+   if that call is missing or stops early. Measured in the game with the D3
+   stack on Cheese Cube: enables 9.2 s to 0.04 s, creates 2.0 s to 0.004 s,
+   first main frame 34.7 s to 25.5 s, menu 41.1 s to 31.8 s.
 2. Load times: pools sized once, background preloading (upstream `beta` added
    it), cached file handles, I/O priority.
 3. Shader compilation hitches: measure first-time material hitches,
