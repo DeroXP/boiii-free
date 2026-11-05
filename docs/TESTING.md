@@ -336,7 +336,9 @@ what still needs you:
       `boiii_players\properties.json`, where the client reads it); FPS limit,
       field of view, V-Sync and the FPS counter take effect in the game; display
       mode (windowed, borderless); a value the game had saved in config.cfg no
-      longer wins over Xerces' (launch_dvars.cpp).
+      longer wins over Xerces' (launch_dvars.cpp), and config.cfg still holds
+      the game's own field of view and FPS limit after the session, so "Game's
+      setting" brings them back (`xerces.dvars.session` in the game log).
 - [ ] Binds and asset pools (from Settings): a custom bind works in the game;
       with larger asset pools off, a big mod that needs them fails as it did
       upstream. Checked on a copy of the folder only, never the real files.

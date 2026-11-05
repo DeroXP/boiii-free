@@ -243,6 +243,22 @@ name_apply_result apply_player_name(const fs::path &game_dir,
   return out;
 }
 
+bool game_name_differs(std::string_view saved,
+                       const std::optional<std::string> &in_file) {
+  if (saved.empty()) {
+    // The client reads an empty playerName as none (name.cpp).
+    return in_file.has_value() && !in_file->empty();
+  }
+  return in_file.value_or("") != saved;
+}
+
+pending_name_step pending_name_after(bool folder_changed, bool file_exists) {
+  if (!file_exists) {
+    return pending_name_step::wait;
+  }
+  return folder_changed ? pending_name_step::write : pending_name_step::ask;
+}
+
 // ------------------------------------------------------------ launch flags
 bool valid_launch_flag(std::string_view flag) {
   if (flag.size() < 2 || flag.size() > 64 || flag[0] != '-') {
@@ -301,19 +317,29 @@ std::string join_flags(const std::vector<std::string> &flags) {
   return out;
 }
 
+namespace {
+// A spelling the client's parser takes for the flag name: "-name",
+// "--name", or one of its short forms (src/common/utils/flags.cpp registers
+// "-nc", "-nocinematics" and "--nocinematics" as one argument). Add a flag's
+// short forms here when a switch on the screen manages it.
+bool spells(std::string_view flag, std::string_view name) {
+  if ((flag.starts_with("-") && flag.substr(1) == name) ||
+      (flag.starts_with("--") && flag.substr(2) == name)) {
+    return true;
+  }
+  return name == "nocinematics" && flag == "-nc";
+}
+} // namespace
+
 bool has_flag(const std::vector<std::string> &flags, std::string_view name) {
-  return std::ranges::any_of(flags, [&](const std::string &flag) {
-    return (flag.starts_with("-") && flag.substr(1) == name) ||
-           (flag.starts_with("--") && flag.substr(2) == name);
-  });
+  return std::ranges::any_of(
+      flags, [&](const std::string &flag) { return spells(flag, name); });
 }
 
 std::vector<std::string> with_flag(std::vector<std::string> flags,
                                    std::string_view name, bool on) {
-  std::erase_if(flags, [&](const std::string &flag) {
-    return (flag.starts_with("-") && flag.substr(1) == name) ||
-           (flag.starts_with("--") && flag.substr(2) == name);
-  });
+  std::erase_if(flags,
+                [&](const std::string &flag) { return spells(flag, name); });
   if (on) {
     flags.push_back("-" + std::string(name));
   }

@@ -135,6 +135,8 @@ public:
     model.Bind("cinematics_note", &cinematics_note_);
     model.Bind("close_on_launch", &close_on_launch_);
     model.Bind("flags", &flags_);
+    model.Bind("flags_hint", &flags_hint_);
+    model.Bind("game_hint", &game_hint_);
     model.Bind("flags_error", &flags_error_);
     model.Bind("command", &command_);
     model.Bind("command_bad", &command_bad_);
@@ -193,6 +195,10 @@ public:
         });
     handle_ = model.GetModelHandle();
     fps_max_ = core::fps_slider_max();
+    // RmlUi translates text nodes only, never a placeholder attribute, so
+    // the fields' placeholders come from the model.
+    game_hint_ = owner_->tr("Game");
+    flags_hint_ = owner_->tr("No extra flags");
     return true;
   }
 
@@ -205,10 +211,11 @@ public:
     if (std::equal(std::begin(key), std::end(key), std::begin(seen_))) {
       return;
     }
-    const bool game_changed = key[1] != seen_[1] || key[2] != seen_[2];
+    const bool folder_changed = key[1] != seen_[1];
+    const bool game_ran = key[2] != seen_[2];
     std::copy(std::begin(key), std::end(key), std::begin(seen_));
-    if (game_changed) {
-      after_game_change();
+    if (folder_changed || game_ran) {
+      after_game_change(folder_changed);
     }
     refresh();
   }
@@ -281,6 +288,7 @@ private:
          "jump-language", "jump-privacy", "jump-updates"},
         {"game-change", "game-detect", "game-open"},
         {"player-name"},
+        {"game-files"},
         {"display-game", "display-windowed", "display-borderless"},
         {"fps-field", "fps-slider"},
         {"fov-field", "fov-slider"},
@@ -540,12 +548,17 @@ private:
                               "boiii_players\\properties.json yet. Start the "
                               "game once, then press Enter here to write the "
                               "name.");
-    } else if (in_game && !c.player_name.empty() && *in_game != c.player_name) {
-      // Renamed in the game (its "name" command), or a write that failed:
+    } else if (in_game && core::game_name_differs(c.player_name, in_game)) {
+      // Renamed in the game (its "name" command), the name the game stored
+      // when it started, a write that failed, or upstream's launcher:
       // Xerces does not overwrite it behind the player's back.
       name_note_ = owner_->tr("The game's file says:") + " " + *in_game + ". " +
-                   owner_->tr("Press Enter in the field to write this name "
-                              "there instead.");
+                   (c.player_name.empty()
+                        ? owner_->tr("Press Enter in the empty field to take "
+                                     "it out: the game then uses your Steam "
+                                     "name from its next start.")
+                        : owner_->tr("Press Enter in the field to write this "
+                                     "name there instead."));
     } else if (in_game) {
       name_note_ = owner_->tr("The game's file says:") + " " + *in_game;
     } else {
@@ -987,8 +1000,9 @@ private:
     core::launcher_config &c = config();
     force_ = text_field::name;
     // An unchanged name is only written again on Enter, when the game's file
-    // still lacks it (no file yet, a failed write, or renamed in the game);
-    // leaving the field never rewrites it.
+    // still lacks it (no file yet, a failed write, renamed in the game, or a
+    // name in the file while the field is empty); leaving the field never
+    // rewrites it.
     if (cleaned.name == c.player_name &&
         (!by_enter || (!name_pending_ && !game_file_differs(cleaned.name)))) {
       refresh(); // shows the cleaned text if spaces were trimmed
@@ -1015,9 +1029,12 @@ private:
     refresh();
   }
 
+  // An empty name too: Enter then takes a name the file holds away, so the
+  // game goes back to the Steam name ("Leave it empty to use your Steam
+  // name"); leaving the field still writes nothing.
   bool game_file_differs(const std::string &name) {
     const game_state &game = svc().game();
-    if (name.empty() || !game.dir) {
+    if (!game.dir) {
       return false;
     }
     const fs::path file = core::player_properties_file(*game.dir);
@@ -1025,7 +1042,8 @@ private:
     if (!fs::is_regular_file(file, ec)) {
       return false;
     }
-    return core::read_player_name(read_small(file)).value_or("") != name;
+    return core::game_name_differs(name,
+                                   core::read_player_name(read_small(file)));
   }
 
   // Writes the saved name into the game's properties file; the message for
@@ -1082,9 +1100,10 @@ private:
     }
   }
 
-  // The game folder changed or the game exited: a name that could not be
-  // written before may go in now.
-  void after_game_change() {
+  // The game folder changed (folder_changed: set, or found again), or the
+  // game started or exited: a name that could not be written before may go
+  // in now, or wait for the player's Enter (core::pending_name_after).
+  void after_game_change(bool folder_changed) {
     services &s = svc();
     if (detect_pending_ && !s.detecting() && s.game_rev() != detect_from_) {
       detect_pending_ = false;
@@ -1100,7 +1119,14 @@ private:
                        true);
       }
     }
-    if (name_pending_ && s.game().dir) {
+    if (!name_pending_ || !s.game().dir) {
+      return;
+    }
+    std::error_code ec;
+    const bool file_there = fs::is_regular_file(
+        core::player_properties_file(*s.game().dir), ec);
+    switch (core::pending_name_after(folder_changed, file_there)) {
+    case core::pending_name_step::write: {
       const core::name_apply_result result =
           core::apply_player_name(*s.game().dir, config().player_name);
       if (result.status == core::name_apply::written ||
@@ -1108,8 +1134,20 @@ private:
         name_pending_ = false;
         name_error_.clear();
         log_info("launcher.settings.player_name",
-                 "written to properties.json after the game changed");
+                 "written to properties.json after the game folder changed");
       }
+      break;
+    }
+    case core::pending_name_step::ask:
+      // The game may have stored a name of its own (or the player's, from
+      // its "name" command): the note says what the file holds, and Enter
+      // writes the saved name over it.
+      name_pending_ = false;
+      log_info("launcher.settings.player_name",
+               "not written after the game ran; Enter writes it");
+      break;
+    case core::pending_name_step::wait:
+      break;
     }
   }
 
@@ -1283,6 +1321,7 @@ private:
   bool game_skips_intro_ = false, game_skips_cinematics_ = false;
   Rml::String intro_note_, cinematics_note_;
   Rml::String flags_, flags_error_, command_;
+  Rml::String game_hint_, flags_hint_; // placeholders, translated
   bool command_bad_ = false;
 
   Rml::String theme_ = "dark";

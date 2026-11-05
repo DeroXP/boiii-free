@@ -3,6 +3,17 @@
 
 #include "harness.hpp"
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+// wingdi.h's GetObject macro would rename rapidjson's GetObject().
+#undef GetObject
+
+#include <filesystem>
 #include <string>
 
 #include <xerces_core/game_files.hpp>
@@ -35,9 +46,39 @@ TEST_CASE("game files: a bind cannot break out of its line") {
   CHECK(!valid_bind_command("say \"x\""));
   CHECK(!valid_bind_command("a\nbind f quit"));
   CHECK(!valid_bind_command(""));
-  const std::string text =
-      binds_to_text({{"f", "ok"}, {"g", "bad\"quote"}, {"h h", "x"}});
+  // Writing leaves out only what would not read back as one bind.
+  const std::string text = binds_to_text({{"f", "ok"},
+                                          {"g", "a\nbind f quit"},
+                                          {"h h", "x"},
+                                          {"", "x"},
+                                          {" k", "x"},
+                                          {"j", ""},
+                                          {"l\r", "x"}});
   CHECK_EQ(text, std::string("bind f \"ok\"\n"));
+}
+
+TEST_CASE("game files: binds already in the file survive another edit") {
+  // The game saves any bind the engine took (no length limit), and a
+  // hand-edited file can quote inside the command; upstream's launcher
+  // writes such binds back, and so does Xerces when another bind changes.
+  const std::string long_command(600, 'x');
+  const std::string file = "bind f \"" + long_command +
+                           "\"\n"
+                           "bind g \"noclip\"\n"
+                           "bind h \"say \"hi\"\"\n";
+  auto binds = parse_binds(file);
+  REQUIRE_EQ(binds.size(), std::size_t{3});
+  CHECK(!valid_bind_command(binds[0].command)); // not one Xerces would add
+  CHECK(!valid_bind_command(binds[2].command));
+  CHECK_EQ(binds_to_text(binds), file);
+  // Remove g, as the screen does: f and h are still there.
+  std::erase_if(binds, [](const game_bind &b) { return b.key == "g"; });
+  const auto after = parse_binds(binds_to_text(binds));
+  REQUIRE_EQ(after.size(), std::size_t{2});
+  CHECK_EQ(after[0].key, std::string("f"));
+  CHECK_EQ(after[0].command, long_command);
+  CHECK_EQ(after[1].key, std::string("h"));
+  CHECK_EQ(after[1].command, std::string("say \"hi\""));
 }
 
 TEST_CASE("game files: the asset pool switch keeps the other settings") {
@@ -60,4 +101,23 @@ TEST_CASE("game files: the asset pool switch keeps the other settings") {
   CHECK(!parsed.document.HasMember("disable_asset_pools"));
   CHECK(asset_pools_enabled(set_asset_pools_enabled(off, true)));
   CHECK(asset_pools_enabled(set_asset_pools_enabled("not json", true)));
+}
+
+TEST_CASE("game files: a client Xerces did not start still counts as running") {
+  CHECK(is_game_client("boiii.exe", ""));
+  CHECK(is_game_client("BOIII.EXE", "boiii.exe"));
+  CHECK(is_game_client("BlackOps3.exe", "boiii.exe"));
+  CHECK(is_game_client("xerces_game.exe", "Xerces_Game.exe")); // after a rename
+  CHECK(!is_game_client("BlackOps3_UnrankedDedicatedServer.exe", "boiii.exe"));
+  CHECK(!is_game_client("Xerces.exe", "boiii.exe"));
+  CHECK(!is_game_client("boiii.exe.bak", "boiii.exe"));
+  CHECK(!is_game_client("", ""));
+
+  // The snapshot sees every process: this one, given as the client's name.
+  wchar_t module[MAX_PATH] = {};
+  GetModuleFileNameW(nullptr, module, MAX_PATH);
+  const std::string self = std::filesystem::path(module).filename().string();
+  const auto found = running_game_client(self);
+  REQUIRE(found.has_value());
+  CHECK(is_game_client(*found, self));
 }

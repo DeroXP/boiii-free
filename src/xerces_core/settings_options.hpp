@@ -81,6 +81,28 @@ struct name_apply_result {
 name_apply_result apply_player_name(const std::filesystem::path &game_dir,
                                     std::string_view name);
 
+// Whether the game's file holds something other than the saved name, so
+// that Enter in the name field writes it there again. in_file is the file's
+// "playerName" (nullopt when it has none). An empty saved name means "use
+// your Steam name", which the file only gives without a name of its own:
+// the client stores the name it uses at every start (name.cpp,
+// load_player_name) and on its "name" command, so a name left there by
+// either, or by upstream's launcher, differs from an empty one.
+bool game_name_differs(std::string_view saved,
+                       const std::optional<std::string> &in_file);
+
+// A name that could not go into the game's file yet (no file, the file
+// busy, no game folder) when the game folder or the game changes:
+// - write: the game folder was set or found again; the screen said the name
+//   goes in once there is one.
+// - ask: the game ran (it started or exited). It may have written a name of
+//   its own, the one it uses at every start or one the player gave it in
+//   the game, and Xerces cannot tell them apart, so it does not overwrite
+//   it: the screen shows what the file says, and Enter writes.
+// - wait: there is still no file.
+enum class pending_name_step { write, ask, wait };
+pending_name_step pending_name_after(bool folder_changed, bool file_exists);
+
 // ------------------------------------------------------------ launch flags
 // The rule build_launch_command applies: '-' then letters, digits, '-' or
 // '_', at most 64 characters.
@@ -98,7 +120,8 @@ flags_parse parse_launch_flags(std::string_view text);
 std::string join_flags(const std::vector<std::string> &flags);
 
 // The client's flag parser accepts "-name" and "--name" (src/common/utils/
-// flags.cpp); both count.
+// flags.cpp), and short forms for some flags ("-nc" is -nocinematics); all
+// count.
 bool has_flag(const std::vector<std::string> &flags, std::string_view name);
 // Removes every spelling of the flag, then adds "-name" when on.
 std::vector<std::string> with_flag(std::vector<std::string> flags,

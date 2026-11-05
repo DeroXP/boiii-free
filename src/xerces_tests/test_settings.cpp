@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <xerces_core/launch.hpp>
+#include <xerces_core/session_dvars.hpp>
 #include <xerces_core/settings_options.hpp>
 
 using namespace xerces_core;
@@ -123,6 +124,47 @@ TEST_CASE("settings: the name goes into an existing properties file only") {
   fs::remove_all(game);
 }
 
+TEST_CASE("settings: Enter on an empty name takes the file's name out") {
+  // "Leave it empty to use your Steam name": a name the file holds (the
+  // game's own, upstream's launcher's) differs from an empty saved name.
+  CHECK(game_name_differs("", std::string("OldName")));
+  CHECK(!game_name_differs("", std::nullopt));
+  CHECK(!game_name_differs("", std::string(""))); // the client reads it as none
+  CHECK(game_name_differs("Dero", std::string("Other")));
+  CHECK(game_name_differs("Dero", std::nullopt));
+  CHECK(!game_name_differs("Dero", std::string("Dero")));
+
+  const fs::path game = fresh_game("empty_name");
+  const fs::path file = player_properties_file(game);
+  write_bytes(file, "{\"playerName\":\"OldName\"}");
+  CHECK(game_name_differs("", read_player_name(read_bytes(file))));
+  CHECK_EQ(apply_player_name(game, "").status, name_apply::written);
+  CHECK(!read_player_name(read_bytes(file)).has_value());
+  CHECK(!game_name_differs("", read_player_name(read_bytes(file))));
+  fs::remove_all(game);
+}
+
+TEST_CASE("settings: a waiting name does not overwrite one set in the game") {
+  CHECK(pending_name_after(true, true) == pending_name_step::write);
+  CHECK(pending_name_after(false, true) == pending_name_step::ask);
+  CHECK(pending_name_after(true, false) == pending_name_step::wait);
+  CHECK(pending_name_after(false, false) == pending_name_step::wait);
+
+  // No file yet, so the name waits; the game makes the file when it starts
+  // and the player renames in the game. When the game exits, Xerces asks
+  // instead of writing, and the file keeps the player's newer name.
+  const fs::path game = fresh_game("pending_name");
+  const fs::path file = player_properties_file(game);
+  CHECK_EQ(apply_player_name(game, "Dero").status, name_apply::no_file);
+  CHECK(pending_name_after(false, fs::exists(file)) == pending_name_step::wait);
+  write_bytes(file, "{\"playerName\":\"Other\"}");
+  CHECK(pending_name_after(false, fs::exists(file)) == pending_name_step::ask);
+  CHECK_EQ(read_player_name(read_bytes(file)).value_or(""),
+           std::string("Other"));
+  CHECK(game_name_differs("Dero", read_player_name(read_bytes(file))));
+  fs::remove_all(game);
+}
+
 TEST_CASE("settings: the game's saved skip switches are read from config.cfg") {
   CHECK_EQ(game_config_file("C:/Game"),
            fs::path("C:/Game") / "boiii_players" / "user" / "config.cfg");
@@ -205,6 +247,20 @@ TEST_CASE("settings: display mode and cinematics are client flags") {
   CHECK((flags == std::vector<std::string>{"-console"}));
 }
 
+TEST_CASE("settings: -nc is the client's short -nocinematics") {
+  // flags.cpp registers -nc, -nocinematics and --nocinematics as one flag,
+  // so the switch reads On for -nc, and Off takes -nc away too.
+  std::vector<std::string> flags = {"-nc", "-console"};
+  CHECK(has_flag(flags, "nocinematics"));
+  CHECK(!has_flag({"--nc"}, "nocinematics")); // not a spelling the client takes
+  CHECK(!has_flag({"-nc"}, "nointro"));
+  flags = with_flag(flags, "nocinematics", false);
+  CHECK((flags == std::vector<std::string>{"-console"}));
+  flags = with_flag({"-nc", "-console"}, "nocinematics", true);
+  CHECK((flags == std::vector<std::string>{"-console", "-nocinematics"}));
+  CHECK(has_flag(parse_launch_flags("-nc").flags, "nocinematics"));
+}
+
 TEST_CASE("settings: numbers and the FPS slider") {
   CHECK(parse_number_input("", 0, 10).state == number_input::kind::empty);
   CHECK(parse_number_input("  ", 0, 10).state == number_input::kind::empty);
@@ -231,4 +287,67 @@ TEST_CASE("settings: numbers and the FPS slider") {
   for (int i = 0; i <= fps_slider_max(); ++i) {
     CHECK_EQ(fps_slider_index(fps_slider_value(i)), i);
   }
+}
+
+TEST_CASE("settings: dvar values compare as the game shows them") {
+  CHECK(same_dvar_value("110", "110"));
+  CHECK(same_dvar_value("110", "110.000000")); // a float dvar's text
+  CHECK(same_dvar_value(" 144 ", "144"));
+  CHECK(same_dvar_value("0", "0.0"));
+  CHECK(!same_dvar_value("110", "90"));
+  CHECK(same_dvar_value("Fullscreen", "fullscreen"));
+  CHECK(!same_dvar_value("1", "true"));
+  CHECK(same_dvar_value("", ""));
+}
+
+TEST_CASE("settings: the launcher's dvars stay out of the game's config.cfg") {
+  // config.cfg as the client wrote it: the player's own FOV and FPS limit.
+  const std::string config = "set cg_fov_default \"90\"\n"
+                             "set com_maxfps \"240\"\n"
+                             "set cg_drawLagometer \"1\"\n";
+  session_dvars table;
+  for (const auto &[name, value] :
+       std::vector<std::pair<std::string, std::string>>{
+           {"cg_fov_default", "110"},
+           {"com_maxfps", "144"},
+           {"r_vsync", "1"}}) {
+    table.add(name, value, read_saved_dvar(config, name));
+  }
+  CHECK(table.has("CG_FOV_DEFAULT"));
+
+  // The client sets the launcher's values again over config.cfg; that set
+  // changes nothing here.
+  CHECK(!table.changed("cg_fov_default", "110.000000"));
+  CHECK(!table.changed("com_maxfps", "144"));
+
+  // Ten seconds later it saves every archived dvar: the launcher's are saved
+  // as config.cfg had them, the rest as they run.
+  CHECK_EQ(table.to_save("cg_fov_default", "110").value_or("?"),
+           std::string("90"));
+  CHECK_EQ(table.to_save("com_maxfps", "144").value_or("?"),
+           std::string("240"));
+  CHECK_EQ(table.to_save("cg_drawLagometer", "1").value_or("?"),
+           std::string("1"));
+
+  // The player picks 100 in the game's menu: from then on that is saved,
+  // also if they go back to the launcher's 110 later.
+  CHECK(table.changed("cg_fov_default", "100"));
+  CHECK(!table.has("cg_fov_default"));
+  CHECK_EQ(table.to_save("cg_fov_default", "100").value_or("?"),
+           std::string("100"));
+  CHECK(!table.changed("cg_fov_default", "110"));
+  CHECK_EQ(table.to_save("cg_fov_default", "110").value_or("?"),
+           std::string("110"));
+
+  // A change the table did not hear of: the running value no longer matches
+  // the launcher's, so it is the player's.
+  CHECK_EQ(table.to_save("com_maxfps", "60").value_or("?"), std::string("60"));
+  CHECK(!table.has("com_maxfps"));
+
+  // A dvar config.cfg had no line for keeps none, so the game's default
+  // stays the game's own value.
+  session_dvars first_run;
+  first_run.add("cg_fov_default", "110", read_saved_dvar("", "cg_fov_default"));
+  CHECK(!first_run.to_save("cg_fov_default", "110").has_value());
+  CHECK(first_run.to_save("cg_fov_default", "95").has_value());
 }

@@ -6,7 +6,9 @@
 // DB_AssetPoolInit unless asset_limits_enabled is "0"). The rules for both
 // files are xerces_core/game_files, the same as upstream's launcher, so
 // either can edit them. Nothing is written while the game runs: it reads and
-// writes binds.cfg itself. Opened from Settings; not a tab.
+// writes binds.cfg itself. That includes a client Xerces did not start (run
+// directly or from upstream's launcher), found by its process name
+// (xerces_core::running_game_client). Opened from Settings; not a tab.
 
 #include <RmlUi/Core.h>
 
@@ -74,6 +76,8 @@ public:
     model.Bind("binds", &binds_);
     model.Bind("new_key", &new_key_);
     model.Bind("new_command", &new_command_);
+    model.Bind("key_hint", &key_hint_);
+    model.Bind("command_hint", &command_hint_);
     model.Bind("bind_error", &bind_error_);
     model.BindEventCallback(
         "act", [this](Rml::DataModelHandle, Rml::Event &,
@@ -90,6 +94,10 @@ public:
           }
         });
     handle_ = model.GetModelHandle();
+    // RmlUi translates text nodes only, never a placeholder attribute, so
+    // the fields' placeholders come from the model.
+    key_hint_ = owner_->tr("Key");
+    command_hint_ = owner_->tr("Command, for example toggle cg_drawFPS");
     return true;
   }
 
@@ -104,13 +112,22 @@ public:
     }
   }
 
-  // Enter in either field adds the bind.
+  // Enter in either field adds the bind. Esc (B on a controller) goes back
+  // to Settings, which opened this screen: it has no tab of its own for the
+  // app's Esc to go to. In a field, Esc first only leaves the field (the app
+  // does that).
   bool key(Rml::Input::KeyIdentifier key, int) override {
     Rml::Element *focus = owner_->context()->GetFocusElement();
-    if (focus && (key == Rml::Input::KI_RETURN ||
-                  key == Rml::Input::KI_NUMPADENTER) &&
-        (focus->GetId() == "bind-key" || focus->GetId() == "bind-command")) {
+    const bool in_field = focus && (focus->GetId() == "bind-key" ||
+                                    focus->GetId() == "bind-command");
+    if (in_field &&
+        (key == Rml::Input::KI_RETURN || key == Rml::Input::KI_NUMPADENTER)) {
       act("add");
+      return true;
+    }
+    if (key == Rml::Input::KI_ESCAPE && !in_field && focus && doc &&
+        focus->GetOwnerDocument() == doc) {
+      act("settings");
       return true;
     }
     return false;
@@ -135,7 +152,7 @@ private:
       handle_.DirtyAllVariables();
       return;
     }
-    game_note_ = owner_->svc().game_running()
+    game_note_ = game_running()
                      ? owner_->tr("The game is running: close it to change "
                                   "these. It reads them when it starts.")
                      : std::string();
@@ -148,13 +165,29 @@ private:
     handle_.DirtyAllVariables();
   }
 
+  // A game Xerces started or that announces itself in <home>\run, or any
+  // running client by its process name (one started directly or by
+  // upstream's launcher announces nothing, and would write binds.cfg back
+  // from its own copy after the next bind change in the game).
+  bool game_running() {
+    if (owner_->svc().game_running()) {
+      return true;
+    }
+    const auto client = xerces_core::running_game_client(
+        owner_->svc().paths().client.filename().string());
+    if (client) {
+      log_info("launcher.game_files.client_running", *client);
+    }
+    return client.has_value();
+  }
+
   // Both files belong to the game while it runs.
   bool writable() {
     if (!folder()) {
       owner_->notify(game_note_, true);
       return false;
     }
-    if (owner_->svc().game_running()) {
+    if (game_running()) {
       owner_->notify(owner_->tr("Close the game first: it reads and writes "
                                 "these files while it runs."),
                      true);
@@ -257,6 +290,7 @@ private:
   bool pools_on_ = true;
   Rml::Vector<bind_row> binds_;
   Rml::String new_key_, new_command_, bind_error_;
+  Rml::String key_hint_, command_hint_; // placeholders, translated
 };
 } // namespace
 

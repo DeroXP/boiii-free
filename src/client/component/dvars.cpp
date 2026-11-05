@@ -9,6 +9,7 @@
 #include <utils/hook.hpp>
 #include <utils/io.hpp>
 #include <utils/string.hpp>
+#include <xerces/launch_dvars.hpp>
 
 namespace dvars {
 namespace {
@@ -105,7 +106,13 @@ void write_archive_dvars() {
       const char *name = dvar.debugName();
       const char *value = game::Dvar_DisplayableValue(dvar);
 
-      config_buffer.append(utils::string::va("set %s \"%s\"\n", name, value));
+      // Xerces: a launcher setting is saved as config.cfg had it.
+      const std::optional<std::string> saved =
+          xerces_launch_dvars::value_to_save(name, value);
+      if (saved) {
+        config_buffer.append(
+            utils::string::va("set %s \"%s\"\n", name, saved->c_str()));
+      }
     }
   }
 
@@ -139,6 +146,7 @@ void dvar_set_variant_stub(game::EngineDependentDvar dvar,
   dvar_set_variant_hook.invoke(dvar, value, source);
 
   if (initial_config_read && is_archive_dvar(dvar)) {
+    xerces_launch_dvars::archive_set(dvar); // Xerces
     schedule_dvar_write();
   }
 }

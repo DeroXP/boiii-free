@@ -92,7 +92,7 @@
 					<div class="field-note">{{fps_note}}</div>
 				</div>
 				<div class="field-control">
-					<input id="fps-field" type="text" class="text mono-field number-field" maxlength="4" placeholder="Game" data-value="fps" data-event-blur="commit('fps')"/>
+					<input id="fps-field" type="text" class="text mono-field number-field" maxlength="4" data-attr-placeholder="game_hint" data-value="fps" data-event-blur="commit('fps')"/>
 					<input id="fps-slider" type="range" class="range" min="0" step="1" data-attr-max="fps_max" data-attr-value="fps_stop" data-event-change="slid('fps')"/>
 				</div>
 			</div>
@@ -104,7 +104,7 @@
 					<div class="field-note">{{fov_note}}</div>
 				</div>
 				<div class="field-control">
-					<input id="fov-field" type="text" class="text mono-field number-field" maxlength="3" placeholder="Game" data-value="fov" data-event-blur="commit('fov')"/>
+					<input id="fov-field" type="text" class="text mono-field number-field" maxlength="3" data-attr-placeholder="game_hint" data-value="fov" data-event-blur="commit('fov')"/>
 					<input id="fov-slider" type="range" class="range" min="64" max="120" step="1" data-attr-value="fov_stop" data-event-change="slid('fov')"/>
 				</div>
 			</div>
@@ -185,7 +185,7 @@
 					<div class="field-name">Extra launch flags</div>
 					<div class="field-help">Each a '-' then letters, digits, '-' or '_', separated by spaces, for example -console. Press Enter to save. Display mode and Skip all cinematics show up here too.</div>
 				</div>
-				<input id="flags-field" type="text" class="text mono-field flags-field" maxlength="1000" placeholder="No extra flags" data-value="flags" data-event-blur="commit('flags')"/>
+				<input id="flags-field" type="text" class="text mono-field flags-field" maxlength="1000" data-attr-placeholder="flags_hint" data-value="flags" data-event-blur="commit('flags')"/>
 				<div class="field-error" data-if="flags_error != ''">{{flags_error}}</div>
 			</div>
 
