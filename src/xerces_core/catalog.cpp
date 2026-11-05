@@ -317,43 +317,68 @@ installed_content load_content(const std::filesystem::path &folder,
   return content;
 }
 
-// The pool file the client reads when it loads this mod
-// (UGC_LoadItem_PrepareAssetPool, called for the main mod and each stacked
-// one; never for a map). It is small and read whole; its hash is in the
-// content hash like every other file's.
+// The file's bytes, when exactly `size` of them could be read: the file could
+// be opened, did not end early and did not grow meanwhile.
+std::optional<std::string> read_text_of_size(const std::filesystem::path &path,
+                                             std::uintmax_t size) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in.is_open()) {
+    return std::nullopt;
+  }
+  std::string text(static_cast<std::size_t>(size), '\0');
+  in.read(text.data(), static_cast<std::streamsize>(size));
+  if (static_cast<std::uintmax_t>(in.gcount()) != size ||
+      in.peek() != std::char_traits<char>::eof()) {
+    return std::nullopt;
+  }
+  return text;
+}
+
+// The pool file the client reads when it loads this mod or map
+// (UGC_LoadItem_PrepareAssetPool: UGC_LoadModByPublisherId_Impl calls it for
+// the main mod and each stacked one, UGC_LoadUsermapByPublisherId_Impl for a
+// custom map). It is small and read whole; its hash is in the content hash
+// like every other file's. The lookup is the client's own walk from its
+// search root, never a look at content.files: hash_files does not enter a
+// junction or a folder link, but the client's walk starts inside zone\ when
+// zone\ is one.
 void read_pool_file(installed_content &content,
                     const std::filesystem::path &folder, content_layout layout,
                     diagnostics &diags) {
-  // Most mods have none: only a folder holding one of the names somewhere is
-  // walked again, in the client's order.
-  const bool named = std::ranges::any_of(content.files, [](const auto &file) {
-    const std::string_view name =
-        std::string_view(file).substr(file.rfind('/') + 1);
-    return std::ranges::find(pool_file_names, name) !=
-           std::end(pool_file_names);
-  });
-  if (!named) {
-    return;
-  }
   const std::filesystem::path base =
       content.path.empty() ? folder : content.path;
   const auto file = find_pool_file(pool_search_root(base, layout));
   if (!file) {
     return;
   }
-  content.pool_file = relative_name(base, *file);
+  // Lexically: the walk built the path under base, and std::filesystem::
+  // relative would resolve a zone\ junction to its target first.
+  content.pool_file = utf8(file->lexically_relative(base).generic_u8string());
+  const std::string where = content.folder + "/" + content.pool_file;
   std::error_code ec;
   const std::uintmax_t size = std::filesystem::file_size(*file, ec);
   if (!ec && size > max_pool_file_bytes) {
-    diags.warning("catalog.pools.too_big",
-                  content.folder + "/" + content.pool_file,
+    content.pool_file_unread = true;
+    diags.warning("catalog.pools.too_big", where,
                   content.folder + ": " + content.pool_file + " holds " +
                       std::to_string(size) +
                       " bytes, more than a pool file needs, so Xerces did "
-                      "not read it; the game reads it whole.");
+                      "not read it and does not know which pools it raises; "
+                      "the game reads it whole.");
     return;
   }
-  content.pool_limits = parse_pool_limits(read_text(*file));
+  std::optional<std::string> text =
+      ec ? std::nullopt : read_text_of_size(*file, size);
+  if (!text) {
+    content.pool_file_unread = true;
+    diags.warning("catalog.pools.unreadable", where,
+                  content.folder + ": " + content.pool_file +
+                      " could not be read (another program may hold it "
+                      "open), so Xerces does not know which pools it "
+                      "raises. Close that program and scan again.");
+    return;
+  }
+  content.pool_limits = parse_pool_limits(std::move(*text));
 }
 } // namespace
 
@@ -362,9 +387,8 @@ installed_content load_mod_folder(const std::filesystem::path &folder,
                                   diagnostics &diags, hash_cache *cache,
                                   content_layout layout) {
   installed_content content = load_content(folder, taken_ids, diags, cache);
-  if (content.info.kind == content_kind::mod) {
-    read_pool_file(content, folder, layout, diags);
-  }
+  // Mods and maps alike: the client reads a map's file when the map loads.
+  read_pool_file(content, folder, layout, diags);
   return content;
 }
 

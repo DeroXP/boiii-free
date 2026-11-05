@@ -384,8 +384,9 @@ int cmd_mods_list(const arguments &args) {
   return scan->diags.has_errors() ? exit_failed : exit_ok;
 }
 
-// The asset pools the stack's pool files raise above the client's default
-// (DESIGN.md 5.4 step 4), and the ones they ask for that cannot grow.
+// The asset pools the pool files of the stack and the map raise above the
+// client's default (DESIGN.md 5.4 step 4), the ones they ask for that cannot
+// grow, and the files that were not read.
 void print_pools(const plan &p) {
   const auto default_text = [](const pool_need &need) {
     return need.default_size ? std::to_string(*need.default_size)
@@ -400,9 +401,11 @@ void print_pools(const plan &p) {
     }
   }
   if (raised.empty()) {
-    std::cout << "  asset pools: the stack raises none\n";
+    std::cout << "  asset pools: the plan raises none"
+              << (p.pools.stack_unread.empty() ? "" : " that Xerces could read")
+              << "\n";
   } else {
-    std::cout << "  asset pools the stack raises"
+    std::cout << "  asset pools the plan raises"
               << (p.pools.enabled
                       ? ""
                       : " (launcher_settings.json turns the client's own "
@@ -418,17 +421,29 @@ void print_pools(const plan &p) {
   for (const pool_need *need : fixed) {
     std::cout << "  " << find_asset_pool(need->type)->label << ": " << need->mod
               << " asks for " << need->size
-              << ", but the engine sizes this pool itself; the client "
-                 "cannot grow it\n";
+              << ", but the client never grows this pool\n";
   }
+  for (const std::string &id : p.pools.stack_unread) {
+    std::cout << "  asset pools of " << id
+              << " unknown: Xerces did not read its pool file (too large, "
+                 "or held open by another program); the game reads it\n";
+  }
+  // Over the catalog scanned, which is one --mods-dir, not everything the
+  // game has installed.
   std::size_t installed = 0;
   for (const auto &need : p.pools.installed) {
     installed += need.raises ? 1 : 0;
   }
   if (installed > 0) {
-    std::cout << "  every installed mod together raises " << installed
-              << " asset pool" << (installed == 1 ? "" : "s")
+    std::cout << "  every mod and map in --mods-dir together raises "
+              << installed << " asset pool" << (installed == 1 ? "" : "s")
               << " (asset_pools.installed in --json)\n";
+  }
+  if (!p.pools.installed_unread.empty()) {
+    std::cout << "  " << p.pools.installed_unread.size() << " pool file"
+              << (p.pools.installed_unread.size() == 1 ? "" : "s")
+              << " in --mods-dir not read (asset_pools.installed_unread in "
+                 "--json)\n";
   }
 }
 

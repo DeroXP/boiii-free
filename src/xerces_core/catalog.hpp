@@ -81,7 +81,7 @@ struct scan_options {
   // reports scan.cancelled.
   const std::atomic<bool> *cancel = nullptr;
   // Where the folders come from, which decides where the client looks for a
-  // mod's asset pool file (asset_limits.hpp).
+  // mod's or map's asset pool file (asset_limits.hpp).
   content_layout layout = content_layout::game_folder;
 };
 
@@ -94,9 +94,9 @@ catalog_scan scan_mods_directory(const std::filesystem::path &directory,
 content_layout layout_of_directory(const std::filesystem::path &directory);
 
 // One mod folder: its xerces.mod.json, or a synthesized legacy manifest. For
-// a mod, also the asset pool file the client would read (pool_file,
-// pool_limits); one larger than max_pool_file_bytes is left unread with a
-// warning.
+// a mod or map, also the asset pool file the client would read (pool_file,
+// pool_limits); one larger than max_pool_file_bytes, or one that cannot be
+// read, is marked pool_file_unread, with a warning.
 installed_content
 load_mod_folder(const std::filesystem::path &folder,
                 const std::set<std::string> &taken_ids, diagnostics &diags,

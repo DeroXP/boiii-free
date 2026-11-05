@@ -1,11 +1,15 @@
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <string_view>
+#include <vector>
 
 #include <Windows.h>
+#include <winioctl.h>
 
 #include "harness.hpp"
 
@@ -63,6 +67,45 @@ std::filesystem::path fixtures_dir() {
 std::string read_file(const std::filesystem::path &path) {
   std::ifstream in(path, std::ios::binary);
   return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+bool make_junction(const std::filesystem::path &link,
+                   const std::filesystem::path &target,
+                   const std::filesystem::path &shown) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  fs::create_directories(link, ec);
+  const std::wstring substitute = L"\\??\\" + fs::absolute(target).native();
+  const std::wstring print =
+      (shown.empty() ? fs::absolute(target) : shown).native();
+  const std::size_t names = (substitute.size() + 1 + print.size() + 1) * 2;
+  std::vector<unsigned char> data(16 + names, 0);
+  const auto put16 = [&](std::size_t at, std::size_t value) {
+    const auto word = std::uint16_t(value);
+    std::memcpy(data.data() + at, &word, sizeof(word));
+  };
+  const std::uint32_t tag = IO_REPARSE_TAG_MOUNT_POINT;
+  std::memcpy(data.data(), &tag, sizeof(tag));
+  put16(4, 8 + names);                    // data length after the header
+  put16(8, 0);                            // substitute name offset
+  put16(10, substitute.size() * 2);       // and length
+  put16(12, (substitute.size() + 1) * 2); // print name offset
+  put16(14, print.size() * 2);            // and length
+  std::memcpy(data.data() + 16, substitute.data(), substitute.size() * 2);
+  std::memcpy(data.data() + 16 + (substitute.size() + 1) * 2, print.data(),
+              print.size() * 2);
+  const HANDLE dir = CreateFileW(
+      link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+      FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+  if (dir == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  DWORD bytes = 0;
+  const BOOL ok =
+      DeviceIoControl(dir, FSCTL_SET_REPARSE_POINT, data.data(),
+                      DWORD(data.size()), nullptr, 0, &bytes, nullptr);
+  CloseHandle(dir);
+  return ok != FALSE;
 }
 } // namespace xerces_tests
 

@@ -22,7 +22,11 @@
 #include <xerces_core/game_files.hpp>
 #include <xerces_core/planner.hpp>
 
+#define NOMINMAX
+#include <Windows.h>
+
 using namespace xerces_core;
+using xerces_tests::make_junction;
 namespace fs = std::filesystem;
 
 namespace {
@@ -517,7 +521,7 @@ TEST_CASE("pools: the file is found where the client looks") {
   fs::remove_all(dir);
 }
 
-TEST_CASE("pools: the catalog reads each mod's pool file, maps' never") {
+TEST_CASE("pools: the catalog reads each mod's and map's pool file") {
   const fs::path dir = fresh_dir("catalog");
   const fs::path mods = dir / "mods";
   const std::string file = "// T7Recharged pools\r\n"
@@ -534,7 +538,8 @@ TEST_CASE("pools: the catalog reads each mod's pool file, maps' never") {
               R"({"Title":"Plain","PublisherID":"222","Type":"mod"})");
   write_bytes(mods / "map" / "zone" / "workshop.json",
               R"({"Title":"Map","PublisherID":"333","Type":"map"})");
-  write_bytes(mods / "map" / "zone" / "assetlimits.txt", file);
+  write_bytes(mods / "map" / "zone" / "assetlimits.txt",
+              header + "23 weapon 1536 6000\n");
 
   const catalog_scan scan = scan_mods_directory(mods);
   REQUIRE_EQ(scan.catalog.size(), std::size_t{3});
@@ -549,13 +554,17 @@ TEST_CASE("pools: the catalog reads each mod's pool file, maps' never") {
   const installed_content &big = find("ws.111");
   CHECK_EQ(big.pool_file, std::string("zone/assetlimits.txt"));
   CHECK_EQ(big.pool_limits, (limits{{23, 4096}, {38, 8000}}));
+  CHECK(!big.pool_file_unread);
   // The pool file is hashed like any other file, and only once.
   CHECK_EQ(big.content_hash, content_hash_of(read_files(big.path)));
   CHECK(find("ws.222").pool_file.empty());
   CHECK(find("ws.222").pool_limits.empty());
-  // The client reads pool files only when it loads a mod.
-  CHECK(find("ws.333").pool_file.empty());
-  CHECK(find("ws.333").pool_limits.empty());
+  // A map's too: UGC_LoadUsermapByPublisherId_Impl reads it when the map
+  // loads, from usermaps\<name>\zone (or the Workshop item folder).
+  const installed_content &map = find("ws.333");
+  CHECK(map.info.kind == content_kind::map);
+  CHECK_EQ(map.pool_file, std::string("zone/assetlimits.txt"));
+  CHECK_EQ(map.pool_limits, (limits{{23, 6000}}));
 
   // A Workshop item: the client walks the item folder itself, and the
   // root's assetpools.txt is listed before the zone folder.
@@ -566,6 +575,9 @@ TEST_CASE("pools: the catalog reads each mod's pool file, maps' never") {
     if (item.info.id == "ws.111") {
       CHECK_EQ(item.pool_file, std::string("assetpools.txt"));
       CHECK_EQ(item.pool_limits, (limits{{23, 99999}}));
+    } else if (item.info.id == "ws.333") {
+      CHECK_EQ(item.pool_file, std::string("zone/assetlimits.txt"));
+      CHECK_EQ(item.pool_limits, (limits{{23, 6000}}));
     }
   }
   CHECK(layout_of_directory(fs::path("D:/Steam/steamapps/workshop/content/"
@@ -575,21 +587,65 @@ TEST_CASE("pools: the catalog reads each mod's pool file, maps' never") {
   CHECK(layout_of_directory(fs::path("D:/Games/BO3/mods")) ==
         content_layout::game_folder);
 
-  // An oversized file is left unread, with a warning.
+  // An oversized file is left unread, with a warning, and marked so: what
+  // it asks for is unknown, not nothing (the client reads it whole).
   write_bytes(mods / "plain" / "zone" / "assetpools.txt",
               header + std::string(max_pool_file_bytes, ' ') + "\n23 1\n");
   const catalog_scan large = scan_mods_directory(mods);
-  bool warned = false;
-  for (const auto &item : large.diags.items()) {
-    warned = warned || item.code == "catalog.pools.too_big";
-  }
-  CHECK(warned);
+  CHECK(large.diags.has("catalog.pools.too_big"));
   for (const auto &item : large.catalog) {
     if (item.info.id == "ws.222") {
       CHECK_EQ(item.pool_file, std::string("zone/assetpools.txt"));
       CHECK(item.pool_limits.empty());
+      CHECK(item.pool_file_unread);
+    } else {
+      CHECK(!item.pool_file_unread);
     }
   }
+
+  // A file another program holds open with no sharing cannot be read: also
+  // unread, never "asks for nothing".
+  {
+    const HANDLE held = CreateFileW(
+        (mods / "big" / "zone" / "assetlimits.txt").c_str(), GENERIC_READ, 0,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    REQUIRE(held != INVALID_HANDLE_VALUE);
+    const catalog_scan locked = scan_mods_directory(mods);
+    CloseHandle(held);
+    CHECK(locked.diags.has("catalog.pools.unreadable"));
+    for (const auto &item : locked.catalog) {
+      if (item.info.id == "ws.111") {
+        CHECK_EQ(item.pool_file, std::string("zone/assetlimits.txt"));
+        CHECK(item.pool_limits.empty());
+        CHECK(item.pool_file_unread);
+      }
+    }
+  }
+  fs::remove_all(dir);
+}
+
+TEST_CASE("pools: a zone folder that is a junction is walked as the client "
+          "walks it") {
+  // The client's entry points at <name>\zone when that is a folder, links
+  // followed, and its walk starts inside it; hash_files does not enter a
+  // junction, so the catalog's file list cannot be what decides.
+  const fs::path dir = fresh_dir("junction");
+  const fs::path mods = dir / "mods";
+  write_bytes(mods / "jun" / "workshop.json",
+              R"({"Title":"Jun","PublisherID":"444","Type":"mod"})");
+  write_bytes(dir / "elsewhere" / "core_mod.ff", "ff");
+  write_bytes(dir / "elsewhere" / "assetlimits.txt", header + "23 9000\n");
+  REQUIRE(make_junction(mods / "jun" / "zone", dir / "elsewhere"));
+  const catalog_scan scan = scan_mods_directory(mods);
+  REQUIRE_EQ(scan.catalog.size(), std::size_t{1});
+  const installed_content &item = scan.catalog[0];
+  CHECK_EQ(item.info.id, std::string("ws.444"));
+  for (const std::string &name : item.files) {
+    CHECK(!name.starts_with("zone/")); // the scan's list stays outside
+  }
+  CHECK_EQ(item.pool_file, std::string("zone/assetlimits.txt"));
+  CHECK_EQ(item.pool_limits, (limits{{23, 9000}}));
+  fs::remove(mods / "jun" / "zone"); // the junction, not what it points at
   fs::remove_all(dir);
 }
 
@@ -617,37 +673,56 @@ plan_request pool_request(std::vector<std::string> mods) {
 }
 } // namespace
 
-TEST_CASE("pools: the plan reports its stack's pools and every mod's") {
-  installed_content map = pool_mod("some.map", "1.0.0", {{23, 1 << 20}});
+TEST_CASE("pools: the plan reports its stack's and map's pools and every "
+          "item's") {
+  // The map's file counts: the client applies it when the map loads.
+  installed_content map =
+      pool_mod("some.map", "1.0.0", {{0x17, 8192}, {0x2F, 0x2000}});
   map.info.kind = content_kind::map;
+  installed_content other_map =
+      pool_mod("other.map", "1.0.0", {{0x51, 0x1000}});
+  other_map.info.kind = content_kind::map;
   const std::vector<installed_content> catalog = {
       pool_mod("a.mod", "1.0.0", {{0x17, 4096}, {0x26, 1000}}),
       pool_mod("b.mod", "2.1.0", {{0x17, 8192}, {0x4, 100}}),
       pool_mod("c.mod", "1.0.0", {{0x17, 16384}, {0x6, 0x8000}}),
-      pool_mod("d.mod", "1.0.0", {{0x17, 16384}}), map};
+      pool_mod("d.mod", "1.0.0", {{0x17, 16384}}),
+      map,
+      other_map};
   plan_request request = pool_request({"b.mod", "a.mod"});
   request.map = "some.map";
   const plan p = resolve_plan(catalog, request);
   REQUIRE(p.ok());
   CHECK(p.pools.enabled);
-  // The stack: a.mod and b.mod only; the map's file is never read.
-  REQUIRE_EQ(p.pools.stack.size(), std::size_t{3});
+  // The stack: a.mod and b.mod, then the map, which loads last.
+  REQUIRE_EQ(p.pools.stack.size(), std::size_t{4});
   CHECK_EQ(p.pools.stack[0].type, 0x4);
   CHECK(!p.pools.stack[0].raises);
   CHECK_EQ(p.pools.stack[1].type, 0x17);
   CHECK_EQ(p.pools.stack[1].size, 8192u);
+  // A tie with the map names the mod: mods come first.
   CHECK_EQ(p.pools.stack[1].mod, std::string("b.mod"));
   CHECK_EQ(p.pools.stack[1].default_size.value_or(0), 0x600u);
   CHECK(p.pools.stack[1].raises);
   CHECK_EQ(p.pools.stack[2].type, 0x26);
   CHECK(!p.pools.stack[2].raises); // 1000 is below FX's 0x7D0
-  // Every installed mod, the map left out; a tie names the lowest id.
-  REQUIRE_EQ(p.pools.installed.size(), std::size_t{4});
+  CHECK_EQ(p.pools.stack[3].type, 0x2F);
+  CHECK_EQ(p.pools.stack[3].size, 0x2000u);
+  CHECK_EQ(p.pools.stack[3].mod, std::string("some.map"));
+  CHECK(p.pools.stack[3].raises); // above RAWFILE's 0x1388
+  CHECK(p.pools.stack_unread.empty());
+  // Every installed mod and map; a tie names the lowest id.
+  REQUIRE_EQ(p.pools.installed.size(), std::size_t{6});
+  CHECK_EQ(p.pools.installed[1].type, 0x6);
+  CHECK(p.pools.installed[1].raises);
   CHECK_EQ(p.pools.installed[2].type, 0x17);
   CHECK_EQ(p.pools.installed[2].size, 16384u);
   CHECK_EQ(p.pools.installed[2].mod, std::string("c.mod"));
-  CHECK_EQ(p.pools.installed[1].type, 0x6);
-  CHECK(p.pools.installed[1].raises);
+  CHECK_EQ(p.pools.installed[4].type, 0x2F);
+  CHECK_EQ(p.pools.installed[4].mod, std::string("some.map"));
+  CHECK_EQ(p.pools.installed[5].type, 0x51);
+  CHECK_EQ(p.pools.installed[5].mod, std::string("other.map"));
+  CHECK(p.pools.installed_unread.empty());
 
   const std::string text = plan_to_json(p);
   CHECK(text.find(R"("asset_pools":{"enabled":true,"installed":[)") !=
@@ -656,6 +731,8 @@ TEST_CASE("pools: the plan reports its stack's pools and every mod's") {
                   R"("mod":"b.mod","name":"WEAPON","raises":true,)"
                   R"("setting_key":"ap_weapon","size":8192,"type":23})") !=
         std::string::npos);
+  CHECK(text.find(R"("installed_unread":[])") != std::string::npos);
+  CHECK(text.find(R"("stack_unread":[])") != std::string::npos);
 
   // launcher_settings.json changes the defaults, never the ids.
   plan_request off = request;
@@ -670,24 +747,63 @@ TEST_CASE("pools: the plan reports its stack's pools and every mod's") {
   CHECK_EQ(q.canonical, p.canonical);
 }
 
+TEST_CASE("pools: the plan names pool files Xerces did not read") {
+  // Too large or held open: what they ask for is unknown, so the report says
+  // so instead of counting them as asking for nothing.
+  installed_content a = pool_mod("a.mod", "1.0.0");
+  a.pool_file = "zone/assetlimits.txt";
+  a.pool_file_unread = true;
+  installed_content map = pool_mod("some.map", "1.0.0");
+  map.info.kind = content_kind::map;
+  map.pool_file = "zone/assetpools.txt";
+  map.pool_file_unread = true;
+  installed_content z = pool_mod("z.mod", "1.0.0");
+  z.pool_file_unread = true;
+  installed_content z2 = pool_mod("z.mod", "1.1.0");
+  z2.pool_file_unread = true;
+  const std::vector<installed_content> catalog = {
+      z, a, pool_mod("b.mod", "2.1.0", {{0x17, 8192}}), map, z2};
+  plan_request request = pool_request({"b.mod", "a.mod"});
+  request.map = "some.map";
+  const plan p = resolve_plan(catalog, request);
+  REQUIRE(p.ok());
+  REQUIRE_EQ(p.pools.stack.size(), std::size_t{1});
+  CHECK_EQ(p.pools.stack_unread,
+           (std::vector<std::string>{"a.mod", "some.map"}));
+  CHECK_EQ(p.pools.installed_unread,
+           (std::vector<std::string>{"a.mod", "some.map", "z.mod"}));
+  const std::string text = plan_to_json(p);
+  CHECK(text.find(R"("installed_unread":["a.mod","some.map","z.mod"])") !=
+        std::string::npos);
+  CHECK(text.find(R"("stack_unread":["a.mod","some.map"])") !=
+        std::string::npos);
+}
+
 TEST_CASE("pools: pool limits leave plan_id and content_id alone") {
   // The literal ids come from the planner before pool limits existed: the
-  // same two mods, now with pool files, plus an installed mod outside the
-  // plan and a launcher_settings.json, must give the same ones.
+  // same two mods, now with pool files (one of them unread), plus installed
+  // items outside the plan (a map with a pool file among them) and a
+  // launcher_settings.json, must give the same ones.
   const char *plan_id = "sha256:540c19dd5688eaf8e68a8492ddaea0bb"
                         "c864682c1f0cfd1d7c9a13baea519dd3";
   const char *content_id = "sha256:d32ba51e7348069db500fc921052a660"
                            "261dc8df31dfd1af3558626210c057e5";
-  const std::vector<installed_content> catalog = {
+  installed_content unread = pool_mod("unread.mod", "1.0.0");
+  unread.pool_file_unread = true;
+  installed_content map = pool_mod("some.map", "1.0.0", {{0x2F, 0x2000}});
+  map.info.kind = content_kind::map;
+  std::vector<installed_content> catalog = {
       pool_mod("a.mod", "1.0.0", {{0x17, 4096}}),
       pool_mod("b.mod", "2.1.0", {{0x26, 9000}}),
-      pool_mod("other.mod", "1.0.0", {{0x4, 99999}})};
+      pool_mod("other.mod", "1.0.0", {{0x4, 99999}}), unread, map};
+  catalog[0].pool_file_unread = true;
   plan_request request = pool_request({"b.mod", "a.mod"});
   request.launcher_settings = R"({"ap_weapon":"8000"})";
   const plan p = resolve_plan(catalog, request);
   CHECK_EQ(p.plan_id, std::string(plan_id));
   CHECK_EQ(p.content_id, std::string(content_id));
-  CHECK_EQ(p.pools.installed.size(), std::size_t{3});
+  CHECK_EQ(p.pools.installed.size(), std::size_t{4});
+  CHECK_EQ(p.pools.stack_unread, std::vector<std::string>{"a.mod"});
   // And without any pool data: the same.
   const plan bare =
       resolve_plan({pool_mod("a.mod", "1.0.0"), pool_mod("b.mod", "2.1.0")},

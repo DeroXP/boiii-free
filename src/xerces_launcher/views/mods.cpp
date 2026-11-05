@@ -961,11 +961,11 @@ private:
   }
 
   // ------------------------------------------------------------ details
-  // The asset pools the mod's pool file raises above the client's default
-  // (DESIGN.md 5.4 step 4, xerces_core/asset_limits.hpp). Mods only: the
-  // client never reads a map's file. The labels are upstream launcher's
-  // pool names. Everything here reaches the screen through data bindings,
-  // which set plain text, never RML.
+  // The asset pools the mod's or map's pool file raises above the client's
+  // default (DESIGN.md 5.4 step 4, xerces_core/asset_limits.hpp); the client
+  // reads a mod's file when the mod loads and a map's when the map loads.
+  // The labels are upstream launcher's pool names. Everything here reaches
+  // the screen through data bindings, which set plain text, never RML.
   void build_pools(const xc::installed_content &item) {
     d_pools_on_ = true;
     if (item.pool_file.empty()) {
@@ -974,6 +974,12 @@ private:
       return;
     }
     d_pools_.push_back({owner_->tr("File"), item.pool_file});
+    if (item.pool_file_unread) {
+      d_pools_note_ = owner_->tr(
+          "Xerces could not read it (too large, or held open by another "
+          "program), so which pools it raises is unknown.");
+      return;
+    }
     const xc::pool_settings settings = svc().pool_settings();
     const xc::mod_pool_limits limits{item.info.id, item.pool_limits};
     // The pools it raises (its size, the default), then the fixed ones it
@@ -993,10 +999,7 @@ private:
                                       std::to_string(*need.default_size)
                                 : owner_->tr("default: the game's own size"))});
       } else if (need.fixed) {
-        fixed.push_back(
-            {label,
-             size + owner_->tr(
-                        "the game sizes this pool itself; it cannot grow")});
+        fixed.push_back({label, size + owner_->tr("this pool never grows")});
       }
     }
     d_pools_.insert(d_pools_.end(), fixed.begin(), fixed.end());
@@ -1151,9 +1154,7 @@ private:
                  setting.default_json +
                  (setting.dvar.empty() ? "" : " \xC2\xB7 " + setting.dvar)});
       }
-      if (!is_map) {
-        build_pools(*item);
-      }
+      build_pools(*item);
     }
     const std::string unknown =
         !item ? owner_->tr("Unknown: it is not installed.")
