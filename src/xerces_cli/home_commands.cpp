@@ -115,12 +115,11 @@ struct home_view {
   catalog_state catalog;
 };
 
-// <home> as Xerces.exe reads it: launcher.json, then (when asked) the game,
-// its pre-flight check and the catalog with the hash cache.
-home_view open_home(const arguments &args, bool detect, bool preflight,
-                    bool scan) {
-  home_view out;
-  out.paths = find_paths(home_override(args));
+// launcher.json as it is on disk now.
+void read_config(home_view &out) {
+  out.config = launcher_config{};
+  out.config_found = false;
+  out.config_error.clear();
   if (const auto text = read_text_file(out.paths.config_file())) {
     out.config_found = true;
     auto parsed = parse_launcher_config(*text);
@@ -131,6 +130,15 @@ home_view open_home(const arguments &args, bool detect, bool preflight,
     }
     out.config = std::move(parsed.value);
   }
+}
+
+// <home> as Xerces.exe reads it: launcher.json, then (when asked) the game,
+// its pre-flight check and the catalog with the hash cache.
+home_view open_home(const arguments &args, bool detect, bool preflight,
+                    bool scan) {
+  home_view out;
+  out.paths = find_paths(home_override(args));
+  read_config(out);
   if (detect || scan) {
     out.game =
         detect_game_state(out.config.game_dir, out.paths.compat, preflight);
@@ -165,17 +173,23 @@ std::string two_digits(std::size_t value) {
   return (value < 10 ? "0" : "") + std::to_string(value);
 }
 
+void say_launcher_runs(const fs::path &home) {
+  std::cerr << "Xerces.exe is open on " << utf8(home)
+            << " (or another xerces_cli is changing its config). Xerces.exe "
+               "keeps the config in memory and would overwrite this change "
+               "the next time it saves. Close it first, or make the change "
+               "in Xerces.exe.\n";
+}
+
 // Xerces.exe keeps the config in memory and writes all of it when it saves,
-// so a change made here while it runs would be lost.
+// so a change made here while it runs would be lost. A quick look before any
+// slow work; the change itself is made under launcher_home_lock.
 bool refuse_while_launcher_runs(const arguments &args) {
   const fs::path home = find_home(home_override(args));
   if (!launcher_running(home)) {
     return false;
   }
-  std::cerr << "Xerces.exe is open on " << utf8(home)
-            << ". It keeps the config in memory and would overwrite this "
-               "change the next time it saves. Close it first, or make the "
-               "change in Xerces.exe.\n";
+  say_launcher_runs(home);
   return true;
 }
 
@@ -254,6 +268,9 @@ std::size_t parse_count(const std::string &option, const std::string &text) {
 
 // ------------------------------------------------------------- mods list
 int cmd_mods_home_list(const arguments &args) {
+  if (!accept_only(args, 2, {"--home", "--mode"}, {"--json"})) {
+    return exit_error;
+  }
   const home_view home = open_home(args, true, false, true);
   const std::string mode = mode_of(args, home.config);
   const mode_profile *profile = profile_of(home.config, mode);
@@ -334,6 +351,9 @@ int cmd_mods_home_list(const arguments &args) {
 
 // ------------------------------------------------------------- mods info
 int cmd_mods_info(const arguments &args) {
+  if (!accept_only(args, 3, {"--home", "--mode"}, {"--json"})) {
+    return exit_error;
+  }
   const std::string given = args.word(2);
   if (given.empty()) {
     std::cerr << "mods info needs an id (as mods list shows it, or a "
@@ -543,6 +563,12 @@ int cmd_mods_info(const arguments &args) {
 // bottom, a map becomes the mode's map, and any edit detaches the profile
 // from an applied pack (its pins go) and moves the saved positions with it.
 int cmd_mods_edit(const arguments &args, const std::string &action) {
+  const bool order = action == "order";
+  if (!(order ? accept_only(args, 3, {"--home", "--mode", "--to"},
+                            {"--up", "--down"})
+              : accept_only(args, 3, {"--home", "--mode"}, {}))) {
+    return exit_error;
+  }
   const std::string given = args.word(2);
   if (given.empty()) {
     std::cerr << "mods " << action << " needs an id.\n";
@@ -550,7 +576,7 @@ int cmd_mods_edit(const arguments &args, const std::string &action) {
   }
   const bool up = args.has("--up"), down = args.has("--down");
   const auto to = args.get("--to");
-  if (action == "order" && (int(up) + int(down) + int(to.has_value())) != 1) {
+  if (order && (int(up) + int(down) + int(to.has_value())) != 1) {
     std::cerr << "mods order needs one of --up, --down or --to <n>.\n";
     return exit_error;
   }
@@ -558,9 +584,19 @@ int cmd_mods_edit(const arguments &args, const std::string &action) {
     return exit_error;
   }
   // Switching on checks the mod is installed and made for the mode, as the
-  // Mods screen only offers those; that needs the catalog.
+  // Mods screen only offers those; that needs the catalog, and its first scan
+  // can take minutes.
   const bool scan = action == "enable";
   home_view home = open_home(args, scan, false, scan);
+  // From the read to the write, the launcher's mutex: a Xerces.exe opened
+  // during the scan holds it and the edit is refused; one opened from now on
+  // waits until launcher.json is written, then reads the new one.
+  const launcher_home_lock lock(home.paths.home);
+  if (!lock.held()) {
+    say_launcher_runs(home.paths.home);
+    return exit_error;
+  }
+  read_config(home); // as it is now, not as it was before the scan
   if (refuse_broken_config(home)) {
     return exit_error;
   }
@@ -668,13 +704,25 @@ int cmd_mods_edit(const arguments &args, const std::string &action) {
 // Home's Launch: the mode's profile resolved as Xerces.exe resolves it, and
 // the game started the same way (xerces_core::launch_game).
 int cmd_plan_apply(const arguments &args) {
+  // Anything this command does not know stops it here: a misspelled
+  // --dry-launch must not leave a real launch.
+  if (!accept_only(args, 2, {"--home", "--mode"},
+                   {"--vanilla", "--mods-off", "--dry-launch", "--json"})) {
+    return exit_error;
+  }
   const bool vanilla = args.has("--vanilla");
   const bool mods_off = args.has("--mods-off");
   if (vanilla && mods_off) {
     std::cerr << "Give --vanilla or --mods-off, not both.\n";
     return exit_error;
   }
-  const bool dry = args.has("--dry-launch");
+  // XERCES_DRY_LAUNCH=1 makes Xerces.exe's launches dry; it does the same
+  // here (xerces_core reads it for both).
+  const bool dry_by_environment = dry_launch_from_environment();
+  const bool dry = args.has("--dry-launch") || dry_by_environment;
+  if (dry_by_environment && !args.has("--dry-launch")) {
+    std::cerr << "note: XERCES_DRY_LAUNCH=1, so this is a dry launch.\n";
+  }
   // Vanilla and safe-mode launches load no mods, so need no catalog.
   const bool modded = !vanilla && !mods_off;
   const home_view home = open_home(args, true, true, modded);
@@ -716,8 +764,14 @@ int cmd_plan_apply(const arguments &args) {
   in.mods_off = mods_off;
   in.dry_launch = dry;
   cli_log log(home.paths.logs);
-  const launch_outcome out = launch_game(
-      in, [&] { return game_in_run_folder(home.paths.home); }, log.events());
+  // The run folder shows a game once it reaches post_unpack; a real launch
+  // also looks for its process, there from the start, so a second plan apply
+  // (or one right after Xerces.exe's Launch) does not start another game.
+  const auto running = [&] {
+    return game_in_run_folder(home.paths.home) ||
+           (!dry && game_process_running(home.paths.client));
+  };
+  const launch_outcome out = launch_game(in, running, log.events());
 
   if (args.has("--json")) {
     rapidjson::Document doc(rapidjson::kObjectType);
@@ -765,7 +819,9 @@ int cmd_plan_apply(const arguments &args) {
       }
       print_diagnostics(out.diags);
     }
-    if (!out.command_line.empty()) {
+    // Only for a launch that went ahead: after a refusal it would read as if
+    // the game had started with it (--json still has it).
+    if (!out.command_line.empty() && (out.started || out.dry_run)) {
       std::cout << "command: " << out.command_line << "\n";
     }
     if (!out.plan_file.empty()) {
@@ -789,22 +845,28 @@ int cmd_plan_apply(const arguments &args) {
 // ----------------------------------------------------------- packs apply
 namespace {
 // A share code, a pack file, or a pack in the library (<home>\config\packs)
-// by its id or the start of it.
-pack_result find_pack(const std::string &source, const launcher_paths &paths) {
+// by its id or the start of it; from_library says which.
+struct found_pack {
+  pack_result result;
+  bool from_library = false;
+};
+
+found_pack find_pack(const std::string &source, const launcher_paths &paths) {
   const std::size_t start = source.find_first_not_of(" \t\r\n");
   if (start != std::string::npos &&
       std::string_view(source).substr(start).starts_with(share_code_prefix)) {
-    return decode_share_code(source);
+    return {decode_share_code(source), false};
   }
   std::error_code ec;
   if (fs::is_regular_file(fs::path(source), ec)) {
-    return read_pack_file(fs::path(source));
+    return {read_pack_file(fs::path(source)), false};
   }
   const fs::path folder = paths.config / "packs";
   const pack_library library = read_pack_library(folder);
-  pack_result out;
+  found_pack out;
+  out.from_library = true;
   if (const library_entry *exact = library.find(source)) {
-    out.value = exact->value;
+    out.result.value = exact->value;
     return out;
   }
   const library_entry *match = nullptr;
@@ -818,17 +880,17 @@ pack_result find_pack(const std::string &source, const launcher_paths &paths) {
     }
   }
   if (matches == 1) {
-    out.value = match->value;
+    out.result.value = match->value;
     return out;
   }
-  out.diags.error("pack.source", "",
-                  matches > 1
-                      ? "\"" + source + "\" starts more than one pack id in " +
-                            utf8(folder) + "; give more of it."
-                      : "\"" + source +
-                            "\" is not a pack file, a share code (XRC1.) or "
-                            "a pack id in " +
-                            utf8(folder) + ".");
+  out.result.diags.error(
+      "pack.source", "",
+      matches > 1 ? "\"" + source + "\" starts more than one pack id in " +
+                        utf8(folder) + "; give more of it."
+                  : "\"" + source +
+                        "\" is not a pack file, a share code (XRC1.) or a "
+                        "pack id in " +
+                        utf8(folder) + ".");
   return out;
 }
 } // namespace
@@ -837,6 +899,9 @@ pack_result find_pack(const std::string &source, const launcher_paths &paths) {
 // by the pack (shared code), launcher.json written, then the check of what is
 // installed against the pack.
 int cmd_packs_apply(const arguments &args) {
+  if (!accept_only(args, 3, {"--home", "--mode"}, {"--json"})) {
+    return exit_error;
+  }
   const std::string source = args.word(2);
   if (source.empty()) {
     std::cerr << "packs apply needs a pack file, a share code or a pack id.\n";
@@ -849,12 +914,12 @@ int cmd_packs_apply(const arguments &args) {
   if (refuse_broken_config(home)) {
     return exit_error;
   }
-  const pack_result loaded = find_pack(source, home.paths);
-  if (!loaded.ok()) {
-    print_diagnostics(loaded.diags);
+  const found_pack loaded = find_pack(source, home.paths);
+  if (!loaded.result.ok()) {
+    print_diagnostics(loaded.result.diags);
     return exit_failed;
   }
-  const pack &p = loaded.value;
+  pack p = loaded.result.value;
   const std::string mode = args.get("--mode").value_or(p.mode);
   if (!valid_mode(mode)) {
     throw std::invalid_argument("Modes are zm, mp and cp, not \"" + mode +
@@ -865,8 +930,36 @@ int cmd_packs_apply(const arguments &args) {
               << " pack; it goes to the " << mode_name(mode)
               << " profile as asked.\n";
   }
+  // The catalog for the check afterwards; its first scan can take minutes.
   home.game = detect_game_state(home.config.game_dir, home.paths.compat, false);
   home.catalog = scan_catalog(home.game, home.paths.cache / "hashes.txt");
+
+  // From the read to the write, the launcher's mutex (see cmd_mods_edit).
+  const launcher_home_lock lock(home.paths.home);
+  if (!lock.held()) {
+    say_launcher_runs(home.paths.home);
+    return exit_error;
+  }
+  read_config(home); // as it is now, not as it was before the scan
+  if (refuse_broken_config(home)) {
+    return exit_error;
+  }
+  // A file or a share code is placed against the library as the Packs
+  // screen's import places it (place_import): when its id already names a
+  // different pack of the player's, it is applied under a fresh id, so the
+  // profile's pack_id never points at a library pack it does not hold.
+  std::string renumbered_from;
+  if (!loaded.from_library) {
+    const fs::path folder = home.paths.config / "packs";
+    import_placement placed = place_import(read_pack_library(folder), p);
+    if (placed.kind == import_kind::renumbered) {
+      renumbered_from = p.id;
+      std::cerr << "note: a different pack in " << utf8(folder)
+                << " has this pack's id (" << p.id << "), so it is applied as "
+                << placed.value.id << ", as importing it would.\n";
+    }
+    p = std::move(placed.value);
+  }
 
   cli_log log(home.paths.logs);
   const auto backup =
@@ -897,6 +990,7 @@ int cmd_packs_apply(const arguments &args) {
     rapidjson::Document doc(rapidjson::kObjectType);
     auto &alloc = doc.GetAllocator();
     json::set(doc, "pack", p.id, alloc);
+    json::set(doc, "renumbered_from", renumbered_from, alloc);
     json::set(doc, "name", p.name, alloc);
     json::set(doc, "mode", mode, alloc);
     json::set(doc, "ok", ok, alloc);
@@ -952,32 +1046,42 @@ int cmd_packs_apply(const arguments &args) {
 
 // -------------------------------------------------------------- logs tail
 namespace {
-// The bytes of complete lines from offset on, and how far they reach.
-std::pair<std::string, std::size_t> read_new_lines(const fs::path &file,
-                                                   std::size_t offset) {
+// The bytes of complete lines from offset on, and how far they reach;
+// nullopt when the file cannot be opened (it was removed).
+std::optional<std::pair<std::string, std::uint64_t>>
+read_new_lines(const fs::path &file, std::uint64_t offset) {
+  using result = std::pair<std::string, std::uint64_t>;
   std::ifstream in(file, std::ios::binary);
   if (!in) {
-    return {{}, offset};
+    return std::nullopt;
   }
   in.seekg(0, std::ios::end);
-  const auto size = static_cast<std::size_t>(std::streamoff(in.tellg()));
+  const std::streamoff end = in.tellg();
+  if (end < 0) {
+    return std::nullopt;
+  }
+  const auto size = static_cast<std::uint64_t>(end);
   if (size <= offset) {
-    return {{}, size < offset ? 0 : offset};
+    // Shorter than before: it was written again, so from its start.
+    return result{{}, size < offset ? 0 : offset};
   }
   in.seekg(static_cast<std::streamoff>(offset));
-  std::string text(size - offset, '\0');
+  std::string text(static_cast<std::size_t>(size - offset), '\0');
   in.read(text.data(), static_cast<std::streamsize>(text.size()));
   text.resize(static_cast<std::size_t>(in.gcount()));
   const std::size_t last = text.rfind('\n');
   if (last == std::string::npos) {
-    return {{}, offset};
+    return result{{}, offset};
   }
   text.resize(last + 1);
-  return {text, offset + text.size()};
+  return result{text, offset + text.size()};
 }
 } // namespace
 
 int cmd_logs_tail(const arguments &args) {
+  if (!accept_only(args, 2, {"--home", "--role", "--lines"}, {"--follow"})) {
+    return exit_error;
+  }
   const launcher_paths paths = find_paths(home_override(args), false);
   const std::string role = args.get("--role").value_or("");
   if (!role.empty() && role != "launcher" && role != "game" && role != "cli" &&
@@ -994,8 +1098,14 @@ int cmd_logs_tail(const arguments &args) {
     return exit_error;
   }
   std::cerr << "== " << utf8(*file) << "\n";
-  auto [text, offset] = read_new_lines(*file, 0);
-  for (const auto &line : last_lines(text, count)) {
+  // Read back from the end: a long session's log is not read whole for the
+  // last few lines.
+  const auto tail = tail_file(*file, count);
+  if (!tail) {
+    std::cerr << utf8(*file) << " cannot be read.\n";
+    return exit_error;
+  }
+  for (const auto &line : tail->lines) {
     std::cout << format_log_line(line) << "\n";
   }
   std::cout.flush();
@@ -1004,19 +1114,30 @@ int cmd_logs_tail(const arguments &args) {
   }
   // Until Ctrl+C: new lines as they are written, and a newer session of the
   // role (the launcher or game started again) as soon as it appears.
+  std::uint64_t offset = tail->end;
+  bool gone = false;
   for (int tick = 0;; ++tick) {
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
-    auto [more, reached] = read_new_lines(*file, offset);
-    offset = reached;
-    for (const auto &line : last_lines(more, 0)) {
-      std::cout << format_log_line(line) << "\n";
+    if (const auto more = read_new_lines(*file, offset)) {
+      offset = more->second;
+      for (const auto &line : last_lines(more->first, 0)) {
+        std::cout << format_log_line(line) << "\n";
+      }
+      std::cout.flush();
+      gone = false;
+    } else if (!gone) {
+      gone = true;
+      std::cerr << utf8(file->filename())
+                << " was removed; waiting for a newer log.\n";
     }
-    std::cout.flush();
     if (tick % 4 == 3) {
+      // Only a session that started later: when the followed file goes, the
+      // newest one left is an older session, and its events are not new.
       const auto newest = newest_log(paths.logs, role);
-      if (newest && *newest != *file) {
+      if (newest && *newest != *file && log_start(*newest) > log_start(*file)) {
         file = newest;
         offset = 0;
+        gone = false;
         std::cerr << "== " << utf8(*file) << "\n";
       }
     }
@@ -1027,6 +1148,9 @@ int cmd_logs_tail(const arguments &args) {
 // The game's own report from its last start (<home>\cache\
 // signatures-report.json, DESIGN.md 4.3), without a dump.
 int cmd_sig_report(const arguments &args) {
+  if (!accept_only(args, 2, {"--home"}, {"--json"})) {
+    return exit_error;
+  }
   const launcher_paths paths = find_paths(home_override(args), false);
   const fs::path file = paths.cache / "signatures-report.json";
   const auto text = read_text_file(file);

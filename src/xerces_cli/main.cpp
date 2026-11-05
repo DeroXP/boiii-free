@@ -14,7 +14,9 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <streambuf>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <xerces_core/bundle.hpp>
@@ -27,6 +29,7 @@
 #include <xerces_core/json.hpp>
 #include <xerces_core/launcher_home.hpp>
 #include <xerces_core/log.hpp>
+#include <xerces_core/log_tail.hpp>
 #include <xerces_core/manifest.hpp>
 #include <xerces_core/pack.hpp>
 #include <xerces_core/planner.hpp>
@@ -52,21 +55,71 @@ arguments parse_arguments(int argc, char **argv) {
   arguments out;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
+    const std::size_t eq = arg.find('=');
     if (flag_names.contains(arg)) {
       out.flags.insert(arg);
+    } else if (arg.starts_with("--") && eq != std::string::npos &&
+               flag_names.contains(arg.substr(0, eq))) {
+      // Not the flag, and not to be dropped either: "--dry-launch=yes" read
+      // as no flag at all would launch for real.
+      out.errors.push_back(arg.substr(0, eq) + " takes no value: \"" + arg +
+                           "\".");
     } else if (arg.starts_with("--")) {
-      if (const std::size_t eq = arg.find('='); eq != std::string::npos) {
+      if (eq != std::string::npos) {
         out.options[arg.substr(0, eq)].push_back(arg.substr(eq + 1));
-      } else if (i + 1 < argc) {
+      } else if (i + 1 < argc &&
+                 !std::string_view(argv[i + 1]).starts_with("--")) {
         out.options[arg].push_back(argv[++i]);
       } else {
-        out.options[arg].push_back("");
+        // "--home --dry-launch" would make the flag the home, and drop it.
+        out.errors.push_back(arg +
+                             " is not a flag, and as an option it needs a "
+                             "value" +
+                             (i + 1 < argc
+                                  ? std::string(" (write ") + arg +
+                                        "=<value> for one that starts with --)"
+                                  : std::string()) +
+                             ".");
       }
     } else {
       out.words.push_back(arg);
     }
   }
   return out;
+}
+
+bool accept_only(const arguments &args, std::size_t words,
+                 std::initializer_list<std::string_view> options,
+                 std::initializer_list<std::string_view> flags) {
+  std::string command;
+  for (std::size_t i = 0; i < std::min(words, args.words.size()) && i < 2;
+       ++i) {
+    command += (i ? " " : "") + args.words[i];
+  }
+  bool ok = true;
+  for (const auto &[name, values] : args.options) {
+    if (std::ranges::find(options, name) == options.end()) {
+      std::cerr << command << " does not take " << name << ".\n";
+      ok = false;
+    }
+  }
+  for (const auto &flag : args.flags) {
+    if (std::ranges::find(flags, flag) == flags.end()) {
+      std::cerr << command << " does not take " << flag << ".\n";
+      ok = false;
+    }
+  }
+  for (std::size_t i = words; i < args.words.size(); ++i) {
+    std::cerr << command << " does not take \"" << args.words[i] << "\"."
+              << (args.words[i].starts_with("-") ? " Options start with --."
+                                                 : "")
+              << "\n";
+    ok = false;
+  }
+  if (!ok) {
+    std::cerr << "Nothing was done. Try --help.\n";
+  }
+  return ok;
 }
 
 std::string read_text(const fs::path &path) {
@@ -147,9 +200,11 @@ Work on <home> as Xerces.exe does (--home <dir>, else XERCES_HOME, else
                                                    Home's Launch: resolve the
                                                    profile, write the plan file
                                                    and the journal, start the
-                                                   game. --dry-launch writes the
-                                                   plan file, logs and prints
-                                                   the command, starts nothing
+                                                   game. --dry-launch (or
+                                                   XERCES_DRY_LAUNCH=1) writes
+                                                   the plan file, logs and
+                                                   prints the command, starts
+                                                   nothing
   packs apply <file|XRC1.code|pack id> [--mode m] [--json]
                                                    the Packs screen's Apply:
                                                    backup, profile, plan check
@@ -173,6 +228,9 @@ its pipe in <home>\run (--home <dir>, else XERCES_HOME, else
                                                    system), scrubbed; stays local
 
 Not built yet (exit 3): index run, bench run, test run
+
+The commands on <home> refuse, with exit 1 and before doing anything, an
+option or word they do not take; a flag never takes a value (--json=1).
 
 Exit codes: 0 ok, 1 error, 2 validation or conflict failures,
             3 Xerces not running, 4 signature failures.
@@ -972,12 +1030,82 @@ int cmd_sig(const arguments &args, const std::string &action) {
   }
   return all_ok ? exit_ok : exit_signatures;
 }
+namespace {
+// Text output passes through terminal_safe a line at a time: names and
+// messages come from Workshop titles, manifests and logs, and a control
+// sequence in one must not reach the console. --json output is left as it is
+// (rapidjson escapes control characters).
+class safe_output : public std::streambuf {
+public:
+  explicit safe_output(std::ostream &stream)
+      : stream_(stream), target_(stream.rdbuf()) {
+    stream_.rdbuf(this);
+  }
+  ~safe_output() override {
+    emit();
+    target_->pubsync();
+    stream_.rdbuf(target_);
+  }
+  safe_output(const safe_output &) = delete;
+  safe_output &operator=(const safe_output &) = delete;
+
+protected:
+  int_type overflow(int_type c) override {
+    if (traits_type::eq_int_type(c, traits_type::eof())) {
+      return traits_type::not_eof(c);
+    }
+    put(traits_type::to_char_type(c));
+    return c;
+  }
+  std::streamsize xsputn(const char *text, std::streamsize count) override {
+    for (std::streamsize i = 0; i < count; ++i) {
+      put(text[i]);
+    }
+    return count;
+  }
+  int sync() override {
+    emit();
+    return target_->pubsync();
+  }
+
+private:
+  void put(char c) {
+    line_.push_back(c);
+    if (c == '\n') {
+      emit();
+    }
+  }
+  void emit() {
+    if (!line_.empty()) {
+      const std::string safe = terminal_safe(line_);
+      target_->sputn(safe.data(), static_cast<std::streamsize>(safe.size()));
+      line_.clear();
+    }
+  }
+
+  std::ostream &stream_;
+  std::streambuf *target_;
+  std::string line_;
+};
+} // namespace
 } // namespace xerces_cli
 
 using namespace xerces_cli;
 
 int main(int argc, char **argv) {
   const arguments args = parse_arguments(argc, argv);
+  safe_output safe_errors(std::cerr);
+  std::optional<safe_output> safe_text;
+  if (!args.has("--json")) {
+    safe_text.emplace(std::cout);
+  }
+  if (!args.errors.empty()) {
+    for (const auto &error : args.errors) {
+      std::cerr << "error: " << error << "\n";
+    }
+    std::cerr << "Nothing was done. Try --help.\n";
+    return exit_error;
+  }
   if (args.has("--api-version")) {
     std::cout << cli_api_version << "\n";
     return exit_ok;

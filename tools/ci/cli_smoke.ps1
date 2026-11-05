@@ -6,7 +6,8 @@
 
 .DESCRIPTION
   Runs xerces_cli against a fresh home and a copy of a fake game folder (two
-  mods that declare a conflict). The fake game comes from -FakeGame, else
+  mods that declare a conflict, plus a legacy mod with escape sequences in its
+  title written here). The fake game comes from -FakeGame, else
   XERCES_FAKE_GAME, else C:\Users\Ginld\XercesDev\fake-game when it exists;
   without one, or with -Generate, the same layout is written here (CI).
   Everything goes under -WorkDir (default build\cli-smoke), outside AppData.
@@ -66,6 +67,12 @@ $pe[0] = 0x4D; $pe[1] = 0x5A
 [BitConverter]::GetBytes([uint32]0x4550).CopyTo($pe, 0x40)
 [BitConverter]::GetBytes([uint32]0x7E570001).CopyTo($pe, 0x40 + 24 + 64)
 [IO.File]::WriteAllBytes("$game\BlackOps3.exe", $pe)
+# A legacy mod whose Workshop title carries escape sequences (JSON decodes
+# them to real ESC and BEL characters).
+New-Item -ItemType Directory -Force "$game\mods\esc_mod\zone" | Out-Null
+Set-Content -NoNewline -Encoding ascii "$game\mods\esc_mod\zone\workshop.json" `
+  '{"Title":"Esc\u001b[2J Mod\u001b]52;c;aGk=\u0007","PublisherID":"","Type":"mod"}'
+New-Item -ItemType File "$game\mods\esc_mod\zone\core_mod.ff" | Out-Null
 
 # The copy of xerces_cli this test runs: its compat\ is the one next to it,
 # and no game client is.
@@ -131,6 +138,13 @@ try {
   # ------------------------------------------------------- mods: the catalog
   $list = Invoke-Xcli 0 mods list
   Check ($list -match 'test\.conflict_a' -and $list -match 'test\.conflict_b') "mods list shows both fake mods`n$list"
+  # Text output never carries a title's control characters to the console.
+  Check ($list -match 'Esc\?\[2J Mod\?\]52;c;aGk=\?' -and -not $list.Contains($esc) -and -not $list.Contains($bel)) "mods list filters control characters`n$list"
+  $escInfo = Invoke-Xcli 0 mods info local.esc_mod
+  Check ($escInfo -match 'Esc\?\[2J Mod' -and -not $escInfo.Contains($esc)) "mods info filters control characters`n$escInfo"
+  # --json keeps the title, escaped.
+  $escJson = Invoke-XcliJson 0 mods info local.esc_mod --json
+  Check ($escJson.name -eq "Esc$esc[2J Mod$esc]52;c;aGk=$bel") "mods info --json keeps the title: $($escJson.name)"
 
   # ------------------------------------------- mods: the Mods screen's edits
   Invoke-Xcli 0 mods enable test.conflict_a | Out-Null
@@ -144,6 +158,10 @@ try {
   Invoke-Xcli 0 mods order test.conflict_b --to 2 | Out-Null
   Check ((Mods) -eq 'test.conflict_a,test.conflict_b') "order --to 2: $(Mods)"
   Invoke-Xcli 1 mods order test.conflict_b | Out-Null # no direction
+  # Anything a command does not take stops it before it changes anything.
+  Invoke-Xcli 1 mods disable test.conflict_b extra | Out-Null
+  Invoke-Xcli 1 mods order test.conflict_b --upp | Out-Null
+  Check ((Mods) -eq 'test.conflict_a,test.conflict_b') "refused edits changed nothing: $(Mods)"
 
   # The declared conflict blocks the plan: exit 2, nothing launched.
   Invoke-Xcli 2 plan apply --dry-launch | Out-Null
@@ -167,7 +185,21 @@ try {
   Check ($json.dry_run -and -not $json.started -and $json.command_line -match 'fs_game conflict_a') "plan apply --json`n$($json | ConvertTo-Json)"
   $vanilla = Invoke-Xcli 0 plan apply --vanilla --dry-launch
   Check ($vanilla -match 'command: -launch -nointro(\r?\n|$)') "vanilla dry launch`n$vanilla"
+  # XERCES_DRY_LAUNCH=1 makes it dry without the flag, as it does Xerces.exe.
+  $byEnv = Invoke-Xcli 0 plan apply
+  Check ($byEnv -match 'XERCES_DRY_LAUNCH=1, so this is a dry launch' -and $byEnv -match 'command: -launch') "XERCES_DRY_LAUNCH=1 plan apply`n$byEnv"
+  Check (-not (Test-Path "$homeDir\logs\journal.json")) 'XERCES_DRY_LAUNCH=1 wrote no journal'
+
+  # A misspelled or misplaced --dry-launch is refused, never dropped.
   $plans = PlanFiles
+  foreach ($bad in @(@('--dry-run'), @('--dry-launch=yes'), @('-dry-launch'), @('dry-launch'),
+                     @('--vanilla', '--home', '--dry-launch'), @('--json=1'))) {
+    $refused = Invoke-Xcli 1 plan apply @bad
+    Check ($refused -match 'Nothing was done') "plan apply $($bad -join ' ') is refused`n$refused"
+  }
+  Check ((PlanFiles) -eq $plans) 'refused plan applies wrote no plan file'
+  $follow = Invoke-Xcli 1 logs tail --follow=yes
+  Check ($follow -match '--follow takes no value') "logs tail --follow=yes is refused`n$follow"
 
   # Xerces.exe's pre-flight: the build's own xerces_cli reads the repository's
   # compat\builds.json, where the fake game is unknown, and a dry launch is
@@ -175,7 +207,7 @@ try {
   $script:exe = $repoCli
   $unknown = Invoke-Xcli 1 plan apply --dry-launch
   $script:exe = "$bin\xerces_cli.exe"
-  Check ($unknown -match 'not a build Xerces knows') "a dry launch on an unknown build is refused`n$unknown"
+  Check ($unknown -match 'not a build Xerces knows' -and $unknown -notmatch 'command:') "a dry launch on an unknown build is refused`n$unknown"
   Check ((PlanFiles) -eq $plans) 'the refused dry launch wrote no plan file'
 
   # ------------------------------------------------------------ packs apply
@@ -203,6 +235,19 @@ try {
   Invoke-Xcli 0 packs apply $pack.id.Substring(0, 8) | Out-Null
   Check ((ZmProfile).pack_name -eq 'Smoke pack' -and (ZmProfile).pack_id -eq $pack.id) 'packs apply by library id'
   Invoke-Xcli 2 packs apply 'no-such-pack' | Out-Null
+  # A file whose id belongs to a different pack in the library is applied
+  # under a fresh id, as importing it would place it; the library is not
+  # written. The very same pack keeps its id.
+  $otherFile = Join-Path $WorkDir 'other.xpack.json'
+  [IO.File]::WriteAllText($otherFile, (Get-Content -Raw $packFile).Replace('"Smoke pack"', '"Other pack"'))
+  $other = Invoke-XcliJson 0 packs apply $otherFile --json
+  Check ($other.renumbered_from -eq $pack.id -and $other.pack -ne $pack.id -and $other.pack -ne '' -and
+         (ZmProfile).pack_id -eq $other.pack -and (ZmProfile).pack_name -eq 'Other pack') `
+    "a file with a library pack's id is renumbered: $($other | ConvertTo-Json -Compress -Depth 2)"
+  Check (@(Get-ChildItem "$homeDir\config\packs").Count -eq 1) 'packs apply does not write the library'
+  $same = Invoke-XcliJson 0 packs apply $packFile --json
+  Check ($same.pack -eq $pack.id -and -not $same.renumbered_from -and (ZmProfile).pack_id -eq $pack.id) `
+    "the library's own pack keeps its id: $($same | ConvertTo-Json -Compress -Depth 2)"
 
   # ------------------------------------------ refused while Xerces.exe runs
   # The launcher's per-home mutex (xerces_core::launcher_instance_name).
@@ -222,12 +267,26 @@ try {
   }
 
   # ------------------------------------------------------------ logs, sigs
+  Invoke-Xcli 0 mods enable local.esc_mod | Out-Null
   $tail = Invoke-Xcli 0 logs tail --role cli --lines 100
   foreach ($event in 'cli.launch.dry', 'cli.launch.refused', 'cli.mods.edit', 'cli.packs.backup', 'cli.packs.applied') {
     Check ($tail -match [regex]::Escape($event)) "logs tail shows $event`n$tail"
   }
+  Check ($tail -match 'Esc\?\[2J Mod' -and -not $tail.Contains($esc) -and -not $tail.Contains($bel)) "logs tail filters control characters`n$tail"
   Check (@(Get-ChildItem "$homeDir\logs" -Filter '*-cli-*.jsonl').Count -eq 1) 'the CLI keeps one log per day'
   Invoke-Xcli 1 logs tail --role game | Out-Null
+  # A log that cannot be opened is an error, not an empty success.
+  $locked = Join-Path $homeDir 'logs\20991231-235959-launcher-1.jsonl'
+  [IO.File]::WriteAllText($locked, '{"event":"launcher.start","level":"info","msg":"late","ts":"2099-12-31T23:59:59.000Z"}' + "`n")
+  $handle = [IO.File]::Open($locked, 'Open', 'Read', 'None')
+  try {
+    $unreadable = Invoke-Xcli 1 logs tail --role launcher
+    Check ($unreadable -match 'cannot be read') "an unreadable log is an error`n$unreadable"
+  } finally {
+    $handle.Dispose()
+  }
+  $late = Invoke-Xcli 0 logs tail --role launcher
+  Check ($late -match 'launcher\.start \| late') "logs tail reads it once it can`n$late"
 
   Invoke-Xcli 1 sig check | Out-Null # no report yet
   $report = '{"schema":"xerces.sigreport/1","game_build":"0x6531394","checked":"2026-11-05T03:00:00Z","entries":[{"id":"a","name":"A","resolved":true,"rva":"0x1000"},{"id":"b","name":"B","resolved":false,"error":"no match"}],"disabled":{"multi_mod":["b"]}}'
@@ -237,6 +296,7 @@ try {
   Check ($sig -match 'MISS\s+b' -and $sig -match 'multi_mod') "sig check names the miss`n$sig"
   [IO.File]::WriteAllText("$homeDir\cache\signatures-report.json", $report.Replace('"resolved":false', '"resolved":true').Replace('"multi_mod":["b"]', ''))
   Invoke-Xcli 0 sig check | Out-Null
+  Invoke-Xcli 1 sig check --registry compat/signatures.json | Out-Null # --registry goes with --dump
 } finally {
   $env:XERCES_HOME = $savedHome
   $env:XERCES_DRY_LAUNCH = $savedDry
