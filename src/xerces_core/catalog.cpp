@@ -317,10 +317,10 @@ installed_content load_content(const std::filesystem::path &folder,
   return content;
 }
 
-// The pool file the client reads when it loads this mod (UGC_LoadItem_
-// PrepareAssetPool, called for the main mod and each stacked one; never for
-// a map). It is small and read whole; its hash is in the content hash like
-// every other file's.
+// The pool file the client reads when it loads this mod
+// (UGC_LoadItem_PrepareAssetPool, called for the main mod and each stacked
+// one; never for a map). It is small and read whole; its hash is in the
+// content hash like every other file's.
 void read_pool_file(installed_content &content,
                     const std::filesystem::path &folder, content_layout layout,
                     diagnostics &diags) {

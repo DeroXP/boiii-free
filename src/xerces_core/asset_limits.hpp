@@ -79,8 +79,8 @@ enum class content_layout {
   // workshop.cpp; the disk fallback's populate_workshop_paths uses zone too).
   game_folder,
   // A Workshop item (steamapps\workshop\content\311210\<id>): the entry
-  // points at the item folder itself (workshop.cpp, supplement_ugc_from_
-  // workshop).
+  // points at the item folder itself (workshop.cpp,
+  // supplement_ugc_from_workshop).
   workshop,
 };
 
