@@ -2,6 +2,8 @@
 // Commands that only need xerces_core work without the game; the ones that
 // talk to a running Xerces exit with 3 until the game-side pipe exists.
 
+#include <algorithm>
+#include <charconv>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -9,6 +11,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -129,7 +132,7 @@ Work without the game:
                [--stock-zones <n>] [--game-build <0x...>] [--json]
   plan explain  (same options)                     why the order is what it is
   conflicts check --mods-dir <dir> (--mod <id>... | --pack <file|code>)
-                  [--stock <dir>] [--json]
+                  [--stock <dir>] [--map-last] [--json]
   packs export --mods-dir <dir> --name <name> --mod <id>... [--mode zm]
                [--out <file>] [--code]
   packs import <file|XRC1.code> [--mods-dir <dir>] [--json]   validate + dry run
@@ -153,7 +156,15 @@ plan_request request_from(const arguments &args) {
   request.mods = args.all("--mod");
   request.map = args.get("--map");
   if (const auto zones = args.get("--stock-zones")) {
-    request.stock_zones = static_cast<std::size_t>(std::stoul(*zones));
+    // from_chars, not stoul: stoul takes "-1" as 4294967295.
+    std::size_t count = 0;
+    const char *end = zones->data() + zones->size();
+    const auto parsed = std::from_chars(zones->data(), end, count);
+    if (zones->empty() || parsed.ec != std::errc{} || parsed.ptr != end) {
+      throw std::invalid_argument(
+          "--stock-zones takes a number of zones, not \"" + *zones + "\".");
+    }
+    request.stock_zones = count;
   }
   request.game_build = args.get("--game-build").value_or("unknown");
   request.xerces_version =
@@ -385,7 +396,10 @@ int cmd_plan(const arguments &args, bool explain) {
 }
 
 pack_result load_pack(const std::string &source) {
-  if (source.starts_with(share_code_prefix)) {
+  // A code pasted with a space or line break around it is still a code.
+  const std::size_t start = source.find_first_not_of(" \t\r\n");
+  if (start != std::string::npos &&
+      std::string_view(source).substr(start).starts_with(share_code_prefix)) {
     return decode_share_code(source);
   }
   if (!fs::exists(source)) {
@@ -404,38 +418,46 @@ struct checked {
 
 checked check(const catalog_scan &scan, const plan_request &request,
               const pack_decisions *decisions,
-              const std::optional<std::string> &stock) {
+              const std::optional<std::string> &stock, bool map_last) {
   checked out;
   out.resolved = resolve_plan(scan.catalog, request);
   conflict_inputs inputs;
   inputs.resolved = &out.resolved;
+  // The manifest and files of the version the plan picked, also when two
+  // versions of an id are installed.
   std::map<std::string, manifest> manifests;
-  for (const auto &content : scan.catalog) {
-    manifests[content.info.id] = content.info;
-  }
-  inputs.manifests = manifests;
-  const auto add_index = [&](const plan_entry &entry) {
-    if (const auto root = scan.roots.find(entry.id); root != scan.roots.end()) {
+  const auto add = [&](const plan_entry &entry) {
+    const auto content =
+        std::ranges::find_if(scan.catalog, [&](const installed_content &c) {
+          return c.path == entry.path;
+        });
+    if (content != scan.catalog.end()) {
+      manifests[entry.id] = content->info;
       inputs.indexes.push_back(
-          index_loose_files(entry.id, read_files(root->second)));
+          index_loose_files(entry.id, read_files(entry.path)));
     }
   };
   for (const auto &entry : out.resolved.stack) {
-    add_index(entry);
+    add(entry);
   }
   if (out.resolved.map) {
-    add_index(*out.resolved.map);
+    add(*out.resolved.map);
   }
+  inputs.manifests = manifests;
   if (stock) {
-    inputs.stock = index_loose_files("stock", read_files(fs::path(*stock)));
+    inputs.stock = index_loose_files(std::string(stock_owner),
+                                     read_files(fs::path(*stock)));
   }
   if (decisions != nullptr) {
     inputs.allow_undeclared = decisions->allow_overrides;
     inputs.decided = decisions->keep_order;
     inputs.map_first_for_scripts = decisions->map_scripts_first;
   }
+  if (map_last) {
+    inputs.map_first_for_scripts = false;
+  }
   out.report = check_conflicts(inputs);
-  out.hooks = plan_hooks(out.resolved, manifests);
+  out.hooks = plan_hooks(out.resolved, manifests, inputs.map_first_for_scripts);
   return out;
 }
 
@@ -458,7 +480,7 @@ int cmd_conflicts(const arguments &args) {
   }
   const checked result =
       check(*scan, request, loaded ? &loaded->decisions : nullptr,
-            args.get("--stock"));
+            args.get("--stock"), args.has("--map-last"));
   if (args.has("--json")) {
     std::cout << conflict_report_to_json(result.report, true) << "\n";
   } else {
@@ -529,8 +551,8 @@ int cmd_packs(const arguments &args) {
     const plan_request request = pack_to_request(
         result.value, args.get("--game-build").value_or("unknown"),
         version::parse(xerces_version_text).value_or(version{}));
-    const checked dry =
-        check(*scan, request, &result.value.decisions, args.get("--stock"));
+    const checked dry = check(*scan, request, &result.value.decisions,
+                              args.get("--stock"), args.has("--map-last"));
     const diagnostics content = verify_pack_content(result.value, dry.resolved);
     if (args.has("--json")) {
       std::cout << "{\"plan\":" << plan_to_json(dry.resolved)
