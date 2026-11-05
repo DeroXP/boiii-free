@@ -415,6 +415,34 @@ TEST_CASE("shared launcher: one launcher per home") {
   fs::remove_all(home, ec);
 }
 
+TEST_CASE("shared launcher: xerces_cli holds the home while it edits") {
+  const fs::path home = fresh("lock");
+  {
+    const launcher_home_lock lock(home);
+    REQUIRE(lock.held());
+    // A launcher opening now sees its mutex taken (and waits for it); so does
+    // a second edit.
+    CHECK(launcher_running(home));
+    const launcher_home_lock second(home / "");
+    CHECK(!second.held());
+    CHECK(launcher_running(home)); // the refused lock let go of nothing
+  }
+  CHECK(!launcher_running(home));
+  {
+    // A running launcher: no lock.
+    HANDLE mutex =
+        CreateMutexW(nullptr, TRUE, launcher_instance_name(home).c_str());
+    REQUIRE(mutex != nullptr);
+    const launcher_home_lock lock(home);
+    CHECK(!lock.held());
+    ReleaseMutex(mutex);
+    CloseHandle(mutex);
+  }
+  CHECK(!launcher_running(home));
+  std::error_code ec;
+  fs::remove_all(home, ec);
+}
+
 TEST_CASE("shared launcher: XERCES_DRY_LAUNCH") {
   wchar_t saved[64] = {};
   const DWORD had = GetEnvironmentVariableW(L"XERCES_DRY_LAUNCH", saved, 64);
@@ -471,6 +499,77 @@ TEST_CASE("log tail: one line per event") {
   // Not an event: as it is.
   CHECK_EQ(format_log_line("not json"), std::string("not json"));
   CHECK_EQ(format_log_line("{\"a\":1}"), std::string("{\"a\":1}"));
+  // A Workshop title with escape sequences in the message (JSON decodes the
+  // escaped ESC, BEL and CSI to the real characters): they print as ?.
+  CHECK_EQ(format_log_line(
+               "{\"event\":\"cli.mods.edit\",\"level\":\"info\",\"msg\":\""
+               "\\u001b]52;c;aGk=\\u0007x is on\\u009b2J\",\"ts\":\"2026-11-"
+               "05T09:48:24.039Z\"}"),
+           std::string("09:48:24.039 info  cli.mods.edit | ?]52;c;aGk=?x is "
+                       "on?2J"));
+  CHECK_EQ(format_log_line("raw \x1b[2J line"), std::string("raw ?[2J line"));
+}
+
+TEST_CASE("terminal_safe: control characters go, text stays") {
+  CHECK_EQ(terminal_safe("Pegasus \x1b[31mred\x07"),
+           std::string("Pegasus ?[31mred?"));
+  CHECK_EQ(terminal_safe("tab\tand\nnewline stay; cr\r del\x7f nul"),
+           std::string("tab\tand\nnewline stay; cr? del? nul"));
+  CHECK_EQ(terminal_safe(std::string_view("a\0b", 3)), std::string("a?b"));
+  // C1 controls as UTF-8 (U+009B is CSI); other non-ASCII text is kept.
+  CHECK_EQ(terminal_safe("\xc2\x9b"
+                         "2J \xc2\x85"),
+           std::string("?2J ?"));
+  CHECK_EQ(terminal_safe("caf\xc3\xa9 \xc2\xa0 \xe6\x97\xa5\xe6\x9c\xac"),
+           std::string("caf\xc3\xa9 \xc2\xa0 \xe6\x97\xa5\xe6\x9c\xac"));
+  // A lone 0xC2 at the end is kept as it is (it is no control).
+  CHECK_EQ(terminal_safe("x\xc2"), std::string("x\xc2"));
+}
+
+TEST_CASE("log tail: the last lines of a file, read from its end") {
+  const fs::path dir = fresh("tail");
+  const fs::path file = dir / "20261105-094818-launcher-1.jsonl";
+  // About 2 MB of lines, so the end is many blocks away from the start.
+  std::string text;
+  for (int i = 0; i < 40000; ++i) {
+    text += "line " + std::to_string(i) +
+            " ........................................\n";
+  }
+  text += "half a line";
+  write(file, text);
+  const auto tail = tail_file(file, 3);
+  REQUIRE(tail.has_value());
+  const std::vector<std::string> expected = {
+      "line 39997 ........................................",
+      "line 39998 ........................................",
+      "line 39999 ........................................"};
+  CHECK(tail->lines == expected);
+  CHECK_EQ(tail->end, std::uint64_t(text.size() - std::strlen("half a line")));
+  // All of them, and more than there are.
+  CHECK_EQ(tail_file(file, 0)->lines.size(), std::size_t(40000));
+  CHECK_EQ(tail_file(file, 50000)->lines.size(), std::size_t(40000));
+  // A line longer than a block, and empty lines that do not count.
+  const fs::path wide = dir / "20261105-094819-launcher-2.jsonl";
+  const std::string long_line(200000, 'x');
+  write(wide, "first\n" + long_line + "\n\n\nlast\n");
+  const auto two = tail_file(wide, 2);
+  REQUIRE(two.has_value());
+  REQUIRE_EQ(two->lines.size(), std::size_t(2));
+  CHECK_EQ(two->lines[0], long_line);
+  CHECK_EQ(two->lines[1], std::string("last"));
+  CHECK_EQ(two->end, std::uint64_t(fs::file_size(wide)));
+  // Nothing complete yet, an empty file, a file that is not there.
+  write(wide, "no newline");
+  CHECK(tail_file(wide, 5)->lines.empty());
+  CHECK_EQ(tail_file(wide, 5)->end, std::uint64_t(0));
+  write(wide, "");
+  CHECK(tail_file(wide, 5)->lines.empty());
+  CHECK(!tail_file(dir / "missing.jsonl", 5).has_value());
+
+  CHECK_EQ(log_start(file), std::string("20261105-094818"));
+  CHECK(log_start(dir / "journal.json").empty());
+  std::error_code ec;
+  fs::remove_all(dir, ec);
 }
 
 TEST_CASE("log tail: the newest log of a role, and its last lines") {

@@ -142,6 +142,25 @@ bool launcher_running(const fs::path &home) {
   return GetLastError() == ERROR_ACCESS_DENIED;
 }
 
+launcher_home_lock::launcher_home_lock(const fs::path &home) {
+  const std::wstring name = launcher_instance_name(home);
+  HANDLE mutex = CreateMutexW(nullptr, TRUE, name.c_str());
+  // Already there: a launcher (or another lock) has it, and TRUE did not make
+  // this one its owner. Null: it exists and this process may not open it.
+  if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
+    CloseHandle(mutex);
+    mutex = nullptr;
+  }
+  handle_ = mutex;
+}
+
+launcher_home_lock::~launcher_home_lock() {
+  if (handle_) {
+    ReleaseMutex(static_cast<HANDLE>(handle_));
+    CloseHandle(static_cast<HANDLE>(handle_));
+  }
+}
+
 bool dry_launch_from_environment() {
   wchar_t value[8] = {};
   return GetEnvironmentVariableW(L"XERCES_DRY_LAUNCH", value, 8) > 0 &&

@@ -53,6 +53,23 @@ std::wstring launcher_instance_name(const std::filesystem::path &home);
 // A Xerces.exe runs on this home (its mutex exists).
 bool launcher_running(const std::filesystem::path &home);
 
+// Holds the per-home mutex for a read, change and write of launcher.json
+// (xerces_cli's edits), so a Xerces.exe started meanwhile waits for it (up to
+// 30 s) instead of reading the config that is about to be replaced and
+// writing its old copy back later. held() is false when a launcher, or
+// another lock, already has it; nothing is held then.
+class launcher_home_lock {
+public:
+  explicit launcher_home_lock(const std::filesystem::path &home);
+  ~launcher_home_lock();
+  launcher_home_lock(const launcher_home_lock &) = delete;
+  launcher_home_lock &operator=(const launcher_home_lock &) = delete;
+  bool held() const { return handle_ != nullptr; }
+
+private:
+  void *handle_ = nullptr;
+};
+
 // XERCES_DRY_LAUNCH=1 asks for a dry launch, as --dry-launch does: Xerces.exe
 // and `xerces_cli plan apply` both honour it.
 bool dry_launch_from_environment();
