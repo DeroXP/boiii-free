@@ -204,6 +204,10 @@ fonts, for comparison in a browser (Edge headless:
       toast, not checked on screen.
 - [ ] With `premake5 ninja --with-ezz-social --with-upstream-downloaders` the
       client builds and behaves as upstream (only when a comparison is needed).
+- [ ] Plugins (DESIGN.md 5.9, built 2026-11-05): with a DLL in
+      `<game>\boiii\plugins`, the default build does not load it and
+      `boiii_players\plugins.log` says how many DLLs it left alone;
+      `--with-upstream-plugins` builds upstream's loader back in.
 
 ### Loader and manifest (M1)
 

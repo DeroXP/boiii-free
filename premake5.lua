@@ -406,6 +406,11 @@ newoption({
   description = "Xerces: build in upstream's anonymous Workshop and map downloaders (off by default, docs/DESIGN.md D15).",
 })
 
+newoption({
+  trigger = "with-upstream-plugins",
+  description = "Xerces: build in upstream's plugin loader, which loads every DLL in two user-writable folders (off by default, docs/DESIGN.md 5.9).",
+})
+
 newaction({
   trigger = "version",
   description = "Returns the version string for the current commit of the source code.",
@@ -761,9 +766,13 @@ files({
   "./src/client/resources/**.*",
 })
 
--- Xerces build switches (src/client/xerces/switches.hpp, DESIGN.md D14 and D15).
+-- Xerces build switches (src/client/xerces/switches.hpp, DESIGN.md D14, D15
+-- and 5.9).
 if _OPTIONS["with-ezz-social"] then
   defines({ "XERCES_WITH_EZZ_SOCIAL" })
+end
+if _OPTIONS["with-upstream-plugins"] then
+  defines({ "XERCES_WITH_UPSTREAM_PLUGINS" })
 end
 if _OPTIONS["with-upstream-downloaders"] then
   defines({ "XERCES_WITH_UPSTREAM_DOWNLOADERS" })

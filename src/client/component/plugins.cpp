@@ -2,6 +2,8 @@
 
 #include <loader/component_loader.hpp>
 
+#include <xerces/switches.hpp>
+
 #include <filesystem>
 
 #include <utils/flags.hpp>
@@ -23,6 +25,17 @@ struct component final : generic_component {
             : "plugins.log";
     log_path_ = fs::path("boiii_players") / log_name;
     clear_log();
+
+    if constexpr (!xerces_switches::upstream_plugins) {
+      // Xerces: the loader is not part of this build (DESIGN.md 5.9). Say
+      // how many DLLs were left alone so a missing plugin is explained.
+      const std::size_t skipped =
+          count_dlls(game::get_appdata_path() / "plugins") +
+          count_dlls(fs::path("boiii") / "plugins");
+      log("Plugin loading is not part of Xerces builds (DESIGN.md 5.9); " +
+          std::to_string(skipped) + " DLL(s) in the plugin folders not loaded.");
+      return;
+    }
 
     if (!is_server && utils::flags::has_flag("noplugins")) {
       log("Plugin loading is disabled via -noplugins launch flag.");
@@ -74,6 +87,18 @@ struct component final : generic_component {
 private:
   std::vector<utils::nt::library> extensions_{};
   std::filesystem::path log_path_;
+
+  static std::size_t count_dlls(const std::filesystem::path &folder) {
+    std::error_code error;
+    std::size_t count = 0;
+    for (std::filesystem::directory_iterator it(folder, error), end;
+         !error && it != end; it.increment(error)) {
+      if (it->path().extension() == ".dll") {
+        ++count;
+      }
+    }
+    return count;
+  }
 
   void clear_log() {
     std::error_code error;

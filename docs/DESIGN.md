@@ -758,7 +758,10 @@ in Release builds too. Xerces release builds compile plugin loading out; dev
 builds load only DLLs whose SHA-256 the developer approved. Dev plugins use a
 versioned ABI (`xerces_plugin_query()` returning name, version and API version,
 plus a host function table). Existing upstream plugins therefore stop loading in
-Xerces release builds.
+Xerces release builds. Built 2026-11-05 as a build switch like D14 and D15:
+`--with-upstream-plugins` builds upstream's loader back in; without it,
+`plugins.log` says how many DLLs were left alone. The approved-hash loader for
+dev builds comes with the dev module.
 
 ### 5.10 Crash bundle and diagnostics
 
@@ -2051,9 +2054,9 @@ M5a, which you asked for now.
   client's own game-folder lookup in `beta` (working folder, saved path, Steam
   libraries, picker) is enough because the launcher starts the game in its
   folder; loading DLLs by absolute path would mean editing the fenced loader, so
-  it stays as upstream has it. Open: the in-game checks in docs/TESTING.md, the
-  hook bus, the pool policy, ownership events, the dev module, and leaving
-  plugins out of release builds.
+  it stays as upstream has it. Plugin loading is out of default builds (5.9).
+  Open: the in-game checks in docs/TESTING.md, the hook bus, the pool policy,
+  ownership events, and the dev module.
 - M2, headless part done: the ownership map and rules, the merges, GSC hook
   chain planning, reports, determinism tests and the loose both-apply pair as
   unit tests. Open: index runs, the in-game merges and chains, the GSC call-next

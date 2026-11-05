@@ -25,4 +25,15 @@ inline constexpr bool upstream_downloaders = true;
 // in Steam instead.
 inline constexpr bool upstream_downloaders = false;
 #endif
+
+#ifdef XERCES_WITH_UPSTREAM_PLUGINS
+inline constexpr bool upstream_plugins = true;
+#else
+// DESIGN.md 5.9: upstream loads every DLL in %LOCALAPPDATA%\boiii\plugins and
+// <game>\boiii\plugins at startup, in release builds too, so anything that
+// can write either folder runs code in the game. Xerces builds leave that
+// loader out; `--with-upstream-plugins` builds it back in. Dev builds will
+// load only DLLs the developer approved by SHA-256 (the dev module, M1).
+inline constexpr bool upstream_plugins = false;
+#endif
 } // namespace xerces_switches
