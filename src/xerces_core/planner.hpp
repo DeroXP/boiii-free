@@ -96,6 +96,10 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
 // The plan with everything a report or the CLI shows, as JSON.
 std::string plan_to_json(const plan &value, bool pretty = false);
 
-// Counts zone files (zone/*.ff) in a file list.
-std::size_t count_zone_files(const std::vector<std::string> &files);
+// The zones a mod adds to the engine's table in a mode: its fastfiles
+// (zone/*.ff, or *.ff at the root of a Workshop folder), one language copy
+// per zone however many languages ship, and no other mode's tier (mp_mod in
+// Zombies) when mode is given.
+std::size_t count_zone_files(const std::vector<std::string> &files,
+                             std::string_view mode = {});
 } // namespace xerces_core

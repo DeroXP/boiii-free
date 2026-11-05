@@ -513,7 +513,7 @@ plan_entry make_entry(const installed_content &content, bool requested,
   entry.content_hash = content.content_hash;
   entry.requested = requested;
   entry.legacy = content.info.legacy;
-  entry.zones = count_zone_files(content.files);
+  entry.zones = count_zone_files(content.files, request.mode);
   entry.settings = resolve_settings(content, request, diags);
   return entry;
 }
@@ -551,14 +551,48 @@ Value entry_value(const plan_entry &entry, bool with_folder,
 }
 } // namespace
 
-std::size_t count_zone_files(const std::vector<std::string> &files) {
-  std::size_t count = 0;
+std::size_t count_zone_files(const std::vector<std::string> &files,
+                             std::string_view mode) {
+  // base zone -> {base file present, a language variant present}
+  std::map<std::string, std::pair<bool, bool>> zones;
   for (const auto &file : files) {
-    const std::string name = normalize_asset_name(file);
-    if (name.starts_with("zone/") && name.ends_with(".ff") &&
-        name.find('/', 5) == std::string::npos) {
-      ++count;
+    std::string name = normalize_asset_name(file);
+    // Mod Tools builds keep fastfiles in zone/; Steam's Workshop folders
+    // keep them at the item's root.
+    if (name.starts_with("zone/")) {
+      name.erase(0, 5);
     }
+    if (!name.ends_with(".ff") || name.find('/') != std::string::npos) {
+      continue;
+    }
+    name.resize(name.size() - 3);
+    // "en_core_mod": the engine loads one language's copy, not all of them.
+    // The mode tiers ("zm_mod", "mp_mod_patch") look the same and are not.
+    const bool tier = name.starts_with("zm_mod") || name.starts_with("mp_mod") ||
+                      name.starts_with("cp_mod");
+    const bool language = !tier && name.size() > 3 && name[2] == '_' &&
+                          std::islower(static_cast<unsigned char>(name[0])) &&
+                          std::islower(static_cast<unsigned char>(name[1]));
+    const std::string base = language ? name.substr(3) : name;
+    // Another mode's tier (mp_mod in Zombies) is not loaded.
+    if (!mode.empty()) {
+      bool other_mode = false;
+      for (const std::string_view tier : {"zm_mod", "mp_mod", "cp_mod"}) {
+        const std::string own = std::string(mode) + "_mod";
+        if (tier != own && (base == tier || base == std::string(tier) + "_patch")) {
+          other_mode = true;
+        }
+      }
+      if (other_mode) {
+        continue;
+      }
+    }
+    auto &seen = zones[base];
+    (language ? seen.second : seen.first) = true;
+  }
+  std::size_t count = 0;
+  for (const auto &[base, seen] : zones) {
+    count += (seen.first ? 1 : 0) + (seen.second ? 1 : 0);
   }
   return count;
 }

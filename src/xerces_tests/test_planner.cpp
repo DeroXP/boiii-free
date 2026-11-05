@@ -222,6 +222,23 @@ TEST_CASE("planner: the zone budget counts the files that are present") {
   CHECK_EQ(*over.zones_total, 65u);
 }
 
+TEST_CASE("planner: Workshop folders keep fastfiles at their root") {
+  // As Steam lays out 1944930083 (Solo Easter Eggs): 13 language copies.
+  std::vector<std::string> workshop = {"core_mod.ff", "workshop.json"};
+  for (const char *language : {"bp", "ea", "en", "es", "fr", "ge", "it", "ja",
+                               "po", "ru", "sc", "tc"}) {
+    workshop.push_back(std::string(language) + "_core_mod.ff");
+  }
+  CHECK_EQ(count_zone_files(workshop, "zm"), std::size_t{2});
+  // Mode tiers: only the launched mode's counts.
+  const std::vector<std::string> tiers = {"zone/core_mod.ff", "zone/zm_mod.ff",
+                                          "zone/en_zm_mod.ff", "zone/mp_mod.ff",
+                                          "zone/mp_mod_patch.ff"};
+  CHECK_EQ(count_zone_files(tiers, "zm"), std::size_t{3});
+  CHECK_EQ(count_zone_files(tiers, "mp"), std::size_t{3});
+  CHECK_EQ(count_zone_files(tiers), std::size_t{5});
+}
+
 TEST_CASE("planner: settings are resolved, validated and scoped") {
   const std::string settings =
       R"(,"settings":[{"key":"mult","type":"float","default":1.0,"min":0.25,"max":2.0},)"
