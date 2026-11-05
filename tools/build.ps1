@@ -4,7 +4,9 @@
 
 .DESCRIPTION
   -Tests   generates the build files, builds xerces_tests and xerces_cli, and
-           runs the unit tests and a CLI smoke test on the fixtures.
+           runs the unit tests and the CLI smoke tests: the fixtures, then
+           tools\ci\cli_smoke.ps1 (mods, plan apply --dry-launch, packs
+           apply, logs and sig check on a fake game folder).
   -Client  builds the game client (boiii.exe) as well. Needs the Visual Studio
            "C++ ATL for latest v143 build tools" component.
   -Spike   builds the RmlUi launcher spike (xerces_spike_dx11.exe and
@@ -75,6 +77,8 @@ try {
       --mods-dir tests/fixtures/mods --mod fixture.alpha --mod fixture.beta `
       --stock tests/fixtures/stock
     if ($LASTEXITCODE -ne 0) { throw 'CLI smoke test failed' }
+    # The commands on <home> against a fake game folder (dry launches only).
+    & (Join-Path $PSScriptRoot 'ci\cli_smoke.ps1')
   }
 
   if ($Client) {

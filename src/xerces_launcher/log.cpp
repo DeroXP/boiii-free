@@ -71,6 +71,13 @@ void log(xerces_core::log_level level, std::string_view event,
   }
 }
 
+xerces_core::event_log launcher_events() {
+  return [](xerces_core::log_level level, std::string_view event,
+            std::string_view message, std::string_view data_json) {
+    log(level, "launcher." + std::string(event), message, data_json);
+  };
+}
+
 double ms_since_process_start() {
   FILETIME creation{}, exit{}, kernel{}, user{};
   GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user);
