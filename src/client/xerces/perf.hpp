@@ -52,6 +52,7 @@ void note_ipc_start();
 // When the main menu was first seen ready (0 until then), for the bench's
 // XERCES_BENCH_AUTO=menu trigger. Readable from any thread.
 std::int64_t menu_ready_qpc();
-// The game's main thread, once the first main frame ran (0 before).
+// The game's main thread: the thread post_unpack ran on until the first main
+// frame, then the main frame's (0 before post_unpack).
 std::uint32_t main_thread_id();
 } // namespace xerces_perf

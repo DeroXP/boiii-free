@@ -44,6 +44,11 @@ xerces_core::event_ring<step_record, 256> steps;
 std::atomic<std::int64_t> ipc_start{0};
 std::atomic<std::int64_t> frontend{0};
 std::atomic<std::int64_t> menu_ready{0};
+// The thread post_unpack ran on (the game's own start-up thread: main.cpp runs
+// it from the game's SteamAPI_RestartAppIfNecessary call), and the thread
+// perf.io labels "main": that one until the first main frame, then the main
+// frame's. perf.startup logs both ids.
+std::atomic<std::uint32_t> unpack_thread{0};
 std::atomic<std::uint32_t> main_thread{0};
 
 // Taken on the main thread at the first main frame and read on the async
@@ -142,6 +147,8 @@ void log_startup() {
   marks.menu_ready_ms = c.ms(menu_ready.load());
   marks.detours = hooks.created;
   marks.menu_timed_out = menu_timed_out;
+  marks.unpack_thread_id = unpack_thread.load();
+  marks.main_thread_id = main_thread.load();
   const auto seconds = [](const std::optional<double> &ms) {
     return ms ? decimal(*ms / 1000.0) + " s" : std::string("not seen");
   };
@@ -243,6 +250,10 @@ public:
       return;
     }
     (void)startup_clock(); // anchors QPC to the process's creation time early
+    // Before the first drain below, so the journal writes and pool loads of
+    // start-up are logged as "main" rather than a bare id.
+    unpack_thread.store(GetCurrentThreadId());
+    main_thread.store(GetCurrentThreadId());
     scheduler::once(first_main_frame, scheduler::main);
     scheduler::loop(log_steps, scheduler::async, 250ms);
   }

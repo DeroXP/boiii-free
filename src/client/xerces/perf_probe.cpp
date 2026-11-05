@@ -324,6 +324,11 @@ bool end_run() {
   if (!run.active || !ring) {
     return false;
   }
+  if (run.kind.starts_with("auto-")) {
+    // The automatic run ended, on time or by xerces_bench_end: step_auto
+    // stops, so its end time cannot cut a manual run started after it.
+    autos.done = true;
+  }
   auto done = std::make_shared<finished_run>();
   done->t1 = probe_clock();
   done->frame_end = ring->count();
@@ -375,7 +380,7 @@ void step_auto(std::int64_t now) {
       }
     }
   } else if (now >= autos.end_at) {
-    end_run();
+    end_run(); // the automatic run: one ended by hand set autos.done already
     autos.done = true;
   }
 }

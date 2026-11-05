@@ -191,11 +191,15 @@ TEST_CASE("bench: perf.startup and perf.hooks") {
   marks.first_detour_ms = 14300.25;
   marks.frontend_ms = 30123.5;
   marks.detours = 412;
+  marks.unpack_thread_id = 10244;
+  marks.main_thread_id = 10244;
   const std::string startup = startup_json(marks);
   CHECK(parses(startup));
   CHECK(startup.find("\"first_detour_ms\":14300.250") != std::string::npos);
   CHECK(startup.find("\"ipc_start_ms\":null") != std::string::npos);
   CHECK(startup.find("\"menu_timed_out\":false") != std::string::npos);
+  CHECK(startup.find("\"unpack_thread_id\":10244,\"main_thread_id\":10244}") !=
+        std::string::npos);
 
   hook_totals totals;
   totals.created = 2;

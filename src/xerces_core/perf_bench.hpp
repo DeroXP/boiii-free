@@ -145,6 +145,11 @@ struct startup_marks {
   std::optional<double> menu_ready_ms;
   std::uint32_t detours = 0; // created by the first main frame
   bool menu_timed_out = false;
+  // Thread ids, so a perf.io record's bare id can be placed: the thread
+  // post_unpack ran on and the main frame's (the same thread when the game
+  // runs its main loop on the thread that started it); 0 when not known.
+  std::uint32_t unpack_thread_id = 0;
+  std::uint32_t main_thread_id = 0;
 };
 std::string startup_json(const startup_marks &marks);
 

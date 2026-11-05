@@ -1716,7 +1716,9 @@ from the async thread, never from the thread that did the work:
   process was created (`GetProcessTimes`, anchored to QPC once): the first and
   the last detour created before the first main frame, `ipc.start` when the
   command pipe is served, the first main frame (`frontend_ms`) and the menu
-  (`menu_ready_ms`).
+  (`menu_ready_ms`), and two thread ids: `unpack_thread_id` (the thread
+  `post_unpack` ran on, the game's start-up thread) and `main_thread_id` (the
+  first main frame's), expected to be the same.
 - **`perf.hooks`**, with it: `src/common/utils/hook.cpp` counts every detour's
   QPC ticks inside `MH_CreateHook` and inside `enable()` (MinHook's
   `MH_EnableHook`, which freezes threads through a system-wide snapshot), the
@@ -1730,12 +1732,14 @@ from the async thread, never from the thread that did the work:
   `IDXGISwapChain2`.
 - **`perf.io`** and **`perf.load_step`**: the duration (`ms`), start (`at_ms`
   since process creation and raw `qpc`, to line up with the probe's frames),
-  thread (`main`, `render` or an id), bytes and items of: `config.cfg`
-  (`write_archive_dvars`, main thread), `journal` (each journal phase write:
-  read, parse and write), `hash_names` (the first load of `hash_names.txt`),
-  `workshop_supplement.usermaps` / `.mods` and `ugc_pools` (the Workshop pool
-  loads). Records go through a fixed lock-free ring (`xerces_core::event_ring`)
-  and are written every 250 ms.
+  thread (`main`, `render` or an id; `main` is the `post_unpack` thread until
+  the first main frame, then the main frame's, so start-up records are labelled
+  too), bytes and items of: `config.cfg` (`write_archive_dvars`, main thread),
+  `journal` (each journal phase write: read, parse and write, not the
+  `loader.phase` log line after it), `hash_names` (the first load of
+  `hash_names.txt`), `workshop_supplement.usermaps` / `.mods` and `ugc_pools`
+  (the Workshop pool loads). Records go through a fixed lock-free ring
+  (`xerces_core::event_ring`) and are written every 250 ms.
 
 Only with `XERCES_BENCH=1` in the game's environment (the frame probe,
 `src/client/xerces/perf_probe.*`):
@@ -1756,7 +1760,8 @@ Only with `XERCES_BENCH=1` in the game's environment (the frame probe,
   (`perf.load` with `timed_out` after 10 minutes); or
   `XERCES_BENCH_AUTO=menu:<start_s>:<len_s>` (from the menu being ready) or
   `ingame:<start_s>:<len_s>` (from the client first being active in a level),
-  one automatic run per game start.
+  one automatic run per game start (`xerces_bench_end` during it ends it for
+  good, so its end time never cuts a manual run started later).
 - Output: `XERCES_BENCH_OUT`, else `<home>\bench`. A folder under AppData, the
   game folder or the Workshop folder, or a relative one, is refused
   (`perf.bench.refused`) and the probe stays off. Each run writes, from the

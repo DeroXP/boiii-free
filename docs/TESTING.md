@@ -376,13 +376,18 @@ is installed
 it needs an elevated terminal, which only you can open. Never read the console
 during a measurement window.
 
-- [ ] A normal start (no `XERCES_BENCH`) logs `perf.startup`, `perf.hooks` and
-      `perf.swapchain` once each, after the menu; `frontend_ms` agrees with the
-      launcher's `launch.started` to first main frame (34.0-34.7 s on
-      2026-11-05) less the launcher's own time; `perf.hooks` names how many
-      detours there were and how much of the start their enables took. `perf.io`
-      lines appear for `journal` and, 10 s after a setting changes,
-      `config.cfg`; `perf.load_step` for `hash_names` and the Workshop pools.
+- [ ] A normal start (no `XERCES_BENCH`) logs `perf.swapchain` once, at the
+      overlay's first Present (well before the menu), and `perf.startup` and
+      `perf.hooks` once each, after the menu (or after 180 s with
+      `menu_timed_out`); `frontend_ms` agrees with the launcher's
+      `launch.started` to first main frame (34.0-34.7 s on 2026-11-05) less the
+      launcher's own time; `perf.hooks` names how many detours there were and
+      how much of the start their enables took. `perf.io` lines appear for
+      `journal` and, 10 s after a setting changes, `config.cfg`;
+      `perf.load_step` for `hash_names` and the Workshop pools. The start-up
+      `journal` lines (`symbols`, then back to `launching`) say
+      `"thread":"main"`, and `perf.startup`'s `unpack_thread_id` and
+      `main_thread_id` are the same id.
 - [ ] The overlay's dialog still works with the idle skip: join a server whose
       map or mod is not installed. The dialog shows, takes the mouse, "Yes"
       opens the item's Workshop page in Steam (now from the main thread), "No"

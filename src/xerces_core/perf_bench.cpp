@@ -315,6 +315,8 @@ std::string startup_json(const startup_marks &marks) {
   out += ",\"menu_ready_ms\":" + number(marks.menu_ready_ms);
   out += ",\"detours\":" + std::to_string(marks.detours);
   out += ",\"menu_timed_out\":" + boolean(marks.menu_timed_out);
+  out += ",\"unpack_thread_id\":" + std::to_string(marks.unpack_thread_id);
+  out += ",\"main_thread_id\":" + std::to_string(marks.main_thread_id);
   return out + "}";
 }
 
