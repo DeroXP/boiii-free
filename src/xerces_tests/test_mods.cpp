@@ -140,6 +140,40 @@ TEST_CASE("mods: undo never overwrites a change made elsewhere") {
   CHECK_EQ(history.size("zm"), 0u);
 }
 
+TEST_CASE("mods: an edit in another mode leaves this mode's undo alone") {
+  launcher_config config = packed_config();
+  profile_for(config, "mp").mods = {"ws.8"};
+  mods_history history;
+  // The same steps as the screen's edit(): apply, hand edit, record.
+  const auto edit = [&](const std::string &mode, const std::string &id) {
+    const mods_snapshot before = mods_take(config, mode);
+    mods_set_enabled(profile_for(config, mode), id, true);
+    mods_hand_edit(config, mode);
+    history.record(mode, before, mods_take(config, mode));
+  };
+  edit("zm", "ws.5"); // zm: ws.1 0, ws.2 1, ws.3 2, ws.5 3
+  edit("mp", "ws.3"); // mp: ws.8 0, ws.3 1 (rewrites zm's ws.3)
+  CHECK_EQ(config.saved_positions.at("ws.3"), 1);
+
+  CHECK(history.undo(config, "zm") == mods_history::undo_result::done);
+  const mode_profile &zm = config.profiles.at("zm");
+  CHECK((zm.mods == std::vector<std::string>{"ws.1", "ws.2", "ws.3"}));
+  CHECK_EQ(zm.pack_name, std::string("Friday night"));
+  CHECK(!config.saved_positions.contains("ws.1"));
+  CHECK(!config.saved_positions.contains("ws.5"));
+  CHECK_EQ(config.saved_positions.at("ws.3"), 1); // mp wrote it last
+  CHECK_EQ(config.saved_positions.at("ws.8"), 0);
+  CHECK_EQ(config.saved_positions.at("ws.9"), 4);
+  CHECK((config.profiles.at("mp").mods ==
+         std::vector<std::string>{"ws.8", "ws.3"}));
+  CHECK_EQ(history.size("zm"), 0u);
+  CHECK_EQ(history.size("mp"), 1u);
+
+  CHECK(history.undo(config, "mp") == mods_history::undo_result::done);
+  CHECK((config.profiles.at("mp").mods == std::vector<std::string>{"ws.8"}));
+  CHECK(!config.saved_positions.contains("ws.8"));
+}
+
 TEST_CASE("mods: the history keeps the newest edits") {
   launcher_config config;
   mods_history history(2);

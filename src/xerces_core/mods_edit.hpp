@@ -30,11 +30,8 @@ struct mods_snapshot {
 };
 
 bool mods_same(const mode_profile &a, const mode_profile &b);
-bool mods_same(const mods_snapshot &a, const mods_snapshot &b);
 
 mods_snapshot mods_take(const launcher_config &config, const std::string &mode);
-void mods_put(launcher_config &config, const std::string &mode,
-              const mods_snapshot &snapshot);
 
 // Turns a mod on or off. A mod switched on goes to the bottom of the order:
 // the lowest priority, so the main mod (the top one, fs_game) and everything
@@ -57,16 +54,19 @@ bool mods_unpin(mode_profile &profile, const std::string &id);
 // one was detached, else an empty string.
 std::string mods_hand_edit(launcher_config &config, const std::string &mode);
 
-// A short history of hand edits for Ctrl+Z. Each entry keeps the state
-// before and after the edit; undo only restores "before" while the profile
-// still looks like "after", so it never throws away a change made elsewhere
-// (Home, Packs) since.
+// A short history of hand edits for Ctrl+Z. Each entry keeps the mode's
+// profile before and after the edit; undo only restores "before" while the
+// profile still looks like "after", so it never throws away a change made
+// elsewhere (Home, Packs) since. The saved positions are shared by every
+// mode, so an entry keeps only the ones its own edit wrote, and undo puts
+// back only those that still hold the value it wrote: an edit in another
+// mode neither makes this mode's history stale nor gets undone with it.
 class mods_history {
 public:
   explicit mods_history(std::size_t limit = 24) : limit_(limit) {}
 
-  void record(const std::string &mode, mods_snapshot before,
-              mods_snapshot after);
+  void record(const std::string &mode, const mods_snapshot &before,
+              const mods_snapshot &after);
 
   enum class undo_result { done, nothing, stale };
   // Undoes the newest edit for this mode. stale: the profile changed
@@ -75,10 +75,14 @@ public:
   std::size_t size(const std::string &mode) const;
 
 private:
+  // A saved position before and after the edit; nullopt: there was none.
+  using position_change =
+      std::pair<std::optional<std::int64_t>, std::optional<std::int64_t>>;
   struct entry {
     std::string mode;
-    mods_snapshot before;
-    mods_snapshot after;
+    mode_profile before;
+    mode_profile after;
+    std::map<std::string, position_change> positions;
   };
   std::size_t limit_;
   std::deque<entry> entries_;

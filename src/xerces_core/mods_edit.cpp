@@ -34,11 +34,6 @@ bool mods_same(const mode_profile &a, const mode_profile &b) {
          a.pack_id == b.pack_id;
 }
 
-bool mods_same(const mods_snapshot &a, const mods_snapshot &b) {
-  return mods_same(a.profile, b.profile) &&
-         a.saved_positions == b.saved_positions;
-}
-
 mods_snapshot mods_take(const launcher_config &config,
                         const std::string &mode) {
   mods_snapshot out;
@@ -47,12 +42,6 @@ mods_snapshot mods_take(const launcher_config &config,
   }
   out.saved_positions = config.saved_positions;
   return out;
-}
-
-void mods_put(launcher_config &config, const std::string &mode,
-              const mods_snapshot &snapshot) {
-  config.profiles[mode] = snapshot.profile;
-  config.saved_positions = snapshot.saved_positions;
 }
 
 bool mods_set_enabled(mode_profile &profile, const std::string &id, bool on) {
@@ -123,12 +112,30 @@ std::string mods_hand_edit(launcher_config &config, const std::string &mode) {
   return detached;
 }
 
-void mods_history::record(const std::string &mode, mods_snapshot before,
-                          mods_snapshot after) {
-  if (mods_same(before, after)) {
+void mods_history::record(const std::string &mode, const mods_snapshot &before,
+                          const mods_snapshot &after) {
+  // Only the positions this edit wrote; the rest belong to other edits.
+  std::map<std::string, position_change> positions;
+  const auto lookup = [](const std::map<std::string, std::int64_t> &map,
+                         const std::string &key) {
+    const auto it = map.find(key);
+    return it == map.end() ? std::optional<std::int64_t>()
+                           : std::optional<std::int64_t>(it->second);
+  };
+  for (const auto *side : {&before.saved_positions, &after.saved_positions}) {
+    for (const auto &[key, value] : *side) {
+      const auto was = lookup(before.saved_positions, key);
+      const auto now = lookup(after.saved_positions, key);
+      if (was != now) {
+        positions[key] = {was, now};
+      }
+    }
+  }
+  if (mods_same(before.profile, after.profile) && positions.empty()) {
     return;
   }
-  entries_.push_back({mode, std::move(before), std::move(after)});
+  entries_.push_back(
+      {mode, before.profile, after.profile, std::move(positions)});
   while (entries_.size() > limit_) {
     entries_.pop_front();
   }
@@ -140,13 +147,28 @@ mods_history::undo_result mods_history::undo(launcher_config &config,
     if (it->mode != mode) {
       continue;
     }
-    if (!mods_same(mods_take(config, mode), it->after)) {
+    if (!mods_same(mods_take(config, mode).profile, it->after)) {
       // Packs or Home changed this mode's profile since: the old states no
       // longer describe what is there, so they cannot be restored safely.
       std::erase_if(entries_, [&](const entry &e) { return e.mode == mode; });
       return undo_result::stale;
     }
-    mods_put(config, mode, it->before);
+    config.profiles[mode] = it->before;
+    auto &saved = config.saved_positions;
+    for (const auto &[key, change] : it->positions) {
+      const auto current = saved.find(key);
+      const std::optional<std::int64_t> now =
+          current == saved.end() ? std::nullopt
+                                 : std::optional<std::int64_t>(current->second);
+      if (now != change.second) {
+        continue; // a later edit (another mode's) wrote it; that one stays
+      }
+      if (change.first) {
+        saved[key] = *change.first;
+      } else {
+        saved.erase(key);
+      }
+    }
     entries_.erase(std::next(it).base());
     return undo_result::done;
   }

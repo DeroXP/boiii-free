@@ -180,7 +180,7 @@
 				</div>
 
 				<div class="d-section d-problems" data-if="d_notes.size &gt; 0">
-					<div class="label section-label">Problems</div>
+					<div class="label section-label d-stop">Problems</div>
 					<div data-for="nt : d_notes"><div class="d-note" data-class-error="nt.error"><span>{{nt.text}}</span></div></div>
 					<div class="d-fixes" data-if="d_fixes.size &gt; 0">
 						<div data-for="fx : d_fixes"><button class="small-button" data-attr-id="'fix-' + fx.index" data-event-click="fix(fx.index)"><span>{{fx.label}}</span></button></div>
@@ -189,23 +189,23 @@
 				</div>
 
 				<div class="d-section">
-					<div class="label section-label">Details</div>
+					<div class="label section-label d-stop">Details</div>
 					<div class="d-field" data-for="f : d_fields"><span class="d-l">{{f.l}}</span><span class="d-v">{{f.v}}</span></div>
 				</div>
 
 				<div class="d-section" data-if="d_why.size &gt; 0">
-					<div class="label section-label">Why this order</div>
+					<div class="label section-label d-stop">Why this order</div>
 					<div class="d-why" data-for="w : d_why"><span>{{w}}</span></div>
 				</div>
 
 				<div class="d-section">
-					<div class="label section-label">Capabilities</div>
+					<div class="label section-label d-stop">Capabilities</div>
 					<div class="d-field" data-for="c : d_caps"><span class="d-l">{{c.l}}</span><span class="d-v">{{c.v}}</span></div>
 					<div class="d-empty" data-if="d_caps.size == 0"><span>{{d_caps_empty}}</span></div>
 				</div>
 
 				<div class="d-section">
-					<div class="label section-label">Settings</div>
+					<div class="label section-label d-stop">Settings</div>
 					<div class="d-field" data-for="st : d_settings"><span class="d-l">{{st.l}}</span><span class="d-v">{{st.v}}</span></div>
 					<div class="d-empty" data-if="d_settings.size == 0"><span>{{d_settings_empty}}</span></div>
 				</div>

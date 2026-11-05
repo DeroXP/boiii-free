@@ -309,6 +309,13 @@ input.search:placeholder-shown { color: var(--text2); }
 .d-legacy .label { margin-right: 6dp; }
 .d-section { margin-top: 24dp; }
 .d-section .section-label { padding-bottom: 8dp; }
+/* The section headings are focus stops, so a keyboard or a controller can
+   walk down a pane that is mostly text (the view pages between them). Enter
+   on one does nothing. The ring matches the buttons' in base.rcss. */
+.d-stop { nav: auto; tab-index: auto; focus: auto; }
+.d-stop:focus { box-shadow: #000000 0dp 0dp 0dp 3dp, #FF4A1C 0dp 0dp 0dp 5dp; }
+body.theme-light .d-stop:focus { box-shadow: #FFFFFF 0dp 0dp 0dp 3dp, #FF4A1C 0dp 0dp 0dp 5dp; }
+body.theme-contrast .d-stop:focus { box-shadow: #000000 0dp 0dp 0dp 3dp, #FFD400 0dp 0dp 0dp 5dp; }
 .d-field
 {
 	display: flex;

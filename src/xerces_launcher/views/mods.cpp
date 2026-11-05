@@ -9,6 +9,7 @@
 #include <RmlUi/Core.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -67,10 +68,6 @@ const char *source_name(const std::string &source) {
          : source == "mods"     ? "mods"
          : source == "usermaps" ? "usermaps"
                                 : "";
-}
-
-std::string version_text(const xc::manifest &info) {
-  return info.legacy ? std::string("legacy") : info.ver.to_string();
 }
 
 std::string join(const std::vector<std::string> &items) {
@@ -294,18 +291,27 @@ public:
                               drop_at_ = -1;
                               dirty({"drag_from", "drop_at"});
                             });
+    // dragover and dragout bubble, and RmlUi sends them to every element
+    // that enters or leaves the hover chain: moving from a row's name to its
+    // padding sends a dragout from the name that would reach the row while
+    // the cursor is still over it. Only the row's own enter and leave count.
+    const auto own = [](const Rml::Event &event) {
+      return event.GetTargetElement() == event.GetCurrentElement();
+    };
     model.BindEventCallback(
-        "drag_over", [this, arg_int](Rml::DataModelHandle, Rml::Event &,
-                                     const Rml::VariantList &args) {
-          if (drag_from_ >= 0 && drop_at_ != arg_int(args, 0)) {
+        "drag_over",
+        [this, arg_int, own](Rml::DataModelHandle, Rml::Event &event,
+                             const Rml::VariantList &args) {
+          if (own(event) && drag_from_ >= 0 && drop_at_ != arg_int(args, 0)) {
             drop_at_ = arg_int(args, 0);
             dirty({"drop_at"});
           }
         });
     model.BindEventCallback("drag_out",
-                            [this, arg_int](Rml::DataModelHandle, Rml::Event &,
-                                            const Rml::VariantList &args) {
-                              if (drop_at_ == arg_int(args, 0)) {
+                            [this, arg_int, own](Rml::DataModelHandle,
+                                                 Rml::Event &event,
+                                                 const Rml::VariantList &args) {
+                              if (own(event) && drop_at_ == arg_int(args, 0)) {
                                 drop_at_ = -1;
                                 dirty({"drop_at"});
                               }
@@ -356,28 +362,24 @@ public:
       apply_filter();
     }
     first_focus();
-    if (lost_focus_check_ > 0 && --lost_focus_check_ == 0) {
-      // A rebuild can remove the focused row (another mode, a rescan, a
-      // filter); RmlUi then leaves focus on its container, a plain div.
-      const Rml::Element *focus =
-          owner_->context() ? owner_->context()->GetFocusElement() : nullptr;
-      if (focus && area_of(focus) >= 0 && focus->GetTagName() != "button" &&
-          focus->GetTagName() != "input" && owner_->current() == id()) {
-        focus_now("");
-      }
-    }
+    keep_focus_visible();
   }
 
   bool key(Rml::Input::KeyIdentifier key, int modifiers) override {
+    // The Win32 backend also reports Caps Lock, Num Lock and Scroll Lock
+    // while they are toggled on; only keys held down count as a chord, or
+    // every plain key below would stop working with Num Lock on.
+    const int mods = modifiers & (Rml::Input::KM_CTRL | Rml::Input::KM_SHIFT |
+                                  Rml::Input::KM_ALT | Rml::Input::KM_META);
     const Rml::Element *focus =
         owner_->context() ? owner_->context()->GetFocusElement() : nullptr;
-    if (focus && focus->GetId() == "search" && modifiers == 0 &&
+    if (focus && focus->GetId() == "search" && mods == 0 &&
         key == Rml::Input::KI_RETURN) {
       sync();
       focus_now(!mods_.empty() ? "lm-0" : !order_.empty() ? "om-0" : "");
       return true;
     }
-    if (modifiers == 0 && focus &&
+    if (mods == 0 && focus &&
         (key == Rml::Input::KI_UP || key == Rml::Input::KI_DOWN ||
          key == Rml::Input::KI_LEFT || key == Rml::Input::KI_RIGHT)) {
       if (navigate(const_cast<Rml::Element *>(focus), key)) {
@@ -389,9 +391,9 @@ public:
          focus->GetTagName() == "select")) {
       return false; // typing in the search box
     }
-    const bool ctrl = (modifiers & Rml::Input::KM_CTRL) != 0;
-    const bool others =
-        (modifiers & (Rml::Input::KM_SHIFT | Rml::Input::KM_ALT)) != 0;
+    const bool ctrl = (mods & Rml::Input::KM_CTRL) != 0;
+    const bool others = (mods & (Rml::Input::KM_SHIFT | Rml::Input::KM_ALT |
+                                 Rml::Input::KM_META)) != 0;
     if (ctrl && !others &&
         (key == Rml::Input::KI_UP || key == Rml::Input::KI_DOWN)) {
       sync();
@@ -403,7 +405,7 @@ public:
       undo();
       return true;
     }
-    if (modifiers == 0 && key == Rml::Input::KI_DELETE) {
+    if (mods == 0 && key == Rml::Input::KI_DELETE) {
       sync();
       if (sel_.section == 'o' || sel_.section == 'c') {
         if (enabled(sel_.id)) {
@@ -413,7 +415,7 @@ public:
       }
       return false;
     }
-    if (modifiers == 0 && key == Rml::Input::KI_F5) {
+    if (mods == 0 && key == Rml::Input::KI_F5) {
       act("rescan");
       return true;
     }
@@ -428,6 +430,22 @@ private:
     for (const char *name : names) {
       handle_.DirtyVariable(name);
     }
+  }
+
+  // The footer line. It becomes RML inside this screen's data model, and
+  // app::escape leaves braces alone, so a Workshop title or a pack name with
+  // "{{" or "}}" in it would be read as a data expression (showing a model
+  // value, or nothing). A space between doubled braces keeps it plain text.
+  void notify(const std::string &text, bool error = false) {
+    std::string out;
+    out.reserve(text.size() + 4);
+    for (const char c : text) {
+      if ((c == '{' || c == '}') && !out.empty() && out.back() == c) {
+        out.push_back(' ');
+      }
+      out.push_back(c);
+    }
+    owner_->notify(out, error);
   }
 
   const xc::mode_profile *profile() const {
@@ -477,10 +495,17 @@ private:
     return std::size_t(item - owner_->svc().catalog().items.data());
   }
 
+  // Translated here: the map rows join it with more text, and a bound
+  // string is only translated by RmlUi when it is one whole key.
   std::string source_of(const xc::installed_content *item) const {
     const auto &sources = owner_->svc().catalog().sources;
     const std::size_t i = index_of(item);
-    return i < sources.size() ? source_name(sources[i]) : "";
+    const char *name = i < sources.size() ? source_name(sources[i]) : "";
+    return *name ? owner_->tr(name) : std::string();
+  }
+
+  std::string version_text(const xc::manifest &info) const {
+    return info.legacy ? owner_->tr("legacy") : info.ver.to_string();
   }
 
   std::string workshop_of(const xc::installed_content &item) const {
@@ -674,7 +699,7 @@ private:
         deps_.push_back(
             {"o:" + entry.id,
              entry.name.empty() ? entry.id : xc::mods_plain_name(entry.name),
-             entry.legacy ? std::string("legacy") : entry.ver.to_string()});
+             entry.legacy ? owner_->tr("legacy") : entry.ver.to_string()});
       }
     }
     order_count_ = mods.empty() ? owner_->tr("Vanilla")
@@ -976,7 +1001,7 @@ private:
       const bool is_map = info.kind == xc::content_kind::map;
       d_kind_ = owner_->tr(is_map ? "Map" : "Mod");
       if (const std::string source = source_of(item); !source.empty()) {
-        d_kind_ += " \xC2\xB7 " + owner_->tr(source);
+        d_kind_ += " \xC2\xB7 " + source; // already translated
       }
       if (info.legacy) {
         d_kind_ += " \xC2\xB7 " + owner_->tr("legacy");
@@ -996,7 +1021,7 @@ private:
         d_toggle_ = on ? owner_->tr("Switch off") : owner_->tr("Switch on");
       }
 
-      field("Version", info.legacy ? std::string("legacy") +
+      field("Version", info.legacy ? owner_->tr("legacy") +
                                          (info.ver.build.empty()
                                               ? ""
                                               : " (" + info.ver.build + ")")
@@ -1089,12 +1114,36 @@ private:
                       "load it."),
            true});
     }
-    if (on || (plan_.map && plan_.map->id == id)) {
+    const bool is_plan_map = plan_.map && plan_.map->id == id;
+    if (on || is_plan_map) {
       for (const auto &fix : plan_.fixes) {
-        if (fix.id != id) {
-          continue;
+        if (fix.id == id) {
+          add_fix(fix);
         }
-        add_fix(fix);
+      }
+    }
+    // The planner files a missing, pinned or outdated dependency under the
+    // dependency's id, which has no row of its own; the mod that needs it
+    // offers the fix. Also for a mod that is only in the plan as another
+    // mod's dependency.
+    const bool in_plan =
+        on || is_plan_map ||
+        std::ranges::any_of(
+            plan_.stack, [&](const xc::plan_entry &e) { return e.id == id; });
+    if (item && in_plan) {
+      for (const auto &dep : item->info.dependencies) {
+        for (const auto &fix : plan_.fixes) {
+          if (fix.id != dep.id || fix.id == id) {
+            continue;
+          }
+          if (fix.kind == "install" || fix.kind == "update") {
+            // The planner gives one range for every mod that asks; this
+            // mod's own is the one to show here.
+            add_fix({fix.kind, fix.id, dep.range_text});
+          } else if (fix.kind == "unpin") {
+            add_fix(fix);
+          }
+        }
       }
     }
     // Why this order: the planner's decisions that name this mod.
@@ -1114,14 +1163,21 @@ private:
     } else if (fix.kind == "reorder" && enabled(fix.detail)) {
       label = owner_->tr("Move below") + " " + name_of(fix.detail);
     } else if (fix.kind == "unpin") {
-      label = owner_->tr("Unpin version") + " " + fix.detail;
+      // A dependency's pin names the dependency; the mod's own does not.
+      label =
+          owner_->tr("Unpin version") + " " + fix.detail +
+          (fix.id != sel_.id ? " " + owner_->tr("of") + " " + name_of(fix.id)
+                             : std::string());
     } else if ((fix.kind == "install" || fix.kind == "update") &&
                fix.id.starts_with("ws.") && fix.id.substr(3) != d_ws_) {
-      label = owner_->tr("Open in Steam to subscribe or update");
+      // A dependency from the Workshop (the selected mod's own page is
+      // the Open in Steam button above). Its id tells two of them apart.
+      label = owner_->tr("Open in Steam:") + " " + fix.id.substr(3);
     }
     if (!label.empty()) {
       for (const auto &existing : sel_fixes_) {
-        if (existing.kind == fix.kind && existing.detail == fix.detail) {
+        if (existing.kind == fix.kind && existing.id == fix.id &&
+            existing.detail == fix.detail) {
           return;
         }
       }
@@ -1129,18 +1185,22 @@ private:
       sel_fixes_.push_back(fix);
       return;
     }
+    std::string text;
     if (fix.kind == "allow_conflict") {
-      d_fix_text_.push_back(owner_->tr("A pack can allow this conflict "
-                                       "(Packs)."));
+      text = owner_->tr("A pack can allow this conflict (Packs).");
     } else if (fix.kind == "update_xerces") {
-      d_fix_text_.push_back(owner_->tr("Needs Xerces") + " " + fix.detail);
+      text = owner_->tr("Needs Xerces") + " " + fix.detail;
     } else if (fix.kind == "install" || fix.kind == "update") {
-      d_fix_text_.push_back(
-          fix.id.starts_with("ws.")
-              ? owner_->tr("Subscribe to it in Steam (Open in Steam), then "
-                           "rescan.")
-              : owner_->tr("Install") + " " + fix.id +
-                    (fix.detail.empty() ? "" : " " + fix.detail));
+      text = fix.id.starts_with("ws.")
+                 ? owner_->tr("Subscribe to it in Steam (Open in Steam), then "
+                              "rescan.")
+                 : owner_->tr("Install") + " " + fix.id +
+                       (fix.detail.empty() ? "" : " " + fix.detail) + ", " +
+                       owner_->tr("then rescan.");
+    }
+    if (!text.empty() &&
+        std::ranges::find(d_fix_text_, text) == d_fix_text_.end()) {
+      d_fix_text_.push_back(text);
     }
   }
 
@@ -1165,15 +1225,14 @@ private:
     const std::string detached = xc::mods_hand_edit(config, mode_);
     history_.record(mode_, before, xc::mods_take(config, mode_));
     if (!svc().save_config()) {
-      owner_->notify(owner_->tr("The config could not be saved:") + " " +
-                         svc().config_error(),
-                     true);
+      notify(owner_->tr("The config could not be saved:") + " " +
+                 svc().config_error(),
+             true);
     } else if (!detached.empty()) {
-      owner_->notify(done + ". " + owner_->tr("Detached from the pack") +
-                     " \"" + detached + "\" (" + owner_->tr("Ctrl+Z undoes") +
-                     ").");
+      notify(done + ". " + owner_->tr("Detached from the pack") + " \"" +
+             detached + "\" (" + owner_->tr("Ctrl+Z undoes") + ").");
     } else {
-      owner_->notify(done);
+      notify(done);
     }
     log_info("launcher.mods.edit", done);
     return true;
@@ -1238,9 +1297,9 @@ private:
                  (at == 1 ? " (" + owner_->tr("main mod") + ")" : "");
         });
     if (!done) {
-      owner_->notify(name + " " +
-                     owner_->tr(delta < 0 ? "is already at the top"
-                                          : "is already at the bottom"));
+      notify(name + " " +
+             owner_->tr(delta < 0 ? "is already at the top"
+                                  : "is already at the bottom"));
       return;
     }
     set_selection("o:" + id);
@@ -1254,9 +1313,9 @@ private:
       return;
     }
     if (!enabled(sel_.id)) {
-      owner_->notify(owner_->tr("Switch it on first: only enabled mods have a "
-                                "place in the load order."),
-                     true);
+      notify(owner_->tr("Switch it on first: only enabled mods have a "
+                        "place in the load order."),
+             true);
       return;
     }
     const Rml::Element *focus = owner_->context()->GetFocusElement();
@@ -1289,21 +1348,21 @@ private:
     switch (history_.undo(config, mode_)) {
     case xc::mods_history::undo_result::done:
       if (!svc().save_config()) {
-        owner_->notify(owner_->tr("The config could not be saved:") + " " +
-                           svc().config_error(),
-                       true);
+        notify(owner_->tr("The config could not be saved:") + " " +
+                   svc().config_error(),
+               true);
       } else {
-        owner_->notify(owner_->tr("Undone"));
+        notify(owner_->tr("Undone"));
       }
       log_info("launcher.mods.undo", mode_);
       break;
     case xc::mods_history::undo_result::stale:
-      owner_->notify(owner_->tr("Nothing to undo: the load order was changed "
-                                "elsewhere since."),
-                     true);
+      notify(owner_->tr("Nothing to undo: the load order was changed "
+                        "elsewhere since."),
+             true);
       break;
     case xc::mods_history::undo_result::nothing:
-      owner_->notify(owner_->tr("Nothing to undo"));
+      notify(owner_->tr("Nothing to undo"));
       break;
     }
     can_undo_ = history_.size(mode_) > 0;
@@ -1352,7 +1411,7 @@ private:
       return;
     }
     if (!owner_->open_url("steam://url/CommunityFilePage/" + workshop_id)) {
-      owner_->notify(owner_->tr("Steam could not be opened."), true);
+      notify(owner_->tr("Steam could not be opened."), true);
     }
   }
 
@@ -1363,7 +1422,7 @@ private:
         return;
       }
       svc().start_scan();
-      owner_->notify(owner_->tr("Reading the mod folders again..."));
+      notify(owner_->tr("Reading the mod folders again..."));
     } else if (action == "cancel") {
       svc().cancel_scan();
     } else if (action == "undo") {
@@ -1381,12 +1440,12 @@ private:
     } else if (action == "folder") {
       if (const xc::installed_content *item = selected_item()) {
         if (!owner_->open_folder(item->path)) {
-          owner_->notify(owner_->tr("The folder could not be opened."), true);
+          notify(owner_->tr("The folder could not be opened."), true);
         }
       }
     } else if (action == "copy id") {
       owner_->copy_text(sel_.id);
-      owner_->notify(owner_->tr("Copied") + " " + sel_.id);
+      notify(owner_->tr("Copied") + " " + sel_.id);
     } else if (action == "clear") {
       query_.clear();
       filter_ = "all";
@@ -1401,8 +1460,10 @@ private:
   // RmlUi's spatial navigation never leaves the scroll container it starts
   // in, and never enters one, so the list and the details pane would trap a
   // controller. The screen has three areas (the top bar, the list, the
-  // details); moves inside one are RmlUi's, moves between them are made
-  // here with the same scoring RmlUi uses.
+  // details); moves inside the top bar and the list are RmlUi's, moves
+  // between areas, inside the details (which also page through their text)
+  // and from plain text a click focused are made here with the same scoring
+  // RmlUi uses.
   struct area_box {
     float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
   };
@@ -1456,6 +1517,14 @@ private:
     return -1;
   }
 
+  // Something RmlUi can navigate from and Enter acts on: the buttons, the
+  // search box and the details' section headings (tab-index: auto). A click
+  // on plain text focuses that div instead, and RmlUi cannot move from it.
+  static bool is_stop(const Rml::Element *element) {
+    return element->GetComputedValues().tab_index() ==
+           Rml::Style::TabIndex::Auto;
+  }
+
   // The best target in one area. Moving into the list or the details, only
   // what is scrolled into view counts; inside one, RmlUi scrolls to it.
   Rml::Element *best_in(int area, Rml::Element *from,
@@ -1469,9 +1538,13 @@ private:
     const area_box clip = box_of(root);
     const area_box start = box_of(from);
     Rml::Element *found = nullptr;
-    for (const char *tag : {"button", "input"}) {
+    for (const char *tag : {"button", "input", ".d-stop"}) {
       Rml::ElementList elements;
-      root->GetElementsByTagName(elements, tag);
+      if (tag[0] == '.') {
+        root->GetElementsByClassName(elements, tag + 1);
+      } else {
+        root->GetElementsByTagName(elements, tag);
+      }
       for (Rml::Element *element : elements) {
         if (element == from || !element->IsVisible(true)) {
           continue;
@@ -1544,6 +1617,8 @@ private:
     if (text && (key == Rml::Input::KI_LEFT || key == Rml::Input::KI_RIGHT)) {
       return false; // the caret
     }
+    const bool vertical =
+        key == Rml::Input::KI_UP || key == Rml::Input::KI_DOWN;
     Rml::Element *target = nullptr;
     if (area == 2 && key == Rml::Input::KI_LEFT) {
       target = doc->GetElementById(selected_row_id());
@@ -1555,15 +1630,22 @@ private:
       float best = 1e30f;
       // The search box would keep Up and Down for itself, so even moves
       // inside the top bar are made here when it has focus.
-      if (!text && best_in(area, from, key, best, false)) {
+      Rml::Element *inside =
+          text ? nullptr : best_in(area, from, key, best, false);
+      if (area == 2 && vertical && page_details(inside, key)) {
+        return true; // read on before the next stop
+      }
+      if (inside && area != 2 && is_stop(from)) {
         return false; // RmlUi finds it
       }
+      // From plain text RmlUi finds nothing; the details are paged here.
+      target = inside;
+    }
+    if (!target) {
       // Between areas only the ways that read naturally: the top bar and
       // the columns by Up and Down, the list and the details by Left and
       // Right (Down at the end of the details does not jump to the list).
-      const bool vertical =
-          key == Rml::Input::KI_UP || key == Rml::Input::KI_DOWN;
-      best = 1e30f;
+      float best = 1e30f;
       for (int other = 0; other < 3; ++other) {
         const bool allowed = other == area
                                  ? text
@@ -1579,12 +1661,51 @@ private:
     if (!target && area == 0 && key == Rml::Input::KI_UP) {
       target = doc->GetElementById("tab-" + std::string(id()));
     }
-    if (!target) {
+    if (!target && !is_stop(from)) {
+      // Focus sits on plain text (after a click) and nothing lies that way:
+      // the selected row, else the screen's default, so the keys never go
+      // dead.
+      target = doc->GetElementById(selected_row_id());
+      if (!target || !target->IsVisible(true)) {
+        target = default_focus();
+      }
+    }
+    if (!target || target == from) {
       return false;
     }
     target->Focus(true);
     target->ScrollIntoView(
         Rml::ScrollIntoViewOptions(Rml::ScrollAlignment::Nearest));
+    return true;
+  }
+
+  // RmlUi has no keyboard scrolling and the details are mostly text, so Up
+  // and Down page through them (80% of the pane, a little overlap to keep
+  // the place) whenever the next stop that way is further than one step
+  // can bring into view along with what lies before it, or there is none.
+  // True when it scrolled.
+  bool page_details(Rml::Element *next, Rml::Input::KeyIdentifier key) {
+    Rml::Element *pane = doc ? doc->GetElementById("mods-details") : nullptr;
+    if (!pane) {
+      return false;
+    }
+    const float client = pane->GetClientHeight();
+    const float page = client * 0.8f;
+    const bool down = key == Rml::Input::KI_DOWN;
+    if (next) {
+      const area_box view = box_of(pane);
+      const area_box b = box_of(next);
+      if (down ? b.y1 <= view.y1 + page : b.y0 >= view.y0 - page) {
+        return false; // focusing it scrolls nothing unread past
+      }
+    }
+    const float top = pane->GetScrollTop();
+    const float end = std::max(0.f, pane->GetScrollHeight() - client);
+    const float to = std::clamp(top + (down ? page : -page), 0.f, end);
+    if (std::fabs(to - top) < 1.f) {
+      return false; // already at that end
+    }
+    pane->SetScrollTop(to);
     return true;
   }
 
@@ -1623,6 +1744,46 @@ private:
         focus_id == "rescan" || focus_id == "cancel-scan" ||
         focus_id == "empty-rescan") {
       focus_later("");
+    }
+  }
+
+  // Focus must stay on something with a ring. A rebuild can remove the
+  // focused row (another mode, a rescan, a filter), and a control that
+  // data-if hides (Undo once the history is empty, Rescan and Stop
+  // swapping) is blurred by RmlUi onto its parent: either way focus ends on
+  // a plain div. A hidden control hands focus to its neighbour, a removed
+  // row to the screen's default. A plain div focused by a click on text is
+  // left alone (navigate() moves on from it).
+  void keep_focus_visible() {
+    const bool rebuilt = lost_focus_check_ > 0 && --lost_focus_check_ == 0;
+    Rml::Element *focus =
+        owner_->context() ? owner_->context()->GetFocusElement() : nullptr;
+    if (!focus || !doc || !doc->IsVisible() || owner_->current() != id() ||
+        owner_->dialog_open() || area_of(focus) < 0) {
+      return;
+    }
+    if (is_stop(focus) && focus->IsVisible(true)) {
+      last_stop_ = focus->GetId();
+      return;
+    }
+    Rml::Element *was =
+        last_stop_.empty() ? nullptr : doc->GetElementById(last_stop_);
+    bool blurred = false; // focus went from `was` to a parent of it
+    if (was && !was->IsVisible(true)) {
+      for (const Rml::Element *e = was; e && !blurred; e = e->GetParentNode()) {
+        blurred = e == focus;
+      }
+    }
+    if (blurred) {
+      // Remembered at once: a cached rescan can end (Stop hides again)
+      // before a frame passes with Stop focused.
+      last_stop_ = last_stop_ == "rescan"        ? "cancel-scan"
+                   : last_stop_ == "cancel-scan" ? "rescan"
+                   : last_stop_ == "undo"        ? "filter-legacy"
+                                                 : "";
+      focus_now(last_stop_);
+    } else if (rebuilt || !focus->IsVisible(true)) {
+      focus_now("");
     }
   }
 
@@ -1676,6 +1837,7 @@ private:
   std::vector<std::pair<std::string, std::string>> coloured_; // raw, plain
   bool had_rows_ = false;
   int lost_focus_check_ = 0;
+  std::string last_stop_; // the last control with focus, by id
   std::string applied_query_;
   std::string pending_focus_;
   int pending_wait_ = 0;
