@@ -281,6 +281,9 @@ flowchart LR
   control keep working and the UI technology never lives in the game process.
 - The game role keeps upstream's in-process model: map `BlackOps3.exe`, run
   component phases, jump to the entry point.
+- Until the rename (7.7) the launcher builds as its own `Xerces.exe`
+  (`src/xerces_launcher`) and starts the client next to it (`boiii.exe -launch`)
+  as the game role; folding both roles into one binary is part of the rename.
 - `xerces_cli.exe` is a small console program for automation that talks to
   whichever process is running.
 - The dedicated server is the same binary with `-dedicated`.
@@ -1980,7 +1983,7 @@ checklist items run with you, and the docs updated.
 v1.0 is M0 to M4; M5 to M9 ship as later releases in that order, except slice
 M5a, which you asked for now.
 
-**Status on 2026-11-04.**
+**Status on 2026-11-05.**
 
 - M0: base and toolchain done (D1, D2); the updater and the `-beta`
   self-download are disabled; `xerces_core` and its tests exist, with a CI job
@@ -2001,8 +2004,20 @@ M5a, which you asked for now.
   targets, made from the D3 dump; `xerces_cli sig check --dump` resolves all
   nine at upstream's addresses for build `0x6531394`. The pre-flight check (4.2)
   exists with `compat/builds.json`; `xerces_cli game check` calls the installed
-  game supported. Open: everything in the game process (resolving the registry
-  at startup, hook bus, `xerces_loader`, pipe, safe mode, detection).
+  game supported. On 2026-11-05 the game-process side was built (389dff95 to
+  db7fda81), not yet run in the game: the client resolves the registry before
+  mod_stack hooks anything (on a miss multi-mod stays off; the dedicated
+  server keeps upstream's tables, D22), checks `fs_game` and `fs_extramods`
+  against the plan named by `-xerces-plan`, keeps the journal for safe mode,
+  serves the command pipe (`xerces_cli status`, `load`, `reload`, `unload`),
+  and `xerces_cli diag bundle` makes the diagnostics zip (5.10, without
+  minidumps). The launcher does detection (4.7), safe mode and "find the
+  culprit" (5.6). The client's own game-folder lookup in `beta` (working
+  folder, saved path, Steam libraries, picker) is enough because the launcher
+  starts the game in its folder; loading DLLs by absolute path would mean
+  editing the fenced loader, so it stays as upstream has it. Open: the
+  in-game checks in docs/TESTING.md, the hook bus, the pool policy, ownership
+  events, the dev module, and leaving plugins out of release builds.
 - M2, headless part done: the ownership map and rules, the merges, GSC hook
   chain planning, reports, determinism tests and the loose both-apply pair as
   unit tests. Open: index runs, the in-game merges and chains, the GSC call-next

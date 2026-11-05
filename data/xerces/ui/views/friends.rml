@@ -2,13 +2,51 @@
 <head>
 	<title>Friends</title>
 	<link type="text/template" href="../shell.rml"/>
+	<style>
+		.friends-columns { display: flex; flex-direction: row; flex-wrap: wrap; gap: 40dp; margin-top: 40dp; }
+		.friends-column { flex: 1 1 360dp; max-width: 560dp; }
+		.friends-item { padding: 14dp 0dp; border-bottom: 1dp var(--line); }
+		.friends-item-title { font-size: 15dp; font-weight: 600; line-height: 20dp; }
+		.friends-item-text { margin-top: 4dp; font-size: 13dp; line-height: 19dp; color: var(--text2); }
+	</style>
 </head>
-<!-- Friends (docs/DESIGN.md 7.3): placeholder. -->
+<!-- Friends (docs/DESIGN.md 7.3): arrives with Xerces accounts in M5. Until
+     then this page says what is off in this build (D14) and what will come,
+     and nothing on it talks to a network. -->
 <body template="shell">
 <div class="page">
 	<div class="page-title">Friends</div>
-	<div class="page-sub">Friends, presence and invites arrive with Xerces accounts.</div>
-	<div class="section"><button class="outline default-focus" id="friends-back"><span>Back to Home</span></button></div>
+	<div class="page-sub">Friends, presence and invites arrive with Xerces accounts. Until then Xerces sends nothing about you anywhere, and joining a friend works through Servers with their address.</div>
+
+	<div class="friends-columns">
+		<div class="friends-column">
+			<div class="label section-label">Off in this build</div>
+			<div class="friends-item">
+				<div class="friends-item-title">Friend presence and invites</div>
+				<div class="friends-item-text">BOIII sent your friend code to its masters every few seconds. Xerces builds leave that out.</div>
+			</div>
+			<div class="friends-item">
+				<div class="friends-item-title">Connecting through BOIII's servers</div>
+				<div class="friends-item-text">The rendezvous that helped two players behind routers find each other is off too. Direct connect and LAN still work.</div>
+			</div>
+		</div>
+		<div class="friends-column">
+			<div class="label section-label">Coming with accounts</div>
+			<div class="friends-item">
+				<div class="friends-item-title">Friend requests, presence and parties</div>
+				<div class="friends-item-text">Optional, with privacy settings and block and report.</div>
+			</div>
+			<div class="friends-item">
+				<div class="friends-item-title">Invites that bring the right mods</div>
+				<div class="friends-item-text">An invite carries the pack, so Xerces can tell you which Workshop items to get in Steam first.</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="section toolbar">
+		<button id="friends-servers" class="outline default-focus"><span>Open Servers</span></button>
+		<button id="friends-home" class="link"><span>Back to Home</span></button>
+	</div>
 </div>
 </body>
 </rml>

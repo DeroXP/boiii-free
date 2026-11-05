@@ -1,5 +1,6 @@
-// Friends (docs/DESIGN.md 7.3). Placeholder until the screen is built: it
-// shows the frame and a short description.
+// Friends (docs/DESIGN.md 7.3): arrives with Xerces accounts (M5). This page
+// says what is off in this build (D14) and what will come; it never talks to a
+// network.
 
 #include <RmlUi/Core.h>
 
@@ -10,7 +11,21 @@ namespace {
 class friends_view final : public view {
 public:
   const char *id() const override { return "friends"; }
-  bool bind(Rml::Context *, app &) override { return true; }
+
+  bool bind(Rml::Context *, app &owner) override {
+    owner_ = &owner;
+    return true;
+  }
+
+  void loaded(Rml::ElementDocument *document) override {
+    owner_->listen(document->GetElementById("friends-servers"), "click",
+                   [this](Rml::Event &) { owner_->show("servers"); });
+    owner_->listen(document->GetElementById("friends-home"), "click",
+                   [this](Rml::Event &) { owner_->show("home"); });
+  }
+
+private:
+  app *owner_ = nullptr;
 };
 } // namespace
 
