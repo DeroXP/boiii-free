@@ -1,0 +1,123 @@
+<!doctype html>
+<!-- Static copy of the C / Signal home mockup (design canvas, project/C-Home),
+     dark theme, Zombies mode, with the fonts the launcher bundles
+     (data/xerces/fonts). The RmlUi spike's home.rml is compared against this
+     in a browser at the same CSS size (docs/TESTING.md, D4 spike). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Signal home (reference)</title>
+<style>
+@font-face { font-family: 'Inter Tight'; src: url('../../../data/xerces/fonts/InterTight-wght.ttf'); font-weight: 100 900; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('../../../data/xerces/fonts/IBMPlexMono-Regular.ttf'); font-weight: 400; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('../../../data/xerces/fonts/IBMPlexMono-Medium.ttf'); font-weight: 500; }
+body{margin:0;background:#000}
+.xc-b{transition:background-color 200ms ease-out,color 200ms ease-out,border-color 200ms ease-out,opacity 200ms ease-out,transform 200ms ease-out}
+.xc-b:focus-visible{outline:2px solid #FF4A1C;outline-offset:3px}
+a{color:inherit}
+</style>
+</head>
+<body>
+<div style="background: #000000; color: #FFFFFF; width: 100%; min-height: 800px; box-sizing: border-box; display: flex; flex-direction: column; font-family: 'Inter Tight', system-ui, sans-serif">
+
+<header style="display: flex; flex-wrap: wrap; align-items: stretch; min-height: 48px; border-bottom: 1px solid #2B2B2B">
+<div style="display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 32px 0 24px">
+<svg viewBox="0 0 48 48" width="22" height="22" aria-hidden="true" style="display: block; flex: none"><polygon points="9,4 39,4 24,19" fill="#FFFFFF"></polygon><polygon points="44,9 44,39 29,24" fill="#FF4A1C"></polygon><polygon points="39,44 9,44 24,29" fill="#FFFFFF"></polygon><polygon points="4,39 4,9 19,24" fill="#FFFFFF"></polygon></svg>
+<span style="font-weight: 800; font-size: 18px; line-height: 1; letter-spacing: -0.04em; color: #FFFFFF">xerces</span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; line-height: 16px; color: #A6A6A6">1.0.0-beta.1</span>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; line-height: 14px; font-weight: 500; letter-spacing: 0.08em; padding: 1px 5px; border: 1px solid #A6A6A6; border-radius: 2px; color: #FFFFFF">BETA</span>
+</div>
+<nav style="display: flex; flex-wrap: wrap; align-items: stretch; flex: 1 1 auto; min-width: 0">
+<button type="button" class="xc-b" style="display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 12px; border: 0; background: transparent; color: #FFFFFF; font: 600 13px/1 'Inter Tight', sans-serif"><span style="width: 6px; height: 6px; flex: none; background: #FF4A1C"></span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 400; color: #A6A6A6">01</span>Home</button>
+<button type="button" class="xc-b" style="display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 12px; border: 0; background: transparent; color: #A6A6A6; font: 500 13px/1 'Inter Tight', sans-serif"><span style="width: 6px; height: 6px; flex: none"></span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 400; color: #A6A6A6">02</span>Mods</button>
+<button type="button" class="xc-b" style="display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 12px; border: 0; background: transparent; color: #A6A6A6; font: 500 13px/1 'Inter Tight', sans-serif"><span style="width: 6px; height: 6px; flex: none"></span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 400; color: #A6A6A6">03</span>Packs</button>
+<button type="button" class="xc-b" style="display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 12px; border: 0; background: transparent; color: #A6A6A6; font: 500 13px/1 'Inter Tight', sans-serif"><span style="width: 6px; height: 6px; flex: none"></span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 400; color: #A6A6A6">04</span>Servers</button>
+<button type="button" class="xc-b" style="display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 12px; border: 0; background: transparent; color: #A6A6A6; font: 500 13px/1 'Inter Tight', sans-serif"><span style="width: 6px; height: 6px; flex: none"></span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 400; color: #A6A6A6">05</span>Friends</button>
+<button type="button" class="xc-b" style="display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 12px; border: 0; background: transparent; color: #A6A6A6; font: 500 13px/1 'Inter Tight', sans-serif"><span style="width: 6px; height: 6px; flex: none"></span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 400; color: #A6A6A6">06</span>Settings</button>
+<button type="button" class="xc-b" style="display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 12px; border: 0; background: transparent; color: #A6A6A6; font: 500 13px/1 'Inter Tight', sans-serif"><span style="width: 6px; height: 6px; flex: none"></span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 400; color: #A6A6A6">07</span>Diagnostics</button>
+</nav>
+<div style="display: flex; align-items: stretch; margin-left: auto">
+<button type="button" style="display: flex; align-items: center; justify-content: center; width: 46px; min-height: 48px; padding: 0; border: 0; background: transparent; color: #FFFFFF"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.25"><path d="M3 8.5h10"></path></svg></button>
+<button type="button" style="display: flex; align-items: center; justify-content: center; width: 46px; min-height: 48px; padding: 0; border: 0; background: transparent; color: #FFFFFF"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.25"><rect x="3.5" y="3.5" width="9" height="9"></rect></svg></button>
+<button type="button" style="display: flex; align-items: center; justify-content: center; width: 46px; min-height: 48px; padding: 0; border: 0; background: transparent; color: #FFFFFF"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.25"><path d="M4 4l8 8M12 4l-8 8"></path></svg></button>
+</div>
+</header>
+
+<main style="flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 40px; padding: 32px 32px 24px; box-sizing: border-box">
+<div style="flex: 999 1 560px; min-width: 0; max-width: 880px">
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 32px; border-bottom: 1px solid #2B2B2B">
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; line-height: 16px; letter-spacing: 0.08em; text-transform: uppercase; color: #A6A6A6">Game mode</span>
+<div style="display: flex; flex-wrap: wrap; gap: 0 28px">
+<button type="button" class="xc-b" style="display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 2px; margin-bottom: -1px; border: 0; border-bottom: 2px solid #FFFFFF; background: transparent; color: #FFFFFF; font: 600 15px/1 'Inter Tight', sans-serif; letter-spacing: -0.01em"><span style="width: 8px; height: 8px; flex: none; background: #FF4A1C"></span>Zombies</button>
+<button type="button" class="xc-b" style="display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 2px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #A6A6A6; font: 600 15px/1 'Inter Tight', sans-serif; letter-spacing: -0.01em"><span style="width: 8px; height: 8px; flex: none; background: transparent"></span>Multiplayer</button>
+<button type="button" class="xc-b" style="display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 2px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #A6A6A6; font: 600 15px/1 'Inter Tight', sans-serif; letter-spacing: -0.01em"><span style="width: 8px; height: 8px; flex: none; background: transparent"></span>Campaign</button>
+</div>
+</div>
+
+<section style="margin-top: 40px">
+<div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; line-height: 16px; letter-spacing: 0.08em; text-transform: uppercase; color: #A6A6A6">Active pack</div>
+<h1 style="margin: 8px 0 0; font-weight: 800; font-size: 80px; line-height: 0.92; letter-spacing: -0.03em; color: #FFFFFF">Weekend Zombies</h1>
+<p style="margin: 16px 0 0; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">Pinned versions</p>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 40px; margin-top: 40px">
+<div style="flex: 999 1 400px; min-width: 0">
+<div style="display: flex; flex-wrap: wrap; gap: 16px 40px">
+<div style="flex: 0 1 120px; min-width: 0; padding-top: 12px; border-top: 1px solid #FFFFFF"><div style="font-weight: 700; font-size: 48px; line-height: 1; letter-spacing: -0.03em">07</div><div style="margin-top: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">mods</div></div>
+<div style="flex: 0 1 120px; min-width: 0; padding-top: 12px; border-top: 1px solid #FFFFFF"><div style="font-weight: 700; font-size: 48px; line-height: 1; letter-spacing: -0.03em">00</div><div style="margin-top: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">conflicts</div></div>
+<div style="flex: 0 1 120px; min-width: 0; padding-top: 12px; border-top: 1px solid #FFFFFF"><div style="font-weight: 700; font-size: 48px; line-height: 1; letter-spacing: -0.03em">02</div><div style="margin-top: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">merged</div></div>
+<div style="flex: 0 1 120px; min-width: 0; padding-top: 12px; border-top: 1px solid #FFFFFF"><div style="font-weight: 700; font-size: 48px; line-height: 1; letter-spacing: -0.03em">01</div><div style="margin-top: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">override</div></div>
+</div>
+<button type="button" class="xc-b" style="display: flex; align-items: center; gap: 24px; width: 100%; min-height: 96px; margin-top: 32px; padding: 20px 24px; box-sizing: border-box; border: 1px solid #FF4A1C; border-radius: 2px; background: #FF4A1C; color: #000000; text-align: left; font-family: 'Inter Tight', sans-serif">
+<span style="display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-width: 0"><span style="font-weight: 800; font-size: 36px; line-height: 1; letter-spacing: -0.03em">Launch modded</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; line-height: 16px; font-weight: 500">Multi-mod · 7 mods</span></span>
+<span style="display: flex; align-items: center; gap: 8px; flex: none"><span style="display: inline-flex; align-items: center; height: 24px; padding: 0 7px; border: 1px solid currentColor; border-radius: 2px; font: 500 12px/1 'IBM Plex Mono', monospace">Enter</span><span style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 1px solid currentColor; border-radius: 2px; font: 500 12px/1 'IBM Plex Mono', monospace">A</span></span>
+<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" style="flex: none"><path d="M4 12h15M13 6l6 6-6 6"></path></svg>
+</button>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; margin-top: 12px">
+<button type="button" style="min-height: 48px; padding: 0 20px; border: 1px solid #FFFFFF; border-radius: 2px; background: transparent; color: #FFFFFF; font: 600 15px/1 'Inter Tight', sans-serif">Launch vanilla</button>
+<button type="button" style="min-height: 48px; padding: 0 4px; border: 0; background: transparent; color: #FFFFFF; font: 500 15px/1 'Inter Tight', sans-serif; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px">Dry-run preview</button>
+</div>
+</div>
+
+<section style="flex: 1 1 240px; min-width: 0">
+<h2 style="margin: 0; padding-bottom: 12px; border-bottom: 1px solid #FFFFFF; font-family: 'IBM Plex Mono', monospace; font-size: 11px; line-height: 16px; font-weight: 400; letter-spacing: 0.08em; text-transform: uppercase; color: #A6A6A6">Load order</h2>
+<ol style="list-style: none; margin: 0; padding: 0">
+<li style="display: flex; align-items: baseline; gap: 12px; padding: 12px 0; border-bottom: 1px solid #2B2B2B"><span style="flex: none; width: 20px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">01</span><span style="flex: 1 1 auto; font-size: 14px; font-weight: 500; line-height: 16px">Perk Rebalance</span><span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">2.1.0</span></li>
+<li style="display: flex; align-items: baseline; gap: 12px; padding: 12px 0; border-bottom: 1px solid #2B2B2B"><span style="flex: none; width: 20px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">02</span><span style="flex: 1 1 auto; font-size: 14px; font-weight: 500; line-height: 16px">Better HUD</span><span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">1.4.2</span></li>
+<li style="display: flex; align-items: baseline; gap: 12px; padding: 12px 0; border-bottom: 1px solid #2B2B2B"><span style="flex: none; width: 20px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">03</span><span style="flex: 1 1 auto; font-size: 14px; font-weight: 500; line-height: 16px">Extended Box Pool</span><span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">0.9.0</span></li>
+<li style="display: flex; align-items: baseline; gap: 12px; padding: 12px 0; border-bottom: 1px solid #2B2B2B"><span style="flex: none; width: 20px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">04</span><span style="flex: 1 1 auto; font-size: 14px; font-weight: 500; line-height: 16px">Round Timer</span><span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">1.0.3</span></li>
+</ol>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #FFFFFF; text-decoration: underline; text-underline-offset: 3px">+3 more</a>
+</section>
+</div>
+
+<section style="display: flex; flex-wrap: wrap; gap: 16px 32px; margin-top: 40px; padding-top: 16px; border-top: 1px solid #2B2B2B">
+<div style="flex: 1 1 200px; min-width: 0"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; line-height: 16px; letter-spacing: 0.08em; text-transform: uppercase; color: #A6A6A6">Game</div><div style="margin-top: 6px; font-size: 15px; font-weight: 600; line-height: 20px">Found</div><div style="margin-top: 4px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 18px; color: #A6A6A6">Steam library C:\ · Build 24784313</div></div>
+<div style="flex: 1 1 140px; min-width: 0"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; line-height: 16px; letter-spacing: 0.08em; text-transform: uppercase; color: #A6A6A6">Signatures</div><div style="margin-top: 6px; font-size: 15px; font-weight: 600; line-height: 20px">9/9 matched</div></div>
+<div style="flex: 1 1 100px; min-width: 0"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; line-height: 16px; letter-spacing: 0.08em; text-transform: uppercase; color: #A6A6A6">Safe mode</div><div style="margin-top: 6px; font-size: 15px; font-weight: 600; line-height: 20px">Off</div></div>
+</section>
+</div>
+
+<aside style="flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 40px">
+<section>
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #FFFFFF"><h2 style="margin: 0; font-size: 20px; line-height: 24px; font-weight: 700; letter-spacing: -0.02em">Friends</h2><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">3 online</span></div>
+<ul style="list-style: none; margin: 0; padding: 0">
+<li style="display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #2B2B2B"><svg viewBox="0 0 10 10" width="10" height="10" style="flex: none"><rect x="0" y="0" width="10" height="10" fill="#FFFFFF"></rect></svg><div style="flex: 1 1 auto; min-width: 0"><div style="font-size: 15px; font-weight: 600; line-height: 20px">nova</div><div style="font-size: 13px; line-height: 18px; color: #A6A6A6">In game · Weekend Zombies</div></div><button type="button" style="flex: none; min-height: 32px; padding: 0 12px; border: 1px solid #A6A6A6; border-radius: 2px; background: transparent; color: #FFFFFF; font: 600 13px/1 'Inter Tight', sans-serif">Join</button></li>
+<li style="display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #2B2B2B"><svg viewBox="0 0 10 10" width="10" height="10" style="flex: none"><polygon points="5,0 10,10 0,10" fill="#FFFFFF"></polygon></svg><div style="flex: 1 1 auto; min-width: 0"><div style="font-size: 15px; font-weight: 600; line-height: 20px">kestrel</div><div style="font-size: 13px; line-height: 18px; color: #A6A6A6">In lobby · Classic Lobby</div></div><button type="button" style="flex: none; min-height: 32px; padding: 0 12px; border: 1px solid #A6A6A6; border-radius: 2px; background: transparent; color: #FFFFFF; font: 600 13px/1 'Inter Tight', sans-serif">Join</button></li>
+<li style="display: flex; align-items: center; gap: 12px; padding: 10px 0; min-height: 32px; border-bottom: 1px solid #2B2B2B"><svg viewBox="0 0 10 10" width="10" height="10" style="flex: none"><circle cx="5" cy="5" r="5" fill="#FFFFFF"></circle></svg><div style="flex: 1 1 auto; min-width: 0"><div style="font-size: 15px; font-weight: 600; line-height: 20px">drift</div><div style="font-size: 13px; line-height: 18px; color: #A6A6A6">Online</div></div></li>
+<li style="display: flex; align-items: center; gap: 12px; padding: 10px 0; min-height: 32px; border-bottom: 1px solid #2B2B2B"><svg viewBox="0 0 10 10" width="10" height="10" style="flex: none"><circle cx="5" cy="5" r="4.25" fill="none" stroke="#A6A6A6" stroke-width="1.5"></circle></svg><div style="flex: 1 1 auto; min-width: 0"><div style="font-size: 15px; font-weight: 500; line-height: 20px; color: #A6A6A6">ash_</div><div style="font-size: 13px; line-height: 18px; color: #A6A6A6">Away · 12m</div></div></li>
+</ul>
+<button type="button" style="width: 100%; min-height: 44px; margin-top: 16px; padding: 0 16px; border: 1px solid #FFFFFF; border-radius: 2px; background: transparent; color: #FFFFFF; font: 600 14px/1 'Inter Tight', sans-serif">Invite friends</button>
+</section>
+<section>
+<h2 style="margin: 0; padding-bottom: 12px; border-bottom: 1px solid #FFFFFF; font-size: 20px; line-height: 24px; font-weight: 700; letter-spacing: -0.02em">Servers</h2>
+<button type="button" style="display: flex; align-items: center; gap: 16px; width: 100%; min-height: 72px; margin-top: 16px; padding: 12px 16px; box-sizing: border-box; border: 1px solid #FFFFFF; border-radius: 2px; background: transparent; color: #FFFFFF; text-align: left; font-family: 'Inter Tight', sans-serif"><span style="display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-width: 0"><span style="font-size: 16px; font-weight: 700; line-height: 20px">Host a game</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 16px; color: #A6A6A6">Direct connect, relay fallback, no VPN</span></span><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" style="flex: none"><path d="M8 2v12M2 8h12"></path></svg></button>
+<div style="margin-top: 24px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; line-height: 16px; letter-spacing: 0.08em; text-transform: uppercase; color: #A6A6A6">Last joined</div>
+<p style="margin: 6px 0 0; font-size: 14px; line-height: 20px">Night Shift Zombies · 4/8 · 32 ms</p>
+</section>
+</aside>
+</main>
+</div>
+</body>
+</html>

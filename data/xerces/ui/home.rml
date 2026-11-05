@@ -1,0 +1,171 @@
+<rml>
+<head>
+	<title>Xerces</title>
+	<link type="text/rcss" href="signal.rcss"/>
+</head>
+<!-- The C / Signal home screen (docs/DESIGN.md 7.3), ported from the design
+     canvas for the RmlUi spike (D4). Pack data comes from the "home" data model
+     in src/xerces_launcher_spike/main.cpp. -->
+<body data-model="home">
+
+<div id="header">
+	<div class="brand">
+		<div class="mark"><div></div><div class="on"></div><div></div><div></div></div>
+		<span class="wordmark">xerces</span>
+		<span class="version">1.0.0-beta.1</span>
+		<span class="badge">BETA</span>
+	</div>
+	<div class="tabs">
+		<button class="tab current" data-event-click="act('tab home')"><span class="dot"></span><span class="num">01</span><span>Home</span></button>
+		<button class="tab" data-event-click="act('tab mods')"><span class="dot"></span><span class="num">02</span><span>Mods</span></button>
+		<button class="tab" data-event-click="act('tab packs')"><span class="dot"></span><span class="num">03</span><span>Packs</span></button>
+		<button class="tab" data-event-click="act('tab servers')"><span class="dot"></span><span class="num">04</span><span>Servers</span></button>
+		<button class="tab" data-event-click="act('tab friends')"><span class="dot"></span><span class="num">05</span><span>Friends</span></button>
+		<button class="tab" data-event-click="act('tab settings')"><span class="dot"></span><span class="num">06</span><span>Settings</span></button>
+		<button class="tab" data-event-click="act('tab diagnostics')"><span class="dot"></span><span class="num">07</span><span>Diagnostics</span></button>
+	</div>
+	<div class="window-buttons">
+		<button class="win" data-event-click="act('minimize')"><span class="min"></span></button>
+		<button class="win" data-event-click="act('maximize')"><span class="max"></span></button>
+		<button class="win" data-event-click="act('close')"><span>&#215;</span></button>
+	</div>
+</div>
+
+<div id="main">
+	<div class="primary">
+		<div class="modes">
+			<span class="label">Game mode</span>
+			<div class="mode-group">
+				<button id="mode-zm" class="mode" data-class-on="mode == 'zm'" data-event-click="pick('zm')"><span class="mark-dot"></span><span>Zombies</span></button>
+				<button id="mode-mp" class="mode" data-class-on="mode == 'mp'" data-event-click="pick('mp')"><span class="mark-dot"></span><span>Multiplayer</span></button>
+				<button id="mode-cp" class="mode" data-class-on="mode == 'cp'" data-event-click="pick('cp')"><span class="mark-dot"></span><span>Campaign</span></button>
+			</div>
+		</div>
+
+		<div class="pack">
+			<div class="label">Active pack</div>
+			<div class="pack-title">{{pack}}</div>
+			<div class="pack-meta">{{meta}}</div>
+		</div>
+
+		<div class="columns">
+			<div class="launch-column">
+				<div class="stats">
+					<div class="stat" data-for="st : stats">
+						<div class="stat-n">{{st.n}}</div>
+						<div class="stat-l">{{st.l}}</div>
+					</div>
+				</div>
+
+				<button id="launch-modded" data-class-off="!can_launch" data-event-click="act('launch modded')">
+					<div class="launch-text">
+						<div class="launch-title">Launch modded</div>
+						<div class="launch-sub">{{sub}}</div>
+					</div>
+					<div class="keys"><span class="key">Enter</span><span class="key">A</span></div>
+					<span class="arrow">&#8594;</span>
+				</button>
+
+				<div class="secondary">
+					<button id="launch-vanilla" class="outline" data-event-click="act('launch vanilla')"><span>Launch vanilla</span></button>
+					<button id="dry-run" class="link" data-event-click="act('dry-run preview')"><span>Dry-run preview</span></button>
+				</div>
+			</div>
+
+			<div class="load-order">
+				<div class="label section-label">Load order</div>
+				<div class="row" data-for="r : rows">
+					<span class="row-n">{{r.n}}</span>
+					<span class="row-name">{{r.name}}</span>
+					<span class="row-v">{{r.v}}</span>
+				</div>
+				<button class="more" data-if="has_more" data-event-click="act('more mods')"><span>+3 more</span></button>
+				<div class="empty-note" data-if="empty">Nothing to load. Campaign runs vanilla.</div>
+			</div>
+		</div>
+
+		<div class="status">
+			<div class="status-cell">
+				<div class="label">Game</div>
+				<div class="status-value">Found</div>
+				<div class="status-detail">Steam library C:\ &#183; Build 24784313</div>
+				<div class="status-ok"><span class="tick"></span><span>Supported</span></div>
+			</div>
+			<div class="status-cell">
+				<div class="label">Signatures</div>
+				<div class="status-value">9/9 matched</div>
+			</div>
+			<div class="status-cell">
+				<div class="label">Safe mode</div>
+				<div class="status-value">Off</div>
+			</div>
+			<div class="status-cell">
+				<div class="label">Update</div>
+				<div class="status-value">1.0.0-beta.2 available</div>
+				<button class="small-button" data-event-click="act('update')"><span>Update</span></button>
+			</div>
+		</div>
+	</div>
+
+	<div class="aside">
+		<div>
+			<div class="panel-head">
+				<span class="panel-title">Friends</span>
+				<span class="panel-count">3 online</span>
+			</div>
+			<div class="friend">
+				<span class="presence game"></span>
+				<div class="friend-text"><div class="friend-name">nova</div><div class="friend-state">In game &#183; Weekend Zombies</div></div>
+				<button class="small-button" data-event-click="act('join nova')"><span>Join</span></button>
+			</div>
+			<div class="friend">
+				<span class="presence lobby"></span>
+				<div class="friend-text"><div class="friend-name">kestrel</div><div class="friend-state">In lobby &#183; Classic Lobby</div></div>
+				<button class="small-button" data-event-click="act('join kestrel')"><span>Join</span></button>
+			</div>
+			<div class="friend">
+				<span class="presence online"></span>
+				<div class="friend-text"><div class="friend-name">drift</div><div class="friend-state">Online</div></div>
+			</div>
+			<div class="friend">
+				<span class="presence away"></span>
+				<div class="friend-text"><div class="friend-name away">ash_</div><div class="friend-state">Away &#183; 12m</div></div>
+			</div>
+			<button class="outline wide" data-event-click="act('invite friends')"><span>Invite friends</span></button>
+		</div>
+
+		<div>
+			<div class="panel-head"><span class="panel-title">Servers</span></div>
+			<button class="host" data-event-click="act('host a game')">
+				<div class="host-text">
+					<div class="host-title">Host a game</div>
+					<div class="host-sub">Direct connect, relay fallback, no VPN</div>
+				</div>
+				<span class="plus">+</span>
+			</button>
+			<div class="label last-joined">Last joined</div>
+			<div class="last-server">Night Shift Zombies &#183; 4/8 &#183; 32 ms</div>
+			<button class="join-again" data-event-click="act('join again')"><span>Join again</span></button>
+		</div>
+	</div>
+</div>
+
+<div id="footer">
+	<div class="hints">
+		<span>KEYBOARD</span>
+		<span class="hint"><span class="kbd">Enter</span><span>Select</span></span>
+		<span class="hint"><span class="kbd">Esc</span><span>Back</span></span>
+		<span class="hint"><span class="kbd">/</span><span>Search</span></span>
+		<span class="hint"><span class="kbd">Q</span><span class="kbd">E</span><span>Switch tab</span></span>
+	</div>
+	<div class="hints">
+		<span>CONTROLLER</span>
+		<span class="hint"><span class="kbd">A</span><span>Select</span></span>
+		<span class="hint"><span class="kbd">B</span><span>Back</span></span>
+		<span class="hint"><span class="kbd">Y</span><span>Search</span></span>
+		<span class="hint"><span class="kbd">LB</span><span class="kbd">RB</span><span>Switch tab</span></span>
+	</div>
+</div>
+
+</body>
+</rml>

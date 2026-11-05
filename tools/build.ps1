@@ -7,6 +7,10 @@
            runs the unit tests and a CLI smoke test on the fixtures.
   -Client  builds the game client (boiii.exe) as well. Needs the Visual Studio
            "C++ ATL for latest v143 build tools" component.
+  -Spike   builds the RmlUi launcher spike (xerces_spike_dx11.exe and
+           xerces_spike_gl3.exe, DESIGN.md 7.1). Needs RmlUi 6.3 and FreeType
+           2.14.3 under -ThirdPartyDir (default: the tools folder's sibling
+           third_party\), laid out as rmlui\RmlUi-6.3 and freetype\freetype-2.14.3.
 
   LLVM 23, Ninja and premake 5.0.0 must be on PATH, or in -ToolsDir laid out
   as llvm-*\clang+llvm-*\bin, ninja-*\ and premake-*\.
@@ -15,7 +19,9 @@
 param(
   [switch]$Tests,
   [switch]$Client,
-  [string]$ToolsDir = $env:XERCES_TOOLS
+  [switch]$Spike,
+  [string]$ToolsDir = $env:XERCES_TOOLS,
+  [string]$ThirdPartyDir = $env:XERCES_THIRD_PARTY
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,7 +43,18 @@ foreach ($tool in 'clang', 'ninja', 'premake5') {
   }
 }
 
-if (-not $Tests -and -not $Client) { $Tests = $true }
+if (-not $Tests -and -not $Client -and -not $Spike) { $Tests = $true }
+
+if ($Spike) {
+  if (-not $ThirdPartyDir -and $ToolsDir) {
+    $ThirdPartyDir = Join-Path (Split-Path -Parent $ToolsDir) 'third_party'
+  }
+  if (-not $ThirdPartyDir -or -not (Test-Path (Join-Path $ThirdPartyDir 'rmlui'))) {
+    throw 'The spike needs -ThirdPartyDir with rmlui\ and freetype\ (or XERCES_THIRD_PARTY).'
+  }
+  # premake/xerces_launcher_spike.lua reads it; projects are skipped without it.
+  $env:XERCES_THIRD_PARTY = $ThirdPartyDir
+}
 
 Push-Location $root
 try {
@@ -61,6 +78,12 @@ try {
     ninja -C build Release_x64
     if ($LASTEXITCODE -ne 0) { throw 'building the client failed' }
     Write-Host 'Built build\bin\x64\Release\boiii.exe (not launched).'
+  }
+
+  if ($Spike) {
+    ninja -C build bin/x64/Release/xerces_spike_dx11.exe bin/x64/Release/xerces_spike_gl3.exe
+    if ($LASTEXITCODE -ne 0) { throw 'building the spike failed' }
+    Write-Host 'Built build\bin\x64\Release\xerces_spike_dx11.exe and xerces_spike_gl3.exe (not launched).'
   }
 } finally {
   Pop-Location

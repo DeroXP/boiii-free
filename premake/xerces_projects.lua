@@ -54,3 +54,6 @@ headless_includes()
 links({ "xerces_core", "zstd", "advapi32" })
 
 group("")
+
+-- The RmlUi launcher spike, only when its third-party sources are given (D4).
+include("xerces_launcher_spike.lua")

@@ -94,7 +94,7 @@ too.
     returned to the lobby.
   - `loadmod 3171632315` replaced the main mod while the stack was loaded.
 
-  Open: the loaded-mod label ("… and 2 more") was not checked, and each mod's
+  Open: the loaded-mod label ("â€¦ and 2 more") was not checked, and each mod's
   feature in play needs a person playing.
 
 - [ ] Joining a server whose mods you lack names the missing mods instead of
@@ -102,8 +102,8 @@ too.
       run: it needs a server.
 - [x] Two fastfiles that share a name: all three mods ship `core_mod.ff`. With
       mod-stack's aliases PMem raised no error in three cases: the load, a front
-      end → match → front end round trip, and a main-mod switch that unloaded
-      every stacked zone in reverse order.
+      end â†’ match â†’ front end round trip, and a main-mod switch that
+      unloaded every stacked zone in reverse order.
 - [x] `en_`-prefixed zones of a stacked mod load (`en_stack_<id>_core_mod`,
       `en_stack_<id>_zm_mod`).
 - [x] The queue-add falsification test (DESIGN.md 2.3, row 6), on this session's
@@ -141,6 +141,54 @@ Also seen:
   it.
 - The client created `boiii_players` in the game folder. The official `players`
   folder was not touched.
+
+### Launcher spike (D4, the M3 gate)
+
+Run on 2026-11-05 by Claude on your PC while you were away; results and the open
+decision are in DESIGN.md 7.1.
+
+Third-party sources live outside the repository until the gate decides, in
+`C:\Users\Ginld\XercesDev\third_party` (downloaded to `..\downloads`):
+
+| File                      | Source                                     | Bytes     | SHA-256                                                            |
+| ------------------------- | ------------------------------------------ | --------- | ------------------------------------------------------------------ |
+| `RmlUi-6.3.zip`           | github.com/mikke89/RmlUi, tag 6.3 (MIT)    | 4,513,038 | `bfb340660e4bce38d4211cffc836cfbe1be676aa36ef9cc48e7df3855ee74fe3` |
+| `freetype-2.14.3.tar.xz`  | download.savannah.gnu.org (FTL or GPLv2)   | 2,670,220 | `36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f` |
+| `InterTight-wght.ttf`     | github.com/google/fonts, `ofl/intertight`  | 581,588   | `b81b73dcb64df3c230cabade7df6c5773bf863233f24c9ee51087519f1f88b6f` |
+| `IBMPlexMono-Regular.ttf` | github.com/google/fonts, `ofl/ibmplexmono` | 135,580   | `6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46` |
+| `IBMPlexMono-Medium.ttf`  | github.com/google/fonts, `ofl/ibmplexmono` | 136,704   | `a9b4c49bb299e05b5f6c481e7fb5e78943d2793249a0c8874ab574a2d1ea6755` |
+
+The fonts and their OFL texts are in `data/xerces/fonts/` (unmodified; the
+variable font's file name drops the `[wght]` suffix).
+
+To repeat the measurements (the programs are not the game; they only draw a
+window):
+
+```
+tools\build.ps1 -Spike -ToolsDir C:\Users\Ginld\XercesDev\tools
+build\bin\x64\Release\xerces_spike_dx11.exe --scale 1.5 --size 1200x680 --seconds 4 --log dx11.log
+build\bin\x64\Release\xerces_spike_gl3.exe --async --seconds 2 --log gl3.log
+build\bin\x64\Release\xerces_spike_dx11.exe --animate --seconds 8 --log animate.log
+build\bin\x64\Release\xerces_spike_dx11.exe --script tools\dev\spike\pad-script.txt --seconds 7 --log pad.log
+```
+
+The log has a `startup:` line per step, the first-frame time, and frame-time
+statistics. `tools/dev/spike/home-reference.html` is the mockup with the same
+fonts, for comparison in a browser (Edge headless:
+`msedge --headless=new --force-device-scale-factor=2 --window-size=1200,680 --screenshot=ref.png <file URL>`).
+
+- [x] Typography at 100, 150 and 200 percent against the mockup. One gap: no
+      OpenType (GPOS) kerning with RmlUi's default font engine.
+- [x] Transitions: worst frame 5.0 ms (DX11) and 5.3 ms (GL3) while switching
+      modes, inside the 144 Hz budget.
+- [ ] First frame under 150 ms: not met. GPU driver start-up takes 115 to 145
+      ms; first RmlUi frame 190 to 216 ms; native paint at 21 ms. Your call
+      (DESIGN.md 7.1).
+- [x] Controller navigation through the scripted pad on both renderers.
+- [ ] A physical controller press (the Tarantula) and vsync pacing on a live
+      display: need you at the PC.
+- [x] GL3 and DX11 both run.
+- [ ] Proton: not run.
 
 ### Build switches D14 and D15 (M0)
 

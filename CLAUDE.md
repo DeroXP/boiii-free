@@ -127,6 +127,12 @@ the `pgserver` wheel in a throwaway venv.
   from here (DESIGN.md 3.6). Its join prompt names missing mods instead of
   downloading them. The proof of concept's "queue-add" function is
   `SL_GetStringOfSize` (verified on a dump in D3). Do not call it.
+- D4 (RmlUi, gated) and D5 (C / Signal) are decided. The RmlUi spike is
+  `src/xerces_launcher_spike/` with `data/xerces/ui/` and `data/xerces/fonts/`;
+  `tools\build.ps1 -Spike` builds it from RmlUi 6.3 and FreeType 2.14.3 kept in
+  `C:\Users\Ginld\XercesDev\third_party` (not in the repo). Its results and the
+  open first-frame question are in DESIGN.md 7.1. Moving an OpenGL context to
+  another thread crashes NVIDIA's driver here; warm the driver instead.
 - D14 and D15 are build switches in `src/client/xerces/switches.hpp`, off by
   default: no friend presence, rendezvous, invites or Ezz Discord app, and
   upstream's downloaders are left out of the build
