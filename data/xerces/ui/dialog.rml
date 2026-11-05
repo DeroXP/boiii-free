@@ -1,0 +1,16 @@
+<rml>
+<head>
+	<title>Dialog</title>
+	<link type="text/rcss" href="base.rcss"/>
+</head>
+<!-- The launcher's modal dialog (app::dialog): a title, a body and up to three
+     buttons, over a dimmed screen. The app fills it and listens to the
+     buttons; Esc picks "cancel" (-1). -->
+<body class="dialog">
+	<div id="dialog-box">
+		<div id="dialog-title"></div>
+		<div id="dialog-body"></div>
+		<div id="dialog-buttons"></div>
+	</div>
+</body>
+</rml>

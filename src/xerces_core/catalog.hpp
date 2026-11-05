@@ -1,9 +1,13 @@
 #pragma once
 
+#include <atomic>
+#include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -19,14 +23,65 @@ struct catalog_scan {
   // installed_content::path is the folder of each version.
   std::map<std::string, std::filesystem::path> roots;
   diagnostics diags;
+  bool cancelled = false; // scan_options::cancel stopped it early
 };
 
-catalog_scan scan_mods_directory(const std::filesystem::path &directory);
+// Remembers each file's SHA-256 by its path, size and last write time, so a
+// rescan reads only files that changed. The Workshop folder on the test PC
+// holds 59 GB, which takes minutes to hash from scratch. Stored as text under
+// <home>\cache (DESIGN.md 3.5): a header line, then one line per file,
+// "<size>\t<write time>\t<sha256>\t<path>". Not thread-safe: one scan at a
+// time owns it.
+inline constexpr std::string_view hash_cache_header = "xerces.hashcache/1";
+
+class hash_cache {
+public:
+  // A missing or unreadable file leaves the cache empty; it is only a cache.
+  bool load(const std::filesystem::path &file);
+  // Writes the entries, all of them or only those looked up or added since
+  // load (prune), to file through a temporary file.
+  bool save(const std::filesystem::path &file, bool prune) const;
+
+  // The file's hash: cached if its size and write time are unchanged,
+  // otherwise read and remembered.
+  std::string file_sha256(const std::filesystem::path &path);
+
+  std::size_t hits() const { return hits_; }
+  std::size_t misses() const { return misses_; }
+  std::size_t size() const { return entries_.size(); }
+  std::uint64_t bytes_hashed() const { return bytes_hashed_; }
+
+private:
+  struct entry {
+    std::uint64_t size = 0;
+    std::int64_t write_time = 0;
+    std::string sha256;
+    bool used = false;
+  };
+  std::map<std::string, entry> entries_;
+  std::size_t hits_ = 0;
+  std::size_t misses_ = 0;
+  std::uint64_t bytes_hashed_ = 0;
+};
+
+struct scan_options {
+  hash_cache *cache = nullptr; // optional
+  // Called before each mod folder with its index, the folder count and its
+  // name; from the scanning thread.
+  std::function<void(std::size_t, std::size_t, const std::string &)> progress;
+  // Checked between folders; a cancelled scan returns what it has so far and
+  // reports scan.cancelled.
+  const std::atomic<bool> *cancel = nullptr;
+};
+
+catalog_scan scan_mods_directory(const std::filesystem::path &directory,
+                                 const scan_options &options = {});
 
 // One mod folder: its xerces.mod.json, or a synthesized legacy manifest.
 installed_content load_mod_folder(const std::filesystem::path &folder,
                                   const std::set<std::string> &taken_ids,
-                                  diagnostics &diags);
+                                  diagnostics &diags,
+                                  hash_cache *cache = nullptr);
 
 // Every file under a folder as (relative '/' path, contents), sorted. This
 // holds every byte in memory: scans use hash_files, and only the conflict
@@ -44,7 +99,7 @@ std::string file_sha256_hex(const std::filesystem::path &path);
 
 // Every file under a folder as (relative '/' path, SHA-256 hex), sorted.
 std::vector<std::pair<std::string, std::string>>
-hash_files(const std::filesystem::path &folder);
+hash_files(const std::filesystem::path &folder, hash_cache *cache = nullptr);
 
 // SHA-256 over the sorted (path, file hash) list, leaving out workshop.json
 // as upstream's content hash does.

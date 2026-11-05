@@ -1,0 +1,14 @@
+<rml>
+<head>
+	<title>Settings</title>
+	<link type="text/template" href="../shell.rml"/>
+</head>
+<!-- Settings (docs/DESIGN.md 7.3): placeholder. -->
+<body template="shell">
+<div class="page">
+	<div class="page-title">Settings</div>
+	<div class="page-sub">Game, display, input, network, privacy, updates, accessibility and language.</div>
+	<div class="section"><button class="outline default-focus" id="settings-back"><span>Back to Home</span></button></div>
+</div>
+</body>
+</rml>

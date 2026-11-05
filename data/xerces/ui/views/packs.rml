@@ -1,0 +1,14 @@
+<rml>
+<head>
+	<title>Packs</title>
+	<link type="text/template" href="../shell.rml"/>
+</head>
+<!-- Packs (docs/DESIGN.md 7.3): placeholder. -->
+<body template="shell">
+<div class="page">
+	<div class="page-title">Packs</div>
+	<div class="page-sub">Named, version-pinned sets of mods: apply, import and export.</div>
+	<div class="section"><button class="outline default-focus" id="packs-back"><span>Back to Home</span></button></div>
+</div>
+</body>
+</rml>

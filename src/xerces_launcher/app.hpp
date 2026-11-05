@@ -1,0 +1,173 @@
+#pragma once
+
+// The launcher application: the window, RmlUi, the screens and the one
+// action map for keyboard and controller (DESIGN.md 7.3, 7.4).
+
+#include <cstdint>
+#include <deque>
+#include <filesystem>
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include <RmlUi/Core/Input.h>
+
+#include "services.hpp"
+#include "view.hpp"
+#include "window.hpp"
+
+namespace Rml {
+class Context;
+class Element;
+class ElementDocument;
+class Event;
+class EventListener;
+class SystemInterface;
+} // namespace Rml
+
+namespace xerces_launcher {
+struct options {
+  std::optional<fs::path> home;
+  float scale = 0.f;        // 0: the config's UI scale, else Windows
+  int width = 1280, height = 800; // dp
+  double seconds = 0;       // quit after this long (checks)
+  std::string start_view;   // show this screen after boot
+  std::string script;       // scripted input for checks (app.cpp)
+  std::string language;     // overrides the config ("pseudo" for 7.5)
+  std::string theme;        // overrides the config
+  bool dry_launch = false;  // never start the game, log the command
+  bool skip_boot = false;
+};
+
+options parse_options(int argc, wchar_t **argv);
+
+class app {
+public:
+  explicit app(options opts);
+  ~app();
+  int run();
+
+  services &svc() { return *services_; }
+  window &win() { return window_; }
+  Rml::Context *context() { return context_; }
+  const options &opts() const { return opts_; }
+
+  // ------------------------------------------------------------- screens
+  void show(const std::string &id);
+  const std::string &current() const { return current_; }
+  view *find(const std::string &id);
+  void next_tab(int delta);
+
+  // The game mode Home and Mods share (zm, mp, cp); saved in the config.
+  const std::string &mode() const;
+  void set_mode(const std::string &mode);
+  std::uint64_t mode_rev() const { return mode_rev_; }
+
+  // ------------------------------------------------------------ feedback
+  // A line in the footer for a few seconds.
+  void notify(const std::string &text, bool error = false);
+  // A modal dialog over the current screen. done gets the index of the
+  // button picked, or -1 for Esc / B.
+  void dialog(const std::string &title, const std::string &body,
+              std::vector<std::string> buttons, std::function<void(int)> done);
+  bool dialog_open() const { return dialog_open_; }
+
+  // ------------------------------------------------------------- strings
+  // English source text to the current language (data/xerces/i18n/<lang>.json
+  // maps English to the translation; "pseudo" lengthens and marks every
+  // string to expose truncation).
+  std::string tr(const std::string &english) const;
+  const std::string &language() const { return language_; }
+
+  // ---------------------------------------------------------------- look
+  // Theme, UI scale and reduced motion from the config, on every document.
+  void apply_look();
+
+  // --------------------------------------------------------------- tools
+  // Opens a link in the default browser or Steam. Only https:// links and
+  // steam:// links are opened; anything else is refused and logged.
+  bool open_url(const std::string &url);
+  bool open_folder(const fs::path &dir);
+  // Windows' folder picker over the launcher window; nullopt if cancelled.
+  std::optional<fs::path> pick_folder(const std::string &title);
+  // Windows' file pickers; filter like L"Xerces pack (*.xpack)|*.xpack".
+  std::optional<fs::path> pick_open_file(const std::string &title,
+                                         const std::wstring &filter);
+  std::optional<fs::path> pick_save_file(const std::string &title,
+                                         const std::wstring &filter,
+                                         const std::wstring &default_name);
+  void copy_text(const std::string &text);
+  // Calls fn for event (e.g. "click") on element; the app owns the listener.
+  void listen(Rml::Element *element, const std::string &event,
+              std::function<void(Rml::Event &)> fn);
+  // Feeds a key through the same path as the keyboard (pad, scripts).
+  void inject_key(Rml::Input::KeyIdentifier key, int modifiers = 0);
+  // Runs task on the UI thread (thread-safe).
+  void post(std::function<void()> task);
+  double now() const;
+  // Escapes text for RML markup (SetInnerRML).
+  static std::string escape(const std::string &text);
+
+private:
+  friend class translator;
+  bool load_fonts();
+  bool load_view(view &v, const view_info &info);
+  void wire_shell(Rml::ElementDocument *doc);
+  void run_posted();
+  bool on_key(Rml::Input::KeyIdentifier key, int modifiers, bool priority);
+  hit_region hit_test(int x, int y);
+  void load_language();
+  void close_dialog(int choice);
+  void update_notice();
+  void run_script(double seconds);
+
+  options opts_;
+  window window_;
+  std::unique_ptr<services> services_;
+  Rml::Context *context_ = nullptr;
+  std::unique_ptr<Rml::SystemInterface> system_;
+
+  struct entry {
+    view_info info;
+    std::unique_ptr<view> screen;
+    bool loaded = false;
+  };
+  std::vector<entry> views_;
+  std::string current_;
+  std::uint64_t mode_rev_ = 1;
+
+  std::mutex posted_mutex_;
+  std::deque<std::function<void()>> posted_;
+
+  std::string notice_text_;
+  bool notice_error_ = false;
+  double notice_until_ = 0;
+  bool notice_dirty_ = false;
+
+  Rml::ElementDocument *dialog_doc_ = nullptr;
+  bool dialog_open_ = false;
+  std::function<void(int)> dialog_done_;
+  std::vector<std::unique_ptr<Rml::EventListener>> listeners_;
+
+  std::string language_ = "en";
+  std::map<std::string, std::string> strings_;
+
+  double started_ = 0;
+  float applied_scale_ = 0.f;
+  std::string applied_look_;
+
+  struct script_step {
+    double at;
+    std::string verb;
+    std::string arg;
+  };
+  std::vector<script_step> script_;
+  std::size_t script_next_ = 0;
+  unsigned pad_previous_ = 0;
+  double pad_repeat_at_ = 0;
+};
+} // namespace xerces_launcher

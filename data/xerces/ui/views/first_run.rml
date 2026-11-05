@@ -1,0 +1,14 @@
+<rml>
+<head>
+	<title>Welcome</title>
+	<link type="text/template" href="../shell.rml"/>
+</head>
+<!-- Welcome (docs/DESIGN.md 7.3): placeholder. -->
+<body template="shell">
+<div class="page">
+	<div class="page-title">Welcome</div>
+	<div class="page-sub">Find the game, import BOIII settings, pick a look.</div>
+	<div class="section"><button class="outline default-focus" id="first_run-back"><span>Back to Home</span></button></div>
+</div>
+</body>
+</rml>

@@ -55,5 +55,7 @@ links({ "xerces_core", "zstd", "advapi32" })
 
 group("")
 
--- The RmlUi launcher spike, only when its third-party sources are given (D4).
+-- The RmlUi launcher spike and the launcher, only when the third-party sources
+-- (RmlUi, FreeType) are given (D4).
 include("xerces_launcher_spike.lua")
+include("xerces_launcher.lua")

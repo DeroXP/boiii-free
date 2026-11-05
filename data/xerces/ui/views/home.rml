@@ -1,0 +1,127 @@
+<rml>
+<head>
+	<title>Home</title>
+	<link type="text/template" href="../shell.rml"/>
+	<link type="text/rcss" href="home.rcss"/>
+</head>
+<!-- Home (docs/DESIGN.md 7.3): the game mode with its profile, Launch modded,
+     Launch vanilla, the load order and the status strip. Data: the "home"
+     model in src/xerces_launcher/views/home.cpp. -->
+<body template="shell" data-model="home">
+<div id="home-main">
+	<div class="primary">
+		<div class="notice-box safe-box" data-if="safe">
+			<div class="label">Safe mode</div>
+			<div class="safe-text">{{safe_text}}</div>
+			<div class="toolbar safe-actions">
+				<button id="safe-off" class="primary-button" data-event-click="act('launch safe')"><span>Launch with mods off</span></button>
+				<button id="safe-retry" class="outline" data-event-click="act('retry mods')"><span>Retry with mods</span></button>
+				<button id="safe-dismiss" class="link" data-event-click="act('dismiss safe')"><span>Dismiss</span></button>
+			</div>
+		</div>
+
+		<div class="modes">
+			<span class="label">Game mode</span>
+			<div class="mode-group">
+				<button id="mode-zm" class="mode" data-class-on="mode == 'zm'" data-event-click="pick('zm')"><span class="mark-dot"></span><span>Zombies</span></button>
+				<button id="mode-mp" class="mode" data-class-on="mode == 'mp'" data-event-click="pick('mp')"><span class="mark-dot"></span><span>Multiplayer</span></button>
+				<button id="mode-cp" class="mode" data-class-on="mode == 'cp'" data-event-click="pick('cp')"><span class="mark-dot"></span><span>Campaign</span></button>
+			</div>
+		</div>
+
+		<div class="pack">
+			<div class="label">{{pack_label}}</div>
+			<div class="pack-title">{{pack}}</div>
+			<div class="pack-meta">{{meta}}</div>
+		</div>
+
+		<div class="columns">
+			<div class="launch-column">
+				<div class="stats">
+					<div class="stat" data-for="st : stats">
+						<div class="stat-n">{{st.n}}</div>
+						<div class="stat-l">{{st.l}}</div>
+					</div>
+				</div>
+
+				<button id="launch-modded" class="default-focus" data-class-off="!can_launch" data-event-click="act('launch modded')">
+					<div class="launch-text">
+						<div class="launch-title">Launch modded</div>
+						<div class="launch-sub">{{sub}}</div>
+					</div>
+					<div class="keys"><span class="key">Enter</span><span class="key">A</span></div>
+					<span class="arrow">&#8594;</span>
+				</button>
+
+				<div class="secondary">
+					<button id="launch-vanilla" class="outline" data-event-click="act('launch vanilla')"><span>Launch vanilla</span></button>
+					<button id="dry-run" class="link" data-event-click="act('dry-run')"><span>Dry-run preview</span></button>
+				</div>
+			</div>
+
+			<div class="load-order">
+				<div class="label section-label">Load order</div>
+				<div class="row" data-for="r : rows">
+					<span class="row-n">{{r.n}}</span>
+					<span class="row-name">{{r.name}}</span>
+					<span class="row-v">{{r.v}}</span>
+				</div>
+				<button id="more-mods" class="more" data-if="more != ''" data-event-click="act('mods')"><span>{{more}}</span></button>
+				<div class="empty-note" data-if="rows.size == 0">{{empty_text}}</div>
+				<button id="edit-mods" class="small-button edit-mods" data-event-click="act('mods')"><span>Edit load order</span></button>
+			</div>
+		</div>
+
+		<div class="status">
+			<div class="status-cell">
+				<div class="label">Game</div>
+				<div class="status-value">{{game_value}}</div>
+				<div class="status-detail">{{game_detail}}</div>
+				<div class="status-ok" data-if="game_ok"><span class="tick"></span><span>Supported</span></div>
+				<button id="find-game" class="small-button" data-if="!game_found" data-event-click="act('find game')"><span>Set folder</span></button>
+			</div>
+			<div class="status-cell">
+				<div class="label">Signatures</div>
+				<div class="status-value">{{sig_value}}</div>
+				<div class="status-detail">{{sig_detail}}</div>
+			</div>
+			<div class="status-cell">
+				<div class="label">Mods found</div>
+				<div class="status-value">{{catalog_value}}</div>
+				<div class="status-detail">{{catalog_detail}}</div>
+			</div>
+			<div class="status-cell">
+				<div class="label">Safe mode</div>
+				<div class="status-value">{{safe_value}}</div>
+				<div class="status-detail">{{safe_detail}}</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="aside">
+		<div>
+			<div class="panel-head">
+				<span class="panel-title">Friends</span>
+				<span class="panel-count">Coming with accounts</span>
+			</div>
+			<div class="empty-note">Friends, presence and invites arrive with Xerces accounts. Nothing is sent anywhere until then.</div>
+		</div>
+
+		<div>
+			<div class="panel-head"><span class="panel-title">Servers</span></div>
+			<button id="direct-connect" class="host" data-event-click="act('servers')">
+				<div class="host-text">
+					<div class="host-title">Direct connect</div>
+					<div class="host-sub">Self-hosted servers, offline and LAN</div>
+				</div>
+				<span class="plus">+</span>
+			</button>
+			<div data-if="last_server != ''">
+				<div class="label last-joined">Last joined</div>
+				<div class="last-server">{{last_server}}</div>
+			</div>
+		</div>
+	</div>
+</div>
+</body>
+</rml>

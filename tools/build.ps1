@@ -11,6 +11,8 @@
            xerces_spike_gl3.exe, DESIGN.md 7.1). Needs RmlUi 6.3 and FreeType
            2.14.3 under -ThirdPartyDir (default: the tools folder's sibling
            third_party\), laid out as rmlui\RmlUi-6.3 and freetype\freetype-2.14.3.
+  -Launcher builds the launcher, Xerces.exe (DESIGN.md 7), from the same
+           third-party sources as -Spike.
 
   LLVM 23, Ninja and premake 5.0.0 must be on PATH, or in -ToolsDir laid out
   as llvm-*\clang+llvm-*\bin, ninja-*\ and premake-*\.
@@ -20,6 +22,7 @@ param(
   [switch]$Tests,
   [switch]$Client,
   [switch]$Spike,
+  [switch]$Launcher,
   [string]$ToolsDir = $env:XERCES_TOOLS,
   [string]$ThirdPartyDir = $env:XERCES_THIRD_PARTY
 )
@@ -43,9 +46,9 @@ foreach ($tool in 'clang', 'ninja', 'premake5') {
   }
 }
 
-if (-not $Tests -and -not $Client -and -not $Spike) { $Tests = $true }
+if (-not $Tests -and -not $Client -and -not $Spike -and -not $Launcher) { $Tests = $true }
 
-if ($Spike) {
+if ($Spike -or $Launcher) {
   if (-not $ThirdPartyDir -and $ToolsDir) {
     $ThirdPartyDir = Join-Path (Split-Path -Parent $ToolsDir) 'third_party'
   }
@@ -84,6 +87,12 @@ try {
     ninja -C build bin/x64/Release/xerces_spike_dx11.exe bin/x64/Release/xerces_spike_gl3.exe
     if ($LASTEXITCODE -ne 0) { throw 'building the spike failed' }
     Write-Host 'Built build\bin\x64\Release\xerces_spike_dx11.exe and xerces_spike_gl3.exe (not launched).'
+  }
+
+  if ($Launcher) {
+    ninja -C build bin/x64/Release/Xerces.exe
+    if ($LASTEXITCODE -ne 0) { throw 'building the launcher failed' }
+    Write-Host 'Built build\bin\x64\Release\Xerces.exe (not launched).'
   }
 } finally {
   Pop-Location

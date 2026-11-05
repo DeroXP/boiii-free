@@ -1,0 +1,14 @@
+<rml>
+<head>
+	<title>Servers</title>
+	<link type="text/template" href="../shell.rml"/>
+</head>
+<!-- Servers (docs/DESIGN.md 7.3): placeholder. -->
+<body template="shell">
+<div class="page">
+	<div class="page-title">Servers</div>
+	<div class="page-sub">Direct connect, favourites and the public list.</div>
+	<div class="section"><button class="outline default-focus" id="servers-back"><span>Back to Home</span></button></div>
+</div>
+</body>
+</rml>

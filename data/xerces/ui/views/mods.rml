@@ -1,0 +1,14 @@
+<rml>
+<head>
+	<title>Mods</title>
+	<link type="text/template" href="../shell.rml"/>
+</head>
+<!-- Mods (docs/DESIGN.md 7.3): placeholder. -->
+<body template="shell">
+<div class="page">
+	<div class="page-title">Mods</div>
+	<div class="page-sub">Search, filters, the load order and each mod's details.</div>
+	<div class="section"><button class="outline default-focus" id="mods-back"><span>Back to Home</span></button></div>
+</div>
+</body>
+</rml>

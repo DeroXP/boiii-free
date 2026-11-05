@@ -1,0 +1,14 @@
+<rml>
+<head>
+	<title>Friends</title>
+	<link type="text/template" href="../shell.rml"/>
+</head>
+<!-- Friends (docs/DESIGN.md 7.3): placeholder. -->
+<body template="shell">
+<div class="page">
+	<div class="page-title">Friends</div>
+	<div class="page-sub">Friends, presence and invites arrive with Xerces accounts.</div>
+	<div class="section"><button class="outline default-focus" id="friends-back"><span>Back to Home</span></button></div>
+</div>
+</body>
+</rml>

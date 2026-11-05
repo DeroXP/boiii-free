@@ -32,6 +32,10 @@ local function root_path(relative)
   return path.join(root, relative)
 end
 
+-- The launcher (premake/xerces_launcher.lua) builds on the same libraries.
+XERCES_RMLUI_DIR = rmlui
+XERCES_FREETYPE_DIR = freetype
+
 group("Xerces spike")
 
 -- FreeType 2.14.3, the module list of its own builds/windows/vc2010 project.

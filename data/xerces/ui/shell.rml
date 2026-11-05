@@ -1,0 +1,47 @@
+<!-- The frame every launcher screen shares (docs/DESIGN.md 7.3): the header with
+     the brand, the tabs and the window buttons (the window has no system title
+     bar; the header's empty space drags it), the screen's content, and the
+     footer with the key hints and the notice line. A screen's document uses it
+     with <body template="shell">; its own markup lands in #content. The app
+     marks the current tab by setting view-<id> on the body. -->
+<template name="shell" content="content">
+<head>
+	<link type="text/rcss" href="base.rcss"/>
+</head>
+<body>
+	<div id="header">
+		<div class="brand">
+			<div class="mark"><div></div><div class="on"></div><div></div><div></div></div>
+			<span class="wordmark">xerces</span>
+			<span class="version" id="shell-version">0.1.0-dev</span>
+			<span class="badge" id="shell-badge">DEV</span>
+		</div>
+		<div class="tabs">
+			<button id="tab-home" class="tab"><span class="dot"></span><span class="num">01</span><span>Home</span></button>
+			<button id="tab-mods" class="tab"><span class="dot"></span><span class="num">02</span><span>Mods</span></button>
+			<button id="tab-packs" class="tab"><span class="dot"></span><span class="num">03</span><span>Packs</span></button>
+			<button id="tab-servers" class="tab"><span class="dot"></span><span class="num">04</span><span>Servers</span></button>
+			<button id="tab-friends" class="tab"><span class="dot"></span><span class="num">05</span><span>Friends</span></button>
+			<button id="tab-settings" class="tab"><span class="dot"></span><span class="num">06</span><span>Settings</span></button>
+			<button id="tab-diagnostics" class="tab"><span class="dot"></span><span class="num">07</span><span>Diagnostics</span></button>
+		</div>
+		<div class="window-buttons">
+			<button id="win-min" class="win" title="Minimize"><span class="min"></span></button>
+			<button id="win-max" class="win" title="Maximize"><span class="max"></span></button>
+			<button id="win-close" class="win" title="Close"><span>&#215;</span></button>
+		</div>
+	</div>
+
+	<div id="content"></div>
+
+	<div id="footer">
+		<div class="hints">
+			<span class="hint"><span class="kbd">Enter</span><span class="kbd">A</span><span>Select</span></span>
+			<span class="hint"><span class="kbd">Esc</span><span class="kbd">B</span><span>Back</span></span>
+			<span class="hint"><span class="kbd">/</span><span class="kbd">Y</span><span>Search</span></span>
+			<span class="hint"><span class="kbd">Q</span><span class="kbd">E</span><span class="kbd">LB</span><span class="kbd">RB</span><span>Switch tab</span></span>
+		</div>
+		<div id="notice"></div>
+	</div>
+</body>
+</template>

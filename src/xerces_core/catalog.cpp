@@ -1,8 +1,11 @@
 #include "catalog.hpp"
 
 #include <algorithm>
+#include <charconv>
+#include <chrono>
 #include <fstream>
 #include <iterator>
+#include <sstream>
 
 #include "manifest.hpp"
 #include "sha256.hpp"
@@ -76,11 +79,96 @@ std::string file_sha256_hex(const std::filesystem::path &path) {
   return sha256::to_hex(hasher.finish());
 }
 
+bool hash_cache::load(const std::filesystem::path &file) {
+  entries_.clear();
+  std::ifstream in(file, std::ios::binary);
+  std::string line;
+  if (!in || !std::getline(in, line) || line != hash_cache_header) {
+    return false;
+  }
+  while (std::getline(in, line)) {
+    // size, write time, sha256 and path, tab-separated; Windows paths hold no
+    // tabs.
+    const std::size_t a = line.find('\t');
+    const std::size_t b = a == std::string::npos ? a : line.find('\t', a + 1);
+    const std::size_t c = b == std::string::npos ? b : line.find('\t', b + 1);
+    if (c == std::string::npos || c - b - 1 != 64 || c + 1 >= line.size()) {
+      continue;
+    }
+    entry value;
+    const char *begin = line.data();
+    if (std::from_chars(begin, begin + a, value.size).ec != std::errc{} ||
+        std::from_chars(begin + a + 1, begin + b, value.write_time).ec !=
+            std::errc{}) {
+      continue;
+    }
+    value.sha256 = line.substr(b + 1, 64);
+    entries_[line.substr(c + 1)] = std::move(value);
+  }
+  return true;
+}
+
+bool hash_cache::save(const std::filesystem::path &file, bool prune) const {
+  std::error_code ec;
+  std::filesystem::create_directories(file.parent_path(), ec);
+  std::filesystem::path temporary = file;
+  temporary += ".tmp";
+  {
+    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+    if (!out) {
+      return false;
+    }
+    out << hash_cache_header << '\n';
+    for (const auto &[path, value] : entries_) {
+      if (prune && !value.used) {
+        continue;
+      }
+      out << value.size << '\t' << value.write_time << '\t' << value.sha256
+          << '\t' << path << '\n';
+    }
+    if (!out.flush()) {
+      return false;
+    }
+  }
+  std::filesystem::rename(temporary, file, ec);
+  return !ec;
+}
+
+std::string hash_cache::file_sha256(const std::filesystem::path &path) {
+  std::error_code ec;
+  const std::uint64_t size = std::filesystem::file_size(path, ec);
+  if (ec) {
+    return file_sha256_hex(path);
+  }
+  const auto time = std::filesystem::last_write_time(path, ec);
+  if (ec) {
+    return file_sha256_hex(path);
+  }
+  const std::int64_t write_time = time.time_since_epoch().count();
+  const std::string key = utf8(path.generic_u8string());
+  entry &value = entries_[key];
+  if (!value.sha256.empty() && value.size == size &&
+      value.write_time == write_time) {
+    ++hits_;
+    value.used = true;
+    return value.sha256;
+  }
+  ++misses_;
+  bytes_hashed_ += size;
+  value.size = size;
+  value.write_time = write_time;
+  value.sha256 = file_sha256_hex(path);
+  value.used = true;
+  return value.sha256;
+}
+
 std::vector<std::pair<std::string, std::string>>
-hash_files(const std::filesystem::path &folder) {
+hash_files(const std::filesystem::path &folder, hash_cache *cache) {
   std::vector<std::pair<std::string, std::string>> digests;
   for_each_file(folder, [&](const std::filesystem::path &file) {
-    digests.emplace_back(relative_name(folder, file), file_sha256_hex(file));
+    digests.emplace_back(relative_name(folder, file),
+                         cache ? cache->file_sha256(file)
+                               : file_sha256_hex(file));
   });
   std::ranges::sort(digests);
   return digests;
@@ -114,14 +202,16 @@ content_hash_of(const std::vector<std::pair<std::string, std::string>> &files) {
 
 installed_content load_mod_folder(const std::filesystem::path &folder,
                                   const std::set<std::string> &taken_ids,
-                                  diagnostics &diags) {
+                                  diagnostics &diags, hash_cache *cache) {
   installed_content content;
   content.folder = utf8(folder.filename().u8string());
   std::error_code ec;
   content.path = std::filesystem::absolute(folder, ec);
   // Hash file by file: Workshop maps reach several gigabytes, and only the
   // manifest and workshop.json are needed as text.
-  const auto digests = hash_files(folder);
+  // The cache is keyed by absolute paths.
+  const auto digests =
+      hash_files(content.path.empty() ? folder : content.path, cache);
   for (const auto &[path, digest] : digests) {
     content.files.push_back(path);
   }
@@ -160,7 +250,8 @@ installed_content load_mod_folder(const std::filesystem::path &folder,
   return content;
 }
 
-catalog_scan scan_mods_directory(const std::filesystem::path &directory) {
+catalog_scan scan_mods_directory(const std::filesystem::path &directory,
+                                 const scan_options &options) {
   catalog_scan scan;
   std::error_code ec;
   std::vector<std::filesystem::path> folders;
@@ -176,8 +267,18 @@ catalog_scan scan_mods_directory(const std::filesystem::path &directory) {
   }
   std::ranges::sort(folders);
   std::set<std::string> taken;
-  for (const auto &folder : folders) {
-    installed_content content = load_mod_folder(folder, taken, scan.diags);
+  for (std::size_t index = 0; index < folders.size(); ++index) {
+    const std::filesystem::path &folder = folders[index];
+    if (options.cancel && options.cancel->load()) {
+      scan.cancelled = true;
+      break;
+    }
+    if (options.progress) {
+      options.progress(index, folders.size(),
+                       utf8(folder.filename().u8string()));
+    }
+    installed_content content =
+        load_mod_folder(folder, taken, scan.diags, options.cache);
     if (content.info.id.empty()) {
       continue;
     }

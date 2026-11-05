@@ -1,0 +1,14 @@
+<rml>
+<head>
+	<title>Diagnostics</title>
+	<link type="text/template" href="../shell.rml"/>
+</head>
+<!-- Diagnostics (docs/DESIGN.md 7.3): placeholder. -->
+<body template="shell">
+<div class="page">
+	<div class="page-title">Diagnostics</div>
+	<div class="page-sub">Build and signature report, verify install, logs and crash bundles.</div>
+	<div class="section"><button class="outline default-focus" id="diagnostics-back"><span>Back to Home</span></button></div>
+</div>
+</body>
+</rml>
