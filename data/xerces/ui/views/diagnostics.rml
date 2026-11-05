@@ -2,13 +2,172 @@
 <head>
 	<title>Diagnostics</title>
 	<link type="text/template" href="../shell.rml"/>
+	<link type="text/rcss" href="diagnostics.rcss"/>
 </head>
-<!-- Diagnostics (docs/DESIGN.md 7.3): placeholder. -->
-<body template="shell">
-<div class="page">
-	<div class="page-title">Diagnostics</div>
-	<div class="page-sub">Build and signature report, verify install, logs and crash bundles.</div>
-	<div class="section"><button class="outline default-focus" id="diagnostics-back"><span>Back to Home</span></button></div>
+<!-- Diagnostics (docs/DESIGN.md 7.3, 4.2, 5.10, 15.1): the build report, the
+     signature report, the mods found, the last launch, logs and crash bundles,
+     with Copy report, Refresh and Verify with Steam. Data: the "diagnostics"
+     model in src/xerces_launcher/views/diagnostics.cpp. Block actions sit at
+     the end of their block, so moving focus down reads the page in order;
+     Down on the last button scrolls on (the view's key()). -->
+<body template="shell" data-model="diagnostics">
+<div id="diag-main">
+	<div class="diag-top">
+		<div class="page-title">Diagnostics</div>
+		<div class="page-sub">What a bug report needs: the game build, the signatures, the mods found, the last launch and the logs. Copy report puts all of it on the clipboard, with your user folder hidden.</div>
+		<!-- On the left, above the main column: Down from here walks the
+		     report blocks in order. -->
+		<div class="toolbar diag-actions">
+			<button id="copy-report" class="primary-button default-focus" data-event-click="act('copy')"><span>Copy report</span></button>
+			<button id="refresh" class="outline" data-class-busy="busy" data-event-click="act('refresh')"><span>{{refresh_label}}</span></button>
+			<button id="verify" class="outline" data-event-click="act('verify')"><span>Verify with Steam</span></button>
+		</div>
+	</div>
+
+	<div class="status">
+		<div class="status-cell">
+			<div class="label">Game build</div>
+			<div class="status-value" data-class-warn="!build_ok">{{build_value}}</div>
+			<div class="status-detail">{{build_detail}}</div>
+		</div>
+		<div class="status-cell">
+			<div class="label">Signatures</div>
+			<div class="status-value" data-class-warn="sig_warn">{{sig_value}}</div>
+			<div class="status-detail">{{sig_detail}}</div>
+		</div>
+		<div class="status-cell">
+			<div class="label">Mods found</div>
+			<div class="status-value">{{catalog_value}}</div>
+			<div class="status-detail">{{catalog_detail}}</div>
+		</div>
+		<div class="status-cell">
+			<div class="label">Last launch</div>
+			<div class="status-value" data-class-warn="safe_on">{{launch_value}}</div>
+			<div class="status-detail">{{launch_detail}}</div>
+		</div>
+	</div>
+
+	<div class="columns">
+		<div class="col-main">
+			<div class="block" id="build-report">
+				<div class="panel-head">
+					<span class="panel-title">Build</span>
+					<span class="panel-count" data-class-warn="!build_ok">{{build_count}}</span>
+				</div>
+				<div class="kv" data-for="r : build_rows">
+					<span class="kv-k">{{r.k}}</span>
+					<span class="kv-v" data-class-mono="r.mono" data-class-warn="r.warn">{{r.v}}</span>
+				</div>
+				<div class="empty-note" data-if="build_note != ''">{{build_note}}</div>
+				<div class="list-block" data-if="tried.size > 0">
+					<div class="label list-label">Looked in</div>
+					<div class="list-row mono" data-for="t : tried"><span>{{t.text}}</span></div>
+				</div>
+				<div class="toolbar block-actions" data-if="game_found">
+					<button id="open-game" class="small-button" data-event-click="act('open game')"><span>Open game folder</span></button>
+				</div>
+			</div>
+
+			<div class="block" id="signature-report">
+				<div class="panel-head">
+					<span class="panel-title">Signatures</span>
+					<span class="panel-count">{{sig_count}}</span>
+				</div>
+				<div class="kv" data-for="r : sig_rows">
+					<span class="kv-k">{{r.k}}</span>
+					<span class="kv-v" data-class-mono="r.mono" data-class-warn="r.warn">{{r.v}}</span>
+				</div>
+				<div class="empty-note" data-if="sig_note != ''">{{sig_note}}</div>
+				<div class="list-block" data-if="missing.size > 0">
+					<div class="label list-label">Missing</div>
+					<div class="list-row missing mono" data-for="m : missing"><span class="miss-mark"></span><span>{{m.text}}</span></div>
+				</div>
+				<div class="toolbar block-actions">
+					<button id="reread-signatures" class="small-button" data-event-click="act('reread signatures')"><span>Read the report again</span></button>
+				</div>
+			</div>
+
+			<div class="block" id="catalog-report">
+				<div class="panel-head">
+					<span class="panel-title">Mods found</span>
+					<span class="panel-count">{{catalog_count}}</span>
+				</div>
+				<div class="kv" data-for="r : catalog_rows">
+					<span class="kv-k">{{r.k}}</span>
+					<span class="kv-v" data-class-mono="r.mono" data-class-warn="r.warn">{{r.v}}</span>
+				</div>
+				<div class="label list-label diag-label">
+					<span>Scan diagnostics</span>
+					<span class="diag-count">{{diag_count}}</span>
+				</div>
+				<button class="diag" data-for="d, i : diags" data-attr-id="'diag-' + i" data-class-error="d.error" data-class-warning="d.warning" data-event-click="copy_diag(i)">
+					<span class="lvl">{{d.level}}</span>
+					<div class="diag-text">
+						<div class="diag-code">{{d.code}}</div>
+						<div class="diag-msg">{{d.message}}</div>
+					</div>
+				</button>
+				<div class="empty-note" data-if="diags.size == 0">{{diag_note}}</div>
+				<div class="more-note" data-if="diag_more != ''">{{diag_more}}</div>
+				<div class="toolbar block-actions">
+					<button id="rescan" class="small-button" data-event-click="act('rescan')"><span>Read mods again</span></button>
+				</div>
+			</div>
+		</div>
+
+		<div class="col-side">
+			<div class="block" id="launch-report">
+				<div class="panel-head">
+					<span class="panel-title">Last launch</span>
+					<span class="panel-count">{{launch_count}}</span>
+				</div>
+				<div class="notice-box safe-box" data-if="safe_on">
+					<div class="label">Safe mode suggested</div>
+					<div class="safe-text">{{safe_text}}</div>
+				</div>
+				<div class="kv" data-for="r : launch_rows">
+					<span class="kv-k">{{r.k}}</span>
+					<span class="kv-v" data-class-mono="r.mono" data-class-warn="r.warn">{{r.v}}</span>
+				</div>
+				<div class="empty-note" data-if="launch_note != ''">{{launch_note}}</div>
+				<div class="list-block" data-if="launch_stack.size > 0">
+					<div class="label list-label">Mods, first wins</div>
+					<div class="list-row mono" data-for="m : launch_stack"><span>{{m.text}}</span></div>
+				</div>
+			</div>
+
+			<div class="block" id="logs-report">
+				<div class="panel-head">
+					<span class="panel-title">Logs</span>
+					<span class="panel-count">{{log_count}}</span>
+				</div>
+				<div class="kv" data-for="r : log_rows">
+					<span class="kv-k">{{r.k}}</span>
+					<span class="kv-v" data-class-mono="r.mono" data-class-warn="r.warn">{{r.v}}</span>
+				</div>
+				<div class="toolbar block-actions">
+					<button id="open-logs" class="small-button" data-event-click="act('open logs')"><span>Open logs folder</span></button>
+					<button id="copy-log-path" class="small-button" data-event-click="act('copy log path')"><span>Copy log path</span></button>
+				</div>
+			</div>
+
+			<div class="block" id="crash-report">
+				<div class="panel-head">
+					<span class="panel-title">Crash bundles</span>
+					<span class="panel-count">{{crash_count}}</span>
+				</div>
+				<div class="file-row" data-for="f : crashes">
+					<div class="file-name">{{f.name}}</div>
+					<div class="file-meta">{{f.size}} &#183; {{f.date}}</div>
+				</div>
+				<div class="empty-note" data-if="crashes.size == 0">No crash bundles. When the game crashes, Xerces keeps what a bug report needs here.</div>
+				<div class="more-note" data-if="crash_more != ''">{{crash_more}}</div>
+				<div class="toolbar block-actions">
+					<button id="open-crash" class="small-button" data-event-click="act('open crash')"><span>Open crash folder</span></button>
+				</div>
+			</div>
+		</div>
+	</div>
 </div>
 </body>
 </rml>
