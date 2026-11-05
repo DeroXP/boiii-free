@@ -670,6 +670,11 @@ bool app::on_key(Rml::Input::KeyIdentifier key, int modifiers, bool priority) {
   if (!priority || !context_) {
     return true;
   }
+  // RmlUi's modifier state includes Caps, Num and Scroll Lock; with Num Lock
+  // on (the usual case) a plain Q would otherwise never count as unmodified.
+  // Screens get the same masked value.
+  modifiers &= Rml::Input::KM_CTRL | Rml::Input::KM_SHIFT |
+               Rml::Input::KM_ALT | Rml::Input::KM_META;
   if (dialog_open_) {
     if (key == Rml::Input::KI_ESCAPE) {
       close_dialog(-1);
