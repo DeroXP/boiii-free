@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "id": "vela.perk_rebalance",
+  "name": "Perk Rebalance",
+  "version": "2.1.0",
+  "authors": ["vela"],
+  "license": "CC-BY-4.0",
+  "requires": { "xerces": ">=1.0 <2", "modes": ["zm"] },
+  "source": { "workshop": 1234567890 },
+  "dependencies": [
+    { "id": "orrin.better_hud", "version": "^1.4.0", "optional": false }
+  ],
+  "conflicts": [
+    { "id": "pell.faster_revive", "reason": "Both rewrite perk purchase" }
+  ],
+  "order": { "after": ["orrin.better_hud"], "before": [], "priority": 0 },
+  "assets": {
+    "provides": [
+      { "type": "scriptparsetree", "name": "scripts/zm/vela_perks.gsc" }
+    ],
+    "overrides": [
+      {
+        "type": "scriptparsetree",
+        "name": "scripts/zm/_zm_perks.gsc",
+        "reason": "perk limit"
+      }
+    ],
+    "extends": [
+      {
+        "type": "stringtable",
+        "name": "gamedata/weapons/zm/zm_levelcommon_weapons.csv",
+        "key": [0]
+      }
+    ]
+  },
+  "scripts": {
+    "entry": ["scripts/zm/vela_perks.gsc"],
+    "hooks": [
+      {
+        "target": "scripts/zm/_zm_perks.gsc::give_perk",
+        "handler": "scripts/zm/vela_perks.gsc::on_give_perk",
+        "kind": "wrap"
+      }
+    ]
+  },
+  "capabilities": {
+    "native_code": false,
+    "lua": { "unsafe": false, "net": [], "files": [] },
+    "gsc": { "exec_command": false, "files": false, "replacefunc": false }
+  },
+  "settings": [
+    {
+      "key": "cost_mult",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.25,
+      "max": 2.0,
+      "label": "Perk cost multiplier",
+      "dvar": "xm_vela_cost_mult"
+    }
+  ],
+  "integrity": {
+    "core_mod.ff": "sha256:2f0c8f6e1d1d2a7a5b9c3e4f5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7",
+    "zm_mod.ff": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b"
+  }
+}

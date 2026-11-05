@@ -825,5 +825,8 @@ includedirs({ "%{prj.location}/src/tlsdll", "%{prj.location}/src" })
 links({ "common" })
 resincludedirs({ path.join(tlsdll_proj.location, "src") })
 
+-- Xerces projects (docs/DESIGN.md 3.2)
+include("premake/xerces_projects.lua")
+
 group("Dependencies")
 dependencies.projects()
