@@ -730,8 +730,7 @@ std::optional<int32_t> map_script_choice(const XAssetEntry *candidate,
       is_script ? "loader.script.map_first" : "loader.ui.map_first",
       script + ": the map's copy " + (map_wins ? "replaces" : "stays over") +
           " the mod's",
-      "{\"script\":" + xerces_core::json::quote(script) +
-          ",\"map_zone\":" +
+      "{\"script\":" + xerces_core::json::quote(script) + ",\"map_zone\":" +
           xerces_core::json::quote(map_wins ? incoming_zone : existing_zone) +
           ",\"mod_zone\":" +
           xerces_core::json::quote(map_wins ? existing_zone : incoming_zone) +
