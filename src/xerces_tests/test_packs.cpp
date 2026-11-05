@@ -221,6 +221,31 @@ TEST_CASE("packs store: reading files and share codes") {
   CHECK(read_pasted_pack("{ not json").diags.has("pack.json"));
 }
 
+TEST_CASE("packs store: exports, and a failed one leaves no temporary file") {
+  temp_dir root("xerces_tests_packs_export");
+  const fs::path file = root.path / "Weekend.xpack.json";
+  REQUIRE(write_pack_file(file, sample(id_1, "Weekend")));
+  REQUIRE(write_pack_file(file, sample(id_2, "Weekend"))); // replaces it
+  const pack_result back = read_pack_file(file);
+  REQUIRE(back.ok());
+  CHECK_EQ(back.value.id, id_2);
+  CHECK(!fs::exists(root.path / "Weekend.xpack.json.tmp"));
+
+  // The rename fails (a folder has the name): the .tmp written for it goes.
+  // A write or flush that fails on a full or pulled drive takes the same
+  // path, which a test cannot cause.
+  const fs::path blocked = root.path / "Blocked.xpack.json";
+  write(blocked / "keep.txt", "x");
+  CHECK(!write_pack_file(blocked, sample(id_1, "Blocked")));
+  CHECK(!fs::exists(root.path / "Blocked.xpack.json.tmp"));
+  CHECK(fs::exists(blocked / "keep.txt"));
+
+  // The temporary file cannot even be made: nothing is created.
+  CHECK(
+      !write_pack_file(root.path / "gone" / "x.xpack.json", sample(id_1, "x")));
+  CHECK(!fs::exists(root.path / "gone"));
+}
+
 TEST_CASE("packs store: export file names get the pack extension") {
   const auto named = [](const char *text) {
     return with_pack_extension(fs::path("C:/out") / text).filename().string();
