@@ -455,6 +455,16 @@ is installed
 it needs an elevated terminal, which only you can open. Never read the console
 during a measurement window.
 
+- [x] (2026-11-05, 5cd56eef, one Cheese Cube run with the D3 stack, which loaded
+      in 27.4 s and returned to the menu: the merged build plays)
+      `perf.swapchain`: discard (blit) model, 2 buffers, 3840x2160, windowed,
+      sync interval 0, `IDXGISwapChain2` available. `perf.startup`: first main
+      frame 34.7 s after the process was created, menu ready 41.1 s, the command
+      pipe at 17.1 s; the 212 detours were created between 0.08 s and 17.2 s.
+      `perf.hooks`: enabling them took 9.2 s in all (about 40 ms each, the
+      slowest 77 ms: MinHook's system-wide thread snapshot on a PC with about
+      8,100 threads), creating them 2.0 s. About a quarter of the time to the
+      first main frame is hook enabling (DESIGN.md 12.4 item 2, "L1").
 - [ ] A normal start (no `XERCES_BENCH`) logs `perf.swapchain` once, at the
       overlay's first Present (well before the menu), and `perf.startup` and
       `perf.hooks` once each, after the menu (or after 180 s with
