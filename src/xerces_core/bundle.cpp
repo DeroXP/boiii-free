@@ -233,15 +233,17 @@ bundle_result make_bundle(const std::filesystem::path &home,
   std::string listing =
       "Xerces diagnostics bundle. Nothing in it was sent anywhere; share it\n"
       "only if you want to. The user folder is written as %USERPROFILE% and\n"
-      "server addresses as " +
+      "server addresses and favourite names as " +
       std::string(redacted_address) +
       ". launcher.json has no player name, and only\n"
       "counts of the favourite and recent servers.\n\n";
   std::error_code ec;
 
-  // The servers this person saved or joined. The launcher logs them as they
-  // were typed, and a host name without a port ("dave.example.org") matches
-  // no address pattern, so each is looked for by name in every file below.
+  // The servers this person saved or joined, and the names they gave their
+  // favourites ("Dave's house"). Logs from older launchers hold them as they
+  // were typed, and neither a host name without a port ("dave.example.org")
+  // nor a name matches any address pattern, so each is looked for by name in
+  // every file below.
   std::vector<std::string> known;
   std::string config_text;
   const auto config = home / "config" / "launcher.json";
@@ -254,8 +256,10 @@ bundle_result make_bundle(const std::filesystem::path &home,
           list != nullptr && list->IsArray()) {
         for (const auto &item : list->GetArray()) {
           if (item.IsObject()) {
-            if (auto address = json::get_string(item, "address")) {
-              known.push_back(std::move(*address));
+            for (const char *field : {"address", "name"}) {
+              if (auto value = json::get_string(item, field)) {
+                known.push_back(std::move(*value));
+              }
             }
           }
         }

@@ -227,6 +227,41 @@ TEST_CASE("bundle: escaped and port-less addresses go too, lines stay JSON") {
   fs::remove_all(home);
 }
 
+TEST_CASE("bundle: favourite names in old logs are scrubbed too") {
+  const fs::path home = fs::temp_directory_path() / "xerces_bundle_names";
+  fs::remove_all(home);
+  // Footer notices as launchers before this one logged them: the name the
+  // player gave a favourite, and a single-label host the patterns miss.
+  write(
+      home / "logs" / "20261105-040000-launcher-5.jsonl",
+      R"({"event":"launcher.notice","msg":"Added to favourites: Dave's house"})"
+      "\n"
+      R"({"event":"launcher.notice","msg":"Removed from favourites: dave's HOUSE"})"
+      "\n"
+      R"({"event":"launcher.notice","msg":"Saved to favourites. Use Edit to name it: davespc:27017"})"
+      "\n");
+  write(home / "config" / "launcher.json",
+        R"({"favorites":[{"name":"Dave's house","address":"davespc:27017"}]})");
+
+  const fs::path out = home / "bundle.zip";
+  REQUIRE(make_bundle(home, out, "C:\\Users\\Someone", "{}").ok);
+  std::string bytes;
+  {
+    std::ifstream in(out, std::ios::binary);
+    bytes.assign(std::istreambuf_iterator<char>(in),
+                 std::istreambuf_iterator<char>());
+  }
+  const auto files = unzip(bytes);
+  const std::string &log = files.at("logs/20261105-040000-launcher-5.jsonl");
+  for (const char *secret : {"Dave", "dave", "davespc"}) {
+    CHECK(log.find(secret) == std::string::npos);
+  }
+  CHECK(log.find("Added to favourites: <address>") != std::string::npos);
+  CHECK(log.find("Removed from favourites: <address>") != std::string::npos);
+  CHECK(log.find("name it: <address>") != std::string::npos);
+  fs::remove_all(home);
+}
+
 TEST_CASE("bundle: system information is JSON") {
   const auto parsed = json::parse(system_info_json());
   REQUIRE(parsed.ok);

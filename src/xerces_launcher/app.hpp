@@ -12,6 +12,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <RmlUi/Core/Input.h>
@@ -68,8 +69,14 @@ public:
   std::uint64_t mode_rev() const { return mode_rev_; }
 
   // ------------------------------------------------------------ feedback
-  // A line in the footer for a few seconds.
-  void notify(const std::string &text, bool error = false);
+  // A line in the footer for a few seconds. It is logged too
+  // ("launcher.notice"), as `logged` when that is given. Logs go into bug
+  // reports, and the log's scrubber cannot spot every server address (a host
+  // name without a port, one cut short for the footer) nor a favourite's name
+  // (log.hpp, DESIGN.md 15.1): a notice that shows one passes its text
+  // without it as `logged`.
+  void notify(const std::string &text, bool error = false,
+              std::string_view logged = {});
   // A modal dialog over the current screen. done gets the index of the
   // button picked, or -1 for Esc / B.
   void dialog(const std::string &title, const std::string &body,
