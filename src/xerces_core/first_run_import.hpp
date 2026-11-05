@@ -55,11 +55,25 @@ struct boiii_import {
   }
 };
 
-// Looks in boiii_appdata (%LOCALAPPDATA%\boiii) and game_dir\boiii_players.
-// Either may be missing. Reads a few small files; never writes.
-boiii_import find_boiii_import(
-    const std::optional<std::filesystem::path> &boiii_appdata,
-    const std::optional<std::filesystem::path> &game_dir);
+// Upstream BOIII's data folders, %LOCALAPPDATA%\boiii, each with an identity
+// folder (user\) the import never opens. The fenced code that reads the key
+// finds the folder through the Local AppData known folder (known_folder,
+// from SHGetKnownFolderPath); upstream's updater reads the LOCALAPPDATA
+// variable (variable), which usually names the same folder but can be pointed
+// elsewhere. Both are kept, the known folder's first; a variable naming the
+// same folder adds nothing. Empty when the known folder is not known: the
+// identity folder cannot be told then, and find_boiii_import reads nothing.
+std::vector<std::filesystem::path>
+boiii_appdata_dirs(const std::optional<std::filesystem::path> &known_folder,
+                   const std::optional<std::filesystem::path> &variable);
+
+// Looks in game_dir\boiii_players (which may be missing) and says whether
+// boiii_appdata's first folder is there. Every read refuses the identity
+// folder of each of boiii_appdata (boiii_appdata_dirs); with none, nothing in
+// the game folder is read. Reads a few small files; never writes.
+boiii_import
+find_boiii_import(const std::vector<std::filesystem::path> &boiii_appdata,
+                  const std::optional<std::filesystem::path> &game_dir);
 
 // Where a path really leads, as far as the identity folder is concerned.
 enum class boiii_identity_check {

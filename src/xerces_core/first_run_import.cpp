@@ -48,32 +48,39 @@ bool contains_address(const std::vector<std::string> &list,
       list, [&](const std::string &item) { return lower(item) == key; });
 }
 
-// True (with a warning) when path is, or may be, in the identity folder.
-bool refused(const fs::path &path, const std::optional<fs::path> &appdata,
+// True (with a warning) when path is, or may be, in an identity folder.
+bool refused(const fs::path &path, const std::vector<fs::path> &appdata,
              diagnostics &diags) {
-  if (!appdata) {
-    return false;
+  bool unknown = appdata.empty();
+  for (const fs::path &dir : appdata) {
+    if (dir.empty()) {
+      unknown = true; // a folder nobody could name: no telling
+      continue;
+    }
+    switch (check_boiii_identity_path(path, dir)) {
+    case boiii_identity_check::outside:
+      break;
+    case boiii_identity_check::inside:
+      diags.warning("first_run.import.identity", utf8(path),
+                    "Skipped: this is inside BOIII's identity key folder.");
+      return true;
+    case boiii_identity_check::unknown:
+      unknown = true;
+      break;
+    }
   }
-  switch (check_boiii_identity_path(path, *appdata)) {
-  case boiii_identity_check::outside:
-    return false;
-  case boiii_identity_check::inside:
-    diags.warning("first_run.import.identity", utf8(path),
-                  "Skipped: this is inside BOIII's identity key folder.");
-    return true;
-  case boiii_identity_check::unknown:
+  if (unknown) {
     diags.warning("first_run.import.unchecked", utf8(path),
                   "Skipped: Xerces could not make sure this is outside "
                   "BOIII's identity key folder.");
-    return true;
   }
-  return true;
+  return unknown;
 }
 
 // Reads one small file, unless it is in the identity folder. Missing files
 // are not an error; everything else that stops the read is a warning.
 std::optional<std::string> read_small(const fs::path &file,
-                                      const std::optional<fs::path> &appdata,
+                                      const std::vector<fs::path> &appdata,
                                       diagnostics &diags) {
   if (refused(file, appdata, diags)) {
     return std::nullopt;
@@ -188,7 +195,33 @@ std::vector<std::string> parse_boiii_server_list(std::string_view text,
   return out;
 }
 
-boiii_import find_boiii_import(const std::optional<fs::path> &boiii_appdata,
+std::vector<fs::path>
+boiii_appdata_dirs(const std::optional<fs::path> &known_folder,
+                   const std::optional<fs::path> &variable) {
+  std::vector<fs::path> out;
+  if (!known_folder || known_folder->empty()) {
+    return out;
+  }
+  out.push_back(*known_folder / "boiii");
+  if (variable && !variable->empty()) {
+    // The same folder written another way (case, a trailing '\') adds
+    // nothing; anything else is checked too.
+    const auto key = [](const fs::path &dir) {
+      std::string text = lower(utf8(dir.lexically_normal()));
+      std::ranges::replace(text, '/', '\\');
+      while (text.size() > 3 && text.back() == '\\') {
+        text.pop_back();
+      }
+      return text;
+    };
+    if (key(*variable) != key(*known_folder)) {
+      out.push_back(*variable / "boiii");
+    }
+  }
+  return out;
+}
+
+boiii_import find_boiii_import(const std::vector<fs::path> &boiii_appdata,
                                const std::optional<fs::path> &game_dir) {
   boiii_import out;
   std::error_code ec;
@@ -196,15 +229,22 @@ boiii_import find_boiii_import(const std::optional<fs::path> &boiii_appdata,
   // %LOCALAPPDATA%\boiii: upstream's data, caches and crash dumps, and the
   // identity folder (user\). Nothing outside user\ maps onto the launcher
   // config, and user\ is never opened, so only its presence is reported.
-  if (boiii_appdata && !boiii_appdata->empty()) {
-    out.places.push_back(
-        {"appdata", *boiii_appdata, fs::is_directory(*boiii_appdata, ec)});
+  if (!boiii_appdata.empty() && !boiii_appdata.front().empty()) {
+    out.places.push_back({"appdata", boiii_appdata.front(),
+                          fs::is_directory(boiii_appdata.front(), ec)});
   }
 
   if (game_dir && !game_dir->empty()) {
     const fs::path players = *game_dir / "boiii_players";
     boiii_place place{"players", players, false};
-    if (!refused(players, boiii_appdata, out.diags)) {
+    if (boiii_appdata.empty()) {
+      // Without the app data folder there is no telling where the identity
+      // folder is, so no path can be checked against it.
+      out.diags.warning("first_run.import.no_appdata", utf8(players),
+                        "Skipped: Windows did not say where the Local "
+                        "AppData folder is, so Xerces cannot make sure this "
+                        "is outside BOIII's identity key folder.");
+    } else if (!refused(players, boiii_appdata, out.diags)) {
       place.exists = fs::is_directory(players, ec);
     }
     out.places.push_back(place);

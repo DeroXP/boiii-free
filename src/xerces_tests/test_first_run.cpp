@@ -96,7 +96,7 @@ TEST_CASE("first run: player name and server lists from boiii_players") {
   write(game / "boiii_players" / "user" / "recent_servers.txt",
         "10.0.0.9:27017\n10.0.0.5:27018\n");
 
-  const boiii_import found = find_boiii_import(appdata, game);
+  const boiii_import found = find_boiii_import({appdata}, game);
   REQUIRE(found.found_anything());
   REQUIRE(found.player_name.has_value());
   CHECK_EQ(*found.player_name, std::string("^1Ghost"));
@@ -121,26 +121,29 @@ TEST_CASE("first run: nothing to import") {
   const fs::path game = root.path / "game";
   fs::create_directories(game);
 
-  const boiii_import none = find_boiii_import(root.path / "boiii", game);
+  const boiii_import none = find_boiii_import({root.path / "boiii"}, game);
   CHECK(!none.found_anything());
   REQUIRE_EQ(none.places.size(), std::size_t(2));
   CHECK(!none.places[0].exists);
   CHECK(!none.places[1].exists);
 
   // No game folder known: only %LOCALAPPDATA%\boiii is reported.
-  const boiii_import no_game = find_boiii_import(root.path / "boiii", {});
+  const boiii_import no_game = find_boiii_import({root.path / "boiii"}, {});
   CHECK(!no_game.found_anything());
   CHECK_EQ(no_game.places.size(), std::size_t(1));
   CHECK(find_boiii_import({}, {}).places.empty());
 
   // A properties.json without a name, and broken JSON, give no name.
   write(game / "boiii_players" / "properties.json", "{\"launchOptions\":\"\"}");
-  CHECK(!find_boiii_import({}, game).player_name.has_value());
+  CHECK(
+      !find_boiii_import({root.path / "boiii"}, game).player_name.has_value());
   write(game / "boiii_players" / "properties.json", "{\"playerName\":");
-  CHECK(!find_boiii_import({}, game).player_name.has_value());
+  CHECK(
+      !find_boiii_import({root.path / "boiii"}, game).player_name.has_value());
   write(game / "boiii_players" / "properties.json",
         "{\"playerName\":\"\\u00e9\\u00e9\"}");
-  CHECK(!find_boiii_import({}, game).player_name.has_value());
+  CHECK(
+      !find_boiii_import({root.path / "boiii"}, game).player_name.has_value());
 }
 
 TEST_CASE("first run: the identity folder is never read") {
@@ -163,13 +166,13 @@ TEST_CASE("first run: the identity folder is never read") {
   const fs::path inside = appdata / "user" / "game";
   write(inside / "boiii_players" / "properties.json",
         "{\"playerName\":\"Inside\"}");
-  const boiii_import found = find_boiii_import(appdata, inside);
+  const boiii_import found = find_boiii_import({appdata}, inside);
   CHECK(!found.player_name.has_value());
   CHECK(found.diags.has("first_run.import.identity"));
   REQUIRE_EQ(found.places.size(), std::size_t(2));
   CHECK(!found.places[1].exists);
 
-  const boiii_import top = find_boiii_import(appdata, {});
+  const boiii_import top = find_boiii_import({appdata}, {});
   CHECK(!top.found_anything());
 }
 
@@ -188,7 +191,7 @@ TEST_CASE("first run: links into the identity folder are seen from outside it") 
                         identity / "game" / "boiii_players"));
   CHECK((check_boiii_identity_path(game / "boiii_players" / "properties.json",
                                    appdata) == inside));
-  const boiii_import through = find_boiii_import(appdata, game);
+  const boiii_import through = find_boiii_import({appdata}, game);
   CHECK(!through.player_name.has_value());
   CHECK(through.diags.has("first_run.import.identity"));
   REQUIRE_EQ(through.places.size(), std::size_t(2));
@@ -215,7 +218,7 @@ TEST_CASE("first run: links into the identity folder are seen from outside it") 
                         root.path / "elsewhere" / "boiii_players"));
   CHECK((check_boiii_identity_path(other / "boiii_players" / "properties.json",
                                    appdata) == outside));
-  const boiii_import linked = find_boiii_import(appdata, other);
+  const boiii_import linked = find_boiii_import({appdata}, other);
   REQUIRE(linked.player_name.has_value());
   CHECK_EQ(*linked.player_name, std::string("Elsewhere"));
 
@@ -229,7 +232,8 @@ TEST_CASE("first run: links into the identity folder are seen from outside it") 
   CHECK((check_boiii_identity_path(root.path / "ga*e" / "x", appdata) == unknown));
   CHECK((check_boiii_identity_path(root.path / "game:s" / "x", appdata) ==
          unknown));
-  const boiii_import looped = find_boiii_import(appdata, root.path / "loop_a");
+  const boiii_import looped =
+      find_boiii_import({appdata}, root.path / "loop_a");
   CHECK(looped.diags.has("first_run.import.unchecked"));
   CHECK(!looped.diags.has("first_run.import.identity"));
 
@@ -272,7 +276,7 @@ TEST_CASE("first run: BOIII files are only read") {
   const auto favorites_time = fs::last_write_time(favorites);
 
   launcher_config config;
-  const boiii_import found = find_boiii_import(root.path / "boiii", game);
+  const boiii_import found = find_boiii_import({root.path / "boiii"}, game);
   const boiii_import_result applied =
       apply_boiii_import(config, found, boiii_import_choice{});
   CHECK(applied.changed());
@@ -474,7 +478,7 @@ TEST_CASE("first run: shares and network names are never outside") {
     CHECK((check_boiii_identity_path(through / "boiii" / "cache" / "x.bin",
                                      appdata) == unknown));
     const boiii_import found =
-        find_boiii_import(appdata, through / "boiii" / "user" / "game");
+        find_boiii_import({appdata}, through / "boiii" / "user" / "game");
     CHECK(!found.player_name.has_value());
     CHECK(found.diags.has("first_run.import.unchecked"));
     REQUIRE_EQ(found.places.size(), std::size_t(2));
@@ -545,7 +549,7 @@ TEST_CASE("first run: names past MAX_PATH and Windows' own name rules") {
       make_junction(game / "boiii_players", fs::path(deep_plain + L"\\bp")));
   CHECK((check_boiii_identity_path(game / "boiii_players" / "properties.json",
                                    appdata) == inside));
-  const boiii_import through = find_boiii_import(appdata, game);
+  const boiii_import through = find_boiii_import({appdata}, game);
   CHECK(!through.player_name.has_value());
   CHECK(through.diags.has("first_run.import.identity"));
 
@@ -557,4 +561,62 @@ TEST_CASE("first run: names past MAX_PATH and Windows' own name rules") {
   REQUIRE(make_junction(other / "boiii_players", fs::path(deep_plain)));
   CHECK((check_boiii_identity_path(other / "boiii_players" / "x.json",
                                    appdata) == outside));
+}
+
+TEST_CASE(
+    "first run: the identity folder is looked for where upstream keeps it") {
+  using enum boiii_identity_check;
+  const fs::path known = "C:\\Users\\Someone\\AppData\\Local";
+  // The variable names the same folder (any case, a trailing '\'): one.
+  std::vector<fs::path> dirs = boiii_appdata_dirs(
+      known, fs::path("c:\\users\\someone\\APPDATA\\local\\"));
+  REQUIRE_EQ(dirs.size(), std::size_t(1));
+  CHECK(dirs[0] == known / "boiii");
+  CHECK_EQ(boiii_appdata_dirs(known, std::nullopt).size(), std::size_t(1));
+  // Pointed elsewhere (a portable launcher, a script): both, the known
+  // folder (where the fenced code reads the key) first.
+  dirs = boiii_appdata_dirs(known, fs::path("D:\\Portable\\AppData"));
+  REQUIRE_EQ(dirs.size(), std::size_t(2));
+  CHECK(dirs[0] == known / "boiii");
+  CHECK(dirs[1] == fs::path("D:\\Portable\\AppData") / "boiii");
+  // Without the known folder the identity folder cannot be told, whatever
+  // the variable says.
+  CHECK(boiii_appdata_dirs(std::nullopt, known).empty());
+  CHECK(boiii_appdata_dirs(fs::path(), known).empty());
+
+  temp_dir root("xerces_first_run_appdata");
+  const fs::path real = root.path / "Local";     // the known folder
+  const fs::path moved = root.path / "Portable"; // LOCALAPPDATA, redirected
+  write(real / "boiii" / "user" / "game" / "boiii_players" / "properties.json",
+        "{\"playerName\":\"Known\"}");
+  write(moved / "boiii" / "user" / "game" / "boiii_players" / "properties.json",
+        "{\"playerName\":\"Variable\"}");
+  const std::vector<fs::path> both = boiii_appdata_dirs(real, moved);
+  REQUIRE_EQ(both.size(), std::size_t(2));
+
+  // A game folder whose boiii_players leads into either identity folder is
+  // not read.
+  for (const fs::path &local : {real, moved}) {
+    const fs::path game = root.path / ("game-" + local.filename().string());
+    REQUIRE(make_junction(game / "boiii_players",
+                          local / "boiii" / "user" / "game" / "boiii_players"));
+    const boiii_import found = find_boiii_import(both, game);
+    CHECK(!found.player_name.has_value());
+    CHECK(found.diags.has("first_run.import.identity"));
+  }
+  // Checking only the variable's folder would have read the known one.
+  CHECK((check_boiii_identity_path(root.path / "game-Local" / "boiii_players",
+                                   moved / "boiii") == outside));
+
+  // Nothing known: a plain game folder is not read either.
+  const fs::path plain = root.path / "plain";
+  write(plain / "boiii_players" / "properties.json",
+        "{\"playerName\":\"Plain\"}");
+  const boiii_import none = find_boiii_import({}, plain);
+  CHECK(!none.player_name.has_value());
+  CHECK(none.diags.has("first_run.import.no_appdata"));
+  REQUIRE_EQ(none.places.size(), std::size_t(1));
+  CHECK(!none.places[0].exists);
+  const boiii_import read = find_boiii_import(both, plain);
+  CHECK_EQ(read.player_name.value_or(""), std::string("Plain"));
 }

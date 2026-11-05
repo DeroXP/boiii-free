@@ -10,6 +10,13 @@
 
 #include <RmlUi/Core.h>
 
+#include <RmlUi_Include_Windows.h>
+// wingdi.h's GetObject macro would rename rapidjson's GetObject().
+#undef GetObject
+#include <KnownFolders.h>
+#include <objbase.h>
+#include <ShlObj.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -49,16 +56,28 @@ std::string utf8(const fs::path &path) {
 }
 
 // %LOCALAPPDATA%\boiii, where upstream BOIII keeps its data and (in user\)
-// the identity key. The import only checks it is there.
-std::optional<fs::path> boiii_appdata() {
+// the identity key, found as the fenced code finds it (the Local AppData
+// known folder) and as the LOCALAPPDATA variable names it, when that differs
+// (xerces_core::boiii_appdata_dirs). The import only checks it is there, and
+// never opens user\ in either. Empty when Windows does not say: then the
+// import reads nothing.
+std::vector<fs::path> boiii_appdata() {
+  std::optional<fs::path> known;
+  PWSTR folder = nullptr;
+  if (SUCCEEDED(
+          SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &folder)) &&
+      folder != nullptr) {
+    known = fs::path(folder);
+  }
+  CoTaskMemFree(folder);
+  std::optional<fs::path> variable;
   wchar_t *value = nullptr;
   std::size_t size = 0;
-  if (_wdupenv_s(&value, &size, L"LOCALAPPDATA") != 0 || value == nullptr) {
-    return std::nullopt;
+  if (_wdupenv_s(&value, &size, L"LOCALAPPDATA") == 0 && value != nullptr) {
+    variable = fs::path(value);
   }
-  fs::path dir = fs::path(value) / "boiii";
   std::free(value);
-  return dir;
+  return xerces_core::boiii_appdata_dirs(known, variable);
 }
 
 const char *verdict_name(xerces_core::preflight_verdict verdict) {
