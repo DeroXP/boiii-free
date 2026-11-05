@@ -406,3 +406,155 @@ TEST_CASE("first run: applying the import to the config") {
   CHECK_EQ(new_boiii_recent_servers(full, found, &no_room), std::size_t(0));
   CHECK_EQ(no_room, std::size_t(1));
 }
+
+namespace {
+// Removes a tree that may be deeper than MAX_PATH ("\\?\" names); links are
+// removed as links, never followed.
+void remove_deep(const std::wstring &dir) {
+  WIN32_FIND_DATAW found{};
+  const HANDLE find = FindFirstFileW((dir + L"\\*").c_str(), &found);
+  if (find != INVALID_HANDLE_VALUE) {
+    do {
+      const std::wstring name = found.cFileName;
+      if (name == L"." || name == L"..") {
+        continue;
+      }
+      const std::wstring child = dir + L"\\" + name;
+      const bool folder =
+          (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+      if ((found.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        folder ? RemoveDirectoryW(child.c_str()) : DeleteFileW(child.c_str());
+      } else if (folder) {
+        remove_deep(child);
+      } else {
+        DeleteFileW(child.c_str());
+      }
+    } while (FindNextFileW(find, &found));
+    FindClose(find);
+  }
+  RemoveDirectoryW(dir.c_str());
+}
+
+// A folder deeper than MAX_PATH, removed with everything in it when the test
+// ends (before temp_dir, whose remove_all cannot reach that deep).
+struct deep_tree {
+  std::wstring top; // "\\?\C:\..."
+  ~deep_tree() { remove_deep(top); }
+};
+
+bool make_dir(const std::wstring &dir) {
+  return CreateDirectoryW(dir.c_str(), nullptr) ||
+         GetLastError() == ERROR_ALREADY_EXISTS;
+}
+} // namespace
+
+TEST_CASE("first run: shares and network names are never outside") {
+  using enum boiii_identity_check;
+  temp_dir root("xerces_first_run_shares");
+  const fs::path appdata = root.path / "boiii";
+  write(appdata / "user" / "k.txt", "SECRET");
+  write(appdata / "user" / "game" / "boiii_players" / "properties.json",
+        "{\"playerName\":\"Inside\"}");
+  write(appdata / "cache" / "x.bin", "cache");
+
+  // The fake identity folder through this PC's own admin share: the same
+  // folder under another name. Shares are judged by their name alone, which
+  // cannot say which folder of which PC they are, so nothing is opened.
+  const std::wstring local = fs::absolute(root.path).native();
+  REQUIRE(local.size() > 3 && local[1] == L':');
+  const std::wstring below = local.substr(2); // "\Users\...\xerces_..."
+  const std::wstring admin = std::wstring(1, local[0]) + L"$";
+  for (const std::wstring &share :
+       {L"\\\\localhost\\" + admin, L"\\\\127.0.0.1\\" + admin,
+        L"\\\\?\\UNC\\localhost\\" + admin, L"\\\\.\\UNC\\localhost\\" + admin,
+        L"//localhost/" + admin}) {
+    const fs::path through(share + below);
+    CHECK((check_boiii_identity_path(through / "boiii" / "user" / "k.txt",
+                                     appdata) == unknown));
+    CHECK((check_boiii_identity_path(through / "boiii" / "cache" / "x.bin",
+                                     appdata) == unknown));
+    const boiii_import found =
+        find_boiii_import(appdata, through / "boiii" / "user" / "game");
+    CHECK(!found.player_name.has_value());
+    CHECK(found.diags.has("first_run.import.unchecked"));
+    REQUIRE_EQ(found.places.size(), std::size_t(2));
+    CHECK(!found.places[1].exists);
+  }
+  CHECK(is_boiii_identity_path(fs::path(L"\\\\server\\share\\game"), appdata));
+  // Device paths other than a drive are not checked either.
+  CHECK(is_boiii_identity_path(
+      fs::path(L"\\\\?\\GLOBALROOT\\Device\\HarddiskVolume1\\x"), appdata));
+}
+
+TEST_CASE("first run: names past MAX_PATH and Windows' own name rules") {
+  using enum boiii_identity_check;
+  temp_dir root("xerces_first_run_long");
+  const fs::path appdata = root.path / "boiii";
+  const fs::path identity = appdata / "user";
+  write(identity / "k.txt", "SECRET");
+  write(identity / "game" / "boiii_players" / "properties.json",
+        "{\"playerName\":\"Inside\"}");
+  write(appdata / "cache" / "x.bin", "cache");
+
+  // What Windows itself drops or applies before it looks a name up: a
+  // trailing dot, a trailing space at the end, "." and "..".
+  CHECK((check_boiii_identity_path(appdata / "user." / "k.txt", appdata) ==
+         inside));
+  CHECK((check_boiii_identity_path(appdata / "user ", appdata) == inside));
+  CHECK((check_boiii_identity_path(appdata / "cache" / ".." / "user" / "k.txt",
+                                   appdata) == inside));
+  // A "\\?\" name is taken as written, as Windows takes it.
+  const std::wstring prefixed = L"\\\\?\\" + fs::absolute(appdata).native();
+  CHECK((check_boiii_identity_path(fs::path(prefixed + L"\\user\\k.txt"),
+                                   appdata) == inside));
+  CHECK((check_boiii_identity_path(fs::path(prefixed + L"\\USER"), appdata) ==
+         inside));
+  CHECK((check_boiii_identity_path(fs::path(prefixed + L"\\cache\\x.bin"),
+                                   appdata) == outside));
+
+  // A folder deeper than MAX_PATH (made through "\\?\": the tests are not
+  // long-path aware either) with a junction into the identity folder.
+  const deep_tree tree{L"\\\\?\\" + fs::absolute(root.path).native() + L"\\" +
+                       std::wstring(30, L'a')};
+  std::wstring deep = tree.top;
+  REQUIRE(make_dir(deep));
+  for (int i = 1; i < 12; ++i) {
+    deep += L"\\" + std::wstring(30, wchar_t(L'a' + i));
+    REQUIRE(make_dir(deep));
+  }
+  REQUIRE(deep.size() > MAX_PATH + 4);
+  REQUIRE(make_dir(deep + L"\\lnk"));
+  REQUIRE(make_junction(fs::path(deep + L"\\lnk"), identity));
+  CHECK((check_boiii_identity_path(fs::path(deep + L"\\lnk\\k.txt"), appdata) ==
+         inside));
+  CHECK((check_boiii_identity_path(fs::path(deep + L"\\lnk"), appdata) ==
+         inside));
+  // Without the prefix, as a config file could name it.
+  const std::wstring deep_plain = deep.substr(4);
+  CHECK((check_boiii_identity_path(fs::path(deep_plain + L"\\lnk\\k.txt"),
+                                   appdata) == inside));
+
+  // A short game folder whose boiii_players leads into the deep folder,
+  // where another junction leads on into the identity folder. The game
+  // folder is an ordinary one: no "\\?\" anywhere in what the player picked.
+  REQUIRE(make_dir(deep + L"\\bp"));
+  REQUIRE(make_junction(fs::path(deep + L"\\bp"),
+                        identity / "game" / "boiii_players"));
+  const fs::path game = root.path / "game";
+  REQUIRE(
+      make_junction(game / "boiii_players", fs::path(deep_plain + L"\\bp")));
+  CHECK((check_boiii_identity_path(game / "boiii_players" / "properties.json",
+                                   appdata) == inside));
+  const boiii_import through = find_boiii_import(appdata, game);
+  CHECK(!through.player_name.has_value());
+  CHECK(through.diags.has("first_run.import.identity"));
+
+  // The deep folder itself is outside, and so is a game folder leading
+  // there through a junction (nothing to read in it).
+  CHECK((check_boiii_identity_path(fs::path(deep_plain + L"\\elsewhere"),
+                                   appdata) == outside));
+  const fs::path other = root.path / "other";
+  REQUIRE(make_junction(other / "boiii_players", fs::path(deep_plain)));
+  CHECK((check_boiii_identity_path(other / "boiii_players" / "x.json",
+                                   appdata) == outside));
+}

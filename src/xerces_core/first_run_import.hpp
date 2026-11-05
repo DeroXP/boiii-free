@@ -69,12 +69,14 @@ enum class boiii_identity_check {
 };
 
 // Follows path one name at a time, the way Windows would (long and short
-// names, any case, junctions, symbolic links, subst drives, volume mount
-// points), without opening anything inside boiii_appdata\user: each name is
-// looked up in its parent folder's listing and each link is read as a link.
-// unknown when a step cannot be checked that way (a folder that cannot be
-// listed, a link that cannot be read or points somewhere Windows-internal,
-// a loop of links, a name Windows does not allow).
+// names, any case, ".", "..", trailing dots and spaces, names past MAX_PATH,
+// junctions, symbolic links, subst drives, volume mount points), without
+// opening anything inside boiii_appdata\user: each name is looked up in its
+// parent folder's listing and each link is read as a link. unknown when a
+// step cannot be checked that way (a folder that cannot be listed, a link
+// that cannot be read or points somewhere Windows-internal, a loop of links,
+// a name Windows does not allow) and for every path through a share or a
+// network drive: \\localhost\C$ is this PC's C:\ under another name.
 boiii_identity_check
 check_boiii_identity_path(const std::filesystem::path &path,
                           const std::filesystem::path &boiii_appdata);

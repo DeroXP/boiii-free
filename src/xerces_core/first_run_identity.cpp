@@ -11,6 +11,10 @@
 // (FILE_FLAG_OPEN_REPARSE_POINT) to read where it points, never followed.
 // Every step is compared with the identity folder before the next one is
 // looked up, so the walk stops at its door.
+//
+// The comparison is by name, so it only works where a name says which folder
+// of this PC it is: on a drive. A share or a network drive can be this PC's
+// own C:\ under another name, so a path through one is never "outside".
 
 #include "first_run_import.hpp"
 
@@ -76,8 +80,7 @@ bool allowed_name(std::wstring_view name) {
   });
 }
 
-// A path as a root Windows does not look up by name here (a drive "C:\" or a
-// share "\\server\share\") and the names below it.
+// A path as the drive it is on ("C:\") and the names below it.
 struct location {
   fs::path root;
   std::vector<std::wstring> names;
@@ -91,49 +94,24 @@ struct location {
   }
 };
 
-// "\\?\C:\x" and "\\.\C:\x" are C:\x, "\\?\UNC\s\h" is \\s\h. Other device
-// paths (pipes, raw volumes) are not folders on a drive: nullopt.
-std::optional<location> locate(const fs::path &path) {
-  std::error_code ec;
-  const fs::path absolute = fs::absolute(path, ec);
-  if (ec) {
+// "C:\x\y" as written, split into its drive and names. Only paths on a drive
+// are checked: a share ("\\server\share\", "UNC\server\share") can be this
+// PC's own drive (\\localhost\C$, \\127.0.0.1\c$, a share of any folder above
+// the identity folder), and its name does not say which folder of which PC it
+// is. Other device paths (pipes, volumes by GUID) are not folders on a drive.
+// Both are nullopt, which the walk reports as unknown.
+std::optional<location> split(std::wstring_view text) {
+  if (!is_drive(text)) {
     return std::nullopt;
   }
-  std::wstring text = absolute.native();
-  std::ranges::replace(text, L'/', L'\\');
-  if (starts_with_nocase(text, L"\\\\?\\UNC\\")) {
-    text = L"\\\\" + text.substr(8);
-  } else if (text.starts_with(L"\\\\?\\") || text.starts_with(L"\\\\.\\") ||
-             text.starts_with(L"\\??\\")) {
-    text.erase(0, 4);
-  }
-
   location out;
-  std::wstring_view rest;
-  if (is_drive(text)) {
-    out.root = text.substr(0, 2) + L"\\";
-    rest = std::wstring_view(text).substr(2);
-  } else if (text.starts_with(L"\\\\")) {
-    const std::size_t server_end = text.find(L'\\', 2);
-    if (server_end == std::wstring::npos || server_end == 2) {
-      return std::nullopt;
-    }
-    std::size_t share_end = text.find(L'\\', server_end + 1);
-    if (share_end == std::wstring::npos) {
-      share_end = text.size();
-    }
-    if (share_end == server_end + 1) {
-      return std::nullopt;
-    }
-    out.root = text.substr(0, share_end) + L"\\";
-    rest = std::wstring_view(text).substr(share_end);
-  } else {
-    return std::nullopt;
-  }
+  out.root = std::wstring(text.substr(0, 2)) + L"\\";
+  std::wstring_view rest = text.substr(2);
 
   // "." and ".." are applied by name, as Windows applies them before it looks
   // anything up (so "link\.." is the folder holding the link, not the link
-  // target's parent).
+  // target's parent). In a "\\?\" path the file system refuses them instead,
+  // so applying them can only make the check stricter.
   while (!rest.empty()) {
     const std::size_t end = rest.find(L'\\');
     const std::wstring_view name = rest.substr(0, end);
@@ -150,6 +128,41 @@ std::optional<location> locate(const fs::path &path) {
     out.names.emplace_back(name);
   }
   return out;
+}
+
+// A path the way Windows' file functions will look it up. A "\\?\" or "\??\"
+// path reaches the file system as written ("\\?\C:\a\user." names "user.",
+// not "user"), so it is split as written. Any other path is first made
+// absolute as those functions do it: std::filesystem::absolute calls
+// GetFullPathNameW, the routine they use, which applies "." and "..", turns
+// '/' into '\' and drops a trailing dot or space where Windows drops it. So
+// the names walked are the names a later open of the same path looks up.
+std::optional<location> locate(const fs::path &path) {
+  const std::wstring &given = path.native();
+  if (given.starts_with(L"\\\\?\\") || given.starts_with(L"\\??\\")) {
+    return split(std::wstring_view(given).substr(4));
+  }
+  std::error_code ec;
+  const fs::path absolute = fs::absolute(path, ec);
+  if (ec) {
+    return std::nullopt;
+  }
+  std::wstring text = absolute.native();
+  std::ranges::replace(text, L'/', L'\\');
+  // "\\.\C:\x" (and "//?/C:/x", which Windows normalizes like it) is C:\x.
+  if (text.starts_with(L"\\\\?\\") || text.starts_with(L"\\\\.\\")) {
+    text.erase(0, 4);
+  }
+  return split(text);
+}
+
+// What the walk passes to Windows for a path locate() made: "\\?\C:\...".
+// The prefix lifts the MAX_PATH limit (the programs are not long-path aware,
+// and a link can lead to a path longer than the one it sits in, which a
+// later open follows all the same) and stops Windows from changing the
+// names again.
+std::wstring long_name(const fs::path &path) {
+  return L"\\\\?\\" + path.native();
 }
 
 // "Volume{guid}\rest" (where a junction to a whole volume points): the
@@ -176,14 +189,15 @@ std::optional<location> from_volume(std::wstring_view name) {
       while (!rest.empty() && rest.front() == L'\\') {
         rest.remove_prefix(1);
       }
-      return locate(std::wstring(text) + std::wstring(rest));
+      return split(std::wstring(text) + std::wstring(rest));
     }
   }
   return std::nullopt;
 }
 
 // Where an NT name such as "\??\C:\x" (what links and subst drives store)
-// is. nullopt for names that are not a drive, a share or a volume.
+// is. Windows follows it as written. nullopt for names that are not a drive
+// or a volume (a share among them, see split).
 std::optional<location> from_nt(std::wstring_view name) {
   if (!name.starts_with(L"\\??\\")) {
     return std::nullopt;
@@ -192,36 +206,49 @@ std::optional<location> from_nt(std::wstring_view name) {
   if (starts_with_nocase(name, L"Volume{")) {
     return from_volume(name);
   }
-  if (starts_with_nocase(name, L"UNC\\")) {
-    return locate(L"\\\\" + std::wstring(name.substr(4)));
-  }
-  if (is_drive(name)) {
-    return locate(std::wstring(name));
-  }
-  return std::nullopt;
+  return split(name);
 }
 
-struct redirect {
-  bool is_link = false;
-  std::optional<location> target; // empty for a link that cannot be checked
+struct drive {
+  bool checked = false;           // a volume of this PC, walked by name
+  bool is_link = false;           // a subst drive, a link at the root
+  std::optional<location> target; // where a subst drive leads, if checkable
 };
 
-// A subst drive (X: -> \??\C:\folder) is a link at the root.
-redirect subst_target(const fs::path &root) {
-  const std::wstring text = root.native();
-  if (!is_drive(text)) {
-    return {};
-  }
-  const std::wstring drive = text.substr(0, 2);
+// What a drive letter stands for, from the name Windows keeps for it
+// (QueryDosDeviceW), which opens nothing on the drive.
+drive drive_of(const fs::path &root) {
+  const std::wstring text = root.native(); // "C:\"
+  const std::wstring letter = text.substr(0, 2);
   std::vector<wchar_t> device(32768, L'\0');
-  if (QueryDosDeviceW(drive.c_str(), device.data(), DWORD(device.size())) == 0) {
-    return {};
+  if (QueryDosDeviceW(letter.c_str(), device.data(), DWORD(device.size())) ==
+      0) {
+    // No such drive: nothing on it exists, which the walk finds out.
+    drive none;
+    none.checked = GetLastError() == ERROR_FILE_NOT_FOUND &&
+                   GetDriveTypeW(text.c_str()) == DRIVE_NO_ROOT_DIR;
+    return none;
   }
   const std::wstring_view target(device.data());
-  if (!target.starts_with(L"\\??\\")) {
-    return {}; // a volume of its own (\Device\HarddiskVolume3) or a network drive
+  drive out;
+  if (target.starts_with(L"\\??\\")) {
+    out.is_link = true; // subst X: C:\folder
+    out.target = from_nt(target);
+    return out;
   }
-  return {true, from_nt(target)};
+  // A drive of this PC is a whole volume ("\Device\HarddiskVolume3"). A
+  // network drive names a share after its redirector ("\Device\Lanman
+  // Redirector\;Z:...\server\share"), and that share can be this PC's own
+  // C:\ again (\\localhost\C$, see split); a folder after any other device is
+  // just as unknown. Neither is checked.
+  constexpr std::wstring_view devices = L"\\Device\\";
+  const bool whole_device =
+      target.starts_with(devices) && target.size() > devices.size() &&
+      target.find(L'\\', devices.size()) == std::wstring_view::npos;
+  const UINT type = GetDriveTypeW(text.c_str());
+  out.checked = whole_device && type != DRIVE_REMOTE && type != DRIVE_UNKNOWN &&
+                type != DRIVE_NO_ROOT_DIR;
+  return out;
 }
 
 // The name a symbolic link or junction stores and Windows follows: its
@@ -232,12 +259,11 @@ struct link_text {
 };
 
 std::optional<link_text> read_link(const fs::path &link) {
-  const HANDLE file =
-      CreateFileW(link.c_str(), FILE_READ_ATTRIBUTES,
-                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                  nullptr, OPEN_EXISTING,
-                  FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
-                  nullptr);
+  const HANDLE file = CreateFileW(
+      long_name(link).c_str(), FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+      nullptr);
   if (file == INVALID_HANDLE_VALUE) {
     return std::nullopt;
   }
@@ -294,9 +320,10 @@ std::optional<location> link_destination(const fs::path &link,
     return from_nt(text.target);
   }
   if (!text.target.empty() && text.target.front() == L'\\') {
-    return locate(root / text.target.substr(1)); // "\x": from the root
+    // "\x": from the root
+    return split((root / text.target.substr(1)).native());
   }
-  return locate(link.parent_path() / text.target);
+  return split((link.parent_path() / text.target).native());
 }
 
 // Errors that mean the name is not there, so nothing below it exists either.
@@ -328,15 +355,18 @@ walk_result walk(const fs::path &path, const std::vector<fs::path> &identity) {
     if (hit(at->joined())) {
       return {inside, {}};
     }
-    const redirect subst = subst_target(at->root);
-    if (subst.is_link) {
-      if (!subst.target || ++links > max_links) {
+    const drive root = drive_of(at->root);
+    if (root.is_link) {
+      if (!root.target || ++links > max_links) {
         return {};
       }
-      location next = *subst.target;
+      location next = *root.target;
       next.names.insert(next.names.end(), at->names.begin(), at->names.end());
       at = std::move(next);
       continue;
+    }
+    if (!root.checked) {
+      return {}; // a network drive, or a drive Windows does not describe
     }
 
     fs::path current = at->root;
@@ -353,12 +383,12 @@ walk_result walk(const fs::path &path, const std::vector<fs::path> &identity) {
       // The listing of `current` (already checked) answers for `name`; the
       // name itself is not opened.
       WIN32_FIND_DATAW found{};
-      const HANDLE find = FindFirstFileExW(next.c_str(), FindExInfoBasic,
-                                           &found, FindExSearchNameMatch,
-                                           nullptr, 0);
+      const HANDLE find =
+          FindFirstFileExW(long_name(next).c_str(), FindExInfoBasic, &found,
+                           FindExSearchNameMatch, nullptr, 0);
       if (find == INVALID_HANDLE_VALUE) {
         if (!missing(GetLastError())) {
-          return {}; // a folder that cannot be listed
+          return {}; // a folder that cannot be listed, a name too long
         }
         // Nothing from here on exists, so none of it is a link.
         for (std::size_t j = i + 1; j < at->names.size(); ++j) {
