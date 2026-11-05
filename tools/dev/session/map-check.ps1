@@ -30,6 +30,9 @@ param(
   [int]$MenuTimeoutSeconds = 240,
   [int]$LoadTimeoutSeconds = 480,
   [int]$PlaySeconds = 45,
+  # Launch flags for the game, such as -log-script-errors (the launcher's
+  # extra_flags; they go before the +set commands).
+  [string[]]$ExtraFlags = @(),
   [switch]$Live
 )
 
@@ -105,7 +108,12 @@ function Write-Config {
   New-Item -ItemType Directory -Force $config | Out-Null
   $mods = ($Stack | ForEach-Object { '"ws.' + $_ + '"' }) -join ', '
   $flag = if ($Stack.Count -gt 0) { 'true' } else { 'false' }
-  $json = "{`n  `"schema`": `"xerces.config/1`",`n  `"first_run_done`": true,`n  `"mode`": `"$Mode`",`n" +
+  $flags = ''
+  $extra = @($ExtraFlags | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+  if ($extra.Count -gt 0) {
+    $flags = "  `"extra_flags`": [" + (($extra | ForEach-Object { '"' + $_ + '"' }) -join ', ') + "],`n"
+  }
+  $json = "{`n  `"schema`": `"xerces.config/1`",`n  `"first_run_done`": true,`n  `"mode`": `"$Mode`",`n" + $flags +
     "  `"profiles`": { `"$Mode`": { `"mods`": [$mods], `"modded`": $flag } }`n}`n"
   [System.IO.File]::WriteAllText((Join-Path $config 'launcher.json'), $json)
   # A fresh record each run: an unfinished journal would make Home offer safe

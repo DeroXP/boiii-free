@@ -32,8 +32,8 @@ std::string utf8(const std::wstring &text) {
   if (text.empty()) {
     return {};
   }
-  const int size = WideCharToMultiByte(CP_UTF8, 0, text.data(), int(text.size()),
-                                       nullptr, 0, nullptr, nullptr);
+  const int size = WideCharToMultiByte(
+      CP_UTF8, 0, text.data(), int(text.size()), nullptr, 0, nullptr, nullptr);
   std::string out(std::size_t(size), '\0');
   WideCharToMultiByte(CP_UTF8, 0, text.data(), int(text.size()), out.data(),
                       size, nullptr, nullptr);
@@ -275,6 +275,7 @@ journal_step journal_symbols_step() {
 namespace {
 // Plain values: read during shutdown, after other statics may be gone.
 std::atomic_bool quit_seen{false};
+std::atomic_bool crashed{false};
 std::atomic_bool exit_code_known{false};
 std::atomic<std::uint32_t> exit_code_value{0};
 
@@ -284,6 +285,14 @@ xerces_core::text_tail console_tail; // a fixed buffer, no destructor work
 
 void note_quit_requested() { quit_seen = true; }
 bool quit_requested() { return quit_seen; }
+void note_crash() { crashed = true; }
+bool crash_seen() { return crashed; }
+
+void journal_quit_forced() {
+  if (quit_seen && !crashed) {
+    set_journal_phase(xerces_core::launch_phase::clean_exit);
+  }
+}
 
 void note_exit_code(std::uint32_t code) {
   exit_code_value = code;

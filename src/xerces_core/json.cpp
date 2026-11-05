@@ -239,6 +239,56 @@ std::string quote(std::string_view text) {
   return out;
 }
 
+std::string valid_utf8(std::string_view text, std::size_t max_bytes) {
+  constexpr std::string_view replacement = "\xEF\xBF\xBD"; // U+FFFD
+  std::string out;
+  out.reserve(std::min(text.size(), max_bytes));
+  std::size_t i = 0;
+  while (i < text.size()) {
+    const auto lead = static_cast<unsigned char>(text[i]);
+    std::size_t length = 0;
+    std::uint32_t min_value = 0;
+    if (lead < 0x80) {
+      length = 1;
+    } else if (lead >= 0xC2 && lead <= 0xDF) {
+      length = 2;
+      min_value = 0x80;
+    } else if (lead >= 0xE0 && lead <= 0xEF) {
+      length = 3;
+      min_value = 0x800;
+    } else if (lead >= 0xF0 && lead <= 0xF4) {
+      length = 4;
+      min_value = 0x10000;
+    }
+    bool valid = length > 0 && i + length <= text.size();
+    std::uint32_t value = length == 1 ? lead
+                          : length == 2 ? (lead & 0x1Fu)
+                          : length == 3 ? (lead & 0x0Fu)
+                                        : (lead & 0x07u);
+    for (std::size_t k = 1; valid && k < length; ++k) {
+      const auto next = static_cast<unsigned char>(text[i + k]);
+      if ((next & 0xC0) != 0x80) {
+        valid = false;
+      } else {
+        value = (value << 6) | (next & 0x3Fu);
+      }
+    }
+    if (valid && length > 1 &&
+        (value < min_value || value > 0x10FFFF ||
+         (value >= 0xD800 && value <= 0xDFFF))) {
+      valid = false; // overlong, out of range, or a surrogate
+    }
+    const std::string_view piece =
+        valid ? text.substr(i, length) : replacement;
+    if (out.size() + piece.size() > max_bytes) {
+      break; // never cut inside a character
+    }
+    out.append(piece);
+    i += valid ? length : 1;
+  }
+  return out;
+}
+
 std::size_t length(std::string_view text) {
   return static_cast<std::size_t>(std::ranges::count_if(text, [](char c) {
     return (static_cast<unsigned char>(c) & 0xc0) != 0x80; // not a continuation

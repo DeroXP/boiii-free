@@ -36,6 +36,12 @@ std::string pretty(const rapidjson::Value &value);
 
 std::string quote(std::string_view text);
 
+// `text` as valid UTF-8 of at most `max_bytes` bytes: each invalid byte
+// becomes U+FFFD, and the cut never splits a character. For text from the
+// game (console lines, engine errors), which may hold CP-1252 bytes or be cut
+// mid-character; one bad byte would make the log drop a whole event's data.
+std::string valid_utf8(std::string_view text, std::size_t max_bytes);
+
 // Characters (code points) in UTF-8 text, as a schema's maxLength counts them.
 std::size_t length(std::string_view text);
 

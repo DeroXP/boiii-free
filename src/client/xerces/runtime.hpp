@@ -84,6 +84,14 @@ private:
 // (the console's close forces it after 3 s, code 1).
 void note_quit_requested();
 bool quit_requested();
+// The crash handler ran (exception.cpp): no exit after it counts as clean,
+// even one that follows a quit (a crash while the game shuts down).
+void note_crash();
+bool crash_seen();
+// The console's close forces the exit 3 s after it runs "quit" (console.cpp),
+// before any shutdown code: the journal gets clean_exit there, when a quit
+// ran and no crash did. A normal exit writes it in the loader's shutdown.
+void journal_quit_forced();
 // main.cpp's exit hook passes the code the game gave ExitProcess, just before
 // the components' shutdown runs; nullopt when the process ends another way.
 void note_exit_code(std::uint32_t code);

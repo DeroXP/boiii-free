@@ -471,7 +471,9 @@ void join_lobby(const game::net::netadr_t &host,
   size_t name_index = 6;
   if (parts[6].starts_with("c:")) {
     content = utils::string::split(parts[6].substr(2), ':');
-    content.resize(4);
+    // The fifth field is Xerces' map-first choice; older hosts leave it out
+    // and older clients drop it.
+    content.resize(5);
     name_index = 7;
   }
   std::string name;
@@ -507,6 +509,7 @@ void join_lobby(const game::net::netadr_t &host,
   const std::string &map = content[1];
   const std::string loaded_mod = game::ugc::UGC_ActiveMod_PublisherId();
   mod_stack::set(content[3]);
+  mod_stack::follow_host_map_scripts_first(content[4]);
   const bool same_mods =
       mod == (loaded_mod == "usermaps" ? std::string{} : loaded_mod) &&
       mod_stack::is_loaded();
@@ -700,14 +703,16 @@ void receive_lobby_join(const game::net::netadr_t &sender,
                                : std::nullopt;
   network::send(
       sender, "lobbyHost",
-      std::format("{} {:x} {} {} {} {} c:{}:{}:{}:{} {}", parts[0], host->xuid,
+      std::format("{} {:x} {} {} {} {} c:{}:{}:{}:{}:{} {}", parts[0],
+                  host->xuid,
                   to_hex(host->serializedAdr.addrBuff,
                          sizeof(host->serializedAdr.addrBuff)),
                   to_hex(&host->secId, sizeof(host->secId)),
                   to_hex(&host->secKey, sizeof(host->secKey)),
                   game_lobby ? "game" : "party",
                   mod == "usermaps" ? std::string{} : mod, map,
-                  usermap_id.value_or(""), mod_stack::serialize(), host->name));
+                  usermap_id.value_or(""), mod_stack::serialize(),
+                  mod_stack::map_scripts_first_info(), host->name));
 }
 
 bool from_lobby_request(const game::net::netadr_t &sender,

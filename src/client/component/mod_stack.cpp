@@ -15,7 +15,9 @@
 
 #include <xerces/runtime.hpp>
 #include <xerces/signatures.hpp>
+#include <xerces_core/json.hpp>
 #include <xerces_core/sigruntime.hpp>
+#include <xerces_core/zone_names.hpp>
 
 namespace mod_stack {
 namespace {
@@ -78,6 +80,62 @@ std::unordered_map<std::string, size_t> script_owners;
 
 std::string startup_list;
 std::atomic_bool reload_pending;
+
+// xerces_map_scripts_first: a custom map keeps its own scripts against mods
+// (DESIGN.md 6.3 rule 6). On unless turned off.
+game::EngineDependentDvarMut map_scripts_first_dvar;
+// The host's choice while this process is a client of another host: the
+// server's .gsc and every client's .csc must come from the same copies, or
+// clientfields disagree and the client is dropped. -1: decide locally (alone,
+// hosting, a dedicated server); 0 or 1: what the host announced (0 also for a
+// host that announced nothing, which uses the engine's order).
+std::atomic<int> host_rule{-1};
+
+bool own_map_scripts_first() {
+  return map_scripts_first_dvar ? map_scripts_first_dvar.get_bool() : true;
+}
+
+bool map_scripts_first_enabled() {
+  const int rule = host_rule.load();
+  const bool remote_client = !game::is_server() && !game::server_running();
+  if (remote_client && rule >= 0) {
+    return rule == 1;
+  }
+  return own_map_scripts_first();
+}
+
+// Halves (.gsc/.csc, xerces_core::script_half) of each script the mods'
+// zones ship, by name without extension; filled as their zones link and
+// cleared at every mod load.
+std::unordered_map<std::string, std::uint8_t> mod_halves;
+
+// What the custom map being loaded ships, so map-first never splits a
+// script's halves (xerces_core::decide_map_half). The map's zones link after
+// the mods', one script at a time, so whether the map ships a script's other
+// half is only known for sure from an earlier load: the halves seen are kept
+// in <home>\cache\map-scripts\<map>.txt, trusted while the map's zone file
+// keeps its size and time.
+struct map_scripts_state {
+  std::string usermap;
+  std::filesystem::path cache_file;
+  std::string stamp; // "<size>:<time>" of the map's zone file
+  xerces_core::map_script_halves seen;
+  std::optional<xerces_core::map_script_halves> known;
+  std::map<std::string, std::uint8_t> tentative; // taken before knowing
+  std::unordered_set<std::string> logged;        // one log line per script
+  bool written = false;
+};
+map_scripts_state map_scripts;
+
+// The custom map being loaded or played: its internal name, which is the name
+// of its zones; "" for stock maps. The engine's own active usermap, set when
+// a usermap starts loading (before its zones are found) and cleared for a
+// stock map (workshop.cpp). A level set-up hook would come too late: on a
+// local game the server loads the map's zones before the client sets up.
+std::string_view current_usermap() {
+  const char *name = game::ugc::active_usermap->internalName;
+  return {name, strnlen(name, sizeof(game::ugc::active_usermap->internalName))};
+}
 
 thread_local std::vector<XZoneInfo> prepared;
 thread_local std::vector<std::array<char, 64>> prepared_names;
@@ -250,6 +308,7 @@ int32_t prepare_zones_stub(XZoneInfo *zones, const int32_t count, char *,
     loaded = ids;
     priorities.clear();
     script_owners.clear();
+    mod_halves.clear();
     for (const provider &mod : extras) {
       folders[mod.id] = mod.folder;
       priorities.push_back(mod.id);
@@ -346,26 +405,21 @@ bool open_sound_bank_stub(const bool streamed, void *asset_bank, void *load) {
   return result;
 }
 
+// 0 for the main mod's zones, 1.. for each extra in stack order, nullopt for
+// everything else (xerces_core/zone_names.hpp has the naming rules; the main
+// mod's mode tier "zm_mod" used to fall through as unranked).
 std::optional<size_t> zone_priority(const std::string &zone) {
-  std::string_view base = zone;
-  if (base.size() > 3 && base[2] == '_') {
-    base.remove_prefix(3);
-  }
-  if (base.ends_with("_patch")) {
-    base.remove_suffix(6);
-  }
-  if (is_mod_zone(base)) {
+  std::scoped_lock lock(mutex);
+  const xerces_core::zone_class found =
+      xerces_core::classify_zone(zone, current_usermap(), priorities);
+  switch (found.kind) {
+  case xerces_core::zone_kind::main_tier:
     return 0;
-  }
-  const std::optional<route> owner = find_route(zone);
-  if (!owner) {
+  case xerces_core::zone_kind::extra:
+    return found.extra_index + 1;
+  default:
     return std::nullopt;
   }
-  std::scoped_lock lock(mutex);
-  const auto found = std::ranges::find(priorities, owner->id);
-  return found == priorities.end()
-             ? std::nullopt
-             : std::optional<size_t>(found - priorities.begin() + 1);
 }
 
 std::optional<size_t> priority_of(const XAssetEntry *entry) {
@@ -464,12 +518,221 @@ std::string script_base(const XAssetEntry *entry) {
   return std::string(name.substr(0, name.size() - 4));
 }
 
+// With the mod stack's mutex held: the map-scripts state follows the custom
+// map being loaded, reading its cache when the map changes.
+void sync_map_scripts(const std::string_view usermap) {
+  if (map_scripts.usermap == usermap) {
+    return;
+  }
+  map_scripts = {};
+  map_scripts.usermap = std::string(usermap);
+  if (usermap.empty()) {
+    return;
+  }
+  std::string file_name(usermap);
+  std::ranges::replace_if(
+      file_name,
+      [](const char c) {
+        return !std::isalnum(static_cast<unsigned char>(c)) && c != '_' &&
+               c != '-';
+      },
+      '_');
+  map_scripts.cache_file =
+      xerces_runtime::home() / "cache" / "map-scripts" / (file_name + ".txt");
+  std::error_code ec;
+  const char *zone_dir = game::ugc::active_usermap->absolutePathZoneFiles;
+  const std::filesystem::path zone =
+      std::filesystem::path(std::string(
+          zone_dir,
+          strnlen(zone_dir,
+                  sizeof(game::ugc::active_usermap->absolutePathZoneFiles)))) /
+      (std::string(usermap) + ".ff");
+  const auto size = std::filesystem::file_size(zone, ec);
+  if (ec) {
+    return; // no stamp: no cache, every pair is decided as on a first load
+  }
+  const auto time = std::filesystem::last_write_time(zone, ec);
+  if (ec) {
+    return;
+  }
+  map_scripts.stamp = std::to_string(size) + ":" +
+                      std::to_string(time.time_since_epoch().count());
+  map_scripts.known = xerces_core::parse_map_scripts(
+      xerces_runtime::read_file(map_scripts.cache_file), map_scripts.stamp);
+}
+
+// Which halves of each script the mods and the custom map ship, as their
+// zones link.
+void track_script_half(const XAssetEntry *entry) {
+  const game::scr::ScriptParseTree *tree = entry->asset.header.scriptParseTree;
+  std::string base;
+  const std::uint8_t half =
+      xerces_core::script_half_of(tree && tree->name ? tree->name : "", &base);
+  if (!half) {
+    return;
+  }
+  const std::string zone = loading_zone();
+  const std::string_view usermap = current_usermap();
+  std::scoped_lock lock(mutex);
+  switch (xerces_core::classify_zone(zone, usermap, priorities).kind) {
+  case xerces_core::zone_kind::main_tier:
+  case xerces_core::zone_kind::extra:
+    mod_halves[base] |= half;
+    break;
+  case xerces_core::zone_kind::usermap:
+    sync_map_scripts(usermap);
+    map_scripts.seen[base] |= half;
+    break;
+  default:
+    break;
+  }
+}
+
+// Once the player is in the custom map (every zone loaded): the cache for
+// its next load, and the mixed pairs a first load could not avoid. Back in
+// the menus the state is dropped, so the next load starts fresh.
+void write_map_scripts() {
+  if (!game::is_client()) {
+    return;
+  }
+  if (!game::com::Com_IsInGame()) {
+    std::scoped_lock lock(mutex);
+    if (!map_scripts.usermap.empty()) {
+      map_scripts = {};
+    }
+    return;
+  }
+  if (game::cg::clientUIActives->actives[0].connectionState !=
+      game::connstate_t::ACTIVE) {
+    return;
+  }
+  std::string cache_text;
+  std::filesystem::path cache_file;
+  std::vector<std::string> mixed;
+  {
+    std::scoped_lock lock(mutex);
+    if (map_scripts.usermap.empty() || map_scripts.written) {
+      return;
+    }
+    map_scripts.written = true;
+    for (const auto &[base, taken] : map_scripts.tentative) {
+      const auto seen = map_scripts.seen.find(base);
+      if (seen == map_scripts.seen.end() ||
+          (seen->second & (xerces_core::half_gsc | xerces_core::half_csc)) !=
+              (xerces_core::half_gsc | xerces_core::half_csc)) {
+        mixed.push_back(base);
+      }
+    }
+    if (!map_scripts.stamp.empty() && !map_scripts.seen.empty()) {
+      cache_text =
+          xerces_core::format_map_scripts(map_scripts.stamp, map_scripts.seen);
+      cache_file = map_scripts.cache_file;
+    }
+  }
+  for (const std::string &base : mixed) {
+    xerces_runtime::log_warn(
+        "loader.script.mixed_halves",
+        base + ": the map ships one half and a mod both; this first load "
+               "mixed them, the next load keeps the mod's pair",
+        "{\"script\":" + xerces_core::json::quote(base) + "}");
+  }
+  if (!cache_text.empty()) {
+    xerces_runtime::write_file(cache_file, cache_text);
+  }
+}
+
+// DESIGN.md 6.3 rule 6 on a custom map: the map keeps its own scripts. The
+// engine ranks every mod tier above a usermap's zones, so a mod that ships
+// its own version of a script the map also ships (DS4C's perk scripts) used
+// to replace the map's copy, and the map's other scripts then failed to link
+// ("GSC LINK ERROR ... Unresolved external", SANCTUM OBITUS, 2026-11-05).
+// This applies with one mod too. Entry scripts keep the stack's own rule.
+std::optional<int32_t> map_script_choice(const XAssetEntry *candidate,
+                                         const XAssetEntry *existing) {
+  if (candidate->asset.type != XAssetType::SCRIPTPARSETREE ||
+      is_entry_script(candidate) || !map_scripts_first_enabled()) {
+    return std::nullopt;
+  }
+  const std::string incoming_zone = zone_name(candidate);
+  const std::string existing_zone = zone_name(existing);
+  const std::string_view usermap = current_usermap();
+  if (usermap.empty()) {
+    return std::nullopt;
+  }
+  xerces_core::script_choice choice;
+  {
+    std::scoped_lock lock(mutex);
+    choice = xerces_core::decide_script_override(
+        xerces_core::classify_zone(incoming_zone, usermap, priorities).kind,
+        xerces_core::classify_zone(existing_zone, usermap, priorities).kind,
+        true);
+  }
+  if (choice == xerces_core::script_choice::engine) {
+    return std::nullopt;
+  }
+  const game::scr::ScriptParseTree *tree =
+      candidate->asset.header.scriptParseTree;
+  const std::string script = tree && tree->name ? tree->name : "";
+  const bool map_wins = choice == xerces_core::script_choice::incoming_wins;
+  std::string base;
+  const std::uint8_t half = xerces_core::script_half_of(script, &base);
+  {
+    std::scoped_lock lock(mutex);
+    sync_map_scripts(usermap);
+    // Never split a script's halves between the map and a mod.
+    if (half) {
+      const auto mods = mod_halves.find(base);
+      const auto seen = map_scripts.seen.find(base);
+      std::optional<std::uint8_t> known;
+      if (map_scripts.known) {
+        const auto found = map_scripts.known->find(base);
+        known = found == map_scripts.known->end() ? 0 : found->second;
+      }
+      const xerces_core::half_choice halves = xerces_core::decide_map_half(
+          half, mods == mod_halves.end() ? 0 : mods->second,
+          seen == map_scripts.seen.end() ? 0 : seen->second, known);
+      if (halves == xerces_core::half_choice::skip) {
+        if (map_scripts.logged.insert(script).second) {
+          xerces_runtime::log_info(
+              "loader.script.map_first_skipped",
+              script + ": the map ships only this half and a mod both; the "
+                       "mod keeps its pair",
+              "{\"script\":" + xerces_core::json::quote(script) + "}");
+        }
+        return std::nullopt;
+      }
+      if (halves == xerces_core::half_choice::take_tentative) {
+        map_scripts.tentative[base] |= half;
+      }
+    }
+    // The engine asks once per copy it meets: log each script once per map.
+    if (!map_scripts.logged.insert(script).second) {
+      return map_wins ? 1 : 0;
+    }
+  }
+  xerces_runtime::log_info(
+      "loader.script.map_first",
+      script + ": the map's copy " + (map_wins ? "replaces" : "stays over") +
+          " the mod's",
+      "{\"script\":" + xerces_core::json::quote(script) +
+          ",\"map_zone\":" +
+          xerces_core::json::quote(map_wins ? incoming_zone : existing_zone) +
+          ",\"mod_zone\":" +
+          xerces_core::json::quote(map_wins ? existing_zone : incoming_zone) +
+          "}");
+  return map_wins ? 1 : 0;
+}
+
 int32_t asset_priority_stub(const XAssetEntry *candidate,
                             const XAssetEntry *existing) {
   const int32_t original =
       asset_priority_hook.invoke<int32_t>(candidate, existing);
   if (candidate->asset.type != existing->asset.type) {
     return original;
+  }
+  if (const std::optional<int32_t> choice =
+          map_script_choice(candidate, existing)) {
+    return *choice;
   }
   {
     std::scoped_lock lock(mutex);
@@ -636,6 +899,7 @@ XAssetEntry *link_asset_stub(XAssetEntry *entry, const game::qboolean allow) {
   if (entry->asset.type == XAssetType::SCRIPTPARSETREE) {
     capture_script_copy(entry);
     track_script_owner(entry);
+    track_script_half(entry);
   }
   XAssetEntry *result = link_asset_hook.invoke<XAssetEntry *>(entry, allow);
   if (game::is_client() && entry->asset.type == XAssetType::SOUND) {
@@ -781,6 +1045,16 @@ bool is_loaded() {
 // as ModStack.Reload in the mods menu.
 void request_reload() { reload_pending = true; }
 
+std::string map_scripts_first_info() {
+  return own_map_scripts_first() ? "1" : "0";
+}
+
+void follow_host_map_scripts_first(const std::string_view announced) {
+  host_rule = announced == "1" ? 1 : 0;
+}
+
+void use_own_map_scripts_first() { host_rule = -1; }
+
 // Where each hook goes. The last four are hooked on the client only.
 struct hook_targets {
   std::uintptr_t expand_zone_list_call = 0;
@@ -897,6 +1171,11 @@ public:
               "Extra mods loaded together with fs_game, comma separated, "
               "highest priority first. fs_game always has the highest "
               "priority.");
+          map_scripts_first_dvar = game::register_dvar_bool(
+              "xerces_map_scripts_first", true, game::dvarFlags_e::NONE,
+              "On a custom map, the map keeps its own scripts when a mod "
+              "ships another version of them (applies at the next map "
+              "load).");
         },
         scheduler::main);
 
@@ -920,6 +1199,9 @@ public:
     }
 
     if (game::is_client()) {
+      // The map-scripts cache, once the player is in a custom map.
+      scheduler::loop(write_map_scripts, scheduler::main, 1s);
+
       static constexpr const luaL_Reg ModStackLibrary[] = {
           lua_state::luaL_LoggedReg<"ModStack", "Get", lua_get>(),
           lua_state::luaL_LoggedReg<"ModStack", "Set", lua_set>(),

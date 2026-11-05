@@ -208,6 +208,9 @@ ui_scripting::table lua_globals() {
 
 void launch_from_frontend(const GameModeConfiguration mode,
                           const std::string &mapname) {
+  // Xerces: a game this process starts follows its own map-first setting,
+  // not the last host it joined (mod_stack.hpp).
+  mod_stack::use_own_map_scripts_first();
   enum class stage : uint8_t { mod, lobby, launch };
   stage current = stage::mod;
   int32_t ready_ticks = 0;
@@ -545,6 +548,7 @@ void handle_connect_query_response(const bool success,
 
   const std::string mod_id = info.get("modId");
   const std::string mod_stack_list = info.get("modStack");
+  const std::string map_scripts_first = info.get("mapScriptsFirst");
 
   const std::string workshop_id = info.get("workshop_id").empty()
                                       ? info.get("usermapId")
@@ -576,6 +580,7 @@ void handle_connect_query_response(const bool success,
              workshop::check_valid_mod_id(mod_id, {}, base_uri) &&
              workshop::check_valid_mod_stack(mod_stack_list))) {
           mod_stack::set(mod_stack_list);
+          mod_stack::follow_host_map_scripts_first(map_scripts_first);
           connect_in_mode(target, mode, mapname, gametype, usermap_id, mod_id,
                           lobby);
         } else {

@@ -18,6 +18,7 @@
 #include <utils/thread.hpp>
 
 #include <exception/minidump.hpp>
+#include <xerces/runtime.hpp>
 
 // In case of clangd compilation
 #if __has_include("version.hpp")
@@ -915,6 +916,23 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
     return EXCEPTION_CONTINUE_EXECUTION;
   }
   crashed = true;
+  // Xerces' journal: no exit after this counts as clean (xerces/runtime.hpp).
+  xerces_runtime::note_crash();
+
+  // Xerces: a dump first, straight to a file. On 2026-11-05 two custom maps
+  // with DS4C crashed while loading and the game ended (code 0xFFFFFFFF)
+  // during the report below, before the zip with the dump was written.
+  {
+    std::error_code ec;
+    const std::filesystem::path dir = game::get_appdata_path() / "minidumps";
+    std::filesystem::create_directories(dir, ec);
+    const std::filesystem::path early =
+        dir / ("crash-" + get_timestamp() + ".dmp");
+    exception_log(true, "Writing a crash dump to %s",
+                  write_minidump_file(exceptioninfo, early.c_str())
+                      ? early.string().c_str()
+                      : "(failed)");
+  }
 
   const resolved_frame crash_frame =
       resolve_address(exceptioninfo->ExceptionRecord->ExceptionAddress);

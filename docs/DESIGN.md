@@ -655,25 +655,33 @@ together.
 3. After the dvars are loaded, `xerces_loader` only verifies them against the
    plan and the files (cached hashes) and registers its hook-bus callbacks:
    ownership capture, override policy, merges, GSC chains.
-4. Asset pools are sized once at `DB_AssetPoolInit` from the largest limits of
-   every installed mod and map, not just the current plan. mod-stack currently
-   re-applies each extra mod's `assetlimits.txt` on every mod load through
-   upstream's growth path, which copies only part of a pool and frees the
-   previous extension while assets may still point into it; upstream also
-   applies a custom map's file when the map loads. Xerces blocks pool growth
-   once assets are live; a plan that would need bigger pools asks for a restart
-   instead. Built (2026-11-05), headless only: `xerces_core/asset_limits` reads
-   pool files, the client's default sizes and `launcher_settings.json` the way
-   the client does, and every plan file carries `asset_pools.stack` (per pool,
-   the largest size a stacked mod or the plan's map asks for) and
-   `asset_pools.installed` (the same over every installed mod and map; the CLI's
-   covers one `--mods-dir`), plus `stack_unread` and `installed_unread` for pool
-   files Xerces did not read (over 1 MiB, or held open), outside `plan_id` and
-   `content_id`, shown by `xerces_cli plan` and Mods; sizing the pools in the
-   game and the growth block are not built. Upstream's parser never counts a
-   pool file's first line (`utils::string::replace` replaces at position 0
-   before it searches); the headless parser keeps that so its numbers match
-   today's game, and the in-game half decides whether Xerces does too.
+4. Asset pools. The copy-and-free growth path this step was written against (it
+   copied part of a pool and freed the previous extension while assets still
+   pointed into it) is gone from this base: upstream replaced it on 2026-10-25
+   (276543d9, part of `beta` f8f7b735), and growth now links a new block onto
+   the free list without copying or freeing. It is still in upstream `main`,
+   `mod-stack` and Ezz's release builds made from them. What remains (research
+   2026-11-05, on the D3 dump): IMAGE and XMODELMESH never grow, so exhausting
+   them is the engine's "Exceeded limit" error; MATERIAL, XMODEL and SANIM are
+   addressed by index from their built-in arrays yet are allowed to grow, which
+   would give grown entries wrong indices; CLIPMAP's `cm` binding is taken at
+   start-up only; and pool-file growth and the engine's frees do not share a
+   lock. None of the 17 Workshop items on the test PC ships a pool file, and no
+   limit was hit in the 2026-11-05 custom-map runs. Sizing pools once at
+   start-up stays the plan for the pools that may grow; the index-addressed ones
+   must be budgeted, not grown. Built (2026-11-05), headless only:
+   `xerces_core/asset_limits` reads pool files, the client's default sizes and
+   `launcher_settings.json` the way the client does, and every plan file carries
+   `asset_pools.stack` (per pool, the largest size a stacked mod or the plan's
+   map asks for) and `asset_pools.installed` (the same over every installed mod
+   and map; the CLI's covers one `--mods-dir`), plus `stack_unread` and
+   `installed_unread` for pool files Xerces did not read (over 1 MiB, or held
+   open), outside `plan_id` and `content_id`, shown by `xerces_cli plan` and
+   Mods; sizing the pools in the game and the growth block are not built.
+   Upstream's parser never counts a pool file's first line
+   (`utils::string::replace` replaces at position 0 before it searches); the
+   headless parser keeps that so its numbers match today's game, and the in-game
+   half decides whether Xerces does too.
 5. Front end: the engine loads the core tier, and mod-stack adds
    `stack_<id>_core_mod` and its language pair to the same batch. Map load does
    the same for the mode tier (`zm_mod`, `mp_mod`, `cp_mod`) and the map's
@@ -699,17 +707,33 @@ together.
 
 - A launch journal (`logs\journal.json`) records phases (`launching`, `symbols`,
   `frontend`, `loading_map`, `in_game`, `clean_exit`) with the `plan_id`, the
-  stack, the game mode and whether the launch ran in safe mode. `loading_map` is
-  reserved; the client writes the others (2026-11-05).
+  stack, the game mode and whether the launch ran in safe mode. The client
+  writes all of them (2026-11-05).
 - Who owns the journal. The launcher writes it as `launching` with a fresh
   one-time launch id and hands the same id to the game in `XERCES_LAUNCH_ID`.
   The game takes the journal over only when the ids match and the phase is still
   `launching`, clears the id, and removes the variable from its own environment,
   so a game restarted from the crash dialog never overwrites the record of the
-  launch that crashed. `symbols` lasts while signatures resolve and returns to
-  `launching` afterwards; the first main-loop frame writes `frontend`; a
-  once-a-second check switches between `frontend` and `in_game`; a normal quit
-  writes `clean_exit`.
+  launch that crashed (it logs `loader.journal.none`). `symbols` lasts while
+  signatures resolve and returns to `launching` afterwards; the first main-loop
+  frame writes `frontend`; a once-a-second check moves between `frontend`,
+  `loading_map` (a level is loading: the engine is in a level but the local
+  client's connection is not yet `ACTIVE`) and `in_game` (then
+  `loader.map.ready` is logged with the map).
+- How a launch ends. The engine's `quit` command is wrapped (its entry in the
+  command list, no code bytes) and notes that the player quit. `clean_exit` is
+  written when the exit then happens: by the shutdown at the game's
+  `ExitProcess` (main.cpp's exit hook), or, when the console's close forces the
+  exit 3 s after `quit` (before any shutdown code runs, code 1), just before
+  that forced exit. Never once the crash handler has run, so a crash while the
+  game shuts down still counts. Without a quit, an exit with a code other than 0
+  (two custom maps with DS4C ended the game with 0xFFFFFFFF in the middle of
+  their load) keeps the journal's phase and logs `loader.exit.unexpected` with
+  the code, the phase, the map and the last 60 console lines
+  (`xerces_core::game_exit_is_clean`). Engine errors the player sees
+  (`Com_Error`, and `Sys_Error` before its fatal dialog) are logged as
+  `loader.engine.error` the same way. The crash handler writes a `.dmp` file
+  before its report, because the engine can end the process during the report.
 - Exit code 0 is not proof of a clean exit: the crash dialog's restart and fatal
   engine errors also end with 0. The launcher counts 0 as clean only when the
   game never took the journal over (it quit before Xerces' code ran); otherwise
@@ -941,6 +965,47 @@ Workshop maps), dependencies, indexing and reports, and rule 6 above for their
 position. A plan holds mods plus at most one map; mod-stack stacks only when a
 main mod is set, so a map-only plan is just the map. A test pairs a map and a
 mod that override the same script.
+
+In the game (built 2026-11-05). The engine ranks every mod tier (core_mod
+1408/1409, zm_mod 1410/1411, the same for an extra's `stack_<id>_*` copies)
+above a custom map's own zones (1406/1407), so a mod that ships its own version
+of a script the map also ships replaced the map's copy, with one mod as with a
+stack. With DS4C that broke four of the eight custom maps tested: a GSC link
+error (SANCTUM OBITUS), a level-init script error and freeze (PROJECT: KABOOM)
+and two crashes while the map loaded (Super Mario 64, BACKROOMZ); every one of
+them plays with the stack minus DS4C. Rule 6 now runs in the game: mod_stack
+reads the engine's active usermap (set when a usermap starts loading, before its
+zones are found; a level set-up hook comes too late, because on a local game the
+server loads the map's zones first), and `asset_priority_stub` keeps the map's
+copy of any script a mod also ships (`xerces_core::decide_script_override`,
+logged once per script and map as `loader.script.map_first`). With DS4C alone,
+SANCTUM OBITUS and PROJECT: KABOOM then load and play (15 and 36 decisions, all
+perk scripts); the two load crashes are a separate problem (below). The dvar
+`xerces_map_scripts_first` (on by default; the pack decision `map_scripts_first`
+is not yet carried into the plan file) turns it off for the next map load. Stock
+maps are never affected, entry scripts keep the stack's own rule, and HUD Lua
+(`ui/` rawfiles) still follows the engine until it is decided (DS4C's HUD
+replaces RUST V5's and errors without stopping the match).
+
+A script's server and client halves (.gsc, .csc) must come from the same source,
+so map-first never splits them (`xerces_core::decide_map_half`): the map takes a
+half from a mod only when no mod ships the other half or the map ships both. The
+map's zones link one script at a time, so whether it ships the other half is
+known for sure only from an earlier load: the halves each custom map's zones
+carried are cached in `<home>\cache\map-scripts\<map>.txt` once the player is in
+the level, keyed to the size and time of the map's zone file. With the cache, a
+map that ships one half while a mod ships both leaves the mod both
+(`loader.script.map_first_skipped`); on a map's first load the map takes its
+half and a mixed pair is logged (`loader.script.mixed_halves`) so the next load
+avoids it.
+
+The choice must also agree between a host and its clients (the server runs the
+.gsc, each client its .csc). A host announces its own setting in getinfo
+(`mapScriptsFirst`) and in the lobby content (a fifth field, which older clients
+drop); a client joining another host follows it, and one that hears nothing (a
+host without Xerces) keeps the engine's order. A game the client starts itself
+uses its own setting again. The pack decision `map_scripts_first` should become
+the host's setting when packs reach the plan file.
 
 ---
 

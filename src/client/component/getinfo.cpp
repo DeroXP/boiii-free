@@ -126,6 +126,9 @@ struct component final : generic_component {
       info.set("modName", workshop::get_mod_resized_name());
       info.set("modId", workshop::get_mod_publisher_id());
       info.set("modStack", mod_stack::serialize());
+      // Xerces: which copy of a script a custom map keeps, so clients match
+      // this host (mod_stack.hpp).
+      info.set("mapScriptsFirst", mod_stack::map_scripts_first_info());
       info.set("rounds_played",
                std::to_string(*game::level::level_rounds_played));
       info.set("shortversion", SHORTVERSION);

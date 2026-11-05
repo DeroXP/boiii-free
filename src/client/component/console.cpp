@@ -1103,6 +1103,9 @@ void apply_modern_window_style(const HWND hwnd) {
 void force_exit_after(const DWORD grace_ms) {
   std::thread([grace_ms] {
     std::this_thread::sleep_for(std::chrono::milliseconds(grace_ms));
+    // Xerces' journal: the quit ran and nothing crashed, so this launch
+    // ended cleanly although no shutdown code runs (xerces/runtime.hpp).
+    xerces_runtime::journal_quit_forced();
     TerminateProcess(GetCurrentProcess(), 1);
   }).detach();
 }

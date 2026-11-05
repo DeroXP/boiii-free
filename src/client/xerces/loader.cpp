@@ -53,8 +53,9 @@ std::string console_json() {
       out += ',';
     }
     first = false;
-    out += xerces_core::json::quote(line.size() > 600 ? line.substr(0, 600)
-                                                      : line);
+    // Game text may hold CP-1252 bytes; one invalid byte would make the log
+    // drop the event's whole data.
+    out += xerces_core::json::quote(xerces_core::json::valid_utf8(line, 600));
   }
   return out + "]";
 }
@@ -63,7 +64,7 @@ std::string console_json() {
 std::string current_map() {
   for (const char *name : {"mapname", "ui_mapname"}) {
     if (auto value = game::get_dvar_string(name); value && !value->empty()) {
-      return std::string(*value);
+      return xerces_core::json::valid_utf8(*value, 64);
     }
   }
   return {};
@@ -72,10 +73,12 @@ std::string current_map() {
 // ---------------------------------------------------------------- quit
 game::cmd::xcommand_t engine_quit = nullptr;
 
+// Only notes the quit: clean_exit is written once the exit happens, by the
+// shutdown (pre_destroy) or by the console's forced exit 3 s later
+// (runtime.hpp, journal_quit_forced), never after the crash handler ran, so a
+// crash while the game shuts down still counts as a crash.
 void quit_command() {
   xerces_runtime::note_quit_requested();
-  // Now: the console's close terminates the process 3 s from here.
-  set_journal_phase(launch_phase::clean_exit);
   if (engine_quit) {
     engine_quit();
   }
@@ -223,7 +226,8 @@ public:
     }
     const bool quit = xerces_runtime::quit_requested();
     const auto code = xerces_runtime::exit_code();
-    if (xerces_core::game_exit_is_clean(quit, code)) {
+    if (!xerces_runtime::crash_seen() &&
+        xerces_core::game_exit_is_clean(quit, code)) {
       set_journal_phase(launch_phase::clean_exit);
       return;
     }
@@ -244,7 +248,8 @@ public:
   }
 };
 
-void engine_error(std::uint32_t code, std::string_view message) {
+void engine_error(std::uint32_t code, std::string_view message,
+                  std::string_view source) {
   using game::errorParm;
   const auto parm = static_cast<errorParm>(code);
   // Restarts and disconnects are how the engine leaves a match normally.
@@ -255,7 +260,7 @@ void engine_error(std::uint32_t code, std::string_view message) {
       !game::is_new_client()) {
     return;
   }
-  std::string text(message.substr(0, 4000));
+  const std::string text = xerces_core::json::valid_utf8(message, 4000);
   // The first line that says something ("****" banners carry nothing).
   std::string headline;
   std::size_t start = 0;
@@ -268,12 +273,11 @@ void engine_error(std::uint32_t code, std::string_view message) {
     }
     start = end == std::string::npos ? text.size() : end + 1;
   }
-  if (headline.size() > 300) {
-    headline.resize(300);
-  }
+  headline = xerces_core::json::valid_utf8(headline, 300);
   xerces_runtime::log_error(
       "loader.engine.error", headline.empty() ? "engine error" : headline,
-      "{\"code\":" + std::to_string(code) + ",\"map\":" +
+      "{\"source\":" + xerces_core::json::quote(source) +
+          ",\"code\":" + std::to_string(code) + ",\"map\":" +
           xerces_core::json::quote(current_map()) + ",\"phase\":" +
           xerces_core::json::quote(
               xerces_core::to_string(xerces_runtime::journal_phase())) +

@@ -217,8 +217,9 @@ What the game role does since 389dff95 (`src/client/xerces`): it resolves
 anything (multi-mod stays off on a miss), reports it in
 `<home>\cache\signatures-report.json`, checks `fs_game` and `fs_extramods`
 against the plan file named by `-xerces-plan`, and moves the journal
-(`<home>\logs\journal.json`) through `symbols`, `frontend`, `in_game` and
-`clean_exit`. Its log is `<home>\logs\<date>-<time>-game-<pid>.jsonl`.
+(`<home>\logs\journal.json`) through `symbols`, `frontend`, `loading_map`,
+`in_game` and `clean_exit` (DESIGN.md 5.6 has when each is written). Its log is
+`<home>\logs\<date>-<time>-game-<pid>.jsonl`.
 
 `tools\dev\session\m1-check.ps1 -Case <case> -Live` runs these items one case
 per run through `Xerces.exe` (or `xerces_cli`) and prints pass or fail per check

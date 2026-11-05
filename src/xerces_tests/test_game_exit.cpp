@@ -6,6 +6,8 @@
 #include <string>
 
 #include <xerces_core/journal.hpp>
+#include <xerces_core/json.hpp>
+#include <xerces_core/log.hpp>
 #include <xerces_core/text_tail.hpp>
 
 using namespace xerces_core;
@@ -72,6 +74,36 @@ TEST_CASE(
   const auto lines = tail.last_lines(5);
   REQUIRE(lines.size() == 1u);
   CHECK(lines[0] == "after");
+}
+
+TEST_CASE("utf-8: bad bytes become U+FFFD and cuts never split a character") {
+  const std::string fffd = "\xEF\xBF\xBD";
+  CHECK(json::valid_utf8("plain", 100) == "plain");
+  // A CP-1252 apostrophe (0x92) from a mod's script print.
+  CHECK(json::valid_utf8("it\x92s", 100) == "it" + fffd + "s");
+  // "é" is 2 bytes, "€" 3: a cut at 4 bytes keeps "aé" whole and drops "€".
+  CHECK(json::valid_utf8("a\xC3\xA9\xE2\x82\xAC", 4) == "a\xC3\xA9");
+  CHECK(json::valid_utf8("a\xC3\xA9\xE2\x82\xAC", 6) ==
+        "a\xC3\xA9\xE2\x82\xAC");
+  // A character cut off by the end of the text, an overlong form, a surrogate.
+  CHECK(json::valid_utf8("x\xE2\x82", 100) == "x" + fffd + fffd);
+  CHECK(json::valid_utf8("\xC0\xAF", 100) == fffd + fffd);
+  CHECK(json::valid_utf8("\xED\xA0\x80", 100) == fffd + fffd + fffd);
+  CHECK(json::valid_utf8("\xF0\x9F\x98\x80", 100) == "\xF0\x9F\x98\x80");
+  CHECK(json::valid_utf8("", 10).empty());
+  CHECK(json::valid_utf8("abc", 0).empty());
+}
+
+TEST_CASE("utf-8: a log event built from bad text keeps its data") {
+  json_log log("game", "1");
+  log_event event;
+  event.event = "loader.engine.error";
+  event.message = json::valid_utf8("bad \x92 byte", 300);
+  event.data_json = "{\"console\":[" +
+                    json::quote(json::valid_utf8("line \x92 here", 600)) + "]}";
+  const std::string line = log.format(event, "2026-11-05T00:00:00.000Z");
+  CHECK(line.find("\"data\"") != std::string::npos);
+  CHECK(line.find("line ") != std::string::npos);
 }
 
 TEST_CASE("journal: the game's own exit is clean only after a quit or with 0") {

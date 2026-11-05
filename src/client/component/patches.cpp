@@ -47,6 +47,10 @@ void Sys_Error_LogCaller(const char *fmt, ...) {
                         game::consoleLabel_e::DEFAULT,
                         "[Sys_Error] Called from 0x%p with message: \"%s\"",
                         game::derelocate(callerAddr), msg);
+  // Xerces' game log, before the fatal-error dialog suspends the other
+  // threads (xerces/loader.hpp).
+  xerces_loader::engine_error(static_cast<uint32_t>(game::errorParm::FATAL),
+                              msg, "sys_error");
   if (!game::is_server()) {
     exception::show_fatal_error(msg);
   }
