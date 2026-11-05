@@ -13,10 +13,10 @@ III. Self-hosted and offline play only.
 
 - On 2026-11-05 (overnight, the user away): the launcher `Xerces.exe` with every
   M3 screen, and the M1 game-process side (signatures, journal, pipe, launch
-  settings re-applied). Checked with dry launches and a fake game folder only;
-  nothing of it has run in the game yet. DESIGN.md 18 has the status and what is
-  open; docs/TESTING.md lists the in-game checks, which need the user's
-  go-ahead.
+  settings re-applied). The same morning, with the user's go-ahead, the M1
+  in-game checks ran through `tools\dev\session\m1-check.ps1 -Live` and all
+  passed (docs/TESTING.md, Loader and manifest). DESIGN.md 18 has the status and
+  what is open.
 - M0 is under way on `xerces-main`: upstream `beta` f8f7b735 plus `mod-stack`'s
   two commits (conflicts resolved in 6bc02cb4), with the design docs and
   `backend/` merged in (D1). Upstream's updater and the `-beta` self-download

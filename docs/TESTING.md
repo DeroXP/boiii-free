@@ -218,42 +218,70 @@ anything (multi-mod stays off on a miss), reports it in
 `<home>\cache\signatures-report.json`, checks `fs_game` and `fs_extramods`
 against the plan file named by `-xerces-plan`, and moves the journal
 (`<home>\logs\journal.json`) through `symbols`, `frontend`, `in_game` and
-`clean_exit`. Its log is `<home>\logs\<date>-<time>-game-<pid>.jsonl`. None of
-it has run in the game yet: these items need you (and your go-ahead to start the
-game).
+`clean_exit`. Its log is `<home>\logs\<date>-<time>-game-<pid>.jsonl`.
 
-`tools\dev\session\m1-check.ps1 -Case vanilla|modded|crash|restart|cli -Live`
-runs the first five items one case per run through `Xerces.exe` and prints pass
-or fail per check (journal phases, game-log events, `fs_game` and `fs_extramods`
-from the console, the launcher's view of the exit, a capture of Home after the
-crash). Without `-Live` it only does a dry launch; that form passed on
-2026-11-05 and builds the D3 command line. Its home is
-`C:\Users\Ginld\XercesHome-m1`.
+`tools\dev\session\m1-check.ps1 -Case <case> -Live` runs these items one case
+per run through `Xerces.exe` (or `xerces_cli`) and prints pass or fail per check
+(journal phases, game-log events, `fs_game` and `fs_extramods` from the console,
+the launcher's view of the exit, captures of Home). Cases: `vanilla`, `modded`,
+`crash`, `restart` (after `crash`), `safeoff` (after `crash`), `reopen`,
+`dvars`, `cli [-CliReload]` and `cliapply`. It exits 1 when a check fails.
+Without `-Live` only `vanilla`, `modded` and `crash` run, as dry launches. Its
+home is `C:\Users\Ginld\XercesHome-m1`.
 
-- [ ] Launch vanilla from `Xerces.exe` reaches the menu. The game log shows
-      `xerces.signatures.resolved` (9 of 9) and the journal reads `frontend`;
-      quitting from the menu leaves `clean_exit`.
-- [ ] Launch modded with the D3 stack (1944930083, then 3171632315 and
-      3656779213): `xerces.feature.on` and `loader.plan.applied` in the game
-      log, and the three mods load as they did in D3.
-- [ ] A forced crash (end `boiii.exe` in Task Manager during a match) leads to
-      safe mode on the next launcher start; "Launch with mods off" reaches the
-      menu without mods.
-- [ ] After that crash, "Restart game" in the crash dialog: the restarted game
-      has no `XERCES_LAUNCH_ID`, so it leaves the journal alone and the launcher
-      still offers safe mode for the launch that crashed.
-- [ ] Close `Xerces.exe` while the game runs and open it again: Home does not
-      call the running game a crash (it finds the game's entry in `<home>\run`).
-- [ ] Settings changed in the launcher win over the game's saved config: the
-      game log shows `xerces.dvars.reapplied` after the config loads.
+The first live run was on 2026-11-05 (the user's go-ahead), Steam build
+24784313, with the D3 stack as the Zombies profile. `vanilla` and `modded` ran
+on 4bf21880, the rest on 3a7266c6 (which adds `loader.journal.none` and changes
+only the path of a game started without a launch id). Every case passed; what
+each one does not cover is said under its item.
+
+- [x] (2026-11-05, 4bf21880) Launch vanilla from `Xerces.exe` reaches the menu.
+      The game log shows `xerces.signatures.resolved` (9 of 9) and the journal
+      reads `frontend`; quitting from the menu leaves `clean_exit`, and the
+      launcher sees exit code 0.
+- [x] (2026-11-05, 4bf21880) Launch modded with the D3 stack (1944930083, then
+      3171632315 and 3656779213): `xerces.feature.on` and `loader.plan.applied`
+      in the game log, the console's `fs_game` and `fs_extramods` match the
+      plan, and quitting leaves `clean_exit`. Not looked at: the mods' content
+      in a match (D3 did that with the same stack).
+- [x] (2026-11-05, 3a7266c6) A forced crash leads to safe mode on the next
+      launcher start, and "Launch with mods off" reaches the menu without mods:
+      `boiii.exe` was ended from outside at the menu (not during a match); the
+      launcher logged the exit (code 4294967295), the journal stayed at
+      `frontend`, Home offered safe mode naming the 3 mods. "Launch with mods
+      off" started `-launch -nointro` with no `fs_game`, the journal recorded
+      `safe_mode: true`, the game logged `loader.start` with no plan, and after
+      quitting Home offered safe mode no more. Not run: a crash during a match.
+- [x] (2026-11-05, 3a7266c6) After that crash, a game started the way the crash
+      dialog's "Restart game" starts it (`XERCES_HOME`, no launch id) logs
+      `loader.journal.none`, writes no phases, and leaves `journal.json`
+      byte-for-byte unchanged, also after it quits. The first run (on 4bf21880)
+      left the journal alone too, but logged nothing about it, so 3a7266c6 adds
+      `loader.journal.none`. Not run: the real crash dialog's button.
+- [x] (2026-11-05, 3a7266c6) Close `Xerces.exe` while the game runs and open it
+      again: the launcher closed normally and the game kept running (its entry
+      `game-<pid>.json` in `<home>\run`); the reopened launcher offered no safe
+      mode, refused a second Launch ("The game is already running."), left the
+      journal alone, and logged `launcher.game.gone` when the game quit. Home
+      does not show that the game is running until Launch is pressed.
+- [x] (2026-11-05, 3a7266c6) Settings changed in the launcher win over the
+      game's saved config: with `"dvars": { "cg_fov_default": "90" }` and
+      config.cfg at 80, the command line had `+set cg_fov_default 90`, the game
+      log `xerces.dvars.session` and `xerces.dvars.reapplied`, and the console
+      `cg_fov_default` 90. After quitting, config.cfg was identical to its
+      backup (`cg_fov_default "80"` kept). Not run: changing the setting in the
+      game itself (`xerces.dvars.changed_in_game`).
 - [ ] Find the culprit: one test launch per step, each result recorded when the
       game exits (checked with written journals only, see Launcher below).
-- [ ] With the game in the menus: `xerces_cli status` shows the build, the plan
-      and the stack (it finds the game's pipe in `<home>\run`);
-      `xerces_cli load --extras 3171632315,3656779213` and `xerces_cli unload`
-      change the extra mods and reload them, as the mods menu does; in a match
-      they answer that the stack only changes in the menus. The pipe itself is
-      tested in `test_ipc.cpp` (a served pipe, a forged run file refused).
+- [x] (2026-11-05, 3a7266c6) With the game in the menus: `xerces_cli status`
+      shows the build (0x6531394), the plan, `fs_game`, `fs_extramods`,
+      `multi_mod: true` and the phase (it finds the game's pipe in
+      `<home>\run`); `xerces_cli load --extras 3171632315,3656779213` and
+      `xerces_cli unload` answered and the game logged `ipc.reload` for each,
+      then quit with `clean_exit`. The pipe itself is tested in `test_ipc.cpp`
+      (a served pipe, a forged run file refused). Not run: the same in a match,
+      where they should answer that the stack only changes in the menus; and
+      nobody looked at the mods menu after the reload.
 - [ ] Asset pools (DESIGN.md 5.4 step 4; the report is built, the in-game sizing
       is not): launch a stack with a mod whose `assetlimits.txt` or
       `assetpools.txt` raises pools. After the mod loads, the client's console
@@ -264,15 +292,15 @@ crash). Without `-Live` it only does a dry launch; that form passed on
       (upstream's parser never counts that line). Then load a custom map that
       ships a pool file, with the map in the plan: its pools should print the
       same lines when the map loads, as `asset_pools.stack` says.
-- [ ] `xerces_cli plan apply` (no `--dry-launch`; it starts the game, so only
-      with your go-ahead), from a build with `boiii.exe` next to
-      `xerces_cli.exe` (`tools\build.ps1 -Client`), with the D3 stack as the
-      Zombies profile and `XERCES_HOME` outside AppData: the game starts as it
-      does from Launch modded, takes the journal over, logs
-      `loader.plan.applied`, and the three mods load. This is M1's "a plan with
-      two Workshop mods loads through the CLI". Afterwards
-      `xerces_cli sig check` reads the report the game wrote (9 of 9, exit 0)
-      and `xerces_cli logs tail --role game` shows its log.
+- [x] (2026-11-05, 3a7266c6) `xerces_cli plan apply` (no `--dry-launch`), from
+      the build with `boiii.exe` next to `xerces_cli.exe`, with the D3 stack as
+      the Zombies profile and `XERCES_HOME` outside AppData: the game started
+      with the same command line as Launch modded, took the journal over, logged
+      `loader.plan.applied`, and the console's `fs_game` and `fs_extramods`
+      matched the plan. This is M1's "a plan with two Workshop mods loads
+      through the CLI". Afterwards `xerces_cli sig check` read the report the
+      game wrote (9 of 9, exit 0) and `xerces_cli logs tail --role game` showed
+      its log.
 - [x] (2026-11-05, dry launches only) `xerces_cli plan apply --dry-launch` on a
       copy of the D3 profile (`C:\Users\Ginld\XercesHome-cli`) prints
       `-launch -nointro -xerces-plan <id> +set fs_game 1944930083 +set fs_extramods 3171632315,3656779213`

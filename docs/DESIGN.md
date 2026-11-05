@@ -2084,10 +2084,17 @@ M5a, which you asked for now.
   Checked with dry launches only: on a copy of the D3 profile
   `plan apply --dry-launch` builds the D3 command line, and
   `tools/ci/cli_smoke.ps1` runs them all on a fake game folder whose build only
-  its own `compat\builds.json` knows. Open: the in-game checks in
-  docs/TESTING.md (among them a plan with two Workshop mods loaded through
-  `plan apply`, M1's first "done when"), the hook bus, the pool policy,
-  ownership events, the dev module, and `index run`, `bench run` and `test run`.
+  its own `compat\builds.json` knows. In the game on 2026-11-05
+  (`tools\dev\session\m1-check.ps1`, docs/TESTING.md): vanilla and the D3 stack
+  from `Xerces.exe`, the same stack through `xerces_cli plan apply` (M1's first
+  "done when"), signatures 9 of 9, the journal through `frontend` to
+  `clean_exit`, a forced crash leading to safe mode and "Launch with mods off",
+  a restarted game leaving the crashed record alone, the launcher closed and
+  reopened while the game runs, a launcher setting winning over config.cfg
+  without being saved into it, and `xerces_cli status`, `load` and `unload`
+  through the pipe. Open: the same in a match, the culprit search in the game,
+  the hook bus, the pool policy, ownership events, the dev module, and
+  `index run`, `bench run` and `test run`.
 - M2, headless part done: the ownership map and rules, the merges, GSC hook
   chain planning, reports, determinism tests and the loose both-apply pair as
   unit tests. Open: index runs, the in-game merges and chains, the GSC call-next
@@ -2115,11 +2122,14 @@ M5a, which you asked for now.
   the game loads its own saved config. Every row of the parity table is placed
   except the two that wait for D9. Checked in dry runs only (`--dry-launch`, a
   fake game folder): all screens render with no RmlUi warnings in all three
-  themes, and every launch path builds the command line D3 verified. Open: a
-  person using it; the in-game Lua menu with origin checks (7.6); the rename
-  (7.7); the update client (D16); HarfBuzz for scripts that need shaping (its
-  download waits for your approval); and, from the spike, a physical controller
-  press, vsync pacing on a live display, and Proton.
+  themes, and every launch path builds the command line D3 verified; on
+  2026-11-05 Launch vanilla, Launch modded, safe mode and the reopened launcher
+  also ran against the real game (M1 above). Open: a person using it; Home
+  showing that the game is running before Launch is pressed; the in-game Lua
+  menu with origin checks (7.6); the rename (7.7); the update client (D16);
+  HarfBuzz for scripts that need shaping (its download waits for your approval);
+  and, from the spike, a physical controller press, vsync pacing on a live
+  display, and Proton.
 
 ---
 
