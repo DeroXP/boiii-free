@@ -205,7 +205,7 @@ int cmd_mod_validate(const arguments &args, bool lint) {
   const manifest &m = result.value;
 
   bool has_fastfiles = false;
-  for (const auto &[path, contents] : read_files(root)) {
+  for (const std::string &path : list_files(root)) {
     has_fastfiles =
         has_fastfiles || (path.starts_with("zone/") && path.ends_with(".ff"));
   }
@@ -214,7 +214,7 @@ int cmd_mod_validate(const arguments &args, bool lint) {
     if (!fs::exists(path)) {
       diags.error("mod.integrity.missing_file", "/integrity/" + file,
                   file + " is listed in integrity but missing.");
-    } else if (sha256_tagged(read_text(path)) != expected) {
+    } else if ("sha256:" + file_sha256_hex(path) != expected) {
       diags.error("mod.integrity.mismatch", "/integrity/" + file,
                   file + " does not match its integrity hash.");
     }
