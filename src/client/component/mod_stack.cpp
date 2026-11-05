@@ -1045,6 +1045,8 @@ bool is_loaded() {
 // as ModStack.Reload in the mods menu.
 void request_reload() { reload_pending = true; }
 
+std::string active_usermap() { return std::string(current_usermap()); }
+
 std::string map_scripts_first_info() {
   return own_map_scripts_first() ? "1" : "0";
 }

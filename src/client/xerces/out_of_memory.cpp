@@ -5,7 +5,8 @@
 //
 // The engine's handler, Sys_OutOfMemErrorInternal(file, line) (signature
 // sys.out_of_mem_error_internal, feature oom_report), runs when one of its
-// fixed memory pools is full. On 2026-11-05 that was the 2 GiB pool holding
+// fixed memory pools is full, and when the C runtime's malloc fails in the
+// engine's allocation wrappers. On 2026-11-05 it was the 2 GiB pool holding
 // blocks 5 and 6 of every loaded fastfile, when a large custom map loaded
 // with a large mod. The handler shows its own box only when a dvar is set (it
 // is not), then calls exit(-1) on the thread that hit the limit: the C
@@ -14,7 +15,7 @@
 //
 // The detour replaces the whole handler and, like it, never returns (DESIGN.md
 // 5.7: the error stays fatal). It logs loader.out_of_memory with the zone
-// that was loading, the map, the mods, the journal phase and the console's
+// still loading, the map, the mods, the journal phase and the console's
 // last lines; marks the crash for the journal and leaves its phase, so the
 // launcher counts a crash and nothing writes clean_exit; suspends the other
 // threads; tells the player what happened (not with -headless or
@@ -24,6 +25,7 @@
 
 #include <intrin.h>
 
+#include <component/mod_stack.hpp>
 #include <game/game.hpp>
 #include <game/utils.hpp>
 #include <loader/component_loader.hpp>
@@ -106,7 +108,8 @@ std::map<std::string, std::string> plan_mod_names() {
 }
 
 // Where in the game the handler was called from, as an RVA ("" outside it):
-// which pool ran out.
+// which pool or allocation wrapper ran out. Logged only: Xerces code uses no
+// offsets, so nothing here decides by it.
 std::string caller_rva(const void *return_address) {
   const auto base = game::get_engine_base();
   const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(base);
@@ -154,10 +157,14 @@ xerces_core::out_of_memory_message report(const void *return_address) {
   }
   mod_array += "]";
 
+  // mapname still says core_frontend while a level loads (2026-11-05), so
+  // the custom map being loaded comes first.
+  const std::string map_name = xerces_core::out_of_memory_map(
+      mod_stack::active_usermap(), xerces_loader::current_map());
+
   xerces_runtime::log_error(
       "loader.out_of_memory", text.summary,
-      "{\"zone\":" + json::quote(zone) +
-          ",\"map\":" + json::quote(xerces_loader::current_map()) +
+      "{\"zone\":" + json::quote(zone) + ",\"map\":" + json::quote(map_name) +
           ",\"fs_game\":" + json::quote(fs_game) + ",\"fs_extramods\":" +
           json::quote(fs_extramods) + ",\"mods\":" + mod_array + ",\"phase\":" +
           json::quote(xerces_core::to_string(xerces_runtime::journal_phase())) +
@@ -189,11 +196,19 @@ xerces_core::out_of_memory_message report(const void *return_address) {
 
   // Nothing may leave this function: an exception would unwind into the
   // engine's frames. If the report fails (ordinary memory gone too, say), the
-  // player gets the short text.
+  // player gets the short text, which blames nothing: the engine's malloc
+  // wrappers end here too.
   constexpr const char *short_title = "Black Ops III ran out of memory";
   constexpr const char *short_body =
-      "The game ran out of the memory it keeps for loaded content. The "
-      "details may be in Xerces' game log.";
+      "The game ran out of memory. The details may be in Xerces' game log.";
+  // Read before the other threads stop: install() made both flags' first
+  // reads (argparse, allocations), so these only read the cached values.
+  bool quiet = false;
+  try {
+    quiet = game::quiet_crash() || game::is_headless();
+  } catch (...) {
+    // Show the box.
+  }
   xerces_core::out_of_memory_message text;
   std::wstring title;
   std::wstring body;
@@ -208,13 +223,14 @@ xerces_core::out_of_memory_message report(const void *return_address) {
   }
 
   // Only now: the log is written, and no suspended thread can hold a lock
-  // the report needed.
+  // the report needed. From here on only the box (or the stderr lines) and
+  // TerminateProcess run.
   try {
     utils::thread::suspend_other_threads();
   } catch (...) {
     // Show the box anyway; the process ends right after it.
   }
-  if (game::quiet_crash() || game::is_headless()) {
+  if (quiet) {
     std::fprintf(stderr, "%s\n%s\n",
                  text.title.empty() ? short_title : text.title.c_str(),
                  text.body.empty() ? short_body : text.body.c_str());
@@ -268,6 +284,11 @@ void install() {
     return;
   }
   try {
+    // The flags' first reads parse the command line (argparse, allocations,
+    // exceptions it catches): done here, so the handler only reads the cached
+    // values, before it stops the other threads.
+    static_cast<void>(game::quiet_crash());
+    static_cast<void>(game::is_headless());
     handler_hook.create(*address,
                         reinterpret_cast<void *>(&out_of_mem_error_stub));
   } catch (const std::exception &e) {

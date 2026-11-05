@@ -760,18 +760,41 @@ together.
   The player saw the game vanish, and the crash report blamed the main thread.
   The client replaces the handler (`src/client/xerces/out_of_memory.cpp`,
   feature `oom_report`, 4.3). The replacement never returns (5.7): it logs
-  `loader.out_of_memory` with the zone that was loading (the console's last
-  `Loading fastfile '<zone>'` line), the map, `fs_game`, `fs_extramods`, the
-  mods by their names from the plan file, the journal phase, the caller's RVA
-  (which pool ran out) and the console's last 60 lines; notes the crash and
-  leaves the journal's phase, so the launcher counts a crash and nothing writes
-  `clean_exit`; suspends the other threads; shows "Black Ops III ran out of
-  memory", naming the zone and the mods and saying to remove a mod or play
-  another map (not with `-headless` or `-quiet-crash`); and ends the process
-  with `TerminateProcess` and the engine's code, 0xFFFFFFFF. No destructor runs
-  under the main thread, and no crash dump is written. The text is put together
-  in `xerces_core/out_of_memory`. Without the signature the game ends as the
-  engine ends it.
+  `loader.out_of_memory` with the zone still loading (the console's last
+  `Loading fastfile '<zone>'` line that no later
+  `FastFileLoad: Setting <zone> to XZONE_LOADED` line follows), the map,
+  `fs_game`, `fs_extramods`, the mods by their names from the plan file, the
+  journal phase, the caller's RVA and the console's last 60 lines; notes the
+  crash and leaves the journal's phase, so the launcher counts a crash and
+  nothing writes `clean_exit`; suspends the other threads; shows "Black Ops III
+  ran out of memory" (not with `-headless` or `-quiet-crash`, which it reads
+  before the threads stop); and ends the process with `TerminateProcess` and the
+  engine's code, 0xFFFFFFFF. No destructor runs under the main thread, and no
+  crash dump is written. The text is put together in
+  `xerces_core/out_of_memory`. Without the signature the game ends as the engine
+  ends it.
+  - The map is the engine's active custom map (`mod_stack::active_usermap`, set
+    when the map's load starts), else the `mapname` dvar. `mapname` still names
+    the level before while one loads: in all four out-of-memory runs on
+    2026-11-05, `loader.exit.unexpected` recorded `core_frontend` in phase
+    `loading_map`. That event and `loader.engine.error` still take `mapname`
+    first, so during a load their map is the front end; for a stock map that is
+    still loading, the zone is the better guide here too.
+  - The mods follow `mod_stack::get`: `fs_game` `usermaps` (the engine's
+    pseudo-mod for a custom map played without a mod) is no mod, and without a
+    main mod `fs_extramods` loads nothing, so the box says no mods are loaded
+    and to play another map.
+  - The handler is not only the pool's: two of its six callers (`0x14224FE5C`,
+    `0x14224FF24` in the D3 dump) are the engine's allocation wrappers, one
+    around the C runtime's `malloc`, so a process heap that runs out ends here
+    too. The caller's RVA is logged for that, but Xerces code uses no offsets,
+    so the wording follows the zone instead: with a zone still loading, the box
+    names it and the mods and says to remove a mod or play another map; with
+    none (in a match, say), it only says the game ran out of memory.
+  - The box does not point at Xerces' Mods screen yet. `launcher/zone-memory`
+    (not merged here) adds a plan note there that names the maps which do not
+    fit with the mods; once both are merged, the with-mods text should send the
+    player to it (the TESTING.md item checks the text).
 - Exit code 0 is not proof of a clean exit: the crash dialog's restart and fatal
   engine errors also end with 0. The launcher counts 0 as clean only when the
   game never took the journal over (it quit before Xerces' code ran); otherwise
