@@ -16,7 +16,19 @@
 			<div class="toolbar safe-actions">
 				<button id="safe-off" class="primary-button" data-event-click="act('launch safe')"><span>Launch with mods off</span></button>
 				<button id="safe-retry" class="outline" data-event-click="act('retry mods')"><span>Retry with mods</span></button>
+				<button id="find-culprit" class="outline" data-if="can_bisect" data-event-click="act('find culprit')"><span>Find the culprit</span></button>
 				<button id="safe-dismiss" class="link" data-event-click="act('dismiss safe')"><span>Dismiss</span></button>
+			</div>
+		</div>
+
+		<div class="notice-box safe-box" data-if="culprit_on">
+			<div class="label">Finding the culprit</div>
+			<div class="safe-text">{{culprit_text}}</div>
+			<div class="culprit-mods" data-if="culprit_mods != ''">{{culprit_mods}}</div>
+			<div class="toolbar safe-actions">
+				<button id="culprit-launch" class="primary-button" data-if="!culprit_done" data-event-click="act('culprit test')"><span>Launch the test</span></button>
+				<button id="culprit-off" class="primary-button" data-if="culprit_found" data-event-click="act('culprit off')"><span>Turn it off</span></button>
+				<button id="culprit-stop" class="outline" data-event-click="act('culprit stop')"><span>{{culprit_stop}}</span></button>
 			</div>
 		</div>
 

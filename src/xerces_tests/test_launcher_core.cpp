@@ -11,8 +11,10 @@
 #include <vector>
 
 #include <xerces_core/catalog.hpp>
+#include <xerces_core/journal.hpp>
 #include <xerces_core/launch.hpp>
 #include <xerces_core/launcher_config.hpp>
+#include <xerces_core/manifest.hpp>
 #include <xerces_core/sha256.hpp>
 
 using namespace xerces_core;
@@ -167,6 +169,39 @@ TEST_CASE("launch: arguments quote the way CommandLineToArgvW reads them") {
   CHECK_EQ(quote_argument("C:\\Game Dir\\"),
            std::string("\"C:\\Game Dir\\\\\""));
   CHECK_EQ(quote_argument("say \"hi\""), std::string("\"say \\\"hi\\\"\""));
+}
+
+TEST_CASE("manifest: colour codes leave display titles") {
+  CHECK_EQ(strip_color_codes("^6DS4C ^5Patched ^7v0.85"),
+           std::string("DS4C Patched v0.85"));
+  CHECK_EQ(strip_color_codes("^3[^5PZM^3] ^9PEGASUS^7 v0.2"),
+           std::string("[PZM] PEGASUS v0.2"));
+  CHECK_EQ(strip_color_codes("Plain ^ caret"), std::string("Plain ^ caret"));
+  CHECK_EQ(strip_color_codes("^1"), std::string("^1"));
+}
+
+TEST_CASE("safe mode: a culprit search survives between launches") {
+  culprit_progress progress;
+  progress.mode = "zm";
+  progress.crashed_stack = {"a", "b", "c", "d"};
+  progress.search = culprit_search(progress.crashed_stack);
+  progress.testing = progress.search.next_test();
+  CHECK((progress.testing == std::vector<std::string>{"a", "b"}));
+  progress.search.record(false); // a, b ran fine
+  const auto back = parse_culprit_progress(culprit_progress_to_json(progress));
+  REQUIRE(back.has_value());
+  CHECK_EQ(back->mode, std::string("zm"));
+  CHECK(back->crashed_stack == progress.crashed_stack);
+  CHECK(back->testing == progress.testing);
+  culprit_search search = back->search;
+  CHECK((search.next_test() == std::vector<std::string>{"c", "d"}));
+  CHECK_EQ(search.launches(), std::size_t{1});
+  search.record(true); // c, d crash
+  CHECK((search.next_test() == std::vector<std::string>{"c"}));
+  search.record(true);
+  REQUIRE(search.culprit().has_value());
+  CHECK_EQ(*search.culprit(), std::string("c"));
+  CHECK(!parse_culprit_progress("{}").has_value());
 }
 
 TEST_CASE("config: round trip keeps known and unknown keys") {

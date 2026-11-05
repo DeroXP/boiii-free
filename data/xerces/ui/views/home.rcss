@@ -214,3 +214,4 @@
 .safe-actions { margin-top: 14dp; }
 .edit-mods { margin-top: 12dp; }
 .status-cell .small-button { margin-top: 8dp; }
+.culprit-mods { margin-top: 8dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 18dp; color: var(--text2); }

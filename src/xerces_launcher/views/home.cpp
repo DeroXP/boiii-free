@@ -74,6 +74,13 @@ public:
     model.Bind("safe_value", &safe_value_);
     model.Bind("safe_detail", &safe_detail_);
     model.Bind("last_server", &last_server_);
+    model.Bind("can_bisect", &can_bisect_);
+    model.Bind("culprit_on", &culprit_on_);
+    model.Bind("culprit_text", &culprit_text_);
+    model.Bind("culprit_mods", &culprit_mods_);
+    model.Bind("culprit_done", &culprit_done_);
+    model.Bind("culprit_found", &culprit_found_);
+    model.Bind("culprit_stop", &culprit_stop_);
     model.BindEventCallback(
         "pick", [this](Rml::DataModelHandle, Rml::Event &,
                        const Rml::VariantList &args) {
@@ -94,14 +101,29 @@ public:
 
   void update(double) override {
     services &svc = owner_->svc();
-    const std::uint64_t key[] = {svc.config_rev(),  svc.game_rev(),
-                                 svc.catalog_rev(), svc.journal_rev(),
-                                 svc.signatures_rev(), owner_->mode_rev()};
+    const std::uint64_t key[] = {svc.config_rev(),     svc.game_rev(),
+                                 svc.catalog_rev(),    svc.journal_rev(),
+                                 svc.signatures_rev(), owner_->mode_rev(),
+                                 svc.culprit_rev()};
     if (std::equal(std::begin(key), std::end(key), std::begin(seen_))) {
       return;
     }
     std::copy(std::begin(key), std::end(key), std::begin(seen_));
     refresh();
+  }
+
+  // With a crash to deal with, its box comes first.
+  Rml::Element *default_focus() override {
+    if (doc) {
+      for (const char *id : {"culprit-launch", "culprit-off", "culprit-stop",
+                             "safe-off"}) {
+        if (Rml::Element *element = doc->GetElementById(id);
+            element && element->IsVisible(true)) {
+          return element;
+        }
+      }
+    }
+    return view::default_focus();
   }
 
   bool key(Rml::Input::KeyIdentifier key, int modifiers) override {
@@ -238,7 +260,64 @@ private:
                        : "";
     last_server_ = config.recent_servers.empty() ? ""
                                                  : config.recent_servers.front();
+    refresh_culprit(decision);
     handle_.DirtyAllVariables();
+  }
+
+  std::string mod_label(const std::string &id) const {
+    const auto *item = owner_->svc().catalog().find(id);
+    return item && !item->info.name.empty() ? item->info.name : id;
+  }
+
+  std::string mod_list(const std::vector<std::string> &ids) const {
+    std::string out;
+    for (const auto &id : ids) {
+      out += (out.empty() ? "" : ", ") + mod_label(id);
+    }
+    return out;
+  }
+
+  // The culprit search (5.6): one test launch at a time, the result read
+  // from the journal when the game exits.
+  void refresh_culprit(const xerces_core::safe_mode_decision &decision) {
+    const auto &culprit = owner_->svc().culprit();
+    can_bisect_ = decision.safe_mode && decision.crashed_stack.size() >= 2 &&
+                  !culprit;
+    culprit_on_ = culprit.has_value();
+    culprit_done_ = culprit_found_ = false;
+    culprit_mods_.clear();
+    culprit_stop_ = owner_->tr("Stop");
+    if (!culprit) {
+      return;
+    }
+    if (culprit->search.culprit()) {
+      culprit_done_ = culprit_found_ = true;
+      culprit_text_ = owner_->tr("Found it:") + " " +
+                      mod_label(*culprit->search.culprit()) + ". " +
+                      owner_->tr("It crashes the game on its own. Turn it off "
+                                 "in this profile?");
+      culprit_stop_ = owner_->tr("Close");
+    } else if (culprit->search.done()) {
+      culprit_done_ = true;
+      culprit_text_ = owner_->tr("No single mod crashes alone: the crash needs "
+                                 "these mods together.");
+      culprit_mods_ = mod_list(culprit->search.suspects());
+      culprit_stop_ = owner_->tr("Close");
+    } else {
+      const auto next = culprit->search.next_test();
+      culprit_text_ =
+          owner_->tr("Test") + " " +
+          std::to_string(culprit->search.launches() + 1) + ": " +
+          owner_->tr("launch with") + " " + std::to_string(next.size()) + " " +
+          owner_->tr("of the") + " " +
+          std::to_string(culprit->search.suspects().size()) + " " +
+          owner_->tr("suspects and play to where it crashed. Quit normally if "
+                     "it does not crash.");
+      culprit_mods_ = mod_list(next);
+    }
+    if (culprit_on_) {
+      safe_ = false; // the culprit box replaces the safe-mode box
+    }
   }
 
   void launch(bool modded, bool mods_off) {
@@ -301,6 +380,30 @@ private:
         body += "\n" + item.message;
       }
       owner_->dialog("Dry-run preview", body, {"Close"}, nullptr);
+    } else if (action == "find culprit") {
+      if (owner_->svc().start_culprit()) {
+        owner_->notify(owner_->tr("Each test launches part of the crashed "
+                                  "stack."));
+      }
+    } else if (action == "culprit test") {
+      const launch_outcome outcome = owner_->svc().launch_culprit_test();
+      owner_->notify(outcome.message, !outcome.started && !outcome.dry_run);
+    } else if (action == "culprit off") {
+      const auto &culprit = owner_->svc().culprit();
+      if (culprit && culprit->search.culprit()) {
+        auto &profile = xerces_core::profile_for(owner_->svc().config(),
+                                                 culprit->mode);
+        std::erase(profile.mods, *culprit->search.culprit());
+        profile.pins.clear();
+        profile.pack_name.clear();
+        profile.pack_id.clear();
+        owner_->svc().save_config();
+        owner_->notify(mod_label(*culprit->search.culprit()) + " " +
+                       owner_->tr("is off."));
+      }
+      owner_->svc().stop_culprit();
+    } else if (action == "culprit stop") {
+      owner_->svc().stop_culprit();
     } else if (action == "mods") {
       owner_->show("mods");
     } else if (action == "servers") {
@@ -312,7 +415,7 @@ private:
 
   app *owner_ = nullptr;
   Rml::DataModelHandle handle_;
-  std::uint64_t seen_[6] = {};
+  std::uint64_t seen_[7] = {};
   bool safe_dismissed_ = false;
 
   Rml::String mode_ = "zm";
@@ -325,6 +428,9 @@ private:
   Rml::String sig_value_, sig_detail_, catalog_value_, catalog_detail_;
   bool safe_ = false;
   Rml::String safe_text_, safe_value_, safe_detail_, last_server_;
+  bool can_bisect_ = false, culprit_on_ = false, culprit_done_ = false,
+       culprit_found_ = false;
+  Rml::String culprit_text_, culprit_mods_, culprit_stop_;
 };
 } // namespace
 

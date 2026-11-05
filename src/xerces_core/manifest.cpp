@@ -974,4 +974,28 @@ manifest synthesize_legacy(const legacy_input &input,
   }
   return m;
 }
+std::string strip_color_codes(std::string_view text) {
+  std::string out;
+  out.reserve(text.size());
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    if (text[i] == '^' && i + 1 < text.size() && text[i + 1] >= '0' &&
+        text[i + 1] <= '9') {
+      ++i;
+      continue;
+    }
+    out.push_back(text[i]);
+  }
+  // Codes between words can leave double or edge spaces behind.
+  std::string tidy;
+  for (const char c : out) {
+    if (c == ' ' && (tidy.empty() || tidy.back() == ' ')) {
+      continue;
+    }
+    tidy.push_back(c);
+  }
+  while (!tidy.empty() && tidy.back() == ' ') {
+    tidy.pop_back();
+  }
+  return tidy.empty() ? std::string(text) : tidy;
+}
 } // namespace xerces_core

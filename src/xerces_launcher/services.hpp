@@ -147,8 +147,10 @@ public:
   std::uint64_t catalog_rev() const { return catalog_rev_; }
 
   // -------------------------------------------------------------- the plan
-  // The current mode's profile resolved against the catalog.
-  xerces_core::plan resolve(const std::string &mode) const;
+  // The current mode's profile resolved against the catalog; mods, when
+  // given, replace the profile's list (a culprit-search test launch).
+  xerces_core::plan resolve(const std::string &mode,
+                            const std::vector<std::string> *mods = nullptr) const;
   xerces_core::plan_request request_for(const std::string &mode) const;
   // Content that can be enabled in a mode (mods that support it), catalog
   // order.
@@ -161,12 +163,15 @@ public:
   // launch crashed). Writes the plan file and the journal, then starts the
   // client from the game folder.
   // connect: join a self-hosted server ("+connect host:port", Servers).
+  // mods: launch these instead of the profile's list.
   launch_outcome launch(const std::string &mode, bool modded, bool mods_off,
-                        const std::optional<std::string> &connect = {});
+                        const std::optional<std::string> &connect = {},
+                        const std::vector<std::string> *mods = nullptr);
   // The command line the launch would use, without starting anything.
   launch_outcome preview_launch(const std::string &mode, bool modded,
                                 bool mods_off,
-                                const std::optional<std::string> &connect = {}) const;
+                                const std::optional<std::string> &connect = {},
+                                const std::vector<std::string> *mods = nullptr) const;
   bool dry_launch() const { return dry_launch_; }
   // The game process started by the last launch is still running.
   bool game_running() const;
@@ -177,6 +182,20 @@ public:
   // ---------------------------------------------------- journal, safe mode
   std::optional<xerces_core::launch_journal> last_journal() const;
   xerces_core::safe_mode_decision safe_mode() const;
+
+  // ------------------------------------------------------ find the culprit
+  // After a crash with mods (5.6): halve the crashed stack over a few test
+  // launches. Kept in <home>/config/culprit.json so it survives restarts;
+  // each test's result comes from the journal when the game exits.
+  const std::optional<xerces_core::culprit_progress> &culprit() const {
+    return culprit_;
+  }
+  std::uint64_t culprit_rev() const { return culprit_rev_; }
+  // Starts from the last crashed launch (safe_mode()); false if there is none.
+  bool start_culprit();
+  void stop_culprit();
+  // Launches the next test (a dry launch records nothing).
+  launch_outcome launch_culprit_test();
 
   // ------------------------------------------------------------- signatures
   const signature_state &signatures() const { return signatures_; }
@@ -189,6 +208,9 @@ public:
 private:
   void load_config();
   void finish_scan(std::shared_ptr<catalog_state> result);
+  void save_culprit();
+  // Records the result of a culprit test launch that has ended.
+  void settle_culprit_test(bool crashed);
   game_state detect_now(const std::optional<std::string> &saved_dir) const;
   void apply_detection(game_state next);
 
@@ -215,5 +237,7 @@ private:
   std::uint64_t signatures_rev_ = 1;
   std::uint64_t journal_rev_ = 1;
   void *game_process_ = nullptr; // HANDLE of the last launched client
+  std::optional<xerces_core::culprit_progress> culprit_;
+  std::uint64_t culprit_rev_ = 1;
 };
 } // namespace xerces_launcher

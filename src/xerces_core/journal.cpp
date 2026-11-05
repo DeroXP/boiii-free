@@ -115,6 +115,13 @@ safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last) {
 culprit_search::culprit_search(std::vector<std::string> crashed_stack)
     : suspects_(std::move(crashed_stack)) {}
 
+culprit_search::culprit_search(std::vector<std::string> suspects,
+                               bool testing_second_half, bool combination,
+                               std::size_t launches)
+    : suspects_(std::move(suspects)),
+      testing_second_half_(testing_second_half), combination_(combination),
+      launches_(launches) {}
+
 std::vector<std::string> culprit_search::next_test() const {
   if (done()) {
     return {};
@@ -154,5 +161,66 @@ std::optional<std::string> culprit_search::culprit() const {
     return suspects_.front();
   }
   return std::nullopt;
+}
+namespace {
+std::vector<std::string> strings_at(const rapidjson::Value &root,
+                                    std::string_view key) {
+  std::vector<std::string> out;
+  if (const auto *array = json::member(root, key);
+      array != nullptr && array->IsArray()) {
+    for (const auto &item : array->GetArray()) {
+      if (item.IsString()) {
+        out.emplace_back(item.GetString(), item.GetStringLength());
+      }
+    }
+  }
+  return out;
+}
+
+bool bool_at(const rapidjson::Value &root, std::string_view key) {
+  const auto *value = json::member(root, key);
+  return value != nullptr && value->IsBool() && value->GetBool();
+}
+} // namespace
+
+std::string culprit_progress_to_json(const culprit_progress &value) {
+  rapidjson::Document doc(rapidjson::kObjectType);
+  auto &alloc = doc.GetAllocator();
+  json::set(doc, "schema", std::int64_t{1}, alloc);
+  json::set(doc, "mode", value.mode, alloc);
+  json::set(doc, "crashed_stack", json::string_array(value.crashed_stack, alloc),
+            alloc);
+  json::set(doc, "testing", json::string_array(value.testing, alloc), alloc);
+  json::set(doc, "suspects",
+            json::string_array(value.search.suspects(), alloc), alloc);
+  json::set(doc, "second_half", value.search.testing_second_half(), alloc);
+  json::set(doc, "combination", value.search.needs_combination(), alloc);
+  json::set(doc, "launches", static_cast<std::int64_t>(value.search.launches()),
+            alloc);
+  return json::canonical(doc);
+}
+
+std::optional<culprit_progress> parse_culprit_progress(std::string_view text) {
+  const auto parsed = json::parse(text);
+  if (!parsed.ok || !parsed.document.IsObject()) {
+    return std::nullopt;
+  }
+  const auto &root = parsed.document;
+  culprit_progress out;
+  out.mode = json::get_string(root, "mode").value_or("");
+  out.crashed_stack = strings_at(root, "crashed_stack");
+  out.testing = strings_at(root, "testing");
+  std::size_t launches = 0;
+  if (const auto *count = json::member(root, "launches");
+      count != nullptr && count->IsUint64()) {
+    launches = static_cast<std::size_t>(count->GetUint64());
+  }
+  std::vector<std::string> suspects = strings_at(root, "suspects");
+  if (out.mode.empty() || suspects.empty()) {
+    return std::nullopt;
+  }
+  out.search = culprit_search(std::move(suspects), bool_at(root, "second_half"),
+                              bool_at(root, "combination"), launches);
+  return out;
 }
 } // namespace xerces_core

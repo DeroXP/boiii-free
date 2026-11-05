@@ -149,6 +149,16 @@ services::services(launcher_paths paths, poster post, bool dry_launch)
       dry_launch_(dry_launch) {
   load_config();
   reload_signatures();
+  if (const auto text = read_text(paths_.config / "culprit.json")) {
+    culprit_ = xerces_core::parse_culprit_progress(*text);
+  }
+  // A test launch that ended while the launcher was closed: the journal
+  // says how it went.
+  if (culprit_ && !culprit_->testing.empty()) {
+    const auto journal = last_journal();
+    settle_culprit_test(!journal ||
+                        journal->phase != xerces_core::launch_phase::clean_exit);
+  }
 }
 
 services::~services() {
@@ -363,6 +373,11 @@ void services::finish_scan(std::shared_ptr<catalog_state> result) {
   const bool keep_old = !result->scanned && catalog_.scanned;
   if (!keep_old) {
     catalog_ = std::move(*result);
+    // Workshop titles carry the game's colour codes; the launcher shows plain
+    // text (ids and hashes are untouched, so plans do not change).
+    for (auto &item : catalog_.items) {
+      item.info.name = xerces_core::strip_color_codes(item.info.name);
+    }
   }
   catalog_.scanning = false;
   catalog_.current.clear();
@@ -409,8 +424,13 @@ xerces_core::plan_request services::request_for(const std::string &mode) const {
   return request;
 }
 
-xerces_core::plan services::resolve(const std::string &mode) const {
-  return xerces_core::resolve_plan(catalog_.items, request_for(mode));
+xerces_core::plan services::resolve(const std::string &mode,
+                                   const std::vector<std::string> *mods) const {
+  xerces_core::plan_request request = request_for(mode);
+  if (mods) {
+    request.mods = *mods;
+  }
+  return xerces_core::resolve_plan(catalog_.items, request);
 }
 
 std::vector<const xerces_core::installed_content *>
@@ -438,7 +458,8 @@ std::vector<const xerces_core::installed_content *> services::maps() const {
 // ------------------------------------------------------------------- launch
 launch_outcome services::preview_launch(
     const std::string &mode, bool modded, bool mods_off,
-    const std::optional<std::string> &connect) const {
+    const std::optional<std::string> &connect,
+    const std::vector<std::string> *mods) const {
   launch_outcome out;
   xerces_core::launch_options options;
   options.connect = connect;
@@ -450,7 +471,7 @@ launch_outcome services::preview_launch(
   }
   std::optional<xerces_core::plan> resolved;
   if (modded && !mods_off) {
-    resolved = resolve(mode);
+    resolved = resolve(mode, mods);
     out.plan_id = resolved->plan_id;
     if (!resolved->ok()) {
       out.diags.append(resolved->diags);
@@ -484,8 +505,9 @@ bool services::game_running() const {
 
 launch_outcome services::launch(const std::string &mode, bool modded,
                                 bool mods_off,
-                                const std::optional<std::string> &connect) {
-  launch_outcome out = preview_launch(mode, modded, mods_off, connect);
+                                const std::optional<std::string> &connect,
+                                const std::vector<std::string> *mods) {
+  launch_outcome out = preview_launch(mode, modded, mods_off, connect, mods);
   if (out.diags.has_errors()) {
     log_warn("launcher.launch.refused", out.message);
     return out;
@@ -517,7 +539,7 @@ launch_outcome services::launch(const std::string &mode, bool modded,
   journal.started = journal.updated = now_utc();
   journal.safe_mode = mods_off;
   if (modded && !mods_off) {
-    const xerces_core::plan resolved = resolve(mode);
+    const xerces_core::plan resolved = resolve(mode, mods);
     const std::string id = xerces_core::plan_file_id(resolved.plan_id);
     write_text(paths_.plans / (id + ".json"),
                xerces_core::plan_to_json(resolved, true));
@@ -531,15 +553,14 @@ launch_outcome services::launch(const std::string &mode, bool modded,
       journal.stack = last->stack;
     }
   }
-  write_text(paths_.journal_file(), xerces_core::journal_to_json(journal));
-
   if (dry_launch_) {
     out.dry_run = true;
     out.message = "Dry launch: the command was written to the log.";
     log_info("launcher.launch.dry", out.command_line,
              "{\"plan_id\":" + xerces_core::json::quote(out.plan_id) + "}");
-    return out;
+    return out; // no journal: nothing ran that could crash
   }
+  write_text(paths_.journal_file(), xerces_core::journal_to_json(journal));
 
   // The game role finds <home> and, in a development build, its data folder
   // through the environment it inherits.
@@ -600,6 +621,12 @@ void services::poll() {
     write_text(paths_.journal_file(), xerces_core::journal_to_json(*journal));
   }
   ++journal_rev_;
+  if (culprit_ && !culprit_->testing.empty()) {
+    const auto journal = last_journal();
+    settle_culprit_test(code != 0 &&
+                        (!journal || journal->phase !=
+                                         xerces_core::launch_phase::clean_exit));
+  }
   log_info("launcher.game.exited", "exit code " + std::to_string(code),
            "{\"code\":" + std::to_string(code) + "}");
   reload_signatures();
@@ -619,6 +646,69 @@ xerces_core::safe_mode_decision services::safe_mode() const {
     return {};
   }
   return xerces_core::decide_safe_mode(last_journal());
+}
+
+// ---------------------------------------------------------- find the culprit
+void services::save_culprit() {
+  ++culprit_rev_;
+  const fs::path file = paths_.config / "culprit.json";
+  if (!culprit_) {
+    std::error_code ec;
+    fs::remove(file, ec);
+    return;
+  }
+  write_text(file, xerces_core::culprit_progress_to_json(*culprit_));
+}
+
+bool services::start_culprit() {
+  const xerces_core::safe_mode_decision decision = safe_mode();
+  if (!decision.safe_mode || decision.crashed_stack.size() < 2) {
+    return false;
+  }
+  xerces_core::culprit_progress progress;
+  progress.mode = config_.mode;
+  progress.crashed_stack = decision.crashed_stack;
+  progress.search = xerces_core::culprit_search(decision.crashed_stack);
+  culprit_ = std::move(progress);
+  save_culprit();
+  log_info("launcher.culprit.start",
+           std::to_string(culprit_->crashed_stack.size()) + " mods");
+  return true;
+}
+
+void services::stop_culprit() {
+  culprit_.reset();
+  save_culprit();
+  log_info("launcher.culprit.stop", "stopped");
+}
+
+launch_outcome services::launch_culprit_test() {
+  launch_outcome out;
+  if (!culprit_ || culprit_->search.done()) {
+    out.message = "There is no test to run.";
+    out.diags.error("culprit.none", "", out.message);
+    return out;
+  }
+  const std::vector<std::string> mods = culprit_->search.next_test();
+  out = launch(culprit_->mode, true, false, std::nullopt, &mods);
+  if (out.started) {
+    culprit_->testing = mods;
+    save_culprit();
+  }
+  return out;
+}
+
+void services::settle_culprit_test(bool crashed) {
+  if (!culprit_ || culprit_->testing.empty()) {
+    return;
+  }
+  culprit_->search.record(crashed);
+  culprit_->testing.clear();
+  save_culprit();
+  log_info("launcher.culprit.result", crashed ? "crashed" : "ran fine",
+           "{\"launches\":" + std::to_string(culprit_->search.launches()) +
+               ",\"done\":" + (culprit_->search.done() ? "true" : "false") +
+               "}");
 }
 
 // --------------------------------------------------------------- signatures

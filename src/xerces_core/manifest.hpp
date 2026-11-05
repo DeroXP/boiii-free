@@ -137,6 +137,11 @@ manifest synthesize_legacy(const legacy_input &input,
                            const std::set<std::string> &taken_ids,
                            diagnostics *diags = nullptr);
 
+// A title without the game's colour codes ("^1" to "^9", "^0"), which
+// Workshop titles often carry: "^6DS4C ^5Patched" -> "DS4C Patched". For
+// display only; ids and hashes never change.
+std::string strip_color_codes(std::string_view text);
+
 // "Type" from workshop.json, when it is a map.
 bool workshop_json_is_map(std::string_view workshop_json);
 } // namespace xerces_core

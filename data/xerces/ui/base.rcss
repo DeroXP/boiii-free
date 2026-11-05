@@ -412,5 +412,5 @@ body.dialog
 	box-sizing: border-box;
 }
 #dialog-title { font-size: 24dp; font-weight: 800; line-height: 28dp; letter-spacing: -0.5dp; }
-#dialog-body { margin-top: 12dp; font-size: 14dp; line-height: 20dp; color: var(--text2); }
+#dialog-body { margin-top: 12dp; font-size: 14dp; line-height: 20dp; color: var(--text2); word-break: break-word; white-space: pre-wrap; }
 #dialog-buttons { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; gap: 12dp; margin-top: 24dp; }

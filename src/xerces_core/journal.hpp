@@ -46,6 +46,9 @@ safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last);
 class culprit_search {
 public:
   explicit culprit_search(std::vector<std::string> crashed_stack);
+  // A search read back from disk (it spans several launches).
+  culprit_search(std::vector<std::string> suspects, bool testing_second_half,
+                 bool combination, std::size_t launches);
 
   // Mods for the next test launch; empty when the search is over.
   std::vector<std::string> next_test() const;
@@ -57,6 +60,8 @@ public:
   // The crash needs mods from both halves together (an interaction).
   bool needs_combination() const { return combination_; }
   std::size_t launches() const { return launches_; }
+  const std::vector<std::string> &suspects() const { return suspects_; }
+  bool testing_second_half() const { return testing_second_half_; }
 
 private:
   std::vector<std::string> suspects_;
@@ -64,4 +69,16 @@ private:
   bool combination_ = false;
   std::size_t launches_ = 0;
 };
+// A culprit search in progress, kept in <home>\config\culprit.json between
+// launches: the mode and stack that crashed, the search, and the mods of the
+// test launch whose result is still to be recorded (empty when none).
+struct culprit_progress {
+  std::string mode;
+  std::vector<std::string> crashed_stack;
+  std::vector<std::string> testing;
+  culprit_search search{{}};
+};
+
+std::string culprit_progress_to_json(const culprit_progress &value);
+std::optional<culprit_progress> parse_culprit_progress(std::string_view text);
 } // namespace xerces_core

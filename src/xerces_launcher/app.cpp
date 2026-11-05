@@ -461,8 +461,13 @@ void app::show(const std::string &id) {
   view &v = *target->screen;
   v.doc->Show(Rml::ModalFlag::None, Rml::FocusFlag::None);
   v.shown();
+  // Let the screen fill its model and lay out first, so the default focus
+  // sees the elements data-if shows or hides.
+  v.update(now());
+  context_->Update();
   if (Rml::Element *focus = v.default_focus()) {
     focus->Focus(true);
+    focus->ScrollIntoView(Rml::ScrollAlignment::Adaptive);
   } else {
     v.doc->Focus();
   }
