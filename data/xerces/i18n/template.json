@@ -560,6 +560,7 @@
   "Xerces can copy your player name and servers from BOIII. It only reads: your BOIII files stay exactly as they are.": "",
   "Xerces closes when the game starts.": "",
   "Xerces collects no usage data. There is no analytics and no tracking of any kind.": "",
+  "Xerces could not load its screens. Reinstalling it usually fixes this.": "",
   "Xerces could not save its settings. This setup will show again next time.": "",
   "Xerces draws at": "",
   "Xerces is still reading your mods. Try again in a moment.": "",
