@@ -44,7 +44,9 @@ console_app()
 language("C++")
 files({ root_path("src/xerces_tests/**.hpp"), root_path("src/xerces_tests/**.cpp") })
 headless_includes()
-links({ "xerces_core", "zstd", "advapi32" })
+-- MinHook with Xerces' thread walk (deps/premake/minhook.lua), tested on its own.
+includedirs({ root_path("deps/minhook/include") })
+links({ "xerces_core", "zstd", "advapi32", "minhook" })
 
 project("xerces_cli")
 console_app()
