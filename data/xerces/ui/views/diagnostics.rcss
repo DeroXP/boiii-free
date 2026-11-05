@@ -1,0 +1,139 @@
+/* Diagnostics (DESIGN.md 7.3): reports as 1 dp ruled name/value lists in the
+   C / Signal look, the status strip shared with Home, and the scan
+   diagnostics as focusable rows (Enter copies one). */
+
+#diag-main { padding: 32dp 32dp 40dp 32dp; box-sizing: border-box; }
+
+.diag-actions { margin-top: 24dp; }
+/* Wide enough for "Refreshing..." so the toolbar does not shift. */
+#refresh { min-width: 156dp; justify-content: center; }
+#refresh.busy { color: var(--text2); border-color: var(--text2); }
+
+/* ------------------------------------------------------- status strip */
+.status
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	column-gap: 32dp;
+	row-gap: 16dp;
+	margin-top: 32dp;
+	padding-top: 16dp;
+	border-top: 1dp var(--text);
+}
+.status-cell { flex: 1 1 160dp; }
+.status-value { margin-top: 6dp; font-size: 20dp; font-weight: 700; line-height: 24dp; letter-spacing: -0.4dp; word-break: break-word; }
+.status-value.warn { color: var(--accent-text); }
+.status-detail { margin-top: 4dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 18dp; color: var(--text2); word-break: break-word; }
+
+/* ------------------------------------------------------------ columns */
+.columns
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	gap: 48dp;
+	margin-top: 48dp;
+}
+.col-main { flex: 999 1 520dp; max-width: 880dp; }
+.col-side { flex: 1 1 320dp; }
+.block { margin-bottom: 48dp; }
+.block .panel-head { min-height: 32dp; }
+
+/* Name/value rows: the name in mono, the value wraps anywhere when it has
+   to (paths and hashes have no spaces). */
+.kv
+{
+	display: flex;
+	flex-direction: row;
+	align-items: flex-start;
+	gap: 16dp;
+	padding: 10dp 0dp;
+	border-bottom: 1dp var(--line);
+}
+.kv-k
+{
+	flex: 0 0 152dp;
+	font-family: "IBM Plex Mono";
+	font-size: 12dp;
+	line-height: 20dp;
+	color: var(--text2);
+}
+.kv-v { flex: 1 1 0dp; font-size: 14dp; line-height: 20dp; word-break: break-word; }
+.kv-v.mono { font-family: "IBM Plex Mono"; font-size: 12dp; }
+.kv-v.warn { color: var(--accent-text); }
+/* The side column is narrow: the name sits above the value so paths get the
+   full width. */
+.col-side .kv { flex-direction: column; gap: 4dp; }
+.col-side .kv-k { flex: 0 0 auto; line-height: 16dp; }
+.col-side .kv-v { flex: 0 0 auto; }
+.panel-count.warn { color: var(--accent-text); }
+
+.list-block { margin-top: 16dp; }
+.list-label { padding-bottom: 8dp; border-bottom: 1dp var(--line); }
+.list-row
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 10dp;
+	padding: 8dp 0dp;
+	border-bottom: 1dp var(--line);
+	font-size: 12dp;
+	line-height: 16dp;
+	word-break: break-word;
+}
+.miss-mark { display: block; flex: 0 0 8dp; width: 8dp; height: 8dp; background-color: var(--accent); }
+
+/* ------------------------------------------------------ scan diagnostics */
+.diag-label
+{
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+	margin-top: 24dp;
+}
+.diag-count { text-transform: none; letter-spacing: 0dp; }
+button.diag
+{
+	display: flex;
+	flex-direction: row;
+	align-items: flex-start;
+	gap: 16dp;
+	width: 100%;
+	padding: 10dp 8dp 10dp 0dp;
+	border-bottom: 1dp var(--line);
+}
+button.diag:hover { background-color: var(--surface2); }
+.lvl
+{
+	display: block;
+	flex: 0 0 64dp;
+	padding: 1dp 0dp;
+	box-sizing: border-box;
+	border: 1dp var(--text2);
+	border-radius: 2dp;
+	font-family: "IBM Plex Mono";
+	font-size: 11dp;
+	line-height: 16dp;
+	font-weight: 500;
+	letter-spacing: 0.88dp;
+	text-transform: uppercase;
+	text-align: center;
+	color: var(--text2);
+}
+button.diag.warning .lvl { color: var(--text); border-color: var(--text); }
+button.diag.error .lvl { color: var(--on-accent); background-color: var(--accent); border-color: var(--accent); }
+.diag-text { flex: 1 1 0dp; }
+.diag-code { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); word-break: break-word; }
+.diag-msg { margin-top: 4dp; font-size: 14dp; line-height: 20dp; word-break: break-word; }
+.more-note { padding: 10dp 0dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+
+/* ----------------------------------------------------------- side blocks */
+.safe-box { margin-top: 16dp; }
+.safe-text { margin-top: 6dp; }
+.block-actions { margin-top: 16dp; }
+.file-row { padding: 10dp 0dp; border-bottom: 1dp var(--line); }
+.file-name { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; word-break: break-word; }
+.file-meta { margin-top: 4dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
