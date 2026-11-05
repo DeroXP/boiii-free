@@ -2,13 +2,216 @@
 <head>
 	<title>Mods</title>
 	<link type="text/template" href="../shell.rml"/>
+	<link type="text/rcss" href="mods.rcss"/>
 </head>
-<!-- Mods (docs/DESIGN.md 7.3): placeholder. -->
-<body template="shell">
-<div class="page">
-	<div class="page-title">Mods</div>
-	<div class="page-sub">Search, filters, the load order and each mod's details.</div>
-	<div class="section"><button class="outline default-focus" id="mods-back"><span>Back to Home</span></button></div>
+<!-- Mods (docs/DESIGN.md 7.3): the mode switch, search and filters, the load
+     order (switches, moves, drag, Ctrl+Z), the mods and maps found, and the
+     selected mod's details. Data: the "mods" model in
+     src/xerces_launcher/views/mods.cpp. Element ids in the lists carry the
+     row index (om-0, lt-3, ...) so the view can put focus back after a
+     change. -->
+<body template="shell" data-model="mods">
+<div id="mods-main">
+	<div id="mods-top" class="mods-top">
+		<div class="modes">
+			<span class="label">Game mode</span>
+			<div class="mode-group">
+				<button id="mode-zm" class="mode" data-class-on="mode == 'zm'" data-event-click="pick('zm')"><span class="mark-dot"></span><span>Zombies</span></button>
+				<button id="mode-mp" class="mode" data-class-on="mode == 'mp'" data-event-click="pick('mp')"><span class="mark-dot"></span><span>Multiplayer</span></button>
+				<button id="mode-cp" class="mode" data-class-on="mode == 'cp'" data-event-click="pick('cp')"><span class="mark-dot"></span><span>Campaign</span></button>
+			</div>
+			<div class="scan">
+				<div class="scan-text">
+					<div class="scan-main" data-class-busy="scanning">{{scan_text}}</div>
+					<div class="scan-detail">{{scan_detail}}</div>
+				</div>
+				<button id="rescan" class="small-button" data-if="!scanning" data-event-click="act('rescan')"><span>Rescan</span></button>
+				<button id="cancel-scan" class="small-button" data-if="scanning" data-event-click="act('cancel')"><span>Stop</span></button>
+			</div>
+		</div>
+
+		<div class="mods-toolbar">
+			<input type="text" id="search" class="text search" data-value="query" data-attr-placeholder="search_hint"/>
+			<div class="chips">
+				<button id="filter-all" class="chip" data-class-on="filter == 'all'" data-event-click="set_filter('all')"><span>All</span><span class="chip-n">{{n_all}}</span></button>
+				<button id="filter-enabled" class="chip" data-class-on="filter == 'enabled'" data-event-click="set_filter('enabled')"><span>Enabled</span><span class="chip-n">{{n_enabled}}</span></button>
+				<button id="filter-problems" class="chip" data-class-on="filter == 'problems'" data-event-click="set_filter('problems')"><span>Problems</span><span class="chip-n">{{n_problems}}</span></button>
+				<button id="filter-legacy" class="chip" data-class-on="filter == 'legacy'" data-event-click="set_filter('legacy')"><span>Legacy</span><span class="chip-n">{{n_legacy}}</span></button>
+			</div>
+			<button id="undo" class="link undo" data-if="can_undo" data-event-click="act('undo')"><span>Undo</span><span class="kbd">Ctrl</span><span class="kbd">Z</span></button>
+		</div>
+	</div>
+
+	<div class="mods-body">
+		<div id="mods-list" class="mods-list">
+			<div class="empty-state" data-if="empty_title != ''">
+				<div class="empty-title">{{empty_title}}</div>
+				<div class="empty-text">{{empty_text}}</div>
+				<div class="toolbar empty-actions">
+					<button id="empty-find" class="outline" data-if="empty_game" data-event-click="act('find game')"><span>Set the game folder</span></button>
+					<button id="empty-rescan" class="outline" data-if="!scanning &amp;&amp; !empty_game" data-event-click="act('rescan')"><span>Rescan</span></button>
+				</div>
+			</div>
+
+			<!-- The load order: highest priority first; 01 is the main mod. -->
+			<div class="block">
+				<div class="panel-head">
+					<span class="panel-title">Load order</span>
+					<span class="panel-count">{{order_count}}</span>
+				</div>
+				<div class="order-help">
+					<span>Top is the main mod. Move with</span>
+					<span class="kbd">Ctrl</span><span class="kbd">&#8593;</span><span class="kbd">&#8595;</span>
+					<span>the arrows or drag. Switch off with</span><span class="kbd">Del</span>
+				</div>
+				<div class="pack-note" data-if="pack_note != ''"><span class="label">Pack</span><span class="pack-name">{{pack_note}}</span><span>Changing the order by hand detaches the profile from it; Ctrl+Z brings it back.</span></div>
+				<div data-for="g : general"><div class="general" data-class-error="g.error"><span class="label">Plan</span><span>{{g.text}}</span></div></div>
+
+				<div id="order-list">
+					<div data-for="r, i : order"><div class="orow"
+						data-class-selected="r.key == sel" data-class-problem="r.problem" data-class-warn="r.warn" data-class-missing="r.missing"
+						data-event-mousedown="row_down('om-' + i)"
+						data-class-dragging="drag_from == i"
+						data-class-drop-above="drop_at == i &amp;&amp; drag_from &gt; i"
+						data-class-drop-below="drop_at == i &amp;&amp; drag_from &gt;= 0 &amp;&amp; drag_from &lt; i"
+						data-event-dragstart="drag_start(i)" data-event-dragover="drag_over(i)"
+						data-event-dragout="drag_out(i)" data-event-dragdrop="drag_drop(i)" data-event-dragend="drag_end()">
+						<div class="row-line">
+							<span class="grip"></span>
+							<span class="orow-n">{{r.n}}</span>
+							<button class="toggle on" data-attr-id="'ot-' + i" data-event-click="toggle(r.id)" data-event-focus="select(r.key)"><span class="knob"></span></button>
+							<button class="row-main" data-attr-id="'om-' + i" data-class-default-focus="i == 0" data-event-click="select(r.key)" data-event-focus="select(r.key)">
+								<span class="row-name">{{r.name}}</span>
+								<span class="tag" data-if="r.main">main</span>
+								<span class="row-loads">{{r.loads}}</span>
+								<span class="row-ver">{{r.ver}}</span>
+								<span class="row-state">{{r.state}}</span>
+							</button>
+							<button class="move" data-attr-id="'ou-' + i" data-class-disabled="r.first" data-event-click="move(i, -1)" data-event-focus="select(r.key)"><span>&#8593;</span></button>
+							<button class="move" data-attr-id="'od-' + i" data-class-disabled="r.last" data-event-click="move(i, 1)" data-event-focus="select(r.key)"><span>&#8595;</span></button>
+						</div>
+						<div data-for="nt : r.notes"><div class="row-note" data-class-error="nt.error"><span>{{nt.text}}</span></div></div>
+					</div></div>
+				</div>
+				<div class="empty-note" data-if="order.size == 0 &amp;&amp; empty_title == ''">{{order_empty}}</div>
+
+				<div class="deps" data-if="deps.size &gt; 0">
+					<div class="label deps-label">Added as dependencies</div>
+					<div data-for="d, j : deps"><div class="drow" data-class-selected="d.key == sel" data-event-mousedown="row_down('dp-' + j)">
+						<button class="row-main" data-attr-id="'dp-' + j" data-event-click="select(d.key)" data-event-focus="select(d.key)">
+							<span class="row-name">{{d.name}}</span>
+							<span class="row-ver">{{d.ver}}</span>
+						</button>
+					</div></div>
+				</div>
+				<div class="plan-line" data-if="plan_line != ''">{{plan_line}}</div>
+			</div>
+
+			<!-- Everything installed that supports this mode. -->
+			<div class="block" data-if="empty_title == ''">
+				<div class="panel-head">
+					<span class="panel-title">Mods</span>
+					<span class="panel-count">{{mods_count}}</span>
+				</div>
+				<div class="list-head">
+					<span class="h-toggle">On</span>
+					<div class="h-main">
+						<span class="row-name">Name</span>
+						<span class="row-ver">Version</span>
+						<span class="row-src">Source</span>
+						<span class="row-ws">Workshop id</span>
+						<span class="row-state">State</span>
+					</div>
+				</div>
+				<div data-for="r, i : mods"><div class="mrow" data-class-selected="r.key == sel" data-class-problem="r.problem" data-class-warn="r.warn" data-event-mousedown="row_down('lm-' + i)">
+					<div class="row-line">
+						<button class="toggle" data-attr-id="'lt-' + i" data-class-on="r.on" data-event-click="toggle(r.id)" data-event-focus="select(r.key)"><span class="knob"></span></button>
+						<button class="row-main" data-attr-id="'lm-' + i" data-class-default-focus="i == 0" data-event-click="select(r.key)" data-event-focus="select(r.key)">
+							<span class="row-name">{{r.name}}</span>
+							<span class="row-ver">{{r.ver}}</span>
+							<span class="row-src">{{r.source}}</span>
+							<span class="row-ws">{{r.ws}}</span>
+							<span class="row-state">{{r.state}}</span>
+						</button>
+					</div>
+					<div data-for="nt : r.notes"><div class="row-note" data-class-error="nt.error"><span>{{nt.text}}</span></div></div>
+				</div></div>
+				<div class="empty-note list-empty" data-if="list_empty != ''">
+					<span>{{list_empty}}</span>
+					<button id="clear-search" class="small-button" data-if="list_filtered" data-event-click="act('clear')"><span>Show all</span></button>
+				</div>
+			</div>
+
+			<!-- One map per mode, or none. -->
+			<div class="block" data-if="has_maps">
+				<div class="panel-head">
+					<span class="panel-title">Map</span>
+					<span class="panel-count">{{maps_count}}</span>
+				</div>
+				<div class="mprow" data-class-selected="sel == 'n:'">
+					<button id="map-none" class="row-main map-main" data-class-on="map_none" data-event-click="pick_map('')"><span class="radio"></span><span class="row-name">None</span></button>
+				</div>
+				<div data-for="m, k : maps"><div class="mprow" data-class-selected="m.key == sel">
+					<button class="row-main map-main" data-attr-id="'mp-' + k" data-class-on="m.on" data-event-click="pick_map(m.id)" data-event-focus="select(m.key)">
+						<span class="radio"></span>
+						<span class="row-name">{{m.name}}</span>
+						<span class="row-src">{{m.source}}</span>
+					</button>
+				</div></div>
+			</div>
+		</div>
+
+		<!-- The selected mod. -->
+		<div id="mods-details" class="mods-details">
+			<div class="empty-note" data-if="!d_has">Pick a mod to see its details.</div>
+			<div data-if="d_has">
+				<div class="label d-kind">{{d_kind}}</div>
+				<div class="d-name">{{d_name}}</div>
+				<div class="d-id">{{d_id}}</div>
+				<div class="d-actions">
+					<button id="d-toggle" class="outline d-button" data-if="d_can_toggle" data-event-click="act('toggle')"><span>{{d_toggle}}</span></button>
+					<button id="d-steam" class="small-button" data-if="d_ws != ''" data-event-click="act('steam')"><span>Open in Steam</span></button>
+					<button id="d-folder" class="small-button" data-if="d_path != ''" data-event-click="act('folder')"><span>Open folder</span></button>
+					<button id="d-copy" class="small-button" data-event-click="act('copy id')"><span>Copy id</span></button>
+				</div>
+				<div class="d-legacy" data-if="d_legacy">
+					<span class="label">Legacy</span>
+					<span class="d-legacy-text">No xerces.mod.json, so Xerces made a manifest from its workshop.json: name and version come from Steam, what it touches is unknown.</span>
+				</div>
+
+				<div class="d-section d-problems" data-if="d_notes.size &gt; 0">
+					<div class="label section-label">Problems</div>
+					<div data-for="nt : d_notes"><div class="d-note" data-class-error="nt.error"><span>{{nt.text}}</span></div></div>
+					<div class="d-fixes" data-if="d_fixes.size &gt; 0">
+						<div data-for="fx : d_fixes"><button class="small-button" data-attr-id="'fix-' + fx.index" data-event-click="fix(fx.index)"><span>{{fx.label}}</span></button></div>
+					</div>
+					<div class="d-fix-text" data-for="t : d_fix_text"><span>{{t}}</span></div>
+				</div>
+
+				<div class="d-section">
+					<div class="label section-label">Details</div>
+					<div class="d-field" data-for="f : d_fields"><span class="d-l">{{f.l}}</span><span class="d-v">{{f.v}}</span></div>
+				</div>
+
+				<div class="d-section" data-if="d_why.size &gt; 0">
+					<div class="label section-label">Why this order</div>
+					<div class="d-why" data-for="w : d_why"><span>{{w}}</span></div>
+				</div>
+
+				<div class="d-section">
+					<div class="label section-label">Capabilities</div>
+					<div class="d-field" data-for="c : d_caps"><span class="d-l">{{c.l}}</span><span class="d-v">{{c.v}}</span></div>
+					<div class="d-empty" data-if="d_caps.size == 0"><span>{{d_caps_empty}}</span></div>
+				</div>
+
+				<div class="d-section">
+					<div class="label section-label">Settings</div>
+					<div class="d-field" data-for="st : d_settings"><span class="d-l">{{st.l}}</span><span class="d-v">{{st.v}}</span></div>
+					<div class="d-empty" data-if="d_settings.size == 0"><span>{{d_settings_empty}}</span></div>
+				</div>
+			</div>
+		</div>
+	</div>
 </div>
 </body>
 </rml>
