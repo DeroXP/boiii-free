@@ -1,0 +1,49 @@
+{
+  "comment": "Machine-readable form of docs/FENCED.md, re-derived on upstream beta f8f7b735 (2026-11-04). Partial fences are anchored by function name; the lint hashes each function's normalized tokens. Paths that FENCED.md marks partial but whose blocks have no stable name are fenced whole here, the stricter choice.",
+  "base": "f8f7b7353addb4e3f3c0ac4a9d162bb5615b3b56",
+  "files": [
+    "src/client/component/arxan.cpp",
+    "src/client/component/integrity.hpp",
+    "src/common/utils/hardware_breakpoint.*",
+    "src/client/component/dump.cpp",
+    "src/client/component/steam_proxy.*",
+    "src/client/steam/**",
+    "src/client/component/auth.cpp",
+    "src/client/game/symbols/live/steam/**",
+    "src/client/game/demonware/servers/auth3_server.*",
+    "src/client/game/demonware/services/bdAnticheat.*",
+    "src/client/component/demonware.cpp",
+    "src/client/component/live.cpp",
+    "src/client/game/impl/cg/cg.cpp",
+    "src/client/component/gsc/func/**",
+    "src/client/component/dedicated/networking.cpp",
+    "src/client/game/structs/db/xfile.hpp",
+    "src/client/game/structs/db/load.hpp",
+    "src/client/game/structs/live/core.hpp",
+    "src/client/game/structs/dw/core.hpp",
+    "src/client/game/structs/sys.hpp",
+    "src/client/game/symbols/lua/cod/api.hpp",
+    "src/client/loader/**",
+    "deps/SteamworkSDK"
+  ],
+  "functions": {
+    "src/client/main.cpp": [
+      "patch_steam_import",
+      "patch_imports",
+      "restart_app_if_necessary_stub",
+      "handle_process_runner"
+    ],
+    "src/client/component/client_patches.cpp": [
+      "store_tac_protected_allocs",
+      "disable_dw_userfile_writes"
+    ],
+    "src/client/component/patches.cpp": ["patch_fs_functions"],
+    "src/client/component/dedicated/sound.cpp": ["enable_sound"],
+    "src/client/component/gsc/vm.cpp": [],
+    "src/common/utils/flags.cpp": []
+  },
+  "lines": {
+    "premake5.lua": ["dev-build", "no-check", "DEV_BUILD", "NO_CHECK"],
+    "src/common/utils/flags.cpp": ["dump"]
+  }
+}

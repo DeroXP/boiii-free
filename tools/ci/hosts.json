@@ -1,0 +1,24 @@
+{
+  "comment": "Hosts the code may name (docs/ENDPOINTS.md). A new host fails tools/ci/check_hosts.py until it is reviewed and listed here and in docs/ENDPOINTS.md.",
+  "hosts": [
+    "master.ezz.lol",
+    "m.ezz.lol",
+    "r2.ezz.lol",
+    "ezz.lol",
+    "forum.ezz.lol",
+    "dc.ezz.lol",
+    "archive.org",
+    "api.github.com",
+    "github.com",
+    "api.steampowered.com",
+    "store.steampowered.com",
+    "steamcommunity.com",
+    "steamcdn-a.akamaihd.net",
+    "steamserver.net",
+    "demonware.net",
+    "discord.gg",
+    "youtube.com",
+    "learn.microsoft.com",
+    "www.opensource.apple.com"
+  ]
+}

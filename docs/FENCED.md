@@ -30,7 +30,7 @@ working around the fence.
 | Entitlement, anti-cheat | `src/client/component/live.cpp`                                                                                           | the DLC entitlement helpers, `LiveAntiCheat_ConsoleDetailsReported`, `LiveSteam_NotVacBanned` stubs |
 | TAC workarounds         | `src/client/component/client_patches.cpp`                                                                                 | `store_tac_protected_allocs` and its helpers                                                        |
 | TAC workarounds         | `src/client/game/impl/cg/cg.cpp`                                                                                          | the static pools replacing TAC-protected allocations                                                |
-| TAC workarounds         | `src/client/component/gsc/gsc_funcs.cpp`, `src/client/component/gsc/vm.cpp`                                               | the re-implementations that avoid TAC-protected access                                              |
+| TAC workarounds         | `src/client/component/gsc/func/**` (was `gsc_funcs.cpp`), `src/client/component/gsc/vm.cpp`                               | the re-implementations that avoid TAC-protected access                                              |
 | Fastfile authentication | `src/client/component/dedicated/networking.cpp`                                                                           | the authload crash NOPs                                                                             |
 | Fastfile authentication | `src/client/game/structs/db/xfile.hpp`, `src/client/game/structs/db/load.hpp`                                             | signature, encryption and decrypt fields                                                            |
 
@@ -52,9 +52,14 @@ Content fence: upstream's README positioning ("removes Steam ownership
 verification", "No Steam ownership required") is not carried into Xerces docs,
 branding or launcher text.
 
-Enforcement (milestone M0): this list is re-derived on the chosen upstream base,
-then `tools/ci/check_fenced.py` checks whole-file fences by path and partial
-fences by a normalized-token hash of each fenced function or block, anchored by
-name. Any non-merge commit that changes a fenced block fails; commits that touch
-a file containing a fenced block need a "fence reviewed" note in the message.
-Merge commits from upstream are exempt.
+Enforcement: this list was re-derived on upstream `beta` f8f7b735 (2026-11-04;
+`gsc_funcs.cpp` had been split into `gsc/func/`, fenced whole until reviewed).
+`tools/ci/fences.json` is its machine-readable form, and
+`tools/ci/check_fenced.py` (in CI) checks whole-file fences by path and partial
+fences by a normalized-token hash of each fenced function, anchored by name; the
+Arxan workaround blocks are anchored by their functions
+(`disable_dw_userfile_writes`, `patch_fs_functions`, `enable_sound`). Partial
+fences without a stable name are fenced whole there. Any non-merge commit that
+changes a fenced block fails; commits that touch a file containing a fenced
+block need a "fence reviewed" note in the message or a line in
+`tools/ci/fence_reviews.txt`. Merge commits from upstream are exempt.

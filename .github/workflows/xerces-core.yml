@@ -11,7 +11,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
+          fetch-depth: 0
           lfs: false
+
+      - name: Fence lint
+        run: python tools/ci/check_fenced.py
+
+      - name: Host lint
+        run: python tools/ci/check_hosts.py
 
       - name: Setup LLVM
         uses: ZhongRuoyu/setup-llvm@v0
