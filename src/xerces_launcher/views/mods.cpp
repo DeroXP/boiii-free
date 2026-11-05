@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -211,6 +212,9 @@ public:
     model.Bind("d_caps_empty", &d_caps_empty_);
     model.Bind("d_settings", &d_settings_);
     model.Bind("d_settings_empty", &d_settings_empty_);
+    model.Bind("d_pools_on", &d_pools_on_);
+    model.Bind("d_pools", &d_pools_);
+    model.Bind("d_pools_note", &d_pools_note_);
 
     const auto arg_string = [](const Rml::VariantList &args, std::size_t i) {
       return i < args.size() ? args[i].Get<Rml::String>() : Rml::String();
@@ -957,6 +961,55 @@ private:
   }
 
   // ------------------------------------------------------------ details
+  // The asset pools the mod's pool file raises above the client's default
+  // (DESIGN.md 5.4 step 4, xerces_core/asset_limits.hpp). Mods only: the
+  // client never reads a map's file. The labels are upstream launcher's
+  // pool names. Everything here reaches the screen through data bindings,
+  // which set plain text, never RML.
+  void build_pools(const xc::installed_content &item) {
+    d_pools_on_ = true;
+    if (item.pool_file.empty()) {
+      d_pools_note_ =
+          owner_->tr("None: it has no assetlimits.txt or assetpools.txt.");
+      return;
+    }
+    d_pools_.push_back({owner_->tr("File"), item.pool_file});
+    const xc::pool_settings settings = svc().pool_settings();
+    const xc::mod_pool_limits limits{item.info.id, item.pool_limits};
+    // The pools it raises (its size, the default), then the fixed ones it
+    // asks for in vain; pools it asks for at or below the default are left
+    // out.
+    std::size_t raised = 0;
+    Rml::Vector<field_row> fixed;
+    for (const xc::pool_need &need :
+         xc::largest_limits(std::span(&limits, 1), settings)) {
+      const std::string label(xc::find_asset_pool(need.type)->label);
+      const std::string size = std::to_string(need.size) + " \xC2\xB7 ";
+      if (need.raises) {
+        ++raised;
+        d_pools_.push_back(
+            {label, size + (need.default_size
+                                ? owner_->tr("default") + " " +
+                                      std::to_string(*need.default_size)
+                                : owner_->tr("default: the game's own size"))});
+      } else if (need.fixed) {
+        fixed.push_back(
+            {label,
+             size + owner_->tr(
+                        "the game sizes this pool itself; it cannot grow")});
+      }
+    }
+    d_pools_.insert(d_pools_.end(), fixed.begin(), fixed.end());
+    if (raised == 0) {
+      d_pools_note_ =
+          owner_->tr("Its pool file raises none above the default.");
+    } else if (!settings.enabled) {
+      d_pools_note_ = owner_->tr("Larger asset pools are off (Settings, Binds "
+                                 "and asset pools), so the defaults are the "
+                                 "game's own sizes.");
+    }
+  }
+
   void build_details() {
     d_fields_.clear();
     d_notes_.clear();
@@ -965,6 +1018,9 @@ private:
     d_why_.clear();
     d_caps_.clear();
     d_settings_.clear();
+    d_pools_on_ = false;
+    d_pools_.clear();
+    d_pools_note_.clear();
     sel_fixes_.clear();
     d_has_ = !sel_.id.empty();
     d_ws_.clear();
@@ -1095,6 +1151,9 @@ private:
                  setting.default_json +
                  (setting.dvar.empty() ? "" : " \xC2\xB7 " + setting.dvar)});
       }
+      if (!is_map) {
+        build_pools(*item);
+      }
     }
     const std::string unknown =
         !item ? owner_->tr("Unknown: it is not installed.")
@@ -1209,6 +1268,7 @@ private:
            "d_toggle", "d_can_toggle", "d_fields", "d_notes", "d_fixes",
            "d_fix_text", "d_why", "d_caps", "d_caps_empty", "d_settings",
            "d_settings_empty", "sel"});
+    dirty({"d_pools_on", "d_pools", "d_pools_note"});
   }
 
   // -------------------------------------------------------------- edits
@@ -1884,6 +1944,9 @@ private:
   Rml::Vector<Rml::String> d_fix_text_, d_why_;
   Rml::Vector<field_row> d_caps_, d_settings_;
   Rml::String d_caps_empty_, d_settings_empty_;
+  bool d_pools_on_ = false;
+  Rml::Vector<field_row> d_pools_;
+  Rml::String d_pools_note_;
 };
 } // namespace
 

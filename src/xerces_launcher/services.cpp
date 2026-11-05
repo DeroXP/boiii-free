@@ -337,6 +337,10 @@ void services::refresh(bool detect) {
       xerces_core::scan_options options;
       options.cache = &cache;
       options.cancel = cancel.get();
+      // Where the client looks for each mod's asset pool file.
+      options.layout = from.name == "workshop"
+                           ? xerces_core::content_layout::workshop
+                           : xerces_core::content_layout::game_folder;
       options.progress = [this, &from](std::size_t index, std::size_t total,
                                        const std::string &name) {
         post_([this, index, total, name, label = from.name] {
@@ -417,6 +421,7 @@ xerces_core::plan_request services::request_for(const std::string &mode) const {
     request.settings = it->second.settings;
   }
   request.saved_positions = config_.saved_positions;
+  request.launcher_settings = launcher_settings_text();
   if (game_.steam_build) {
     request.game_build = std::to_string(*game_.steam_build);
   }
@@ -425,6 +430,19 @@ xerces_core::plan_request services::request_for(const std::string &mode) const {
           .value_or(xerces_core::version{});
   request.protocol_version = xerces_core::protocol_version;
   return request;
+}
+
+std::string services::launcher_settings_text() const {
+  if (!game_.dir) {
+    return {};
+  }
+  return read_text(*game_.dir / "boiii_players" / "user" /
+                   "launcher_settings.json")
+      .value_or("");
+}
+
+xerces_core::pool_settings services::pool_settings() const {
+  return xerces_core::parse_pool_settings(launcher_settings_text());
 }
 
 xerces_core::plan services::resolve(const std::string &mode,
