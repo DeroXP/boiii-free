@@ -20,6 +20,31 @@ data.
 Tick each item with the date and build. Never run a build whose updater is not
 disabled (commit 62e28935 disables it).
 
+### How a session runs
+
+The scripts in `tools\dev\session\` act on the running `boiii.exe` only:
+
+- `start-game.ps1 -GamePath <Black Ops III folder> [-Mod <id>] [-ExtraMods <id>,<id>] [-Safe]`
+  starts this repository's build from the game folder, with `XERCES_DATA_PATH`
+  pointing at `data\`. It puts flags before the `+set` commands, because the
+  engine joins everything after `+set <dvar>` up to the next `+` into the value.
+- `console-text.ps1` reads the console window; `console-command.ps1 <command>`
+  runs one console command and prints what it logged.
+- `send-key.ps1 <key>` posts one key to the game window. System dialogs never
+  receive it.
+- `capture.ps1 -Path <png>` saves a picture of the game window even when
+  something covers it; add `-Screen` while a video plays, which the window
+  capture shows as black.
+- `stop-game.ps1` quits through the console, the way closing it does.
+
+`tools\dev\re\dump-module.ps1` saves the game's in-memory image to
+`C:\Users\Ginld\XercesDev\dumps` (never into the repository, OneDrive or
+AppData), and `dump-xrefs.ps1` lists call sites in a dump and writes a copy that
+`llvm-objdump` disassembles by game address.
+
+A new `boiii_players` profile asks three first-run questions (a title screen,
+graphic content, brightness); Enter takes the defaults.
+
 ### Before the first game session (M0)
 
 - [x] (2026-11-04) The Visual Studio Build Tools have the "C++ ATL for latest
@@ -29,28 +54,89 @@ disabled (commit 62e28935 disables it).
       `build\bin\x64\Release\boiii.exe` with no errors. This is the first
       compile of the mod-stack merge (commit 6bc02cb4) and of the updater
       change.
-- [ ] The built exe does not contact upstream's update server on start (watch
-      the console; no "update" lines) and leaves `%LOCALAPPDATA%\boiii` alone.
+- [x] (2026-11-04, 815545d3) The built exe does not contact upstream's update
+      server on start: no update lines in the console logs of the three D3 runs.
+- [ ] What the build writes under `%LOCALAPPDATA%\boiii` moves to `<home>` in M3
+      (DESIGN.md 3.5). Seen on 2026-11-04: the folder did not exist before the
+      session. The first start created upstream's identity key pair in `user\`
+      (written by the fenced `auth.cpp`), `user\game_path.txt`, an empty
+      `minidumps\`, and `cache\mod_previews\` with 17 images. Eight of those
+      come from the items' own `previewimage` files; nine were fetched through
+      `api.steampowered.com` because those items ship no preview. Nothing was
+      deleted. The build also writes `%TEMP%\boiii-tlsdll.dll`.
 
-### Supervised game session (D3, with you at the PC)
+### Supervised game session (D3)
 
-Each item records what happened in the re-verification ledger (DESIGN.md 2.3).
+Run on 2026-11-04 by Claude on your PC while you were away, with your go-ahead.
+Build 815545d3 (the screen shows `v3.0.0-499-gdbd2148d`: the same code just
+before it was committed), Steam build 24784313 of `BlackOps3.exe` (checksum
+`0x6531394`; it reports CL 13892626, compiled 15 December 2025), windowed
+(`-safe`), offline only. Logs and pictures are in
+`C:\Users\Ginld\XercesDev\launch\`. The ledger (DESIGN.md 2.3) has the results
+too.
 
-- [ ] Vanilla launch reaches the main menu.
-- [ ] `+set fs_game <mod>` loads a single Workshop mod.
-- [ ] Stacking: Solo Easter Eggs with DS4C and a third mod through
-      `+set fs_extramods`; the zombies menu shows all three, and each mod's
-      feature works in a match.
+- [x] Vanilla launch reaches the main menu (title screen after about 50 s).
+- [x] `+set fs_game 1944930083` loads one Workshop mod (Solo Easter Eggs) from
+      `steamapps\workshop\content\311210\1944930083`: `ModLoad done` and its
+      `core_mod` zone. A flag after `+set` becomes part of the value: with a
+      trailing `-safe`, `fs_game` was `1944930083 -safe`, nothing loaded, and
+      the log still said `ModLoad done`.
+- [ ] Stacking: Solo Easter Eggs as `fs_game`, with DS4C Patched (3171632315)
+      and Classic Viewmodel FOV (3656779213) through `+set fs_extramods`. Done:
+  - All three load: `core_mod`, `stack_3171632315_core_mod`,
+    `stack_3656779213_core_mod`, and `stack_<id>_zm_mod` for the two mods that
+    have one.
+  - The main menu and the Zombies lobby show DS4C's art, so a stacked mod's
+    assets replace stock ones.
+  - An offline solo match on Shadows of Evil loaded and ran, and `disconnect`
+    returned to the lobby.
+  - `loadmod 3171632315` replaced the main mod while the stack was loaded.
+
+  Open: the loaded-mod label ("… and 2 more") was not checked, and each mod's
+  feature in play needs a person playing.
+
 - [ ] Joining a server whose mods you lack names the missing mods instead of
-      offering a download (the Xerces change in `check_valid_mod_stack`).
-- [ ] Two fastfiles that share a name (for example two mods with `core_mod.ff`):
-      note what PMem does.
-- [ ] `en_`-prefixed zones of a stacked mod load.
-- [ ] The queue-add falsification test (DESIGN.md 2.3, row 7).
-- [ ] Lua DLL load paths of the stacked mods.
-- [ ] Uncapped performance baseline (`com_maxfps 0`, vsync off, PresentMon).
-- [ ] A memory dump to `C:\Users\Ginld\XercesDev\dumps` for the first signatures
-      of mod-stack's targets.
+      offering a download (the Xerces change in `check_valid_mod_stack`). Not
+      run: it needs a server.
+- [x] Two fastfiles that share a name: all three mods ship `core_mod.ff`. With
+      mod-stack's aliases PMem raised no error in three cases: the load, a front
+      end → match → front end round trip, and a main-mod switch that unloaded
+      every stacked zone in reverse order.
+- [x] `en_`-prefixed zones of a stacked mod load (`en_stack_<id>_core_mod`,
+      `en_stack_<id>_zm_mod`).
+- [x] The queue-add falsification test (DESIGN.md 2.3, row 6), on this session's
+      dump. The candidate (new `0x1412D8830`) is `SL_GetStringOfSize`:
+      `SL_GetString` (`0x1412D7B40`) measures the string and tail-jumps to it,
+      and `SL_GetLowercaseString` (`0x1412D7A30`) calls it with a lower-cased
+      copy. It has 16 call sites (14 calls and 2 tail jumps, 4 of them at
+      `0x1422xxxxx`), the PoC's count. The "runner" `0x1412D7F30` is called with
+      `ecx=2` by `0x1412C7F40`, the routine that clears `animtree_loading`, and
+      by `0x1412C8000`, and with `ecx=1` by `0x1412C8040`. That is the engine's
+      string-table shutdown for one user. Neither is an autoexec registrar.
+- [x] Lua DLL load paths of the stacked mods: only DS4C ships a DLL
+      (`T7Overcharged.dll`, in the item's root folder). It was never loaded into
+      the process: not in the front end, not in the match, and not after DS4C
+      became the main mod.
+- [ ] Uncapped performance baseline (`com_maxfps 0`, vsync off, PresentMon). Not
+      run: PresentMon is not installed, and downloading it is yours to approve.
+- [x] A memory dump:
+      `C:\Users\Ginld\XercesDev\dumps\BlackOps3-20261104-223001.bin` (the 471 MB
+      in-memory image of `BlackOps3.exe`), with a `.json` sidecar and a `.pe`
+      copy for `llvm-objdump`. The first signatures for mod-stack's targets come
+      from it in M1.
+
+Also seen:
+
+- With any mod loaded, the log has 123 lines of
+  `Playlist error: line N: 'rule' found outside of any gametype or playlist block`.
+  There are none without a mod. This is not yet compared with upstream's build.
+- In the match, one script tried to set a cheat-protected dvar
+  (`cg_thirdPersonAngle`). The game refused it and nothing else happened.
+- Windows asked whether "BOIII" (publisher Ezz) may use public and private
+  networks. The prompt was left for you to answer; offline play does not need
+  it.
+- The client created `boiii_players` in the game folder. The official `players`
+  folder was not touched.
 
 ### Loader and manifest (M1)
 

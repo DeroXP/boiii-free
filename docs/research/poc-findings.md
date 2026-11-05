@@ -1262,15 +1262,32 @@ upstream tables.
   test on a current-exe dump: check whether SL_GetString (new 0x1412D7B40) or
   SL_GetLowercaseString (new 0x1412D7A30) calls the candidate 0x1412D8830, and
   whether 0x1412C8040 calls 0x1412D7F30 with ecx=1 or 2.
+  - Answered 2026-11-04 (D3 dump `BlackOps3-20261104-223001`, CL 13892626): yes.
+    SL_GetString computes the length and tail-jumps to 0x1412D8830 at
+    0x1412D7B5F with r8d = length + 1; SL_GetLowercaseString calls it at
+    0x1412D7B15 with a lower-cased stack copy. So 0x1412D8830 is
+    SL_GetStringOfSize. 0x1412C8040 calls 0x1412D7F30 with ecx=1 at 0x1412C8092,
+    after clearing `animtree_loading` and calling 0x1412C7F40; 0x1412C7F40 (at
+    0x1412C7FA9) and 0x1412C8000 (at 0x1412C8019) call it with ecx=2. That is
+    the SL shutdown for one user, as in the reading above.
 - Do EXPORT_AUTOEXEC functions in custom_scripts fire on the current upstream
   build? Upstream's compiler relies on it, but the PoC observed otherwise in
   April. This needs a live test.
 - Does the PMem LIFO fatal still occur with mod-stack's same-batch aliased
   loading, or with stacked mods whose zones share names across tiers?
+  - Not reproduced 2026-11-04 (D3): three mods that all ship `core_mod.ff` (two
+    also `zm_mod.ff`) loaded, survived a match round trip and a main-mod switch
+    that unloaded every stacked zone in reverse order.
 - Which Steam build or date was the legacy exe (CheckSum 0x888C368)? There is no
   build ID in the repo, and the PoC's memory dumps and logs no longer exist.
 - What are the 16 direct callers of the 'queue-add' function (4 of them in
   0x14233xxxx)? The list was never recorded.
+  - Answered 2026-11-04 (D3 dump, new addresses; byte scan for E8/E9 rel32, the
+    two SL entries confirmed by disassembly): calls at 0x1412D7B15, 0x1412D7BCA,
+    0x1412D7C3C, 0x1412D7CDA, 0x1412D842F, 0x1412D87C9, 0x1412DC037,
+    0x1412DDAF9, 0x141643ED5, 0x141643F39, 0x1422BD3A6, 0x1422BE0A7, 0x1422C88C6
+    and 0x1422DCBD5; tail jumps at 0x1412D7B5F and 0x1412D83CC. Four are at
+    0x1422xxxxx, matching the PoC's "4 of them".
 - Is upstream's legacy PMem_Free value (0x141439190) correct? It is far from the
   other legacy PMem functions (0x1420D0F40); the new-client value 0x1420C48B0
   sits next to them.

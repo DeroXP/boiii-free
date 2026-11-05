@@ -15,7 +15,10 @@ III. Self-hosted and offline play only.
   two commits (conflicts resolved in 6bc02cb4), with the design docs and
   `backend/` merged in (D1). Upstream's updater and the `-beta` self-download
   are disabled (62e28935). The whole client builds (2761e2d8, after the ATL
-  component was added on 2026-11-04) but has not been launched yet.
+  component was added on 2026-11-04). The supervised session (D3) ran on
+  2026-11-04 with 815545d3: vanilla, one Workshop mod and a three-mod stack
+  reach the menu, and the stack survives a match and a main-mod switch
+  (`docs/TESTING.md`).
 - The headless core builds and its tests pass: manifests, the planner, merges,
   conflict rules, hook chains, packs and share codes, logs, and the CLI's
   offline commands (`src/xerces_core`, `src/xerces_tests`, `src/xerces_cli`).
@@ -122,8 +125,14 @@ the `pgserver` wheel in a throwaway venv.
 - Additive multi-mod loading is `src/client/component/mod_stack.cpp`
   (`docs/mod-stack.md`), taken from `upstream/mod-stack`; Xerces maintains it
   from here (DESIGN.md 3.6). Its join prompt names missing mods instead of
-  downloading them. The proof of concept's "queue-add" function is most likely a
-  script-string routine. Do not call it.
+  downloading them. The proof of concept's "queue-add" function is
+  `SL_GetStringOfSize` (verified on a dump in D3). Do not call it.
+- Start the game for tests with `tools\dev\session\start-game.ps1` (after
+  asking): development builds need `XERCES_DATA_PATH` pointing at `data\`
+  because no updater installs it, and flags must come before `+set` commands or
+  they become part of the dvar's value. The other scripts there read the
+  console, run console commands, post keys to the game window only, capture it
+  and quit it (`docs/TESTING.md`).
 - Process tweaks (priority, timer resolution) and early console prints crashed
   the game during startup in earlier tests; apply them only after the main menu.
 - On this PC, files that processes started from the Claude app write under
