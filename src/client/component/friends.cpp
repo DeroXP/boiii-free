@@ -16,6 +16,8 @@
 #include <utils/io.hpp>
 #include <utils/string.hpp>
 
+#include <xerces/switches.hpp>
+
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -463,6 +465,11 @@ bool invite_to_game(const game::XUID steam_id) {
   if (!steam_id || steam_id == auth::get_guid())
     return false;
 
+  if constexpr (!xerces_switches::ezz_social) {
+    toast::warn("Invite", "Invites went through Ezz's servers and are off in "
+                          "this build. Share your address for direct connect.");
+    return false;
+  }
   if (!game::get_dvar_bool("friends_open").value_or(false) &&
       !nat::set_open_to_friends(true)) {
     toast::warn("Invite", "Only the host of your lobby can invite players.");
@@ -724,7 +731,10 @@ struct component final : client_component {
       if (!nat::set_open_to_friends(enabled)) {
         game::Dvar_SetFromStringByName("friends_open", "0", true);
         toast::warn("Friends",
-                    "Only the host of your lobby can open it to friends.");
+                    xerces_switches::ezz_social
+                        ? "Only the host of your lobby can open it to friends."
+                        : "Opening a party to friends went through Ezz's "
+                          "servers and is off in this build.");
       } else if (enabled) {
         toast::success("FRIENDS", "Friends can now join.");
       } else {

@@ -396,6 +396,16 @@ newoption({
   description = "Disable ownership checks.",
 })
 
+newoption({
+  trigger = "with-ezz-social",
+  description = "Xerces: build in upstream's friend presence, NAT rendezvous, friend invites and Ezz's Discord app (off by default, docs/DESIGN.md D14).",
+})
+
+newoption({
+  trigger = "with-upstream-downloaders",
+  description = "Xerces: build in upstream's anonymous Workshop and map downloaders (off by default, docs/DESIGN.md D15).",
+})
+
 newaction({
   trigger = "version",
   description = "Returns the version string for the current commit of the source code.",
@@ -750,6 +760,23 @@ files({
   "./src/client/**.cpp",
   "./src/client/resources/**.*",
 })
+
+-- Xerces build switches (src/client/xerces/switches.hpp, DESIGN.md D14 and D15).
+if _OPTIONS["with-ezz-social"] then
+  defines({ "XERCES_WITH_EZZ_SOCIAL" })
+end
+if _OPTIONS["with-upstream-downloaders"] then
+  defines({ "XERCES_WITH_UPSTREAM_DOWNLOADERS" })
+else
+  -- Left out, not edited; xerces/no_upstream_downloaders.cpp stands in.
+  removefiles({
+    "./src/client/component/workshop/steamcmd.cpp",
+    "./src/client/component/workshop/steam_cdn.cpp",
+    "./src/client/component/workshop/download.cpp",
+    "./src/client/component/fastdl.cpp",
+    "./src/client/launcher/launcher_workshop.cpp",
+  })
+end
 includedirs({
   "./deps",
   "./src/client",

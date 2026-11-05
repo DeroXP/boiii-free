@@ -142,6 +142,20 @@ Also seen:
 - The client created `boiii_players` in the game folder. The official `players`
   folder was not touched.
 
+### Build switches D14 and D15 (M0)
+
+- [x] (2026-11-04) The default build (both switches off) reaches the main menu.
+      `workshop_download` is an unknown command, and the exe no longer contains
+      SteamCMD's download command, the Steam CM host, the FastDL code or Ezz's
+      Discord application id.
+- [ ] Joining a server whose mod or map you lack names it and offers to open its
+      Workshop page in Steam, which then downloads it.
+- [ ] `friends_open` and inviting a friend say the feature is off in this build.
+      Seen: `friends_open` printed nothing to the console; the message is a
+      toast, not checked on screen.
+- [ ] With `premake5 ninja --with-ezz-social --with-upstream-downloaders` the
+      client builds and behaves as upstream (only when a comparison is needed).
+
 ### Loader and manifest (M1)
 
 - [ ] A plan with two Workshop mods loads through the CLI (`xerces_cli load`).

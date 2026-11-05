@@ -127,6 +127,12 @@ the `pgserver` wheel in a throwaway venv.
   from here (DESIGN.md 3.6). Its join prompt names missing mods instead of
   downloading them. The proof of concept's "queue-add" function is
   `SL_GetStringOfSize` (verified on a dump in D3). Do not call it.
+- D14 and D15 are build switches in `src/client/xerces/switches.hpp`, off by
+  default: no friend presence, rendezvous, invites or Ezz Discord app, and
+  upstream's downloaders are left out of the build
+  (`xerces/no_upstream_downloaders.cpp` stands in). Upstream behaviour comes
+  back with `premake5 ninja --with-ezz-social --with-upstream-downloaders`. Code
+  that talks to Ezz or downloads content goes behind these switches.
 - `compat/builds.json` lists the game builds the pre-flight check knows;
   `xerces_cli game check` (from the repo root) compares the installed
   `BlackOps3.exe` and Steam's build number with it. Add a build there when Steam

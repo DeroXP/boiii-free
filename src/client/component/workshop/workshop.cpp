@@ -34,6 +34,8 @@
 #include <frozen/unordered_map.h>
 #include <frozen/unordered_set.h>
 
+#include <xerces/switches.hpp>
+
 using namespace game::db;
 using XZoneName = xzone::XZoneName;
 
@@ -1138,8 +1140,31 @@ workshop_info get_steam_workshop_info(const std::string_view &workshop_id) {
   return info;
 }
 
+// Xerces (D15): Steam itself gets Workshop items. Its Workshop page opens in
+// the Steam client, where subscribing downloads the item.
+void open_workshop_page(const std::string &workshop_id) {
+  if (workshop_id.empty() || !utils::string::is_numeric(workshop_id)) {
+    return;
+  }
+  const std::string url = "steam://url/CommunityFilePage/" + workshop_id;
+  ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
 void offer_download(game::ZoneType zoneType, const std::string_view &name,
                     const std::string_view &workshop_id) {
+  if constexpr (!xerces_switches::upstream_downloaders) {
+    std::string message = std::format("{} '{}' is not installed.\n",
+                                      game::toString(zoneType), name);
+    if (name != workshop_id) {
+      message += std::format("Workshop ID: {}\n", workshop_id);
+    }
+    message += "\nSubscribe to it on the Steam Workshop; Steam downloads it. "
+               "Then join again.\n\nOpen its Workshop page in Steam now?";
+    download_overlay::show_confirmation(
+        std::format("{} not installed", game::toString(zoneType)), message,
+        [id = std::string(workshop_id)] { open_workshop_page(id); });
+    return;
+  }
   const workshop_info info = get_steam_workshop_info(workshop_id);
   std::string message =
       std::format("{}  '{}' was not found.\n", game::toString(zoneType), name);
@@ -1227,7 +1252,8 @@ void report_version_mismatch(game::ZoneType zoneType,
                              const uint64_t server_built) {
   const std::string what =
       std::format("{} '{}'", game::toString(zoneType), name);
-  if (local_built && server_built > local_built &&
+  if (xerces_switches::upstream_downloaders && local_built &&
+      server_built > local_built &&
       utils::string::is_numeric(workshop_id.data())) {
     const std::string id(workshop_id);
     download_overlay::show_confirmation(
@@ -1287,7 +1313,8 @@ bool check_valid_usermap_id(const std::string_view &mapname,
       return false;
     }
 
-    if (!base_uri.empty()) {
+    // Xerces (D15): no FastDL; a missing map is named instead.
+    if (xerces_switches::upstream_downloaders && !base_uri.empty()) {
       std::function<void()> failure_callback = {};
       if (utils::string::is_numeric(mapname.data())) {
         failure_callback = [mapname] {
@@ -1316,9 +1343,13 @@ bool check_valid_usermap_id(const std::string_view &mapname,
               game::ui::UI_OpenErrorPopupWithMessage(
                   game::LOCAL_CLIENT_0, game::errorCode::UI,
                   utils::string::va(
-                      "Missing usermap: %s\n\nThis server did not provide "
-                      "FastDL\n\nSubscribe on Steam "
-                      "Workshop, or ask the server to set sv_wwwBaseURL.",
+                      xerces_switches::upstream_downloaders
+                          ? "Missing usermap: %s\n\nThis server did not "
+                            "provide FastDL\n\nSubscribe on Steam "
+                            "Workshop, or ask the server to set sv_wwwBaseURL."
+                          : "Missing usermap: %s\n\nSubscribe to it on the "
+                            "Steam Workshop, or ask the server owner where to "
+                            "get it, then join again.",
                       name_copy.c_str()));
             },
             scheduler::main);
@@ -1344,8 +1375,12 @@ void offer_mod_from_workshop(const std::string &mod,
           game::ui::UI_OpenErrorPopupWithMessage(
               game::LOCAL_CLIENT_0, game::errorCode::UI,
               utils::string::va(
-                  "Could not download mod %s: workshop ID is not provided by "
-                  "server and does not have FastDL setup",
+                  xerces_switches::upstream_downloaders
+                      ? "Could not download mod %s: workshop ID is not "
+                        "provided by server and does not have FastDL setup"
+                      : "This server uses mod %s, which you don't have, and "
+                        "does not say which Workshop item it is. Ask the "
+                        "server owner where to get it.",
                   mod.c_str()));
         },
         scheduler::main);
@@ -1361,7 +1396,8 @@ bool check_valid_mod_id(const std::string_view &mod,
     if (!is_busy_downloading()) {
       const std::string mod_copy(mod);
       const std::string id_copy(workshop_id);
-      if (base_uri.empty()) {
+      // Xerces (D15): no FastDL; a missing mod is named instead.
+      if (base_uri.empty() || !xerces_switches::upstream_downloaders) {
         if (!has_mod(mod)) {
           offer_mod_from_workshop(mod_copy, id_copy);
           return false;
@@ -1586,23 +1622,25 @@ public:
         printf("[ Workshop ] workshop_timeout: %d\n",
                workshop_timeout.get_int());
       });
-      command::add("workshop_download", [](const command::params &params) {
-        if (params.size() < 2) {
-          printf("[ Workshop ] Usage: workshop_download <id> [Map|Mod]\n");
-          return;
-        }
-        const std::string id = params.get(1);
-        if (!id.empty()) {
+      // Xerces (D15): only with upstream's downloaders built in.
+      if (xerces_switches::upstream_downloaders)
+        command::add("workshop_download", [](const command::params &params) {
+          if (params.size() < 2) {
+            printf("[ Workshop ] Usage: workshop_download <id> [Map|Mod]\n");
+            return;
+          }
+          const std::string id = params.get(1);
+          if (!id.empty()) {
 
-          game::ZoneType zoneType =
-              params.size() >= 3 &&
-                      utils::string::to_lower(params.get(2)).find("mod") !=
-                          std::string::npos
-                  ? game::ZoneType::MOD
-                  : game::ZoneType::USERMAP;
-          start_download(id, zoneType);
-        }
-      });
+            game::ZoneType zoneType =
+                params.size() >= 3 &&
+                        utils::string::to_lower(params.get(2)).find("mod") !=
+                            std::string::npos
+                    ? game::ZoneType::MOD
+                    : game::ZoneType::USERMAP;
+            start_download(id, zoneType);
+          }
+        });
       command::add("loadmod", [](const command::params &params) {
         if (params.size() > 0) {
           std::string mod = params.get(1);

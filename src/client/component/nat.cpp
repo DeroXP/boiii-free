@@ -22,6 +22,8 @@
 #include <utils/hook.hpp>
 #include <utils/string.hpp>
 
+#include <xerces/switches.hpp>
+
 #include <random>
 #include <sstream>
 
@@ -179,6 +181,11 @@ std::string local_endpoint() {
 }
 
 void send_rendezvous(const std::string &command, const std::string &token) {
+  // Xerces (D14): every rendezvous, presence and friend-code message to Ezz's
+  // masters goes through here; Xerces builds send none of them.
+  if constexpr (!xerces_switches::ezz_social) {
+    return;
+  }
   const std::vector<game::net::netadr_t> &masters =
       server_list::get_master_servers();
   if (masters.empty())
@@ -1047,6 +1054,9 @@ bool is_rendezvous(const game::net::netadr_t &sender) {
 }
 
 void send_invite(const uint64_t steam_id, const std::string &sender_name) {
+  if constexpr (!xerces_switches::ezz_social) {
+    return; // Xerces (D14): invites went through Ezz's masters
+  }
   const game::XUID friend_code = auth::get_guid();
   if (!friend_code || !steam_id)
     return;
@@ -1057,6 +1067,9 @@ void send_invite(const uint64_t steam_id, const std::string &sender_name) {
 }
 
 bool set_open_to_friends(const bool enabled) {
+  // Xerces (D14): friends found an open party through Ezz's masters.
+  if (enabled && !xerces_switches::ezz_social)
+    return false;
   if (enabled && !can_host())
     return false;
   set_open(enabled);
@@ -1071,7 +1084,9 @@ void refresh_friends(const std::vector<game::XUID> &steam_ids,
     if (steam_id)
       pending.insert(steam_id);
   }
-  if (pending.empty()) {
+  // Xerces (D14): presence came from Ezz's masters, so every friend is
+  // reported offline right away instead of after a two-second wait.
+  if (pending.empty() || !xerces_switches::ezz_social) {
     scheduler::once(
         [done = std::move(callback)]() mutable {
           if (done)

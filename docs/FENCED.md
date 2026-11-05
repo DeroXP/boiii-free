@@ -46,7 +46,9 @@ see DESIGN.md D15): upstream's Workshop and map downloaders, meaning
 `workshop/steamcmd.*`, `workshop/steam_cdn.*`, the download queue in
 `workshop/download.*`, `launcher/launcher_workshop.*`, `fastdl.*` (v1), and the
 join-time prompts (`check_valid_mod_id`, `check_valid_usermap_id`,
-`check_valid_mod_stack`) that call them.
+`check_valid_mod_stack`) that call them. Xerces builds leave the downloader
+files out (premake option `--with-upstream-downloaders`, off by default) and the
+join-time prompts name what is missing instead.
 
 Content fence: upstream's README positioning ("removes Steam ownership
 verification", "No Steam ownership required") is not carried into Xerces docs,

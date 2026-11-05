@@ -11,6 +11,8 @@
 
 #include <discord_rpc.h>
 
+#include <xerces/switches.hpp>
+
 #include <ctime>
 #include <unordered_map>
 
@@ -421,6 +423,13 @@ class component final : public generic_component {
 
 public:
   void post_load() override {
+    // Xerces (D14): this is Ezz's Discord application; a Xerces application
+    // replaces it in M5 (DESIGN.md 10.8). The Lua library stays registered so
+    // UI scripts that call it keep working; without Discord_Initialize the
+    // presence updates it queues are never sent.
+    if constexpr (!xerces_switches::ezz_social) {
+      return;
+    }
     if (game::is_client()) {
       start_time = time(nullptr);
 
@@ -438,7 +447,11 @@ public:
   }
   void post_unpack() override { lua::register_lua_libs(); }
 
-  void pre_destroy() override { Discord_Shutdown(); }
+  void pre_destroy() override {
+    if constexpr (xerces_switches::ezz_social) {
+      Discord_Shutdown();
+    }
+  }
 };
 } // namespace discord
 
