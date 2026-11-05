@@ -9,6 +9,9 @@
 
 #include <shellapi.h>
 
+#include <game/game.hpp>
+
+#include <xerces_core/json.hpp>
 #include <xerces_core/launch.hpp>
 
 namespace xerces_runtime {
@@ -126,5 +129,113 @@ std::string flag_value(std::string_view flag) {
   }
   LocalFree(argv);
   return xerces_core::flag_value(args, flag).value_or("");
+}
+
+// ----------------------------------------------------------- the journal
+namespace {
+// Plain values only: pre_destroy can run again during static destruction.
+std::mutex journal_mutex;
+bool journal_decided = false; // the first call looked at XERCES_LAUNCH_ID
+bool journal_owned = false;
+xerces_core::launch_phase journal_current =
+    xerces_core::launch_phase::launching;
+
+std::filesystem::path journal_path() {
+  return home() / "logs" / "journal.json";
+}
+
+// With journal_mutex held. Runs once, at the first journal call, which is
+// the signature lookup in the first post_unpack that needs it.
+void decide_journal() {
+  if (journal_decided) {
+    return;
+  }
+  journal_decided = true;
+  const auto id = env(L"XERCES_LAUNCH_ID");
+  if (!id) {
+    return; // not started by the launcher, or restarted from a crash
+  }
+  // The id is spent now: the crash dialog's "Restart game" starts a copy of
+  // this process with its environment, and that copy must not take over the
+  // record of this launch.
+  SetEnvironmentVariableW(L"XERCES_LAUNCH_ID", nullptr);
+  if (!game::is_client() || !game::is_new_client()) {
+    return; // only the client role walks through the phases
+  }
+  auto journal = xerces_core::parse_journal(read_file(journal_path()));
+  if (!xerces_core::journal_claimable(journal, utf8(*id))) {
+    log_warn("loader.journal.skipped",
+             "The journal is not this launch's; leaving it alone");
+    return;
+  }
+  // An empty id tells the launcher the game took over: from here on an exit
+  // code of 0 alone does not mean a clean exit.
+  journal->launch_id.clear();
+  journal->updated = xerces_core::json_log::now_utc();
+  journal_owned =
+      write_file(journal_path(), xerces_core::journal_to_json(*journal));
+}
+
+// With journal_mutex held.
+void write_phase(xerces_core::launch_phase phase) {
+  decide_journal();
+  if (!journal_owned || phase == journal_current) {
+    return;
+  }
+  auto journal = xerces_core::parse_journal(read_file(journal_path()));
+  if (!journal || journal->phase == xerces_core::launch_phase::clean_exit ||
+      !journal->launch_id.empty()) {
+    // Closed already, or the launcher recorded a newer launch: leave it.
+    journal_owned = false;
+    return;
+  }
+  journal_current = phase;
+  journal->phase = phase;
+  journal->updated = xerces_core::json_log::now_utc();
+  write_file(journal_path(), xerces_core::journal_to_json(*journal));
+  log_info(
+      "loader.phase", xerces_core::to_string(phase),
+      "{\"phase\":" + xerces_core::json::quote(xerces_core::to_string(phase)) +
+          ",\"plan_id\":" + xerces_core::json::quote(journal->plan_id) + "}");
+}
+} // namespace
+
+bool journal_active() {
+  std::lock_guard lock(journal_mutex);
+  decide_journal();
+  return journal_owned;
+}
+
+xerces_core::launch_phase journal_phase() {
+  std::lock_guard lock(journal_mutex);
+  return journal_current;
+}
+
+void set_journal_phase(xerces_core::launch_phase phase) {
+  std::lock_guard lock(journal_mutex);
+  write_phase(phase);
+}
+
+journal_step::journal_step(xerces_core::launch_phase phase,
+                           xerces_core::launch_phase after)
+    : after_(after) {
+  std::lock_guard lock(journal_mutex);
+  decide_journal();
+  if (journal_owned &&
+      journal_current == xerces_core::launch_phase::launching) {
+    entered_ = true;
+    write_phase(phase);
+  }
+}
+
+journal_step::~journal_step() {
+  if (entered_) {
+    set_journal_phase(after_);
+  }
+}
+
+journal_step journal_symbols_step() {
+  return journal_step(xerces_core::launch_phase::symbols,
+                      xerces_core::launch_phase::launching);
 }
 } // namespace xerces_runtime

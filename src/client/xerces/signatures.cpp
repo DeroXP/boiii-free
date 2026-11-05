@@ -132,6 +132,7 @@ void write_report(const state &s, const std::string &registry,
 }
 
 state resolve() {
+  const auto symbols_step = xerces_runtime::journal_symbols_step();
   state s;
   std::string registry_path;
   bool from_cache = false;

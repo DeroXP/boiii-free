@@ -43,7 +43,7 @@
 
 		<div class="pack">
 			<div class="label">{{pack_label}}</div>
-			<div class="pack-title">{{pack}}</div>
+			<div class="pack-title" data-class-long="pack_long">{{pack}}</div>
 			<div class="pack-meta">{{meta}}</div>
 		</div>
 

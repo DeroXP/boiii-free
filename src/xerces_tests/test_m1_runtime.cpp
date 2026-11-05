@@ -2,6 +2,7 @@
 
 #include "harness.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <map>
 #include <set>
@@ -243,6 +244,113 @@ TEST_CASE("safe mode: a crash with mods turns the next launch safe") {
   CHECK(!decide_safe_mode(journal).safe_mode);
   CHECK(!decide_safe_mode(std::nullopt).safe_mode);
   CHECK(!parse_journal(R"({"phase":"nonsense"})").has_value());
+}
+
+TEST_CASE("journal: mode and launch id round trip; older journals parse") {
+  launch_journal journal;
+  journal.plan_id = "sha256:abc";
+  journal.stack = {"a.mod"};
+  journal.phase = launch_phase::in_game;
+  journal.started = "2026-11-05T01:02:03.456Z";
+  journal.mode = "mp";
+  journal.launch_id = new_launch_id();
+  const std::string text = journal_to_json(journal);
+  const auto again = parse_journal(text);
+  REQUIRE(again.has_value());
+  CHECK_EQ(again->mode, std::string("mp"));
+  CHECK_EQ(again->launch_id, journal.launch_id);
+  CHECK_EQ(journal_to_json(*again), text); // canonical: same bytes again
+
+  // Written before mode and launch_id existed.
+  const auto old = parse_journal(
+      R"({"schema":1,"plan_id":"sha256:abc","stack":["a.mod"],"phase":"in_game",)"
+      R"("started":"2026-11-01T00:00:00.000Z","updated":"","safe_mode":false})");
+  REQUIRE(old.has_value());
+  CHECK(old->mode.empty());
+  CHECK(old->launch_id.empty());
+  CHECK(old->phase == launch_phase::in_game);
+  const safe_mode_decision crash = decide_safe_mode(old);
+  CHECK(crash.safe_mode);
+  CHECK(crash.crashed_mode.empty());
+  CHECK_EQ(crash.crashed_started, std::string("2026-11-01T00:00:00.000Z"));
+
+  const safe_mode_decision with_mode = decide_safe_mode(journal);
+  CHECK_EQ(with_mode.crashed_mode, std::string("mp"));
+  CHECK_EQ(with_mode.crashed_started, journal.started);
+}
+
+TEST_CASE("journal: launch ids are fresh hex") {
+  const std::string a = new_launch_id();
+  const std::string b = new_launch_id();
+  CHECK_EQ(a.size(), 32u);
+  CHECK(std::ranges::all_of(a, [](char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+  }));
+  CHECK(a != b);
+}
+
+TEST_CASE("journal: only the launch the launcher recorded takes it over") {
+  launch_journal journal;
+  journal.stack = {"a.mod", "b.mod"};
+  journal.launch_id = "0123456789abcdef0123456789abcdef";
+  CHECK(journal_claimable(journal, journal.launch_id));
+  CHECK(!journal_claimable(journal, "fedcba9876543210fedcba9876543210"));
+  CHECK(!journal_claimable(journal, "")); // no XERCES_LAUNCH_ID
+  CHECK(!journal_claimable(std::nullopt, journal.launch_id));
+  for (const launch_phase phase :
+       {launch_phase::symbols, launch_phase::frontend, launch_phase::in_game,
+        launch_phase::clean_exit}) {
+    launch_journal later = journal;
+    later.phase = phase;
+    CHECK(!journal_claimable(later, journal.launch_id));
+  }
+  launch_journal claimed = journal; // the game clears the id on take-over
+  claimed.launch_id.clear();
+  CHECK(!journal_claimable(claimed, journal.launch_id));
+  CHECK(!journal_claimable(claimed, ""));
+}
+
+TEST_CASE("journal: exit code 0 is clean only before the game took over") {
+  launch_journal journal;
+  journal.stack = {"a.mod"};
+  journal.launch_id = new_launch_id();
+  // Quit before Xerces' code ran: nothing else will ever say so.
+  CHECK(exit_counts_as_clean(journal, 0));
+  CHECK(!exit_counts_as_clean(journal, 0xC0000005u));
+
+  // Taken over: the journal decides, whatever the exit code.
+  journal.launch_id.clear();
+  CHECK(!exit_counts_as_clean(journal, 0)); // fatal error during engine start
+  journal.phase = launch_phase::in_game;
+  CHECK(!exit_counts_as_clean(journal, 0));
+  journal.phase = launch_phase::clean_exit;
+  CHECK(!journal_crashed(journal));
+  journal.phase = launch_phase::frontend;
+  CHECK(journal_crashed(journal));
+  CHECK(journal_crashed(std::nullopt));
+}
+
+TEST_CASE("journal: Restart game after a crash keeps the crash") {
+  // The launcher records the launch and passes the id.
+  launch_journal journal;
+  journal.plan_id = "sha256:abc";
+  journal.stack = {"a.mod", "b.mod"};
+  journal.mode = "zm";
+  journal.launch_id = new_launch_id();
+  const std::string passed = journal.launch_id;
+
+  // The game takes it over and crashes in a match.
+  REQUIRE(journal_claimable(journal, passed));
+  journal.launch_id.clear();
+  journal.phase = launch_phase::in_game;
+
+  // "Restart game": the copy inherits the environment but not the id, which
+  // the first game removed; restart_game ends the old process with code 0.
+  CHECK(!journal_claimable(journal, ""));
+  CHECK(!exit_counts_as_clean(journal, 0));
+  const safe_mode_decision next = decide_safe_mode(journal);
+  CHECK(next.safe_mode);
+  CHECK(next.crashed_in == launch_phase::in_game);
 }
 
 TEST_CASE("safe mode: finding the culprit halves the stack") {

@@ -8,10 +8,11 @@
 //   This checks the dvars the engine ended up with against the plan and logs
 //   loader.plan.applied (or loader.plan.mismatch) with the plan id.
 // - The journal: <home>\logs\journal.json, written "launching" by the
-//   launcher, moves through symbols, frontend, in_game and clean_exit here.
-//   A launch that never reaches clean_exit crashed, and the launcher offers
-//   safe mode next time. Only a game the launcher started (XERCES_HOME set)
-//   touches the journal.
+//   launcher, moves through symbols (the signature lookup, signatures.cpp),
+//   launching again while the engine starts, frontend, in_game and
+//   clean_exit. A launch that never reaches clean_exit crashed, and the
+//   launcher offers safe mode next time. Only the launch the launcher
+//   recorded touches the journal (the launch id, runtime.hpp).
 
 #include <component/scheduler.hpp>
 #include <game/game.hpp>
@@ -27,38 +28,8 @@
 
 namespace xerces_loader {
 namespace {
-std::mutex journal_mutex;
-xerces_core::launch_phase current_phase = xerces_core::launch_phase::launching;
-bool journal_active = false;
-
-std::filesystem::path journal_path() {
-  return xerces_runtime::home() / "logs" / "journal.json";
-}
-
-void set_phase(xerces_core::launch_phase phase) {
-  std::lock_guard lock(journal_mutex);
-  if (!journal_active || phase == current_phase) {
-    return;
-  }
-  auto journal =
-      xerces_core::parse_journal(xerces_runtime::read_file(journal_path()));
-  if (!journal || journal->phase == xerces_core::launch_phase::clean_exit) {
-    // Not the launch the launcher recorded (or already closed): leave it.
-    journal_active = false;
-    return;
-  }
-  current_phase = phase;
-  journal->phase = phase;
-  journal->updated = xerces_core::json_log::now_utc();
-  xerces_runtime::write_file(journal_path(),
-                             xerces_core::journal_to_json(*journal));
-  xerces_runtime::log_info("loader.phase", xerces_core::to_string(phase),
-                           "{\"phase\":" +
-                               xerces_core::json::quote(
-                                   xerces_core::to_string(phase)) +
-                               ",\"plan_id\":" +
-                               xerces_core::json::quote(journal->plan_id) + "}");
-}
+using xerces_core::launch_phase;
+using xerces_runtime::set_journal_phase;
 
 // The plan file the launcher wrote for this launch, by its id (hex only, so
 // the id can never leave the plans folder).
@@ -113,22 +84,24 @@ public:
     if (!game::is_client() || !game::is_new_client()) {
       return;
     }
-    journal_active = xerces_runtime::started_by_launcher();
-    // Resolving the signatures is the "symbols" step (DESIGN.md 3.3).
+    // The signature lookup (the journal's "symbols" step) has usually run
+    // already, in mod_stack's post_unpack; this makes sure it has.
     xerces_signatures::feature_enabled("multi_mod");
-    set_phase(xerces_core::launch_phase::symbols);
+    const bool journal = xerces_runtime::journal_active();
 
     const std::string plan_id = xerces_runtime::flag_value("-xerces-plan");
     xerces_runtime::log_info(
-        "loader.start", plan_id.empty() ? "no plan (vanilla or safe mode)" : plan_id,
+        "loader.start",
+        plan_id.empty() ? "no plan (vanilla or safe mode)" : plan_id,
         std::string("{\"started_by_launcher\":") +
-            (journal_active ? "true" : "false") + "}");
+            (xerces_runtime::started_by_launcher() ? "true" : "false") +
+            ",\"journal\":" + (journal ? "true" : "false") + "}");
 
     // The first frame of the main loop: the engine has parsed the command line
     // (fs_game, fs_extramods) and the front end is starting.
     scheduler::once(
         [plan_id] {
-          set_phase(xerces_core::launch_phase::frontend);
+          set_journal_phase(launch_phase::frontend);
           if (!plan_id.empty()) {
             verify_plan(plan_id);
           }
@@ -138,15 +111,15 @@ public:
     // In a match or back in the menus, checked once a second.
     scheduler::loop(
         [] {
-          if (!journal_active) {
+          if (!xerces_runtime::journal_active()) {
             return;
           }
           const bool in_game = game::com::Com_IsInGame() &&
                                !game::com::Com_IsRunningUILevel();
           if (in_game) {
-            set_phase(xerces_core::launch_phase::in_game);
-          } else if (current_phase == xerces_core::launch_phase::in_game) {
-            set_phase(xerces_core::launch_phase::frontend);
+            set_journal_phase(launch_phase::in_game);
+          } else if (xerces_runtime::journal_phase() == launch_phase::in_game) {
+            set_journal_phase(launch_phase::frontend);
           }
         },
         scheduler::main, 1s);
@@ -154,7 +127,7 @@ public:
 
   void pre_destroy() override {
     if (game::is_client() && game::is_new_client()) {
-      set_phase(xerces_core::launch_phase::clean_exit);
+      set_journal_phase(launch_phase::clean_exit);
     }
   }
 };

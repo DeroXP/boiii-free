@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -160,8 +161,9 @@ public:
 
   // ----------------------------------------------------------------- launch
   // modded false: vanilla. mods_off: safe mode (journal says the last modded
-  // launch crashed). Writes the plan file and the journal, then starts the
-  // client from the game folder.
+  // launch crashed). Writes the plan file and the journal (with the mode and
+  // a fresh launch id, passed in XERCES_LAUNCH_ID), then starts the client
+  // from the game folder; if Windows refuses, the old journal is put back.
   // connect: join a self-hosted server ("+connect host:port", Servers).
   // mods: launch these instead of the profile's list.
   launch_outcome launch(const std::string &mode, bool modded, bool mods_off,
@@ -173,9 +175,12 @@ public:
                                 const std::optional<std::string> &connect = {},
                                 const std::vector<std::string> *mods = nullptr) const;
   bool dry_launch() const { return dry_launch_; }
-  // The game process started by the last launch is still running.
+  // The game process started by the last launch is still running, or any
+  // game announces itself in <home>\run (one this launcher did not start).
   bool game_running() const;
-  // Notices the game exiting (call once per frame); bumps journal_rev.
+  // Notices the game exiting (call once per frame): the one this launcher
+  // started, or one only seen in <home>\run. Bumps journal_rev and settles
+  // a culprit test once its game is gone.
   void poll();
   std::uint64_t journal_rev() const { return journal_rev_; }
 
@@ -215,6 +220,8 @@ private:
   void save_culprit();
   // Records the result of a culprit test launch that has ended.
   void settle_culprit_test(bool crashed);
+  // poll() without a process handle: watches <home>\run.
+  void watch_run_folder();
   game_state detect_now(const std::optional<std::string> &saved_dir) const;
   void apply_detection(game_state next);
 
@@ -241,6 +248,8 @@ private:
   std::uint64_t signatures_rev_ = 1;
   std::uint64_t journal_rev_ = 1;
   void *game_process_ = nullptr; // HANDLE of the last launched client
+  std::chrono::steady_clock::time_point last_run_check_{};
+  bool game_was_live_ = false; // a game was in <home>\run at the last check
   std::optional<xerces_core::culprit_progress> culprit_;
   std::uint64_t culprit_rev_ = 1;
 };

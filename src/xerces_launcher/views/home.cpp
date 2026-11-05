@@ -7,6 +7,7 @@
 #include <cstdio>
 
 #include <xerces_core/compat.hpp>
+#include <xerces_core/json.hpp>
 
 #include "../app.hpp"
 #include "../log.hpp"
@@ -54,6 +55,7 @@ public:
     model.Bind("mode", &mode_);
     model.Bind("pack_label", &pack_label_);
     model.Bind("pack", &pack_);
+    model.Bind("pack_long", &pack_long_);
     model.Bind("meta", &meta_);
     model.Bind("sub", &sub_);
     model.Bind("rows", &rows_);
@@ -143,8 +145,21 @@ private:
     // ------------------------------------------------------------ the plan
     const xerces_core::plan plan = svc.resolve(mode_);
     const auto &catalog = svc.catalog();
-    pack_label_ = owner_->tr("Profile");
-    pack_ = owner_->tr(mode_name(mode_));
+    // A pack applied to this mode (8.3) names the load order until the
+    // player edits it by hand, which clears pack_name.
+    const auto profile = config.profiles.find(mode_);
+    const std::string pack_name =
+        profile != config.profiles.end() ? profile->second.pack_name : "";
+    if (!pack_name.empty()) {
+      pack_label_ = owner_->tr("Active pack");
+      pack_ = pack_name;
+    } else {
+      pack_label_ = owner_->tr("Profile");
+      pack_ = owner_->tr(mode_name(mode_));
+    }
+    // Pack names run to 80 characters; the title's display size fits a
+    // mode name, so a long name gets a smaller one.
+    pack_long_ = xerces_core::json::length(pack_) > 16;
     rows_.clear();
     const std::size_t shown = std::min<std::size_t>(plan.stack.size(), 6);
     for (std::size_t i = 0; i < shown; ++i) {
@@ -251,7 +266,13 @@ private:
       catalog_detail_ = catalog.scanned ? text : "";
     }
     const xerces_core::safe_mode_decision decision = svc.safe_mode();
-    safe_ = decision.safe_mode && !safe_dismissed_;
+    // A crash is told apart from the next one by its plan and start time:
+    // the box stays away for the crash the player dismissed, and comes back
+    // when a newer launch crashes (5.6: after any crash).
+    crash_ = decision.safe_mode
+                 ? decision.crashed_plan_id + "\n" + decision.crashed_started
+                 : "";
+    safe_ = decision.safe_mode && crash_ != dismissed_crash_;
     safe_text_ = decision.message;
     safe_value_ = decision.safe_mode ? owner_->tr("Suggested")
                                      : owner_->tr("Off");
@@ -320,7 +341,8 @@ private:
     }
   }
 
-  void launch(bool modded, bool mods_off) {
+  // True when the game started (or a dry launch was logged).
+  bool launch(bool modded, bool mods_off) {
     const launch_outcome outcome =
         owner_->svc().launch(owner_->mode(), modded, mods_off);
     if (outcome.started || outcome.dry_run) {
@@ -328,9 +350,18 @@ private:
       if (outcome.started && owner_->svc().config().close_on_launch) {
         owner_->win().request_close();
       }
-      return;
+      return true;
     }
     owner_->notify(outcome.message, true);
+    return false;
+  }
+
+  void dismiss_crash(const std::string &crash) {
+    dismissed_crash_ = crash;
+    if (crash == crash_) {
+      safe_ = false;
+      handle_.DirtyVariable("safe");
+    }
   }
 
   void act(const std::string &action) {
@@ -375,12 +406,13 @@ private:
     } else if (action == "launch safe") {
       launch(true, true);
     } else if (action == "retry mods") {
-      safe_dismissed_ = true;
-      launch(true, false);
+      // A launch Windows refused leaves the crash, and its box, in place.
+      const std::string crash = crash_;
+      if (launch(true, false)) {
+        dismiss_crash(crash);
+      }
     } else if (action == "dismiss safe") {
-      safe_dismissed_ = true;
-      safe_ = false;
-      handle_.DirtyVariable("safe");
+      dismiss_crash(crash_);
     } else if (action == "dry-run") {
       const launch_outcome preview =
           owner_->svc().preview_launch(owner_->mode(), true, false);
@@ -431,10 +463,13 @@ private:
   app *owner_ = nullptr;
   Rml::DataModelHandle handle_;
   std::uint64_t seen_[7] = {};
-  bool safe_dismissed_ = false;
+  // The crash safe_mode() reports now and the one the player answered with
+  // Retry or Dismiss: plan id and start time, empty for none.
+  std::string crash_, dismissed_crash_;
 
   Rml::String mode_ = "zm";
   Rml::String pack_label_, pack_, meta_, sub_, more_, empty_text_;
+  bool pack_long_ = false;
   Rml::Vector<load_row> rows_;
   Rml::Vector<stat_cell> stats_;
   bool can_launch_ = false;
