@@ -38,6 +38,15 @@ void report_updater_error(const char *message) {
 } // namespace
 
 void update(bool force) {
+  // Xerces: upstream's updater replaces this build with upstream's boiii.exe
+  // and deletes files under %LOCALAPPDATA%\boiii it does not know, and the
+  // forced first-run update ignores -noupdate (docs/DESIGN.md 2.2). It never
+  // runs in Xerces builds; Xerces' own update client replaces it (D16).
+  static_cast<void>(force);
+  constexpr bool upstream_updater_enabled = false;
+  if (!upstream_updater_enabled) {
+    return;
+  }
   if (force ||
       (!utils::flags::has_flag("noupdate") &&
        (utils::flags::has_flag("update") || utils::flags::has_flag("beta") ||

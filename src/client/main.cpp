@@ -925,7 +925,10 @@ std::wstring quote_process_argument(const std::wstring_view argument) {
 }
 
 bool launch_beta_server_if_needed() {
-  if (utils::flags::has_flag("beta")) {
+  // Xerces: -beta downloaded boiii-beta.exe from upstream's server and ran it
+  // without verification (docs/DESIGN.md D9). Xerces never does that.
+  constexpr bool upstream_beta_download_enabled = false;
+  if (upstream_beta_download_enabled && utils::flags::has_flag("beta")) {
     const utils::nt::library self =
         utils::nt::library::get_by_address(launch_beta_server_if_needed);
     const std::filesystem::path target =
