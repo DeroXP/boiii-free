@@ -1,12 +1,11 @@
 #include "first_run_import.hpp"
 
 #include <algorithm>
-#include <charconv>
-#include <cwctype>
 #include <fstream>
 #include <iterator>
 
 #include "json.hpp"
+#include "launch.hpp"
 
 namespace xerces_core {
 namespace fs = std::filesystem;
@@ -19,28 +18,6 @@ constexpr std::uintmax_t max_file_size = 1024 * 1024;
 std::string utf8(const fs::path &path) {
   const auto text = path.u8string();
   return {reinterpret_cast<const char *>(text.data()), text.size()};
-}
-
-std::wstring folded(const fs::path &path) {
-  std::wstring text = path.lexically_normal().generic_wstring();
-  while (text.size() > 1 && text.back() == L'/') {
-    text.pop_back();
-  }
-  std::ranges::transform(text, text.begin(), [](wchar_t c) {
-    return static_cast<wchar_t>(std::towlower(c));
-  });
-  return text;
-}
-
-// a == b or a inside b, comparing the way Windows does (case-insensitive).
-bool within(const fs::path &a, const fs::path &b) {
-  const std::wstring inner = folded(a);
-  const std::wstring outer = folded(b);
-  if (outer.empty() || inner.size() < outer.size() ||
-      inner.compare(0, outer.size(), outer) != 0) {
-    return false;
-  }
-  return inner.size() == outer.size() || inner[outer.size()] == L'/';
 }
 
 std::string lower(std::string_view text) {
@@ -71,14 +48,34 @@ bool contains_address(const std::vector<std::string> &list,
       list, [&](const std::string &item) { return lower(item) == key; });
 }
 
+// True (with a warning) when path is, or may be, in the identity folder.
+bool refused(const fs::path &path, const std::optional<fs::path> &appdata,
+             diagnostics &diags) {
+  if (!appdata) {
+    return false;
+  }
+  switch (check_boiii_identity_path(path, *appdata)) {
+  case boiii_identity_check::outside:
+    return false;
+  case boiii_identity_check::inside:
+    diags.warning("first_run.import.identity", utf8(path),
+                  "Skipped: this is inside BOIII's identity key folder.");
+    return true;
+  case boiii_identity_check::unknown:
+    diags.warning("first_run.import.unchecked", utf8(path),
+                  "Skipped: Xerces could not make sure this is outside "
+                  "BOIII's identity key folder.");
+    return true;
+  }
+  return true;
+}
+
 // Reads one small file, unless it is in the identity folder. Missing files
 // are not an error; everything else that stops the read is a warning.
 std::optional<std::string> read_small(const fs::path &file,
                                       const std::optional<fs::path> &appdata,
                                       diagnostics &diags) {
-  if (appdata && is_boiii_identity_path(file, *appdata)) {
-    diags.warning("first_run.import.identity", utf8(file),
-                  "Skipped: this is inside BOIII's identity key folder.");
+  if (refused(file, appdata, diags)) {
     return std::nullopt;
   }
   std::error_code ec;
@@ -107,33 +104,6 @@ std::optional<std::string> read_small(const fs::path &file,
                      std::istreambuf_iterator<char>());
 }
 } // namespace
-
-bool is_boiii_identity_path(const fs::path &path, const fs::path &boiii_appdata) {
-  if (boiii_appdata.empty()) {
-    return false;
-  }
-  const fs::path identity = boiii_appdata / "user";
-  std::error_code ec;
-  const fs::path absolute_path = fs::absolute(path, ec);
-  const fs::path absolute_identity = fs::absolute(identity, ec);
-  if (within(absolute_path, absolute_identity)) {
-    return true;
-  }
-  // A junction or link into the identity folder counts too: compare the
-  // resolved paths as well. The identity folder itself is not resolved (that
-  // would open it); its parent is, and "user" is appended.
-  const fs::path real_path = fs::weakly_canonical(absolute_path, ec);
-  if (ec) {
-    return false;
-  }
-  const fs::path real_identity =
-      fs::weakly_canonical(fs::absolute(boiii_appdata, ec), ec) / "user";
-  if (ec) {
-    return false;
-  }
-  return within(real_path, real_identity) ||
-         within(real_path, absolute_identity);
-}
 
 std::string sanitize_boiii_player_name(std::string_view name) {
   std::string out;
@@ -173,32 +143,19 @@ boiii_player_name_from_properties(std::string_view text) {
 }
 
 bool is_server_address(std::string_view address) {
+  // One rule for what a server address is: launch's. An address it would
+  // refuse could be saved here but never joined. Upstream always writes a
+  // port, so one is required ("[v6]" alone has its colons inside brackets).
   const std::size_t colon = address.rfind(':');
-  if (colon == std::string_view::npos || colon == 0 ||
-      colon + 1 >= address.size()) {
+  const std::size_t bracket = address.rfind(']');
+  if (colon == std::string_view::npos ||
+      (bracket != std::string_view::npos && colon < bracket)) {
     return false;
   }
-  const std::string_view host = address.substr(0, colon);
-  const std::string_view port_text = address.substr(colon + 1);
-  if (host.size() > 253 || port_text.size() > 5) {
-    return false;
-  }
-  for (const char c : host) {
-    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                    (c >= '0' && c <= '9') || c == '.' || c == '-';
-    if (!ok) {
-      return false;
-    }
-  }
-  if (host == "0.0.0.0") {
+  if (address.substr(0, colon) == "0.0.0.0") {
     return false; // what upstream writes for an address it could not parse
   }
-  unsigned port = 0;
-  const auto parsed = std::from_chars(
-      port_text.data(), port_text.data() + port_text.size(), port);
-  return parsed.ec == std::errc{} &&
-         parsed.ptr == port_text.data() + port_text.size() && port >= 1 &&
-         port <= 65535;
+  return valid_server_address(address);
 }
 
 std::vector<std::string> parse_boiii_server_list(std::string_view text,
@@ -247,10 +204,7 @@ boiii_import find_boiii_import(const std::optional<fs::path> &boiii_appdata,
   if (game_dir && !game_dir->empty()) {
     const fs::path players = *game_dir / "boiii_players";
     boiii_place place{"players", players, false};
-    if (boiii_appdata && is_boiii_identity_path(players, *boiii_appdata)) {
-      out.diags.warning("first_run.import.identity", utf8(players),
-                        "Skipped: this is inside BOIII's identity key folder.");
-    } else {
+    if (!refused(players, boiii_appdata, out.diags)) {
       place.exists = fs::is_directory(players, ec);
     }
     out.places.push_back(place);
@@ -300,12 +254,22 @@ std::size_t new_boiii_favorites(const launcher_config &config,
 }
 
 std::size_t new_boiii_recent_servers(const launcher_config &config,
-                                     const boiii_import &found) {
-  std::size_t count = 0;
+                                     const boiii_import &found,
+                                     std::size_t *no_room) {
+  std::size_t fresh = 0;
   for (const std::string &address : found.recent_servers) {
-    count += contains_address(config.recent_servers, address) ? 0 : 1;
+    fresh += contains_address(config.recent_servers, address) ? 0 : 1;
   }
-  return count;
+  // apply_boiii_import stops once the list is full, so only what fits counts
+  // as new; otherwise the screen would offer servers that never arrive.
+  const std::size_t room =
+      boiii_recent_limit -
+      std::min(config.recent_servers.size(), boiii_recent_limit);
+  const std::size_t fits = std::min(fresh, room);
+  if (no_room) {
+    *no_room = fresh - fits;
+  }
+  return fits;
 }
 
 boiii_import_result apply_boiii_import(launcher_config &config,

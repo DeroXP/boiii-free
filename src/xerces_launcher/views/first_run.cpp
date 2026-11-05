@@ -33,7 +33,8 @@ struct place_row {
 struct import_row {
   Rml::String key, title, value, detail;
   bool on = false;
-  bool done = false; // already in the Xerces config
+  bool done = false;      // nothing (more) of it can go into the Xerces config
+  Rml::String done_note;  // footer line when a done row is picked (C++ only)
 };
 
 std::string two_digits(std::size_t value) {
@@ -198,6 +199,7 @@ public:
                                  looking ? 1u : 0u};
     if (!std::equal(std::begin(key), std::end(key), std::begin(seen_))) {
       const bool game_changed = key[1] != seen_[1];
+      const bool was_found = game_found_;
       std::copy(std::begin(key), std::end(key), std::begin(seen_));
       if (game_changed && owner_->current() == id()) {
         // A new folder can bring a boiii_players with it.
@@ -205,9 +207,12 @@ public:
       }
       refresh();
       // Shown while detection was still running, focus started on "Choose
-      // folder"; once the game turns up, Next is the useful default.
-      if (game_changed && owner_->current() == id() && step_ == 1 &&
-          svc.game().dir && context_ && doc) {
+      // folder"; once the game turns up, Next is the useful default. Only
+      // when it turns up: a failed pick also bumps the game revision (with an
+      // error) while the old folder stays, and the player is on "Choose
+      // folder" to try again.
+      if (game_changed && !was_found && game_found_ &&
+          owner_->current() == id() && step_ == 1 && context_ && doc) {
         Rml::Element *focus = context_->GetFocusElement();
         Rml::Element *next = doc->GetElementById("fr-next");
         if (focus && focus->GetId() == "fr-choose" && next) {
@@ -316,8 +321,8 @@ private:
     } else if (action == "skip") {
       finish();
     } else if (action == "choose") {
-      const auto picked =
-          owner_->pick_folder(owner_->tr("Choose the Black Ops III folder"));
+      // pick_folder translates its title itself: pass the English key.
+      const auto picked = owner_->pick_folder("Choose the Black Ops III folder");
       if (!picked) {
         return;
       }
@@ -358,7 +363,8 @@ private:
   void toggle(const std::string &key) {
     for (const import_row &row : imports_) {
       if (row.key == key && row.done) {
-        owner_->notify(owner_->tr("Already in Xerces."));
+        owner_->notify(row.done_note.empty() ? owner_->tr("Already in Xerces.")
+                                             : row.done_note);
         return;
       }
     }
@@ -545,18 +551,29 @@ private:
       imports_.push_back(std::move(row));
     }
     if (!found_.recent_servers.empty()) {
+      // Only what fits in Xerces' recent list counts: the import stops there.
+      std::size_t no_room = 0;
       const std::size_t fresh =
-          xerces_core::new_boiii_recent_servers(config, found_);
+          xerces_core::new_boiii_recent_servers(config, found_, &no_room);
       import_row row;
       row.key = "recent";
       row.title = owner_->tr("Recently joined servers");
       row.value = std::to_string(found_.recent_servers.size());
       row.done = fresh == 0;
       row.on = choice_.recent_servers && !row.done;
-      row.detail = row.done ? owner_->tr("All already in Xerces")
-                            : relative(found_.recent_file);
-      if (!row.done && fresh != found_.recent_servers.size()) {
-        row.detail += " \xC2\xB7 " + std::to_string(fresh) + " " + owner_->tr("new");
+      if (row.done) {
+        row.detail = owner_->tr(no_room > 0 ? "Xerces' recent list is full"
+                                            : "All already in Xerces");
+        if (no_room > 0) {
+          row.done_note = owner_->tr("Xerces' recent list is full: there is "
+                                     "no room for more servers.");
+        }
+      } else {
+        row.detail = relative(found_.recent_file);
+        if (fresh != found_.recent_servers.size()) {
+          row.detail +=
+              " \xC2\xB7 " + std::to_string(fresh) + " " + owner_->tr("new");
+        }
       }
       imports_.push_back(std::move(row));
     }
@@ -582,7 +599,8 @@ private:
     }
     for (const auto &item : found_.diags.items()) {
       if (item.level == xerces_core::severity::warning) {
-        import_notes_.push_back(item.message + " " + item.path);
+        // The core's messages are fixed English sentences: translation keys.
+        import_notes_.push_back(owner_->tr(item.message) + " " + item.path);
       }
     }
 

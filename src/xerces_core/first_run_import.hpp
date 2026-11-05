@@ -9,7 +9,8 @@
 //
 // Nothing here writes, moves or deletes a BOIII file. %LOCALAPPDATA%\boiii\user
 // holds the player's identity key (read by the fenced auth code), so every
-// read refuses any path inside it, even through a link.
+// read refuses any path inside it, even through a link, and checking a path
+// never opens anything inside it either (first_run_identity.cpp).
 
 #include <cstddef>
 #include <filesystem>
@@ -60,8 +61,26 @@ boiii_import find_boiii_import(
     const std::optional<std::filesystem::path> &boiii_appdata,
     const std::optional<std::filesystem::path> &game_dir);
 
-// True when path is boiii_appdata\user or inside it (case-insensitive, also
-// after resolving links). Such paths are never read.
+// Where a path really leads, as far as the identity folder is concerned.
+enum class boiii_identity_check {
+  outside,
+  inside,  // boiii_appdata\user or inside it
+  unknown, // could not be checked without opening it: treated as inside
+};
+
+// Follows path one name at a time, the way Windows would (long and short
+// names, any case, junctions, symbolic links, subst drives, volume mount
+// points), without opening anything inside boiii_appdata\user: each name is
+// looked up in its parent folder's listing and each link is read as a link.
+// unknown when a step cannot be checked that way (a folder that cannot be
+// listed, a link that cannot be read or points somewhere Windows-internal,
+// a loop of links, a name Windows does not allow).
+boiii_identity_check
+check_boiii_identity_path(const std::filesystem::path &path,
+                          const std::filesystem::path &boiii_appdata);
+
+// True unless check_boiii_identity_path says outside. Such paths are never
+// read. An empty boiii_appdata means there is no identity folder: false.
 bool is_boiii_identity_path(const std::filesystem::path &path,
                             const std::filesystem::path &boiii_appdata);
 
@@ -79,6 +98,9 @@ std::optional<std::string> boiii_player_name_from_properties(std::string_view te
 std::vector<std::string> parse_boiii_server_list(std::string_view text,
                                                  std::size_t limit,
                                                  std::size_t *skipped = nullptr);
+// An address Xerces can later join: launch's valid_server_address (launch.hpp),
+// with the port required, and without 0.0.0.0 (what upstream writes for an
+// address it could not parse).
 bool is_server_address(std::string_view address);
 
 struct boiii_import_choice {
@@ -97,11 +119,14 @@ struct boiii_import_result {
 };
 
 // What applying would add to config: favourites and recent servers it does
-// not already have (addresses compared ignoring case).
+// not already have (addresses compared ignoring case). Recent servers stop at
+// boiii_recent_limit, as apply_boiii_import does; *no_room (when given)
+// receives how many more are new but do not fit.
 std::size_t new_boiii_favorites(const launcher_config &config,
                                 const boiii_import &found);
 std::size_t new_boiii_recent_servers(const launcher_config &config,
-                                     const boiii_import &found);
+                                     const boiii_import &found,
+                                     std::size_t *no_room = nullptr);
 
 // Copies the chosen values into config (the caller saves it). Favourites are
 // appended without duplicates; recent servers go after the ones Xerces

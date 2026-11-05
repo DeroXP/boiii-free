@@ -5,16 +5,62 @@
 
 #include "harness.hpp"
 
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include <xerces_core/first_run_import.hpp>
+#include <xerces_core/launch.hpp>
+
+#define NOMINMAX
+#include <Windows.h>
+#include <winioctl.h>
 
 using namespace xerces_core;
 namespace fs = std::filesystem;
 
 namespace {
+// mklink /J without a shell (junctions need no extra rights). A junction
+// stores the path Windows follows ("\??\C:\...", the substitute name) and one
+// shown to people (the print name); `shown` lets a test make them differ.
+bool make_junction(const fs::path &link, const fs::path &target,
+                   const fs::path &shown = {}) {
+  std::error_code ec;
+  fs::create_directories(link, ec);
+  const std::wstring substitute = L"\\??\\" + fs::absolute(target).native();
+  const std::wstring print = (shown.empty() ? fs::absolute(target) : shown).native();
+  const std::size_t names = (substitute.size() + 1 + print.size() + 1) * 2;
+  std::vector<unsigned char> data(16 + names, 0);
+  const auto put16 = [&](std::size_t at, std::size_t value) {
+    const auto word = std::uint16_t(value);
+    std::memcpy(data.data() + at, &word, sizeof(word));
+  };
+  const std::uint32_t tag = IO_REPARSE_TAG_MOUNT_POINT;
+  std::memcpy(data.data(), &tag, sizeof(tag));
+  put16(4, 8 + names);                        // data length after the header
+  put16(8, 0);                                // substitute name offset
+  put16(10, substitute.size() * 2);           // and length
+  put16(12, (substitute.size() + 1) * 2);     // print name offset
+  put16(14, print.size() * 2);                // and length
+  std::memcpy(data.data() + 16, substitute.data(), substitute.size() * 2);
+  std::memcpy(data.data() + 16 + (substitute.size() + 1) * 2, print.data(),
+              print.size() * 2);
+  const HANDLE dir = CreateFileW(
+      link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+      FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+  if (dir == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  DWORD bytes = 0;
+  const BOOL ok = DeviceIoControl(dir, FSCTL_SET_REPARSE_POINT, data.data(),
+                                  DWORD(data.size()), nullptr, 0, &bytes, nullptr);
+  CloseHandle(dir);
+  return ok != FALSE;
+}
+
 struct temp_dir {
   fs::path path;
   explicit temp_dir(const char *name)
@@ -127,6 +173,91 @@ TEST_CASE("first run: the identity folder is never read") {
   CHECK(!top.found_anything());
 }
 
+TEST_CASE("first run: links into the identity folder are seen from outside it") {
+  using enum boiii_identity_check;
+  temp_dir root("xerces_first_run_links");
+  const fs::path appdata = root.path / "boiii";
+  const fs::path identity = appdata / "user";
+  write(identity / "game" / "boiii_players" / "properties.json",
+        "{\"playerName\":\"Inside\"}");
+  write(appdata / "cache" / "x.bin", "cache");
+
+  // boiii_players is a junction into the identity folder: nothing is read.
+  const fs::path game = root.path / "game";
+  REQUIRE(make_junction(game / "boiii_players",
+                        identity / "game" / "boiii_players"));
+  CHECK((check_boiii_identity_path(game / "boiii_players" / "properties.json",
+                                   appdata) == inside));
+  const boiii_import through = find_boiii_import(appdata, game);
+  CHECK(!through.player_name.has_value());
+  CHECK(through.diags.has("first_run.import.identity"));
+  REQUIRE_EQ(through.places.size(), std::size_t(2));
+  CHECK(!through.places[1].exists);
+
+  // Into the identity folder where the target does not exist; through the
+  // app data folder and then "user"; and a junction whose shown name points
+  // somewhere harmless while Windows follows it into the identity folder.
+  REQUIRE(make_junction(root.path / "ghost", identity / "nothing"));
+  CHECK((check_boiii_identity_path(root.path / "ghost" / "x", appdata) == inside));
+  REQUIRE(make_junction(root.path / "up", appdata));
+  CHECK((check_boiii_identity_path(root.path / "up" / "USER" / "k", appdata) ==
+         inside));
+  CHECK((check_boiii_identity_path(root.path / "up" / "cache" / "x.bin",
+                                   appdata) == outside));
+  REQUIRE(make_junction(root.path / "liar", identity, root.path / "elsewhere"));
+  CHECK((check_boiii_identity_path(root.path / "liar" / "x", appdata) == inside));
+
+  // A junction elsewhere is followed and read through.
+  const fs::path other = root.path / "other";
+  write(root.path / "elsewhere" / "boiii_players" / "properties.json",
+        "{\"playerName\":\"Elsewhere\"}");
+  REQUIRE(make_junction(other / "boiii_players",
+                        root.path / "elsewhere" / "boiii_players"));
+  CHECK((check_boiii_identity_path(other / "boiii_players" / "properties.json",
+                                   appdata) == outside));
+  const boiii_import linked = find_boiii_import(appdata, other);
+  REQUIRE(linked.player_name.has_value());
+  CHECK_EQ(*linked.player_name, std::string("Elsewhere"));
+
+  // A loop of links, and names Windows does not allow, cannot be checked:
+  // they are not read either, with their own note.
+  REQUIRE(make_junction(root.path / "loop_a", root.path / "loop_b"));
+  REQUIRE(make_junction(root.path / "loop_b", root.path / "loop_a"));
+  CHECK((check_boiii_identity_path(root.path / "loop_a" / "x", appdata) ==
+         unknown));
+  CHECK(is_boiii_identity_path(root.path / "loop_a" / "x", appdata));
+  CHECK((check_boiii_identity_path(root.path / "ga*e" / "x", appdata) == unknown));
+  CHECK((check_boiii_identity_path(root.path / "game:s" / "x", appdata) ==
+         unknown));
+  const boiii_import looped = find_boiii_import(appdata, root.path / "loop_a");
+  CHECK(looped.diags.has("first_run.import.unchecked"));
+  CHECK(!looped.diags.has("first_run.import.identity"));
+
+  // Short (8.3) names reach the same folder; this needs them on the volume.
+  std::wstring buffer(32768, L'\0');
+  const DWORD length = GetShortPathNameW(root.path.c_str(), buffer.data(),
+                                         DWORD(buffer.size()));
+  const fs::path short_root(buffer.substr(0, length));
+  if (length > 0 && short_root.native() != root.path.native()) {
+    CHECK((check_boiii_identity_path(short_root / "boiii" / "user" / "k",
+                                     appdata) == inside));
+    CHECK((check_boiii_identity_path(short_root / "boiii" / "cache", appdata) ==
+           outside));
+  }
+
+  // Symbolic links need Developer Mode or elevation; checked when allowed.
+  std::error_code ec;
+  fs::create_directory_symlink(identity, root.path / "sym", ec);
+  if (!ec) {
+    CHECK((check_boiii_identity_path(root.path / "sym" / "x", appdata) == inside));
+  }
+  fs::create_directory_symlink("boiii\\user", root.path / "relsym", ec);
+  if (!ec) {
+    CHECK((check_boiii_identity_path(root.path / "relsym" / "x", appdata) ==
+           inside));
+  }
+}
+
 TEST_CASE("first run: BOIII files are only read") {
   temp_dir root("xerces_first_run_readonly");
   const fs::path game = root.path / "game";
@@ -171,6 +302,20 @@ TEST_CASE("first run: server addresses") {
   CHECK(!is_server_address("0.0.0.0:27017"));
   CHECK(!is_server_address("bad host:27017"));
   CHECK(!is_server_address("evil\"<b>:27017"));
+  // launch refuses these (a leading '-' or '.' is not a host), so the import
+  // does too: there is one rule for a server address.
+  CHECK(!is_server_address("-x:1"));
+  CHECK(!is_server_address(".x:1"));
+  CHECK(is_server_address("[::1]:27017"));
+  CHECK(!is_server_address("[::1]"));
+  CHECK(!is_server_address("::1:27017"));
+  for (const char *address :
+       {"192.168.1.20:27017", "play.example.org:1", "host-1:65535",
+        "[::1]:27017", "-x:1", ".x:1", "host:0", "host:"}) {
+    if (is_server_address(address)) {
+      CHECK(valid_server_address(address));
+    }
+  }
 
   std::size_t skipped = 0;
   const auto list = parse_boiii_server_list(
@@ -242,7 +387,22 @@ TEST_CASE("first run: applying the import to the config") {
   for (std::size_t i = 0; i < boiii_recent_limit; ++i) {
     full.recent_servers.push_back("10.0.0." + std::to_string(i) + ":1");
   }
+  // A full list has nothing new to offer: the screen must not show servers
+  // the import cannot add.
+  std::size_t no_room = 0;
+  CHECK_EQ(new_boiii_recent_servers(full, found, &no_room), std::size_t(0));
+  CHECK_EQ(no_room, std::size_t(2));
   CHECK_EQ(apply_boiii_import(full, found, boiii_import_choice{}).recent_servers,
            std::size_t(0));
   CHECK_EQ(full.recent_servers.size(), boiii_recent_limit);
+
+  // One place left: one is new, one does not fit, and after the import
+  // nothing is new.
+  full.recent_servers.pop_back();
+  CHECK_EQ(new_boiii_recent_servers(full, found, &no_room), std::size_t(1));
+  CHECK_EQ(no_room, std::size_t(1));
+  CHECK_EQ(apply_boiii_import(full, found, boiii_import_choice{}).recent_servers,
+           std::size_t(1));
+  CHECK_EQ(new_boiii_recent_servers(full, found, &no_room), std::size_t(0));
+  CHECK_EQ(no_room, std::size_t(1));
 }
