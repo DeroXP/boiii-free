@@ -64,8 +64,22 @@ bool is_beta() {
 }
 
 const std::filesystem::path &get_data_path() {
-  static const std::filesystem::path data_path =
-      get_appdata_path() / (is_beta() ? "beta_data" : "data");
+  static const std::filesystem::path data_path = []() -> std::filesystem::path {
+    // Xerces: development builds have no updater to install the data folder,
+    // so XERCES_DATA_PATH can point at the repository's data/ (docs/DESIGN.md
+    // 3.5). Nothing else under %LOCALAPPDATA%\boiii moves.
+    wchar_t *override_path = nullptr;
+    std::size_t length = 0;
+    if (_wdupenv_s(&override_path, &length, L"XERCES_DATA_PATH") == 0 &&
+        override_path != nullptr) {
+      std::filesystem::path result(override_path);
+      std::free(override_path);
+      if (!result.empty()) {
+        return result;
+      }
+    }
+    return get_appdata_path() / (is_beta() ? "beta_data" : "data");
+  }();
   return data_path;
 }
 
