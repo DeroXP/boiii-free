@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -26,16 +27,47 @@ struct launch_journal {
   std::string started; // UTC timestamps
   std::string updated;
   bool safe_mode = false; // this launch ran with mods off
+  // The game mode the launch used (zm, mp, cp), so a culprit search tests
+  // the crashed stack in the mode it crashed in. Empty in older journals.
+  std::string mode;
+  // The one-time id the launcher also hands the game in XERCES_LAUNCH_ID.
+  // The game clears it when it takes the journal over, so an id still here
+  // means the game never did (see journal_claimable and exit_counts_as_clean).
+  std::string launch_id;
 };
 
 std::string journal_to_json(const launch_journal &value);
+// Journals written before a field existed parse with that field empty.
 std::optional<launch_journal> parse_journal(std::string_view text);
+
+// A fresh launch id: 32 hex digits from the system's random source.
+std::string new_launch_id();
+
+// The game's side: a game started with XERCES_LAUNCH_ID = launch_id takes
+// the journal over only if it is the launch the launcher just recorded (same
+// id, still "launching"). A game restarted from the crash dialog has no id,
+// so it never overwrites the record of the launch that crashed.
+bool journal_claimable(const std::optional<launch_journal> &journal,
+                       std::string_view launch_id);
+
+// The launcher's side when the game it started has exited. Exit code 0
+// counts as a clean exit only when the game never took the journal over
+// (it quit before Xerces' code ran). Otherwise the journal decides: the
+// crash dialog's "Restart game" and fatal engine errors also end with
+// code 0, and a normal quit writes clean_exit itself.
+bool exit_counts_as_clean(const launch_journal &journal,
+                          std::uint32_t exit_code);
+
+// No journal, or one that does not end in clean_exit: the launch crashed.
+bool journal_crashed(const std::optional<launch_journal> &journal);
 
 struct safe_mode_decision {
   bool safe_mode = false;
   std::string crashed_plan_id;
   std::vector<std::string> crashed_stack;
   launch_phase crashed_in = launch_phase::launching;
+  std::string crashed_mode;    // empty when an older journal did not say
+  std::string crashed_started; // when the crashed launch started (UTC)
   std::string message;
 };
 

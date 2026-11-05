@@ -2,6 +2,9 @@
 
 #include "json.hpp"
 
+#include <cstdio>
+#include <random>
+
 namespace xerces_core {
 namespace {
 constexpr std::pair<launch_phase, const char *> phase_names[] = {
@@ -60,6 +63,8 @@ std::string journal_to_json(const launch_journal &value) {
   json::set(doc, "started", value.started, alloc);
   json::set(doc, "updated", value.updated, alloc);
   json::set(doc, "safe_mode", value.safe_mode, alloc);
+  json::set(doc, "mode", value.mode, alloc);
+  json::set(doc, "launch_id", value.launch_id, alloc);
   return json::canonical(doc);
 }
 
@@ -91,7 +96,38 @@ std::optional<launch_journal> parse_journal(std::string_view text) {
       safe != nullptr && safe->IsBool()) {
     out.safe_mode = safe->GetBool();
   }
+  out.mode = json::get_string(root, "mode").value_or("");
+  out.launch_id = json::get_string(root, "launch_id").value_or("");
   return out;
+}
+
+std::string new_launch_id() {
+  // It only has to differ from every other launch's id; the standard
+  // library's random_device reads the system's random source on Windows.
+  std::random_device source;
+  std::string out;
+  for (int i = 0; i < 4; ++i) {
+    char part[9];
+    std::snprintf(part, sizeof(part), "%08x", static_cast<unsigned>(source()));
+    out += part;
+  }
+  return out;
+}
+
+bool journal_claimable(const std::optional<launch_journal> &journal,
+                       std::string_view launch_id) {
+  return journal && !launch_id.empty() && journal->launch_id == launch_id &&
+         journal->phase == launch_phase::launching;
+}
+
+bool exit_counts_as_clean(const launch_journal &journal,
+                          std::uint32_t exit_code) {
+  return exit_code == 0 && journal.phase == launch_phase::launching &&
+         !journal.launch_id.empty();
+}
+
+bool journal_crashed(const std::optional<launch_journal> &journal) {
+  return !journal || journal->phase != launch_phase::clean_exit;
 }
 
 safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last) {
@@ -104,6 +140,8 @@ safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last) {
   out.crashed_plan_id = last->plan_id;
   out.crashed_stack = last->stack;
   out.crashed_in = last->phase;
+  out.crashed_mode = last->mode;
+  out.crashed_started = last->started;
   out.message = "The last launch with " + std::to_string(last->stack.size()) +
                 (last->stack.size() == 1 ? " mod" : " mods") + " crashed " +
                 describe(last->phase) +

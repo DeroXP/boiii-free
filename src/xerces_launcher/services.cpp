@@ -155,11 +155,10 @@ services::services(launcher_paths paths, poster post, bool dry_launch)
     culprit_ = xerces_core::parse_culprit_progress(*text);
   }
   // A test launch that ended while the launcher was closed: the journal
-  // says how it went.
-  if (culprit_ && !culprit_->testing.empty()) {
-    const auto journal = last_journal();
-    settle_culprit_test(!journal ||
-                        journal->phase != xerces_core::launch_phase::clean_exit);
+  // says how it went. One still running (the player reopened Xerces
+  // mid-test) is settled by poll() once it is gone.
+  if (culprit_ && !culprit_->testing.empty() && !game_running()) {
+    settle_culprit_test(xerces_core::journal_crashed(last_journal()));
   }
 }
 
@@ -548,6 +547,8 @@ launch_outcome services::launch(const std::string &mode, bool modded,
   journal.phase = xerces_core::launch_phase::launching;
   journal.started = journal.updated = now_utc();
   journal.safe_mode = mods_off;
+  journal.mode = mode;
+  journal.launch_id = xerces_core::new_launch_id();
   if (modded && !mods_off) {
     const xerces_core::plan resolved = resolve(mode, mods);
     const std::string id = xerces_core::plan_file_id(resolved.plan_id);
@@ -570,15 +571,23 @@ launch_outcome services::launch(const std::string &mode, bool modded,
              "{\"plan_id\":" + xerces_core::json::quote(out.plan_id) + "}");
     return out; // no journal: nothing ran that could crash
   }
+  // Kept so a launch Windows refuses can put it back (below).
+  const std::optional<std::string> previous_journal =
+      read_text(paths_.journal_file());
   write_text(paths_.journal_file(), xerces_core::journal_to_json(journal));
+  ++journal_rev_; // screens re-read it after this call, either way
 
   // The game role finds <home> and, in a development build, its data folder
-  // through the environment it inherits.
+  // through the environment it inherits, and the launch id that lets it take
+  // this journal over.
   SetEnvironmentVariableW(L"XERCES_HOME", paths_.home.wstring().c_str());
   if (paths_.dev_data) {
     SetEnvironmentVariableW(L"XERCES_DATA_PATH",
                             paths_.dev_data->wstring().c_str());
   }
+  const std::wstring launch_id(journal.launch_id.begin(),
+                               journal.launch_id.end()); // hex digits
+  SetEnvironmentVariableW(L"XERCES_LAUNCH_ID", launch_id.c_str());
   std::wstring command = L"\"" + paths_.client.wstring() + L"\" ";
   const fs::path args_path = from_utf8(out.command_line);
   command += args_path.wstring();
@@ -586,11 +595,24 @@ launch_outcome services::launch(const std::string &mode, bool modded,
   startup.cb = sizeof(startup);
   PROCESS_INFORMATION process{};
   const std::wstring cwd = game_.dir->wstring();
-  if (!CreateProcessW(paths_.client.wstring().c_str(), command.data(), nullptr,
-                      nullptr, FALSE, 0, nullptr, cwd.c_str(), &startup,
-                      &process)) {
+  const BOOL created = CreateProcessW(
+      paths_.client.wstring().c_str(), command.data(), nullptr, nullptr, FALSE,
+      0, nullptr, cwd.c_str(), &startup, &process);
+  const DWORD error = GetLastError();
+  // The id belongs to this one launch; nothing else this launcher opens
+  // (Steam, Explorer) may carry it.
+  SetEnvironmentVariableW(L"XERCES_LAUNCH_ID", nullptr);
+  if (!created) {
+    // Nothing ran, so nothing crashed: put the journal back as it was. Left
+    // as "launching" it would read as a crash next time, and it would have
+    // replaced the record of a real crash.
+    if (previous_journal) {
+      write_text(paths_.journal_file(), *previous_journal);
+    } else {
+      fs::remove(paths_.journal_file(), ec);
+    }
     out.message = "Windows could not start the game (error " +
-                  std::to_string(GetLastError()) + ").";
+                  std::to_string(error) + ").";
     out.diags.error("launch.start", "", out.message);
     log_error("launcher.launch.failed", out.message);
     return out;
@@ -611,35 +633,61 @@ launch_outcome services::launch(const std::string &mode, bool modded,
 }
 
 void services::poll() {
-  if (!game_process_ ||
-      WaitForSingleObject(static_cast<HANDLE>(game_process_), 0) != WAIT_OBJECT_0) {
+  if (!game_process_) {
+    watch_run_folder();
+    return;
+  }
+  if (WaitForSingleObject(static_cast<HANDLE>(game_process_), 0) !=
+      WAIT_OBJECT_0) {
     return;
   }
   DWORD code = 0;
   GetExitCodeProcess(static_cast<HANDLE>(game_process_), &code);
   CloseHandle(static_cast<HANDLE>(game_process_));
   game_process_ = nullptr;
-  // The client writes clean_exit from its shutdown path; a game that quit
-  // with exit code 0 by a path that skips it (ExitProcess) still quit
-  // normally. Any other code leaves the journal as the client left it, which
-  // the next start reads as a crash.
+  // The client writes every phase itself, clean_exit included, once it has
+  // taken the journal over. A game that exited with code 0 before it did
+  // (the journal still holds the launch id) quit normally. Any other way
+  // leaves the journal as the client left it: the crash dialog's "Restart
+  // game" also exits with code 0, and that is still a crash.
   if (auto journal = last_journal();
-      journal && code == 0 &&
-      journal->phase != xerces_core::launch_phase::clean_exit) {
+      journal && xerces_core::exit_counts_as_clean(*journal, code)) {
     journal->phase = xerces_core::launch_phase::clean_exit;
+    journal->launch_id.clear(); // spent
     journal->updated = now_utc();
     write_text(paths_.journal_file(), xerces_core::journal_to_json(*journal));
   }
   ++journal_rev_;
   if (culprit_ && !culprit_->testing.empty()) {
-    const auto journal = last_journal();
-    settle_culprit_test(code != 0 &&
-                        (!journal || journal->phase !=
-                                         xerces_core::launch_phase::clean_exit));
+    settle_culprit_test(xerces_core::journal_crashed(last_journal()));
   }
   log_info("launcher.game.exited", "exit code " + std::to_string(code),
            "{\"code\":" + std::to_string(code) + "}");
   reload_signatures();
+}
+
+void services::watch_run_folder() {
+  // A game this launcher did not start (started before Xerces was reopened,
+  // or restarted from the crash dialog) has no process handle here; it is
+  // seen through its entry in <home>\run, read at most once a second.
+  const auto now = std::chrono::steady_clock::now();
+  if (now - last_run_check_ < std::chrono::seconds(1)) {
+    return;
+  }
+  last_run_check_ = now;
+  const bool live = game_running();
+  if (game_was_live_ && !live) {
+    // It exited: its journal may now say it crashed, so Home and
+    // Diagnostics read it again.
+    ++journal_rev_;
+    log_info("launcher.game.gone", "a game this launcher did not start exited");
+    reload_signatures();
+  }
+  game_was_live_ = live;
+  // A culprit test that was still running when this launcher opened.
+  if (!live && culprit_ && !culprit_->testing.empty()) {
+    settle_culprit_test(xerces_core::journal_crashed(last_journal()));
+  }
 }
 
 // ------------------------------------------------------- journal, safe mode
@@ -697,7 +745,10 @@ bool services::start_culprit() {
     return false;
   }
   xerces_core::culprit_progress progress;
-  progress.mode = config_.mode;
+  // Test in the mode that crashed, whatever Home shows now; a journal from
+  // before the mode was recorded leaves only Home's mode to go on.
+  progress.mode =
+      decision.crashed_mode.empty() ? config_.mode : decision.crashed_mode;
   progress.crashed_stack = decision.crashed_stack;
   progress.search = xerces_core::culprit_search(decision.crashed_stack);
   culprit_ = std::move(progress);

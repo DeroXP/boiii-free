@@ -50,6 +50,14 @@
 	line-height: 74dp;
 	letter-spacing: -2.4dp;
 }
+/* An applied pack's name (up to 80 characters) instead of a mode name. */
+.pack-title.long
+{
+	font-size: 48dp;
+	line-height: 52dp;
+	letter-spacing: -1.2dp;
+	word-break: break-word;
+}
 .pack-meta { margin-top: 16dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
 
 .columns { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 40dp; margin-top: 40dp; }
