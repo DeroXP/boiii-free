@@ -625,6 +625,7 @@ void app::wire_shell(Rml::ElementDocument *doc) {
 }
 
 bool app::load_view(view &v, const view_info &info) {
+  const double started = ms_since_process_start();
   const fs::path path = services_->paths().data / "ui" / v.document();
   Rml::ElementDocument *doc = context_->LoadDocument(generic(path));
   if (!doc) {
@@ -638,10 +639,16 @@ bool app::load_view(view &v, const view_info &info) {
   }
   v.loaded(doc);
   applied_look_.clear(); // the new document needs the theme classes
+  char data[128];
+  std::snprintf(data, sizeof(data), "{\"view\":%s,\"ms\":%.1f}",
+                xerces_core::json::quote(info.id).c_str(),
+                ms_since_process_start() - started);
+  log_info("launcher.view.loaded", info.id, data);
   return true;
 }
 
 void app::show(const std::string &id) {
+  const double started = ms_since_process_start();
   entry *target = nullptr;
   for (auto &e : views_) {
     if (id == e.info.id) {
@@ -686,7 +693,12 @@ void app::show(const std::string &id) {
   }
   focus_lost_frames_ = 0;
   notice_dirty_ = true;
-  log_info("launcher.view.shown", id);
+  // From the call to here: the document's load when it was not loaded yet,
+  // the screen's first update and one layout.
+  char data[64];
+  std::snprintf(data, sizeof(data), "{\"ms\":%.1f}",
+                ms_since_process_start() - started);
+  log_info("launcher.view.shown", id, data);
 }
 
 bool app::focus_default(view &v) {
@@ -1407,6 +1419,7 @@ int app::run() {
     context_->Render();
     const bool capturing = window_.capture_pending();
     window_.present();
+    count_present(t, front);
     if (capturing && !window_.capture_pending()) {
       if (window_.last_capture_error().empty()) {
         log_info("launcher.check.captured", current_);
@@ -1423,8 +1436,61 @@ int app::run() {
     }
   }
 
+  log_activity(now());
   log_info("launcher.exit", "closed");
   shutdown();
   return 0;
+}
+
+void app::count_present(double t, bool front) {
+  if (t - game_checked_at_ >= 1.0 || game_checked_at_ < 0) {
+    game_checked_at_ = t;
+    game_seen_ = services_->game_running();
+  }
+  const activity_state state =
+      game_seen_ ? state_game
+      : IsIconic(static_cast<HWND>(window_.native_handle()))
+          ? state_minimized
+          : (front ? state_front : state_behind);
+  if (activity_since_ < 0) {
+    activity_since_ = last_frame_at_ = t;
+  }
+  ++frames_[state];
+  state_seconds_[state] += t - last_frame_at_;
+  last_frame_at_ = t;
+  if (t - activity_since_ >= 60.0) {
+    log_activity(t);
+  }
+}
+
+void app::log_activity(double t) {
+  if (activity_since_ < 0) {
+    return;
+  }
+  static constexpr const char *names[state_count] = {
+      "front", "behind", "minimized", "game_running"};
+  std::string data = "{";
+  char part[160];
+  std::snprintf(part, sizeof(part), "\"seconds\":%.1f", t - activity_since_);
+  data += part;
+  for (int state = 0; state < state_count; ++state) {
+    const double seconds = state_seconds_[state];
+    std::snprintf(part, sizeof(part),
+                  ",\"%s\":{\"frames\":%llu,\"seconds\":%.1f,"
+                  "\"per_minute\":%.0f}",
+                  names[state], static_cast<unsigned long long>(frames_[state]),
+                  seconds, seconds > 0 ? frames_[state] * 60.0 / seconds : 0.0);
+    data += part;
+  }
+  const services::resolve_timing resolves = services_->resolve_stats();
+  std::snprintf(part, sizeof(part),
+                ",\"resolve\":{\"count\":%zu,\"total_ms\":%.1f,"
+                "\"max_ms\":%.1f}}",
+                resolves.count, resolves.total_ms, resolves.max_ms);
+  data += part;
+  log_info("launcher.activity", "frames presented per window state", data);
+  frames_ = {};
+  state_seconds_ = {};
+  activity_since_ = last_frame_at_ = t;
 }
 } // namespace xerces_launcher

@@ -1,9 +1,11 @@
 #include "launcher_state.hpp"
 
+#include <algorithm>
 #include <chrono>
 
 #include "catalog.hpp"
 #include "detect.hpp"
+#include "file_hash.hpp"
 #include "json.hpp"
 #include "launcher_home.hpp"
 #include "manifest.hpp"
@@ -12,7 +14,8 @@ namespace xerces_core {
 namespace fs = std::filesystem;
 
 game_state detect_game_state(const std::optional<std::string> &saved_dir,
-                             const fs::path &compat_dir, bool preflight) {
+                             const fs::path &compat_dir, bool preflight,
+                             hash_cache *cache) {
   game_state next;
   next.searched = true;
   std::optional<fs::path> saved;
@@ -36,23 +39,30 @@ game_state detect_game_state(const std::optional<std::string> &saved_dir,
           steamapps / ("appmanifest_" + std::string(bo3_app_id) + ".acf"))) {
     next.steam_build = appmanifest_buildid(*acf);
   }
-  if (!preflight) {
-    return next;
-  }
-  std::string error;
-  next.exe = read_exe_facts(dir / std::string(bo3_exe), &error);
-  if (!next.exe) {
-    next.error = "BlackOps3.exe could not be read: " + error;
-  } else {
-    const auto registry_text = read_text_file(compat_dir / "builds.json");
-    const build_registry registry =
-        parse_build_registry(registry_text.value_or(""));
-    if (!registry_text || !registry.ok()) {
-      next.error = "compat/builds.json is missing or broken.";
-    }
-    next.preflight = preflight_check(*next.exe, next.steam_build, registry);
+  if (preflight) {
+    preflight_game_state(next, compat_dir, cache);
   }
   return next;
+}
+
+void preflight_game_state(game_state &game, const fs::path &compat_dir,
+                          hash_cache *cache) {
+  if (!game.dir) {
+    return;
+  }
+  std::string error;
+  game.exe = read_exe_facts(*game.dir / std::string(bo3_exe), &error, cache);
+  if (!game.exe) {
+    game.error = "BlackOps3.exe could not be read: " + error;
+    return;
+  }
+  const auto registry_text = read_text_file(compat_dir / "builds.json");
+  const build_registry registry =
+      parse_build_registry(registry_text.value_or(""));
+  if (!registry_text || !registry.ok()) {
+    game.error = "compat/builds.json is missing or broken.";
+  }
+  game.preflight = preflight_check(*game.exe, game.steam_build, registry);
 }
 
 const installed_content *catalog_state::find(std::string_view id) const {
@@ -74,9 +84,10 @@ std::string read_launcher_settings(const game_state &game) {
       .value_or("");
 }
 
-catalog_state scan_catalog(const game_state &game, const fs::path &cache_file,
+catalog_state scan_catalog(const game_state &game, hash_cache &cache,
                            const std::atomic<bool> *cancel,
-                           const catalog_progress &progress) {
+                           const catalog_progress &progress,
+                           unsigned hash_threads) {
   struct source {
     std::string name;
     fs::path dir;
@@ -89,8 +100,6 @@ catalog_state scan_catalog(const game_state &game, const fs::path &cache_file,
   }
   const auto started = std::chrono::steady_clock::now();
   catalog_state result;
-  hash_cache cache;
-  cache.load(cache_file);
   for (const source &from : sources) {
     std::error_code ec;
     if (!fs::is_directory(from.dir, ec)) {
@@ -102,6 +111,9 @@ catalog_state scan_catalog(const game_state &game, const fs::path &cache_file,
     // Where the client looks for each mod's asset pool file.
     options.layout = from.name == "workshop" ? content_layout::workshop
                                              : content_layout::game_folder;
+    options.hash_threads =
+        hash_threads != 0 ? hash_threads : default_hash_threads(from.dir);
+    result.hash_threads = std::max(result.hash_threads, options.hash_threads);
     if (progress) {
       options.progress = [&progress, &from](std::size_t index,
                                             std::size_t total,
@@ -121,17 +133,59 @@ catalog_state scan_catalog(const game_state &game, const fs::path &cache_file,
     if (scan.cancelled) {
       break;
     }
+    std::error_code absolute_ec;
+    const fs::path root = fs::absolute(from.dir, absolute_ec);
+    result.scanned_roots.push_back(absolute_ec ? from.dir : root);
   }
   const bool cancelled = cancel && cancel->load();
-  cache.save(cache_file, !cancelled);
-  result.cache_hits = cache.hits();
-  result.cache_misses = cache.misses();
-  result.bytes_hashed = cache.bytes_hashed();
+  const hash_cache::stats stats = cache.get_stats();
+  result.cache_hits = stats.hits;
+  result.cache_misses = stats.misses;
+  result.bytes_hashed = stats.bytes_hashed;
+  result.seed_hits = stats.seed_hits;
+  result.hash_seconds = stats.hash_seconds;
+  result.slowest_file = stats.slowest_file;
+  result.slowest_bytes = stats.slowest_bytes;
+  result.slowest_seconds = stats.slowest_seconds;
   result.seconds =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - started)
           .count();
   result.scanned = !cancelled;
+  if (cancelled) {
+    result.scanned_roots.clear();
+  }
   return result;
+}
+
+catalog_state scan_catalog(const game_state &game, const fs::path &cache_file,
+                           const std::atomic<bool> *cancel,
+                           const catalog_progress &progress) {
+  hash_cache cache;
+  open_hash_cache(cache, cache_file);
+  catalog_state result = scan_catalog(game, cache, cancel, progress);
+  save_hash_cache(cache, cache_file, result);
+  return result;
+}
+
+hash_cache_opened open_hash_cache(hash_cache &cache,
+                                  const fs::path &cache_file) {
+  hash_cache_opened opened;
+  cache.load(cache_file);
+  opened.version = cache.loaded_version();
+  opened.entries = cache.size();
+  opened.seed = hash_cache_seed_file(cache_file);
+  if (opened.seed && cache.load_seed(*opened.seed)) {
+    opened.seed_entries = cache.seed_size();
+  } else {
+    opened.seed.reset();
+  }
+  return opened;
+}
+
+bool save_hash_cache(const hash_cache &cache, const fs::path &cache_file,
+                     const catalog_state &scanned) {
+  // A cancelled scan has no scanned_roots: nothing is pruned.
+  return cache.save(cache_file, scanned.scanned_roots);
 }
 
 signature_state parse_signature_report(std::string_view text) {

@@ -1,5 +1,6 @@
 #include "sha256.hpp"
 
+#include <algorithm>
 #include <cstring>
 
 namespace xerces_core {
@@ -77,16 +78,27 @@ void sha256::block(const std::uint8_t *chunk) {
 void sha256::update(const void *data, std::size_t size) {
   const auto *bytes = static_cast<const std::uint8_t *>(data);
   length_ += size;
-  while (size > 0) {
+  // Whole blocks are hashed where they are; only the bytes that do not fill
+  // a block are copied into buffer_ until more arrive.
+  if (buffered_ > 0) {
     const std::size_t take = std::min(size, buffer_.size() - buffered_);
     std::memcpy(buffer_.data() + buffered_, bytes, take);
     buffered_ += take;
     bytes += take;
     size -= take;
-    if (buffered_ == buffer_.size()) {
-      block(buffer_.data());
-      buffered_ = 0;
+    if (buffered_ < buffer_.size()) {
+      return;
     }
+    block(buffer_.data());
+    buffered_ = 0;
+  }
+  for (; size >= buffer_.size(); size -= buffer_.size()) {
+    block(bytes);
+    bytes += buffer_.size();
+  }
+  if (size > 0) {
+    std::memcpy(buffer_.data(), bytes, size);
+    buffered_ = size;
   }
 }
 

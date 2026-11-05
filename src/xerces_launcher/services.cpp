@@ -43,6 +43,11 @@ std::optional<fs::path> env_path(const wchar_t *name) {
 }
 
 std::string now_utc() { return xerces_core::json_log::now_utc(); }
+
+// A mode for a log line; never the caller's text, which could hold quotes.
+const char *valid_mode_name(const std::string &mode) {
+  return mode == "zm" ? "zm" : mode == "mp" ? "mp" : mode == "cp" ? "cp" : "?";
+}
 } // namespace
 
 services::services(launcher_paths paths, poster post, bool dry_launch)
@@ -106,9 +111,11 @@ bool services::save_config() {
 }
 
 // --------------------------------------------------------------------- game
-game_state services::detect_now(
-    const std::optional<std::string> &saved_dir) const {
-  return xerces_core::detect_game_state(saved_dir, paths_.compat);
+game_state services::detect_now(const std::optional<std::string> &saved_dir,
+                                bool preflight,
+                                xerces_core::hash_cache *cache) const {
+  return xerces_core::detect_game_state(saved_dir, paths_.compat, preflight,
+                                        cache);
 }
 
 void services::apply_detection(game_state next) {
@@ -124,7 +131,9 @@ void services::apply_detection(game_state next) {
                "}");
 }
 
-void services::detect_game() { apply_detection(detect_now(config_.game_dir)); }
+void services::detect_game() {
+  apply_detection(detect_now(config_.game_dir, true, nullptr));
+}
 
 bool services::set_game_dir(const fs::path &dir) {
   std::error_code ec;
@@ -158,25 +167,55 @@ void services::refresh(bool detect) {
   ++catalog_rev_;
   scan_cancel_ = std::make_shared<std::atomic<bool>>(false);
 
-  const fs::path cache_file = paths_.cache / "hashes.txt";
+  const fs::path cache_file = paths_.hash_cache_file();
   auto cancel = scan_cancel_;
   std::optional<std::string> saved_dir = config_.game_dir;
   std::optional<game_state> known;
   if (!detect) {
     known = game_;
   }
+  // While a game runs, one file at a time: a rescan then never competes
+  // with it for the disk and several cores.
+  const unsigned hash_threads = game_running() ? 1 : 0;
   scan_thread_ = std::thread([this, cache_file, cancel, detect, saved_dir,
-                              known] {
-    // Detection hashes BlackOps3.exe (about 100 MB), so it runs here too.
-    game_state game = known ? *known : detect_now(saved_dir);
+                              known, hash_threads] {
+    using clock = std::chrono::steady_clock;
+    const auto ms_since = [](clock::time_point from) {
+      return std::chrono::duration<double, std::milli>(clock::now() - from)
+          .count();
+    };
+    const auto started = clock::now();
+    // One cache for the pre-flight's BlackOps3.exe and the catalog, saved
+    // once both are done.
+    xerces_core::hash_cache cache;
+    const xerces_core::hash_cache_opened opened =
+        xerces_core::open_hash_cache(cache, cache_file);
+    const double cache_load_ms = ms_since(started);
+    // Finding the game takes milliseconds; the pre-flight hashes
+    // BlackOps3.exe (about 100 MB when it is not cached), so it runs next to
+    // the scan, which needs only the folders, and its result goes to the
+    // screens as soon as it is there.
+    auto detect_started = clock::now();
+    game_state game = known ? *known : detect_now(saved_dir, false, nullptr);
+    const double detect_ms = ms_since(detect_started);
+    std::atomic<double> preflight_ms{0};
+    std::thread preflight;
     if (detect) {
-      post_([this, game] {
-        detecting_ = false;
-        apply_detection(game);
+      preflight = std::thread([this, game, &cache, &preflight_ms]() mutable {
+        const auto preflight_started = clock::now();
+        xerces_core::preflight_game_state(game, paths_.compat, &cache);
+        preflight_ms = std::chrono::duration<double, std::milli>(
+                           clock::now() - preflight_started)
+                           .count();
+        post_([this, game] {
+          detecting_ = false;
+          apply_detection(game);
+        });
       });
     }
+    const auto scan_started = clock::now();
     auto result = std::make_shared<catalog_state>(xerces_core::scan_catalog(
-        game, cache_file, cancel.get(),
+        game, cache, cancel.get(),
         [this](const std::string &source, std::size_t index, std::size_t total,
                const std::string &name) {
           post_([this, index, total, name, source] {
@@ -185,12 +224,75 @@ void services::refresh(bool detect) {
             catalog_.current = source + ": " + name;
             ++catalog_rev_;
           });
-        }));
+        },
+        hash_threads));
+    const double scan_ms = ms_since(scan_started);
+    if (preflight.joinable()) {
+      preflight.join();
+    }
+    const auto save_started = clock::now();
+    xerces_core::save_hash_cache(cache, cache_file, *result);
+    const double save_ms = ms_since(save_started);
+    char data[512];
+    std::snprintf(
+        data, sizeof(data),
+        "{\"detect\":%s,\"cache_load_ms\":%.1f,\"detect_ms\":%.1f,"
+        "\"preflight_ms\":%.1f,\"scan_ms\":%.1f,\"cache_save_ms\":%.1f,"
+        "\"total_ms\":%.1f,\"cache_version\":%d,\"cache_entries\":%zu,"
+        "\"seed_entries\":%zu}",
+        detect ? "true" : "false", cache_load_ms, detect_ms,
+        preflight_ms.load(), scan_ms, save_ms, ms_since(started),
+        opened.version, opened.entries, opened.seed_entries);
+    log_info("launcher.refresh.timing",
+             detect ? "detection, pre-flight and scan" : "scan", data);
+    if (opened.version == 1) {
+      log_info("launcher.catalog.cache_migrated",
+               "A version 1 hash cache was read and saved as version 2.");
+    }
+    if (opened.seed) {
+      log_info("launcher.catalog.cache_seed",
+               "Hashes the home's cache lacked were looked up in " +
+                   utf8(*opened.seed) + ".");
+    }
     post_([this, result] { finish_scan(result); });
   });
 }
 
+void services::log_scan(const catalog_state &scan) const {
+  // Throughput: per file is each file's bytes over its own read time (what
+  // one thread manages), overall is every byte hashed over the whole scan
+  // (several threads at once, plus the folders read from the cache).
+  const double mb = static_cast<double>(scan.bytes_hashed) / 1e6;
+  const double per_file_mb_s =
+      scan.hash_seconds > 0 ? mb / scan.hash_seconds : 0;
+  const double overall_mb_s = scan.seconds > 0 ? mb / scan.seconds : 0;
+  const double slowest_mb_s =
+      scan.slowest_seconds > 0
+          ? static_cast<double>(scan.slowest_bytes) / 1e6 / scan.slowest_seconds
+          : 0;
+  std::string data = "{\"items\":" + std::to_string(scan.items.size()) +
+                     ",\"scanned\":" + (scan.scanned ? "true" : "false");
+  char numbers[512];
+  std::snprintf(
+      numbers, sizeof(numbers),
+      ",\"seconds\":%.2f,\"cache_hits\":%zu,\"cache_misses\":%zu,"
+      "\"seed_hits\":%zu,\"bytes_hashed\":%llu,\"threads\":%u,"
+      "\"hash_seconds\":%.2f,\"per_file_mb_s\":%.0f,\"overall_mb_s\":%.0f,"
+      "\"slowest_mb\":%.1f,\"slowest_seconds\":%.2f,\"slowest_mb_s\":%.0f",
+      scan.seconds, scan.cache_hits, scan.cache_misses, scan.seed_hits,
+      static_cast<unsigned long long>(scan.bytes_hashed), scan.hash_threads,
+      scan.hash_seconds, per_file_mb_s, overall_mb_s,
+      static_cast<double>(scan.slowest_bytes) / 1e6, scan.slowest_seconds,
+      slowest_mb_s);
+  data += numbers;
+  data +=
+      ",\"slowest_file\":" + xerces_core::json::quote(scan.slowest_file) + "}";
+  log_info("launcher.catalog.scanned",
+           std::to_string(scan.items.size()) + " items", data);
+}
+
 void services::finish_scan(std::shared_ptr<catalog_state> result) {
+  log_scan(*result);
   const bool keep_old = !result->scanned && catalog_.scanned;
   if (!keep_old) {
     // Names come without colour codes (scan_catalog).
@@ -204,15 +306,6 @@ void services::finish_scan(std::shared_ptr<catalog_state> result) {
     refresh_again_ = refresh_detect_ = false;
     post_([this, detect] { refresh(detect); });
   }
-  char data[200];
-  std::snprintf(data, sizeof(data),
-                "{\"items\":%zu,\"seconds\":%.2f,\"cache_hits\":%zu,"
-                "\"cache_misses\":%zu,\"bytes_hashed\":%llu}",
-                catalog_.items.size(), catalog_.seconds, catalog_.cache_hits,
-                catalog_.cache_misses,
-                static_cast<unsigned long long>(catalog_.bytes_hashed));
-  log_info("launcher.catalog.scanned",
-           std::to_string(catalog_.items.size()) + " items", data);
 }
 
 void services::cancel_scan() {
@@ -237,9 +330,23 @@ xerces_core::pool_settings services::pool_settings() const {
 
 xerces_core::plan services::resolve(const std::string &mode,
                                    const std::vector<std::string> *mods) const {
-  return xerces_core::resolve_profile(catalog_.items, config_, mode,
-                                      game_.steam_build, mods,
-                                      launcher_settings_text());
+  const auto started = std::chrono::steady_clock::now();
+  xerces_core::plan plan = xerces_core::resolve_profile(
+      catalog_.items, config_, mode, game_.steam_build, mods,
+      launcher_settings_text());
+  const double ms = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - started)
+                        .count();
+  ++resolve_stats_.count;
+  resolve_stats_.total_ms += ms;
+  resolve_stats_.max_ms = std::max(resolve_stats_.max_ms, ms);
+  char data[160];
+  std::snprintf(data, sizeof(data),
+                "{\"mode\":\"%s\",\"ms\":%.2f,\"items\":%zu,\"stack\":%zu}",
+                valid_mode_name(mode), ms, catalog_.items.size(),
+                plan.stack.size());
+  log(xerces_core::log_level::debug, "launcher.services.resolve", mode, data);
+  return plan;
 }
 
 std::vector<const xerces_core::installed_content *>

@@ -16,6 +16,7 @@
 #include <string_view>
 #include <vector>
 
+#include "catalog.hpp"
 #include "compat.hpp"
 #include "diagnostics.hpp"
 #include "planner.hpp"
@@ -41,11 +42,19 @@ struct game_state {
 // Detection (4.7): the saved path, then Steam's libraries; then Steam's build
 // number from the appmanifest and, when preflight is true, the pre-flight
 // check (4.2) of BlackOps3.exe against <compat_dir>\builds.json. The
-// pre-flight hashes BlackOps3.exe (about 100 MB); without it can_launch() is
-// false.
+// pre-flight hashes BlackOps3.exe (about 100 MB; through cache when one is
+// given, which skips the read while the file is unchanged); without it
+// can_launch() is false.
 game_state detect_game_state(const std::optional<std::string> &saved_dir,
                              const std::filesystem::path &compat_dir,
-                             bool preflight = true);
+                             bool preflight = true,
+                             hash_cache *cache = nullptr);
+
+// The pre-flight part alone, for a game detect_game_state found without it:
+// fills exe, preflight and error. Nothing without a game folder.
+void preflight_game_state(game_state &game,
+                          const std::filesystem::path &compat_dir,
+                          hash_cache *cache = nullptr);
 
 struct catalog_state {
   bool scanning = false;
@@ -58,6 +67,18 @@ struct catalog_state {
   std::size_t cache_hits = 0, cache_misses = 0;
   std::uint64_t bytes_hashed = 0;
   double seconds = 0;
+  // How the hashing went (hash_cache::stats): hits from a seed, the time
+  // spent hashing summed over files, the slowest file; the files hashed at
+  // once.
+  std::size_t seed_hits = 0;
+  double hash_seconds = 0;
+  std::string slowest_file;
+  std::uint64_t slowest_bytes = 0;
+  double slowest_seconds = 0;
+  unsigned hash_threads = 0;
+  // The folders read in full: the cache forgets files under them that this
+  // scan did not see, and only those (hash_cache::save).
+  std::vector<std::filesystem::path> scanned_roots;
   // Where each item came from: "workshop", "mods" or "usermaps", by index.
   std::vector<std::string> sources;
   // The highest installed version of an id.
@@ -70,19 +91,46 @@ using catalog_progress =
     std::function<void(const std::string &source, std::size_t index,
                        std::size_t total, const std::string &name)>;
 
-// Reads the found game's Workshop folder, mods\ and usermaps\ with the hash
-// cache in cache_file, and saves the cache afterwards (pruned to what this
-// scan saw, unless it was cancelled). Names lose the game's colour codes
-// (ids and hashes do not, so plans do not change). scanned is false when it
-// was cancelled. Nothing is read when the game was not found.
 // The game folder's boiii_players\user\launcher_settings.json (the asset
 // pool switch and sizes the client reads), or "" without a game or file.
 std::string read_launcher_settings(const game_state &game);
 
+// Reads the found game's Workshop folder, mods\ and usermaps\ through cache,
+// several files at once. Names lose the game's colour codes (ids and hashes
+// do not, so plans do not change). scanned is false when it was cancelled.
+// Nothing is read when the game was not found. The caller loads and saves
+// the cache (open_hash_cache, save_hash_cache): the launcher shares it with
+// the pre-flight, which runs at the same time. hash_threads 0 is
+// default_hash_threads for each folder (file_hash.hpp); the launcher asks for
+// 1 while a game runs, so a rescan does not take the disk and the cores from
+// it.
+catalog_state scan_catalog(const game_state &game, hash_cache &cache,
+                           const std::atomic<bool> *cancel = nullptr,
+                           const catalog_progress &progress = {},
+                           unsigned hash_threads = 0);
+
+// The same with the cache in cache_file: opened, used and saved again.
 catalog_state scan_catalog(const game_state &game,
                            const std::filesystem::path &cache_file,
                            const std::atomic<bool> *cancel = nullptr,
                            const catalog_progress &progress = {});
+
+// Loads cache_file (a version 1 file is migrated) and, read only, the seed
+// XERCES_HASH_CACHE names (hash_cache_seed_file).
+struct hash_cache_opened {
+  int version = 0; // of cache_file: 0 none, 1 migrated, 2
+  std::size_t entries = 0;
+  std::optional<std::filesystem::path> seed;
+  std::size_t seed_entries = 0;
+};
+hash_cache_opened open_hash_cache(hash_cache &cache,
+                                  const std::filesystem::path &cache_file);
+
+// Saves the cache after a scan: pruned under the folders it read in full,
+// not at all after a cancelled one.
+bool save_hash_cache(const hash_cache &cache,
+                     const std::filesystem::path &cache_file,
+                     const catalog_state &scanned);
 
 // The game's last signature report, <home>\cache\signatures-report.json
 // (written by the game role each time it resolves the registry, 4.3).

@@ -30,7 +30,16 @@ struct launcher_paths {
   std::optional<std::filesystem::path> dev_data;
   std::filesystem::path config_file() const { return config / "launcher.json"; }
   std::filesystem::path journal_file() const { return logs / "journal.json"; }
+  // The Workshop hash cache (catalog.hpp).
+  std::filesystem::path hash_cache_file() const { return cache / "hashes.txt"; }
 };
+
+// A hash cache to seed this home's from, read only (hash_cache::load_seed):
+// what XERCES_HASH_CACHE names, a hashes.txt file, another home (its
+// cache\hashes.txt) or a cache folder. Nothing when it is not set, names
+// nothing that exists, or names own_cache_file itself.
+std::optional<std::filesystem::path>
+hash_cache_seed_file(const std::filesystem::path &own_cache_file);
 
 // <home>: the override, else XERCES_HOME, else %LOCALAPPDATA%\Xerces, as an
 // absolute path.
