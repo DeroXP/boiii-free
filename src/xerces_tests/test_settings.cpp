@@ -205,6 +205,20 @@ TEST_CASE("settings: display mode and cinematics are client flags") {
   CHECK((flags == std::vector<std::string>{"-console"}));
 }
 
+TEST_CASE("settings: -nc is the client's short -nocinematics") {
+  // flags.cpp registers -nc, -nocinematics and --nocinematics as one flag,
+  // so the switch reads On for -nc, and Off takes -nc away too.
+  std::vector<std::string> flags = {"-nc", "-console"};
+  CHECK(has_flag(flags, "nocinematics"));
+  CHECK(!has_flag({"--nc"}, "nocinematics")); // not a spelling the client takes
+  CHECK(!has_flag({"-nc"}, "nointro"));
+  flags = with_flag(flags, "nocinematics", false);
+  CHECK((flags == std::vector<std::string>{"-console"}));
+  flags = with_flag({"-nc", "-console"}, "nocinematics", true);
+  CHECK((flags == std::vector<std::string>{"-console", "-nocinematics"}));
+  CHECK(has_flag(parse_launch_flags("-nc").flags, "nocinematics"));
+}
+
 TEST_CASE("settings: numbers and the FPS slider") {
   CHECK(parse_number_input("", 0, 10).state == number_input::kind::empty);
   CHECK(parse_number_input("  ", 0, 10).state == number_input::kind::empty);

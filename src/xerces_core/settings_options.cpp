@@ -301,19 +301,29 @@ std::string join_flags(const std::vector<std::string> &flags) {
   return out;
 }
 
+namespace {
+// A spelling the client's parser takes for the flag name: "-name",
+// "--name", or one of its short forms (src/common/utils/flags.cpp registers
+// "-nc", "-nocinematics" and "--nocinematics" as one argument). Add a flag's
+// short forms here when a switch on the screen manages it.
+bool spells(std::string_view flag, std::string_view name) {
+  if ((flag.starts_with("-") && flag.substr(1) == name) ||
+      (flag.starts_with("--") && flag.substr(2) == name)) {
+    return true;
+  }
+  return name == "nocinematics" && flag == "-nc";
+}
+} // namespace
+
 bool has_flag(const std::vector<std::string> &flags, std::string_view name) {
-  return std::ranges::any_of(flags, [&](const std::string &flag) {
-    return (flag.starts_with("-") && flag.substr(1) == name) ||
-           (flag.starts_with("--") && flag.substr(2) == name);
-  });
+  return std::ranges::any_of(
+      flags, [&](const std::string &flag) { return spells(flag, name); });
 }
 
 std::vector<std::string> with_flag(std::vector<std::string> flags,
                                    std::string_view name, bool on) {
-  std::erase_if(flags, [&](const std::string &flag) {
-    return (flag.starts_with("-") && flag.substr(1) == name) ||
-           (flag.starts_with("--") && flag.substr(2) == name);
-  });
+  std::erase_if(flags,
+                [&](const std::string &flag) { return spells(flag, name); });
   if (on) {
     flags.push_back("-" + std::string(name));
   }

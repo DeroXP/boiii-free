@@ -98,7 +98,8 @@ flags_parse parse_launch_flags(std::string_view text);
 std::string join_flags(const std::vector<std::string> &flags);
 
 // The client's flag parser accepts "-name" and "--name" (src/common/utils/
-// flags.cpp); both count.
+// flags.cpp), and short forms for some flags ("-nc" is -nocinematics); all
+// count.
 bool has_flag(const std::vector<std::string> &flags, std::string_view name);
 // Removes every spelling of the flag, then adds "-name" when on.
 std::vector<std::string> with_flag(std::vector<std::string> flags,
