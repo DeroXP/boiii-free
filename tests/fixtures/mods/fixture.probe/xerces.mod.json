@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "id": "fixture.probe",
+  "name": "Xerces test probe",
+  "version": "1.0.0",
+  "license": "GPL-3.0-only",
+  "assets": {
+    "provides": [
+      { "type": "scriptparsetree", "name": "scripts/zm/xerces_test_probe.gsc" }
+    ]
+  },
+  "scripts": { "entry": ["scripts/zm/xerces_test_probe.gsc"] }
+}

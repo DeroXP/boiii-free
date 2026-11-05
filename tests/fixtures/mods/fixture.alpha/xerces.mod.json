@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "id": "fixture.alpha",
+  "name": "Fixture Alpha",
+  "version": "1.0.0",
+  "license": "GPL-3.0-only",
+  "requires": { "modes": ["zm"] },
+  "dependencies": [{ "id": "fixture.probe", "version": "^1.0.0" }],
+  "assets": {
+    "provides": [
+      { "type": "scriptparsetree", "name": "scripts/zm/xerces_alpha.gsc" }
+    ],
+    "extends": [
+      {
+        "type": "stringtable",
+        "name": "gamedata/xerces_test/both_apply.csv",
+        "key": [0]
+      }
+    ]
+  },
+  "scripts": {
+    "entry": ["scripts/zm/xerces_alpha.gsc"],
+    "hooks": [
+      {
+        "target": "scripts/zm/xerces_test_probe.gsc::record",
+        "handler": "scripts/zm/xerces_alpha.gsc::on_record",
+        "kind": "wrap"
+      }
+    ]
+  }
+}
