@@ -358,10 +358,15 @@ extra).
       (`loader.script.map_first_skipped`).
 - [ ] Joining another host on a custom map: the client follows the host's
       `mapScriptsFirst` (getinfo, lobby content); needs a second machine.
-- [ ] A person playing these maps with the stack beyond 30 s, and DS4C's HUD on
-      maps that ship their own (RUST: DS4C's `t7hud_zm_custom.lua` replaces the
-      map's and errors without stopping the match; HUD Lua follows the engine
-      until decided).
+- [x] A map's own HUD over a mod's (`xerces_map_ui_first`): RUST with the stack
+      keeps its `t7hud_zm_custom.lua` and `datasources.lua`
+      (`loader.ui.map_first`), with no LUI errors (DS4C's copy errored before).
+- [ ] A person playing these maps with the stack beyond 30 s.
+- [ ] Three runs in a row ended with a fail-fast (0xC0000409, no crash report,
+      no exit record) while two full client builds and a 60 GB hash ran in the
+      background; the same build passed twice once the machine was idle. Not
+      explained; the client now logs an uncaught C++ exception as
+      `loader.terminate` before the fail-fast (none was logged since).
 
 ### Launcher (M3)
 

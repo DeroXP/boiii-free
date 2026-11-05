@@ -84,6 +84,8 @@ std::atomic_bool reload_pending;
 // xerces_map_scripts_first: a custom map keeps its own scripts against mods
 // (DESIGN.md 6.3 rule 6). On unless turned off.
 game::EngineDependentDvarMut map_scripts_first_dvar;
+// xerces_map_ui_first: the same for its HUD and other UI Lua. On unless off.
+game::EngineDependentDvarMut map_ui_first_dvar;
 // The host's choice while this process is a client of another host: the
 // server's .gsc and every client's .csc must come from the same copies, or
 // clientfields disagree and the client is dropped. -1: decide locally (alone,
@@ -647,10 +649,17 @@ void write_map_scripts() {
 // to replace the map's copy, and the map's other scripts then failed to link
 // ("GSC LINK ERROR ... Unresolved external", SANCTUM OBITUS, 2026-11-05).
 // This applies with one mod too. Entry scripts keep the stack's own rule.
+// The same holds for the map's HUD and other UI Lua (ui/ rawfiles; the user
+// chose it on 2026-11-05: DS4C's t7hud_zm_custom.lua replaced RUST V5's and
+// errored), behind its own switch, xerces_map_ui_first. UI runs on each
+// client alone, so unlike scripts it needs no agreement with the host.
 std::optional<int32_t> map_script_choice(const XAssetEntry *candidate,
                                          const XAssetEntry *existing) {
-  if (candidate->asset.type != XAssetType::SCRIPTPARSETREE ||
-      is_entry_script(candidate) || !map_scripts_first_enabled()) {
+  const bool is_script = candidate->asset.type == XAssetType::SCRIPTPARSETREE;
+  const bool is_ui = !is_script && is_ui_file(candidate);
+  if (is_script ? (is_entry_script(candidate) || !map_scripts_first_enabled())
+                : (!is_ui || !(map_ui_first_dvar ? map_ui_first_dvar.get_bool()
+                                                 : true))) {
     return std::nullopt;
   }
   const std::string incoming_zone = zone_name(candidate);
@@ -670,12 +679,19 @@ std::optional<int32_t> map_script_choice(const XAssetEntry *candidate,
   if (choice == xerces_core::script_choice::engine) {
     return std::nullopt;
   }
-  const game::scr::ScriptParseTree *tree =
-      candidate->asset.header.scriptParseTree;
-  const std::string script = tree && tree->name ? tree->name : "";
+  std::string script;
+  if (is_script) {
+    const game::scr::ScriptParseTree *tree =
+        candidate->asset.header.scriptParseTree;
+    script = tree && tree->name ? tree->name : "";
+  } else if (const char *name =
+                 *static_cast<const char **>(candidate->asset.header.data)) {
+    script = name;
+  }
   const bool map_wins = choice == xerces_core::script_choice::incoming_wins;
   std::string base;
-  const std::uint8_t half = xerces_core::script_half_of(script, &base);
+  const std::uint8_t half =
+      is_script ? xerces_core::script_half_of(script, &base) : 0;
   {
     std::scoped_lock lock(mutex);
     sync_map_scripts(usermap);
@@ -711,7 +727,7 @@ std::optional<int32_t> map_script_choice(const XAssetEntry *candidate,
     }
   }
   xerces_runtime::log_info(
-      "loader.script.map_first",
+      is_script ? "loader.script.map_first" : "loader.ui.map_first",
       script + ": the map's copy " + (map_wins ? "replaces" : "stays over") +
           " the mod's",
       "{\"script\":" + xerces_core::json::quote(script) +
@@ -1176,6 +1192,11 @@ public:
               "On a custom map, the map keeps its own scripts when a mod "
               "ships another version of them (applies at the next map "
               "load).");
+          map_ui_first_dvar = game::register_dvar_bool(
+              "xerces_map_ui_first", true, game::dvarFlags_e::NONE,
+              "On a custom map, the map keeps its own HUD and other UI "
+              "Lua when a mod ships another version of them (applies at "
+              "the next map load).");
         },
         scheduler::main);
 

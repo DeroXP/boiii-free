@@ -983,9 +983,13 @@ SANCTUM OBITUS and PROJECT: KABOOM then load and play (15 and 36 decisions, all
 perk scripts); the two load crashes are a separate problem (below). The dvar
 `xerces_map_scripts_first` (on by default; the pack decision `map_scripts_first`
 is not yet carried into the plan file) turns it off for the next map load. Stock
-maps are never affected, entry scripts keep the stack's own rule, and HUD Lua
-(`ui/` rawfiles) still follows the engine until it is decided (DS4C's HUD
-replaces RUST V5's and errors without stopping the match).
+maps are never affected and entry scripts keep the stack's own rule. The map's
+HUD and other UI Lua (`ui/` rawfiles, `.lua`) follow the same rule (the user's
+decision, 2026-11-05: DS4C's `t7hud_zm_custom.lua` replaced RUST V5's and
+errored; with the rule RUST keeps its own HUD and `datasources.lua`, logged as
+`loader.ui.map_first`, and the errors are gone). `xerces_map_ui_first` (on)
+turns that part off; UI runs on each client alone, so it needs no agreement with
+the host.
 
 A script's server and client halves (.gsc, .csc) must come from the same source,
 so map-first never splits them (`xerces_core::decide_map_half`): the map takes a

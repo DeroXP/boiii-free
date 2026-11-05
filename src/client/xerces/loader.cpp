@@ -100,6 +100,33 @@ bool wrap_quit_command() {
   return false;
 }
 
+[[noreturn]] void log_terminate() {
+  std::string what = "unknown exception";
+  if (const std::exception_ptr current = std::current_exception()) {
+    try {
+      std::rethrow_exception(current);
+    } catch (const std::exception &e) {
+      what = std::string(typeid(e).name()) + ": " + e.what();
+    } catch (...) {
+      what = "a non-standard exception";
+    }
+  } else {
+    what = "std::terminate without an exception";
+  }
+  xerces_runtime::note_crash();
+  xerces_runtime::log_error(
+      "loader.terminate",
+      "The game ended on an uncaught C++ exception: " +
+          xerces_core::json::valid_utf8(what, 300),
+      "{\"exception\":" +
+          xerces_core::json::quote(xerces_core::json::valid_utf8(what, 1000)) +
+          ",\"phase\":" +
+          xerces_core::json::quote(
+              xerces_core::to_string(xerces_runtime::journal_phase())) +
+          ",\"console\":" + console_json() + "}");
+  std::abort();
+}
+
 // In a level, is the local client playing it yet, or still loading it?
 launch_phase level_phase() {
   const auto state = game::cg::clientUIActives->actives[0].connectionState;
@@ -160,6 +187,12 @@ public:
     if (!game::is_client() || !game::is_new_client()) {
       return;
     }
+    // An uncaught C++ exception ends the process through abort's fail-fast
+    // (0xC0000409), past the crash handler and the exit hook: say which
+    // exception it was first, with the console's last lines.
+    static const std::terminate_handler previous =
+        std::set_terminate(log_terminate);
+    (void)previous;
     // The signature lookup (the journal's "symbols" step) has usually run
     // already, in mod_stack's post_unpack; this makes sure it has.
     xerces_signatures::feature_enabled("multi_mod");
