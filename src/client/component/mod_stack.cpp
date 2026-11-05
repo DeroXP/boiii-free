@@ -786,7 +786,7 @@ public:
     scheduler::once(
         [] {
           game::register_dvar_string(
-              "fs_extramods", startup_list.c_str(), game::DVAR_NONE,
+              "fs_extramods", startup_list.c_str(), game::dvarFlags_e::NONE,
               "Extra mods loaded together with fs_game, comma separated, "
               "highest priority first. fs_game always has the highest "
               "priority.");
