@@ -198,6 +198,9 @@ body.view-diagnostics #tab-diagnostics .dot
 { background-color: var(--accent); }
 
 /* --------------------------------------------------------------- content */
+/* A scroll container: RmlUi's spatial navigation (nav: auto) neither enters
+   nor leaves one, so app::on_key moves focus between the header or footer
+   and the screen. */
 #content
 {
 	display: block;

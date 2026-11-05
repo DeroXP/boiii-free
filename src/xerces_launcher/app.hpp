@@ -124,17 +124,30 @@ private:
   void close_dialog(int choice);
   void update_notice();
   void run_script(double seconds);
+  // Focuses the screen's default element, scrolled into view; false when the
+  // screen has none.
+  bool focus_default(view &v);
+  // Once per frame: focus that was lost, or left on something hidden, goes
+  // back to the current screen's default.
+  void keep_focus();
+  // The buttons held on every connected controller (pad_bits in app.cpp).
+  unsigned read_pad(double now);
+  // Stops the worker, RmlUi, the screens and the window in the order they
+  // depend on each other. Safe to call more than once.
+  void shutdown();
 
   options opts_;
   window window_;
   std::unique_ptr<services> services_;
   Rml::Context *context_ = nullptr;
   std::unique_ptr<Rml::SystemInterface> system_;
+  bool rml_started_ = false;
 
   struct entry {
     view_info info;
     std::unique_ptr<view> screen;
-    bool loaded = false;
+    bool loaded = false; // its document was tried (once)
+    bool failed = false; // and did not load: the screen is never shown
   };
   std::vector<entry> views_;
   std::string current_;
@@ -168,7 +181,17 @@ private:
   std::vector<script_step> script_;
   std::size_t script_next_ = 0;
   unsigned pad_previous_ = 0;
+  // Held while the launcher was not in front: ignored until let go. All of
+  // them at the start, so a button still down from whatever started the
+  // launcher is not a press either.
+  unsigned pad_ignored_ = ~0u;
   double pad_repeat_at_ = 0;
+  unsigned script_pad_ = 0; // held by a check script (padhold)
+  int script_front_ = -1;   // check script's front on (1) / off (0); -1 real
+  unsigned pad_slots_ = 0;    // XInput slots that answered (bit per slot)
+  double pad_rescan_at_ = 0;  // when the empty slots are asked again
+  int focus_lost_frames_ = 0; // frames the focus has been lost or hidden
   void *instance_mutex_ = nullptr; // one launcher per home
+  std::uintptr_t home_tag_ = 0;    // this home on the window (single instance)
 };
 } // namespace xerces_launcher

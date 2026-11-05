@@ -98,6 +98,10 @@ struct state {
   std::string capture_error;
 };
 std::unique_ptr<state> s;
+// The handle wake() posts to. wake() is called from other threads, which must
+// not read s while the window thread resets it; this is cleared before the
+// window closes, so a late wake does nothing.
+std::atomic<HWND> wake_target = nullptr;
 
 void create_render_target() {
   ID3D11Texture2D *back_buffer = nullptr;
@@ -417,7 +421,7 @@ bool window::open(const std::string &title, int width_dp, int height_dp,
   s = std::make_unique<state>();
   s->callbacks = std::move(callbacks);
   s->instance = GetModuleHandleW(nullptr);
-  s->class_name = L"xerces_launcher_window";
+  s->class_name = window_class_name;
   load_dpi_functions();
 
   WNDCLASSW window_class{};
@@ -448,6 +452,7 @@ bool window::open(const std::string &title, int width_dp, int height_dp,
     s.reset();
     return false;
   }
+  wake_target = s->handle;
   // Keeps the DWM shadow and snap layouts on a window without a frame.
   const MARGINS margins{0, 0, 1, 0};
   DwmExtendFrameIntoClientArea(s->handle, &margins);
@@ -512,6 +517,7 @@ void window::close() {
   if (!s) {
     return;
   }
+  wake_target = nullptr;
   if (Rml::GetTextInputHandler() == &s->ime) {
     Rml::SetTextInputHandler(nullptr);
   }
@@ -534,6 +540,14 @@ Rml::RenderInterface *window::render_interface() {
   return s ? &*s->deferred : nullptr;
 }
 
+bool window::wait_events(int max_wait_ms) {
+  // MWMO_INPUTAVAILABLE: a message already in the queue also ends the wait,
+  // not only one that arrives during it.
+  const DWORD wait = DWORD(std::max(0, max_wait_ms));
+  return MsgWaitForMultipleObjectsEx(0, nullptr, wait, QS_ALLINPUT,
+                                     MWMO_INPUTAVAILABLE) == WAIT_OBJECT_0;
+}
+
 bool window::process_events(Rml::Context *context, int max_wait_ms) {
   if (s->context_dimensions_dirty) {
     s->context_dimensions_dirty = false;
@@ -541,13 +555,11 @@ bool window::process_events(Rml::Context *context, int max_wait_ms) {
     context->SetDensityIndependentPixelRatio(dp_ratio());
   }
   s->context = context;
+  if (max_wait_ms > 0) {
+    wait_events(max_wait_ms);
+  }
   MSG message{};
   bool has_message = PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE) != 0;
-  if (!has_message && max_wait_ms > 0) {
-    MsgWaitForMultipleObjects(0, nullptr, FALSE, DWORD(max_wait_ms),
-                              QS_ALLINPUT);
-    has_message = PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE) != 0;
-  }
   while (has_message) {
     TranslateMessage(&message);
     DispatchMessageW(&message);
@@ -601,8 +613,8 @@ void window::request_close() {
 }
 
 void window::wake() {
-  if (s) {
-    PostMessageW(s->handle, WM_NULL, 0, 0);
+  if (HWND handle = wake_target.load()) {
+    PostMessageW(handle, WM_NULL, 0, 0);
   }
 }
 
