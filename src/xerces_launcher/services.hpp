@@ -28,6 +28,7 @@
 #include <xerces_core/launcher_home.hpp>
 #include <xerces_core/launcher_launch.hpp>
 #include <xerces_core/launcher_state.hpp>
+#include <xerces_core/pack_apply.hpp>
 #include <xerces_core/planner.hpp>
 #include <xerces_core/sigregistry.hpp>
 
