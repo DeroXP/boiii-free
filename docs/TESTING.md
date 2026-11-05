@@ -276,6 +276,26 @@ Run on 2026-11-05 by Claude on your PC while you were away (dry launches only):
 - [ ] The window by hand: drag by the header, snap, resize from the edges,
       minimize, maximize, close; at 150 percent.
 - [ ] A physical controller: A, B, Y, LB/RB and the D-pad on every screen.
+- [ ] Q and E with Num Lock on switch tabs (fixed 2026-11-05 after review;
+      scripted keys never carry lock flags, so only a real keyboard shows it).
+
+Screens, each built and checked by scripted runs (dry launches) on
+2026-11-05; what still needs you:
+
+- [ ] Mods: enable a few, reorder with Ctrl+Up/Down and with the mouse
+      (drag), Ctrl+Z, search; "Open in Steam" opens the item in Steam.
+- [ ] Settings: the player name shows in the game (written to
+      `boiii_players\properties.json`, where the client reads it); FPS limit,
+      field of view, V-Sync and the FPS counter take effect in the game;
+      display mode (windowed, borderless).
+- [ ] Servers: join a self-hosted server by address (needs a server).
+- [ ] Packs: export a pack, apply it on another profile or PC, and get the
+      same plan id; a share code round trip.
+- [ ] First run: on a PC with BOIII data, the import offers the name and the
+      favourite servers (`boiii_players`); nothing under
+      `%LOCALAPPDATA%\boiii\user` is opened.
+- [ ] Diagnostics: "Verify with Steam" opens Steam's file check; Copy report
+      pastes a report with `%USERPROFILE%` instead of your folder.
 
 ### Conflict system (M2)
 
