@@ -1798,8 +1798,14 @@ What changed:
   a game folder typed by hand and one found in the registry share entries; paths
   are written as first seen, so older builds still read the file. Only folders a
   scan read in full lose entries for files it did not see: an unplugged library
-  drive, a game that was not found or a cancelled scan prune nothing.
-  `XERCES_HASH_CACHE` seeds a new home read-only.
+  drive, a folder that could not be listed, a game that was not found or a
+  cancelled scan prune nothing. `XERCES_HASH_CACHE` seeds a new home read-only.
+  A line that is not a size, a time, a hex hash and a UTF-8 path (a save cut
+  short by a crash, two programs saving at once) is skipped, never thrown on;
+  the launcher's worker turns anything it throws into a scan error instead of
+  ending the process. The scan's figures (`launcher.catalog.scanned`,
+  Diagnostics) count only its own files, and only bytes read in full, never the
+  pre-flight's BlackOps3.exe.
 - **The pre-flight.** BlackOps3.exe (106 MB) is hashed through the same cache,
   and the launcher's worker runs the pre-flight next to the catalog scan instead
   of before it.

@@ -1,8 +1,9 @@
 // Faster catalog hashing and a hash cache that is kept (docs/DESIGN.md 12):
 // CNG gives the portable code's digests, files hashed several at once give
 // the same catalog, version 1 caches are migrated, keys ignore letter case,
-// a home can start from another home's cache, and only folders a scan read
-// in full lose entries.
+// a damaged cache line is skipped, a home can start from another home's
+// cache, only folders a scan read in full lose entries, and a scan's figures
+// count only its own files, read in full.
 
 #include "harness.hpp"
 
@@ -13,6 +14,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+
+#include <aclapi.h>
 
 #include <atomic>
 #include <cstdint>
@@ -98,6 +101,60 @@ struct scoped_env {
     SetEnvironmentVariableW(name.c_str(), old ? old->c_str() : nullptr);
   }
 };
+
+// Denies everyone listing a folder, as an ACL can while the folder still
+// shows as one, and puts its old ACL back on scope exit. ok is false when
+// the ACL could not be changed.
+struct deny_listing {
+  std::wstring path;
+  PSECURITY_DESCRIPTOR old_descriptor = nullptr;
+  PACL old_dacl = nullptr;
+  bool ok = false;
+  explicit deny_listing(const fs::path &folder) : path(folder.wstring()) {
+    if (GetNamedSecurityInfoW(
+            path.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+            nullptr, &old_dacl, nullptr, &old_descriptor) != ERROR_SUCCESS) {
+      return;
+    }
+    BYTE sid[SECURITY_MAX_SID_SIZE];
+    DWORD sid_size = sizeof(sid);
+    if (!CreateWellKnownSid(WinWorldSid, nullptr, sid, &sid_size)) {
+      return;
+    }
+    EXPLICIT_ACCESS_W deny{};
+    deny.grfAccessPermissions = FILE_LIST_DIRECTORY;
+    deny.grfAccessMode = DENY_ACCESS;
+    deny.grfInheritance = NO_INHERITANCE;
+    deny.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    deny.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
+    deny.Trustee.ptstrName = reinterpret_cast<LPWSTR>(sid);
+    PACL dacl = nullptr;
+    if (SetEntriesInAclW(1, &deny, old_dacl, &dacl) != ERROR_SUCCESS) {
+      return;
+    }
+    ok = SetNamedSecurityInfoW(path.data(), SE_FILE_OBJECT,
+                               DACL_SECURITY_INFORMATION, nullptr, nullptr,
+                               dacl, nullptr) == ERROR_SUCCESS;
+    LocalFree(dacl);
+  }
+  ~deny_listing() {
+    if (ok) {
+      SetNamedSecurityInfoW(path.data(), SE_FILE_OBJECT,
+                            DACL_SECURITY_INFORMATION, nullptr, nullptr,
+                            old_dacl, nullptr);
+    }
+    if (old_descriptor != nullptr) {
+      LocalFree(old_descriptor);
+    }
+  }
+  deny_listing(const deny_listing &) = delete;
+  deny_listing &operator=(const deny_listing &) = delete;
+};
+
+bool has_code(const diagnostics &diags, std::string_view code) {
+  return std::ranges::any_of(
+      diags.items(), [&](const diagnostic &item) { return item.code == code; });
+}
 } // namespace
 
 // ------------------------------------------------------------------ digests
@@ -368,6 +425,69 @@ TEST_CASE("hash speed: cache keys ignore letter case, files keep theirs") {
   fs::remove_all(dir);
 }
 
+TEST_CASE("hash speed: a cache line cut short is skipped, never thrown") {
+  const fs::path dir = fresh_dir("cut_lines");
+  // "café.ff": two bytes for the last letter, so a line can end inside
+  // it.
+  const fs::path cafe = dir / "Mods" / fs::path(u8"café.ff");
+  const fs::path native = dir / "Mods" / "Native.ff";
+  write_bytes(cafe, "cafe");
+  write_bytes(native, "native");
+  const std::string hash = sha256::hex("cafe");
+  const std::string base = utf8(dir) + "/x/";
+  const std::string head = "4\t1\t" + hash + "\t" + base;
+  // What a save cut short (a crash, two programs saving at once) or a damaged
+  // file can hold: a path ending inside a character or cut inside one,
+  // zeros, a hash that is not hex, an overlong '/', an encoded surrogate.
+  const std::string cut = head + "caf\xC3\n" + head + "caf\xC3.ff\n" + head +
+                          "zeros.ff" + std::string(16, '\0') + "\n" + "4\t1\t" +
+                          std::string(64, 'Z') + "\t" + base + "hex.ff\n" +
+                          head + "\xC0\xAF.ff\n" + head + "\xED\xA0\x80.ff\n" +
+                          std::string(40, '\0');
+  // Good lines: the valid "é", and a path written with '\' (the native
+  // form) in capitals, whose key is its generic form's.
+  std::string backslashed = utf8(native);
+  for (char &c : backslashed) {
+    c = c == '/' ? '\\' : c;
+  }
+  const std::string good =
+      line_for(cafe, hash) +
+      line_for(native, sha256::hex("native"), to_upper_ascii(backslashed));
+  const fs::path file = dir / "cache" / "hashes.txt";
+  write_bytes(file, std::string(hash_cache_header) + "\n" + good + cut);
+
+  // The home's own cache: loaded without the cut lines.
+  hash_cache cache;
+  REQUIRE(cache.load(file));
+  CHECK_EQ(cache.size(), std::size_t{2});
+  CHECK_EQ(cache.file_sha256(cafe).value_or(""), hash);
+  CHECK_EQ(cache.file_sha256(native).value_or(""), sha256::hex("native"));
+  CHECK_EQ(cache.hits(), std::size_t{2});
+  CHECK_EQ(cache.misses(), std::size_t{0});
+
+  // The same file as a seed, named by XERCES_HASH_CACHE as a new home would.
+  {
+    const scoped_env set(L"XERCES_HASH_CACHE", file.wstring());
+    hash_cache seeded;
+    const hash_cache_opened opened =
+        open_hash_cache(seeded, dir / "home" / "cache" / "hashes.txt");
+    REQUIRE(opened.seed.has_value());
+    CHECK_EQ(opened.seed_entries, std::size_t{2});
+    CHECK_EQ(seeded.file_sha256(cafe).value_or(""), hash);
+    CHECK_EQ(seeded.get_stats().seed_hits, std::size_t{1});
+  }
+
+  // Saved again, only the good lines are left.
+  REQUIRE(cache.save(file));
+  const std::string saved = xerces_tests::read_file(file);
+  CHECK(saved.find("\xC3.ff") == std::string::npos);
+  CHECK(saved.find('\0') == std::string::npos);
+  hash_cache again;
+  REQUIRE(again.load(file));
+  CHECK_EQ(again.size(), std::size_t{2});
+  fs::remove_all(dir);
+}
+
 TEST_CASE("hash speed: a seed cache is read, never written") {
   const fs::path dir = fresh_dir("seed");
   const fs::path ff = dir / "Workshop" / "111" / "core_mod.ff";
@@ -491,6 +611,111 @@ TEST_CASE("hash speed: only folders a scan read in full are pruned") {
   hash_cache same;
   REQUIRE(same.load(file));
   CHECK_EQ(same.size(), std::size_t{4});
+  fs::remove_all(dir);
+}
+
+TEST_CASE("hash speed: a folder that could not be listed keeps its entries") {
+  const fs::path dir = fresh_dir("unlisted");
+  const fs::path workshop = dir / "workshop" / "311210";
+  const fs::path mods = dir / "game" / "mods";
+  write_bytes(workshop / "1" / "w.ff", "workshop");
+  write_bytes(mods / "a" / "m.ff", "mod");
+  const fs::path file = dir / "cache" / "hashes.txt";
+  {
+    hash_cache cache;
+    REQUIRE(cache.file_sha256(workshop / "1" / "w.ff").has_value());
+    REQUIRE(cache.file_sha256(mods / "a" / "m.ff").has_value());
+    REQUIRE(cache.save(file));
+  }
+  game_state game;
+  game.dir = dir / "game";
+  game.workshop_dir = workshop;
+  game.mods_dir = mods;
+  game.usermaps_dir = dir / "game" / "usermaps"; // none
+  {
+    const scoped_env unset(L"XERCES_HASH_CACHE", L"");
+    const deny_listing denied(workshop);
+    REQUIRE(denied.ok);
+    // Still a folder, as far as anyone asking can tell; only its listing
+    // fails.
+    REQUIRE(fs::is_directory(workshop));
+    const catalog_scan direct = scan_mods_directory(workshop);
+    CHECK(!direct.listed);
+    CHECK(has_code(direct.diags, "catalog.read"));
+    CHECK(scan_mods_directory(mods).listed);
+
+    const catalog_state scanned = scan_catalog(game, file);
+    CHECK(scanned.scanned);
+    CHECK(has_code(scanned.diags, "catalog.read"));
+    REQUIRE_EQ(scanned.scanned_roots.size(), std::size_t{1});
+    CHECK(fs::equivalent(scanned.scanned_roots.front(), mods));
+  }
+  // The Workshop file's entry survived the save, though no scan saw it.
+  hash_cache after;
+  REQUIRE(after.load(file));
+  CHECK_EQ(after.size(), std::size_t{2});
+  CHECK(xerces_tests::read_file(file).find("/1/w.ff") != std::string::npos);
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+}
+
+TEST_CASE("hash speed: only bytes read in full count as hashed") {
+  const fs::path dir = fresh_dir("stats");
+  const fs::path held = dir / "held.ff";
+  const fs::path stopped = dir / "stopped.ff";
+  const fs::path read = dir / "read.ff";
+  write_bytes(held, std::string(5000, 'h'));
+  write_bytes(stopped, std::string(7000, 's'));
+  write_bytes(read, "read");
+  hash_cache cache;
+  hash_cache::stats mine;
+  {
+    // Held with no sharing, as Steam holds a Workshop file it updates.
+    const HANDLE handle = CreateFileW(held.c_str(), GENERIC_READ, 0, nullptr,
+                                      OPEN_EXISTING, 0, nullptr);
+    REQUIRE(handle != INVALID_HANDLE_VALUE);
+    CHECK(!cache.file_sha256(held, nullptr, &mine).has_value());
+    CloseHandle(handle);
+  }
+  const std::atomic<bool> cancel{true};
+  CHECK(!cache.file_sha256(stopped, &cancel, &mine).has_value());
+  CHECK(cache.file_sha256(read, nullptr, &mine).has_value());
+  for (const hash_cache::stats &stats : {cache.get_stats(), mine}) {
+    CHECK_EQ(stats.misses, std::size_t{3});
+    CHECK_EQ(stats.bytes_hashed, std::uint64_t{4});
+    CHECK_EQ(stats.slowest_bytes, std::uint64_t{4});
+    CHECK(stats.slowest_file.ends_with("/read.ff"));
+  }
+  fs::remove_all(dir);
+}
+
+TEST_CASE("hash speed: a scan counts its own files, not the pre-flight's") {
+  const fs::path dir = fresh_dir("scan_stats");
+  const fs::path mods = dir / "game" / "mods";
+  const fs::path exe = dir / "game" / "BlackOps3.exe";
+  write_bytes(mods / "a" / "a.ff", "aaaa");
+  write_bytes(exe, std::string(1000, 'x'));
+  game_state game;
+  game.dir = dir / "game";
+  game.workshop_dir = dir / "workshop" / "311210"; // none
+  game.mods_dir = mods;
+  game.usermaps_dir = dir / "game" / "usermaps"; // none
+  // One cache, as the launcher shares it: the pre-flight hashes the exe
+  // through it before (or while) the scan runs.
+  hash_cache cache;
+  REQUIRE(cache.file_sha256(exe).has_value());
+  const catalog_state first = scan_catalog(game, cache);
+  CHECK_EQ(first.cache_misses, std::size_t{1});
+  CHECK_EQ(first.cache_hits, std::size_t{0});
+  CHECK_EQ(first.bytes_hashed, std::uint64_t{4});
+  CHECK(first.slowest_file.ends_with("/a/a.ff"));
+  CHECK_EQ(cache.get_stats().misses, std::size_t{2});
+  // A second scan reads nothing: no exe from earlier in its figures either.
+  const catalog_state second = scan_catalog(game, cache);
+  CHECK_EQ(second.cache_hits, std::size_t{1});
+  CHECK_EQ(second.cache_misses, std::size_t{0});
+  CHECK_EQ(second.bytes_hashed, std::uint64_t{0});
+  CHECK(second.slowest_file.empty());
   fs::remove_all(dir);
 }
 

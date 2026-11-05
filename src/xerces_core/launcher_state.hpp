@@ -64,6 +64,9 @@ struct catalog_state {
   // Workshop items, then the game's mods and usermaps folders.
   std::vector<installed_content> items;
   diagnostics diags;
+  // This scan's own lookups (never the pre-flight's BlackOps3.exe, which
+  // goes through the same cache); bytes_hashed counts only files read in
+  // full.
   std::size_t cache_hits = 0, cache_misses = 0;
   std::uint64_t bytes_hashed = 0;
   double seconds = 0;
@@ -77,7 +80,8 @@ struct catalog_state {
   double slowest_seconds = 0;
   unsigned hash_threads = 0;
   // The folders read in full: the cache forgets files under them that this
-  // scan did not see, and only those (hash_cache::save).
+  // scan did not see, and only those (hash_cache::save). A folder that could
+  // not be listed is not one.
   std::vector<std::filesystem::path> scanned_roots;
   // Where each item came from: "workshop", "mods" or "usermaps", by index.
   std::vector<std::string> sources;

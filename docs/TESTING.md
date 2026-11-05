@@ -491,6 +491,12 @@ Run on 2026-11-05 by Claude (no game running, dry launches only):
       the plan id (`sha256:7fb8e51e...`) are unchanged.
 - [x] `C:\Users\Ginld\XercesHome\cache\hashes.txt` (version 1) migrates line for
       line (on a copy).
+- [x] After review: `XERCES_HASH_CACHE` naming a version 2 file whose one line
+      ends in `caf\xC3.ff` (cut inside a character) no longer fails
+      `xerces_cli mods list --home C:\Users\Ginld\XercesHome-bench` (exit 0, as
+      with a valid "é"), and `Xerces.exe --dry-launch` on that home reads its 17
+      items instead of ending in `std::terminate`. Its scan event reports 686
+      hits, without BlackOps3.exe.
 
 ### Conflict system (M2)
 

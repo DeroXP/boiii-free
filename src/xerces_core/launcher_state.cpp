@@ -100,6 +100,11 @@ catalog_state scan_catalog(const game_state &game, hash_cache &cache,
   }
   const auto started = std::chrono::steady_clock::now();
   catalog_state result;
+  // This scan's own lookups: the launcher's pre-flight hashes BlackOps3.exe
+  // through the same cache at the same time (and the CLI's just before), so
+  // the cache's totals would mix the exe into the scan's figures, by
+  // whichever finished first.
+  hash_cache::stats stats;
   for (const source &from : sources) {
     std::error_code ec;
     if (!fs::is_directory(from.dir, ec)) {
@@ -107,6 +112,7 @@ catalog_state scan_catalog(const game_state &game, hash_cache &cache,
     }
     scan_options options;
     options.cache = &cache;
+    options.stats = &stats;
     options.cancel = cancel;
     // Where the client looks for each mod's asset pool file.
     options.layout = from.name == "workshop" ? content_layout::workshop
@@ -133,12 +139,17 @@ catalog_state scan_catalog(const game_state &game, hash_cache &cache,
     if (scan.cancelled) {
       break;
     }
+    if (!scan.listed) {
+      // The folder could not be listed (catalog.read): none of its files
+      // was seen, which says nothing about whether they are gone, so its
+      // entries stay for the next scan that can read it.
+      continue;
+    }
     std::error_code absolute_ec;
     const fs::path root = fs::absolute(from.dir, absolute_ec);
     result.scanned_roots.push_back(absolute_ec ? from.dir : root);
   }
   const bool cancelled = cancel && cancel->load();
-  const hash_cache::stats stats = cache.get_stats();
   result.cache_hits = stats.hits;
   result.cache_misses = stats.misses;
   result.bytes_hashed = stats.bytes_hashed;

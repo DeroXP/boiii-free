@@ -17,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -171,6 +172,15 @@ private:
                                     const std::optional<std::string> &connect,
                                     const std::vector<std::string> *mods) const;
   void load_config();
+  // The scan worker's body (refresh): the cache, detection, the pre-flight
+  // next to the catalog scan, the save; posts finish_scan.
+  void run_refresh(const fs::path &cache_file,
+                   std::shared_ptr<std::atomic<bool>> cancel, bool detect,
+                   std::optional<std::string> saved_dir,
+                   std::optional<game_state> known, unsigned hash_threads);
+  // What the worker posts instead when run_refresh threw: an error in the
+  // catalog's diagnostics and the log, never std::terminate.
+  void fail_refresh(bool detect, std::string_view what);
   void finish_scan(std::shared_ptr<catalog_state> result);
   void save_culprit();
   // Records the result of a culprit test launch that has ended.

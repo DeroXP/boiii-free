@@ -94,14 +94,75 @@ std::string file_sha256_hex(const std::filesystem::path &path) {
   return try_file_sha256_hex(path).value_or(std::string());
 }
 
-std::string hash_cache_key(const std::filesystem::path &path) {
-  std::string key = utf8(path.generic_u8string());
+namespace {
+// The key of a path already in UTF-8 text. The generic form of a Windows
+// path is its text with '\' turned into '/' (what generic_u8string does), so
+// a cache line's path gives its key without becoming a path: building one
+// from text that is not valid UTF-8 throws.
+std::string key_of_text(std::string key) {
   for (char &c : key) {
-    if (c >= 'A' && c <= 'Z') {
+    if (c == '\\') {
+      c = '/';
+    } else if (c >= 'A' && c <= 'Z') {
       c = static_cast<char>(c - 'A' + 'a');
     }
   }
   return key;
+}
+
+// Valid UTF-8 (no overlong forms, surrogates or values past U+10FFFF) and
+// no control characters, which no Windows path holds: a cache line cut
+// inside a character, or ending in the zeros of a file cut short, fails.
+bool path_text_ok(std::string_view text) {
+  std::size_t i = 0;
+  while (i < text.size()) {
+    const auto lead = static_cast<unsigned char>(text[i]);
+    if (lead < 0x20) {
+      return false;
+    }
+    if (lead < 0x80) {
+      ++i;
+      continue;
+    }
+    std::size_t length = 0;
+    std::uint32_t value = 0, min_value = 0;
+    if (lead >= 0xC2 && lead <= 0xDF) {
+      length = 2, value = lead & 0x1Fu, min_value = 0x80;
+    } else if (lead >= 0xE0 && lead <= 0xEF) {
+      length = 3, value = lead & 0x0Fu, min_value = 0x800;
+    } else if (lead >= 0xF0 && lead <= 0xF4) {
+      length = 4, value = lead & 0x07u, min_value = 0x10000;
+    } else {
+      return false;
+    }
+    if (i + length > text.size()) {
+      return false;
+    }
+    for (std::size_t k = 1; k < length; ++k) {
+      const auto next = static_cast<unsigned char>(text[i + k]);
+      if ((next & 0xC0) != 0x80) {
+        return false;
+      }
+      value = (value << 6) | (next & 0x3Fu);
+    }
+    if (value < min_value || value > 0x10FFFF ||
+        (value >= 0xD800 && value <= 0xDFFF)) {
+      return false;
+    }
+    i += length;
+  }
+  return true;
+}
+
+bool lower_hex(std::string_view text) {
+  return std::ranges::all_of(text, [](char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+  });
+}
+} // namespace
+
+std::string hash_cache_key(const std::filesystem::path &path) {
+  return key_of_text(utf8(path.generic_u8string()));
 }
 
 int hash_cache::read_file(const std::filesystem::path &file, entry_map &into) {
@@ -136,15 +197,17 @@ int hash_cache::read_file(const std::filesystem::path &file, entry_map &into) {
       continue;
     }
     value.sha256 = line.substr(b + 1, 64);
-    if (value.size != 0 && value.sha256 == nothing_read) {
+    if (!lower_hex(value.sha256) ||
+        (value.size != 0 && value.sha256 == nothing_read)) {
       continue;
     }
     value.path = line.substr(c + 1);
-    const std::u8string text(
-        reinterpret_cast<const char8_t *>(value.path.data()),
-        value.path.size());
+    if (!path_text_ok(value.path)) {
+      continue; // cut short: it names no file
+    }
     // A path written twice (two spellings of one file) keeps its last line.
-    into[hash_cache_key(std::filesystem::path(text))] = std::move(value);
+    std::string key = key_of_text(value.path);
+    into[std::move(key)] = std::move(value);
   }
   return version;
 }
@@ -223,9 +286,16 @@ bool hash_cache::save(
 
 std::optional<std::string>
 hash_cache::file_sha256(const std::filesystem::path &path,
-                        const std::atomic<bool> *cancel) {
+                        const std::atomic<bool> *cancel, stats *sink) {
   const std::string shown = utf8(path.generic_u8string());
-  const std::string key = hash_cache_key(path);
+  const std::string key = key_of_text(shown);
+  // Counts in the cache's stats and the caller's; call with mutex_ held.
+  const auto count = [&](auto &&update) {
+    update(stats_);
+    if (sink != nullptr) {
+      update(*sink);
+    }
+  };
   std::error_code ec;
   const std::uint64_t size = std::filesystem::file_size(path, ec);
   const auto time = ec ? std::filesystem::file_time_type{}
@@ -244,21 +314,22 @@ hash_cache::file_sha256(const std::filesystem::path &path,
     std::lock_guard lock(mutex_);
     if (const auto found = entries_.find(key);
         found != entries_.end() && matches(found->second)) {
-      ++stats_.hits;
+      count([](stats &s) { ++s.hits; });
       found->second.used = true;
       return found->second.sha256;
     }
     if (const auto seeded = seed_.find(key);
         seeded != seed_.end() && matches(seeded->second)) {
-      ++stats_.hits;
-      ++stats_.seed_hits;
+      count([](stats &s) {
+        ++s.hits;
+        ++s.seed_hits;
+      });
       entry &value = entries_[key];
       value = seeded->second;
       value.used = true;
       return value.sha256;
     }
-    ++stats_.misses;
-    stats_.bytes_hashed += size;
+    count([](stats &s) { ++s.misses; });
   }
   // Read outside the lock: the other threads go on looking up and hashing.
   const auto started = std::chrono::steady_clock::now();
@@ -276,12 +347,18 @@ hash_cache::file_sha256(const std::filesystem::path &path,
     entries_.erase(key);
     return std::nullopt;
   }
-  stats_.hash_seconds += seconds;
-  if (seconds > stats_.slowest_seconds) {
-    stats_.slowest_seconds = seconds;
-    stats_.slowest_bytes = size;
-    stats_.slowest_file = shown;
-  }
+  // Only bytes that were read in full and hashed: with a failed or
+  // cancelled read counted, the MB/s and "Hashed" figures would include
+  // bytes never read.
+  count([&](stats &s) {
+    s.bytes_hashed += size;
+    s.hash_seconds += seconds;
+    if (seconds > s.slowest_seconds) {
+      s.slowest_seconds = seconds;
+      s.slowest_bytes = size;
+      s.slowest_file = shown;
+    }
+  });
   entry &value = entries_[key];
   value.size = size;
   value.write_time = write_time;
@@ -353,9 +430,10 @@ void list_jobs(const std::filesystem::path &base, std::size_t folder,
 }
 
 std::optional<std::string> hash_job(const file_job &job, hash_cache *cache,
-                                    const std::atomic<bool> *cancel) {
+                                    const std::atomic<bool> *cancel,
+                                    hash_cache::stats *stats) {
   if (cache != nullptr) {
-    return cache->file_sha256(job.path, cancel);
+    return cache->file_sha256(job.path, cancel, stats);
   }
   std::error_code ec;
   const std::uint64_t size = std::filesystem::file_size(job.path, ec);
@@ -369,9 +447,11 @@ std::optional<std::string> hash_job(const file_job &job, hash_cache *cache,
 // file is the longest single read, so it starts at once instead of last.
 // finished(job) is called after each file that was read, from the thread
 // that read it. Once cancel is set, the files not yet read stay !done.
+// Lookups through cache also count in stats when it is given.
 void hash_jobs(std::vector<file_job> &jobs, hash_cache *cache, unsigned threads,
                const std::atomic<bool> *cancel,
-               const std::function<void(const file_job &)> &finished) {
+               const std::function<void(const file_job &)> &finished,
+               hash_cache::stats *stats = nullptr) {
   std::vector<std::size_t> order(jobs.size());
   std::iota(order.begin(), order.end(), std::size_t{0});
   std::ranges::stable_sort(order, [&](std::size_t a, std::size_t b) {
@@ -387,7 +467,7 @@ void hash_jobs(std::vector<file_job> &jobs, hash_cache *cache, unsigned threads,
           return;
         }
         file_job &job = jobs[order[at]];
-        job.digest = hash_job(job, cache, cancel);
+        job.digest = hash_job(job, cache, cancel, stats);
         if (cancel != nullptr && cancel->load()) {
           job.digest.reset(); // it may have been cut short
           return;
@@ -655,6 +735,7 @@ catalog_scan scan_mods_directory(const std::filesystem::path &directory,
                      "Cannot read the folder: " + ec.message());
     return scan;
   }
+  scan.listed = true;
   std::ranges::sort(folders);
 
   // Every file of every folder first, so the files can be hashed several at
@@ -688,7 +769,8 @@ catalog_scan scan_mods_directory(const std::filesystem::path &directory,
   const unsigned threads = options.hash_threads != 0
                                ? options.hash_threads
                                : default_hash_threads(directory);
-  hash_jobs(jobs, options.cache, threads, options.cancel, folder_done);
+  hash_jobs(jobs, options.cache, threads, options.cancel, folder_done,
+            options.stats);
 
   std::set<std::string> taken;
   for (std::size_t index = 0; index < folders.size(); ++index) {
