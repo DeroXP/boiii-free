@@ -128,9 +128,10 @@
 	padding: 12dp 0dp;
 	border-bottom: 1dp var(--line);
 }
-.row-n { width: 20dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
-.row-name { flex: 1 1 auto; font-size: 14dp; font-weight: 500; line-height: 16dp; }
-.row-v { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+/* The number and tag keep their size; a long name wraps in what is left. */
+.row-n { flex-shrink: 0; width: 20dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.row-name { flex: 1 1 0dp; min-width: 0dp; font-size: 14dp; font-weight: 500; line-height: 16dp; }
+.row-v { flex-shrink: 0; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
 .more { min-height: 44dp; font-family: "IBM Plex Mono"; font-size: 12dp; text-decoration: underline; }
 .empty-note { padding: 12dp 0dp; border-bottom: 1dp var(--line); font-size: 14dp; line-height: 20dp; color: var(--text2); }
 

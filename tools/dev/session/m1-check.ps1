@@ -17,6 +17,18 @@
 #            leave the crashed journal alone.
 #   cli      Launch modded, then xerces_cli status (and with -CliReload,
 #            load --extras and unload) against the running game.
+#   safeoff  After "crash": Home's "Launch with mods off" reaches the menu with
+#            no mods, the journal marks it as safe mode, and quitting clears
+#            the safe-mode offer.
+#   reopen   Launch modded, close Xerces.exe while the game runs and open it
+#            again: the game keeps running, the new launcher does not call it
+#            a crash, refuses a second launch, and sees the game exit.
+#   dvars    Launch modded with a launcher setting (-DvarName, default
+#            cg_fov_default, set to a value config.cfg does not have): the game
+#            sets it again after config.cfg, and config.cfg keeps its own
+#            value afterwards (restored from a backup in the home if not).
+#   cliapply xerces_cli plan apply (no --dry-launch) starts the game as Launch
+#            modded does; then xerces_cli sig check and logs tail --role game.
 #
 # Without -Live nothing but Xerces.exe --dry-launch runs: it builds the plan
 # file and the command line and starts nothing. -Live starts the real game:
@@ -24,12 +36,14 @@
 # The home folder must be outside AppData; it is a test home that this script
 # writes freely (config, journal, logs).
 param(
-  [ValidateSet('vanilla', 'modded', 'crash', 'restart', 'cli')]
+  [ValidateSet('vanilla', 'modded', 'crash', 'restart', 'cli', 'safeoff', 'reopen', 'dvars', 'cliapply')]
   [string]$Case = 'vanilla',
   [string]$HomeDir = 'C:\Users\Ginld\XercesHome-m1',
   [string[]]$Stack = @('1944930083', '3171632315', '3656779213'),
   [string]$Mode = 'zm',
   [int]$TimeoutSeconds = 240,
+  [string]$DvarName = 'cg_fov_default',
+  [string]$DvarValue = '',
   [switch]$Live,
   [switch]$CliReload
 )
@@ -85,14 +99,88 @@ function Find-Event([string]$path, [string]$name) {
   Read-Events $path | Where-Object { $_.event -eq $name } | Select-Object -First 1
 }
 
-function Write-Config([bool]$modded) {
+function Write-Config([bool]$modded, [hashtable]$dvars = $null) {
   $config = Join-Path $HomeDir 'config'
   New-Item -ItemType Directory -Force $config | Out-Null
   $mods = ($Stack | ForEach-Object { '"ws.' + $_ + '"' }) -join ', '
   $flag = if ($modded) { 'true' } else { 'false' }
-  $json = "{`n  `"schema`": `"xerces.config/1`",`n  `"first_run_done`": true,`n  `"mode`": `"$Mode`",`n" +
+  $extra = ''
+  if ($dvars) {
+    $pairs = ($dvars.GetEnumerator() | ForEach-Object { "`"$($_.Key)`": `"$($_.Value)`"" }) -join ', '
+    $extra = "  `"dvars`": { $pairs },`n"
+  }
+  $json = "{`n  `"schema`": `"xerces.config/1`",`n  `"first_run_done`": true,`n  `"mode`": `"$Mode`",`n" + $extra +
     "  `"profiles`": { `"$Mode`": { `"mods`": [$mods], `"modded`": $flag } }`n}`n"
   [System.IO.File]::WriteAllText((Join-Path $config 'launcher.json'), $json)
+}
+
+function Finish {
+  $results | Format-Table -AutoSize | Out-String -Width 200
+  if ($results | Where-Object { $_.Result -eq 'fail' }) { exit 1 }
+  exit 0
+}
+
+# The log of one launcher process (several can run in the reopen case).
+function Launcher-Log($process) {
+  Get-ChildItem (Join-Path $HomeDir 'logs') -Filter "*-launcher-$($process.Id).jsonl" -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+}
+
+# The launcher's launch.started event, or a fail with its refusal.
+function Wait-Started($process) {
+  $started = Wait-For {
+    $log = Launcher-Log $process
+    if ($log) { Find-Event $log.FullName 'launcher.launch.started' }
+  } 30
+  if ($started) {
+    Note 'launcher started the game' 'pass' "pid $($started.data.pid); $($started.msg)"
+    return $started
+  }
+  $log = Launcher-Log $process
+  $refused = if ($log) { Find-Event $log.FullName 'launcher.launch.refused' } else { $null }
+  $why = if ($refused) { $refused.msg } else { 'no launcher.launch.started event' }
+  Note 'launcher started the game' 'fail' $why
+  return $null
+}
+
+# Where the game is: launcher.json's game_dir, else the newest launcher log
+# that found it.
+function Get-GameDir {
+  $configFile = Join-Path $HomeDir 'config\launcher.json'
+  $gamePath = if (Test-Path $configFile) { (Get-Content $configFile -Raw | ConvertFrom-Json).game_dir } else { $null }
+  if (-not $gamePath) {
+    $prefix = 'Black Ops III found at '
+    foreach ($log in (Get-ChildItem (Join-Path $HomeDir 'logs') -Filter '*launcher*.jsonl' | Sort-Object LastWriteTime -Descending)) {
+      $event = Find-Event $log.FullName 'launcher.game.detected'
+      if ($event -and $event.msg.StartsWith($prefix)) {
+        # Logs write the profile folder as %USERPROFILE%.
+        $gamePath = $event.msg.Substring($prefix.Length).Replace('%USERPROFILE%', $env:USERPROFILE)
+        break
+      }
+    }
+  }
+  if (-not $gamePath -or -not (Test-Path (Join-Path $gamePath 'BlackOps3.exe'))) {
+    throw 'cannot tell where the game is (no game_dir in launcher.json, no launcher.game.detected event)'
+  }
+  return $gamePath
+}
+
+# Runs xerces_cli on this home; stderr notes do not stop the script.
+function Run-Cli([string[]]$cliArgs) {
+  $env:XERCES_HOME = $HomeDir
+  $saved = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { $all = & $cli @cliArgs 2>&1; $code = $LASTEXITCODE } finally { $ErrorActionPreference = $saved }
+  return [pscustomobject]@{
+    Code = $code
+    Out = (($all | Where-Object { $_ -is [string] }) | Out-String).Trim()
+    Err = (($all | Where-Object { $_ -isnot [string] } | ForEach-Object { $_.ToString() }) | Out-String).Trim()
+  }
+}
+
+function Game-Log([int]$gamePid) {
+  Get-ChildItem (Join-Path $HomeDir 'logs') -Filter "*-game-$gamePid.jsonl" -ErrorAction SilentlyContinue |
+    Select-Object -First 1
 }
 
 # Moves the last journal and any culprit search aside, so Home starts from a
@@ -134,9 +222,12 @@ function Warm-Catalog {
 }
 
 function Close-Launcher($process) {
+  # How it went, for the reopen case: exited, closed or killed.
+  $script:lastClose = 'exited'
   if (-not $process -or $process.HasExited) { return }
   [void]$process.CloseMainWindow()
-  if (-not $process.WaitForExit(10000)) { Stop-Process -Id $process.Id -Force }
+  $script:lastClose = 'closed'
+  if (-not $process.WaitForExit(10000)) { Stop-Process -Id $process.Id -Force; $script:lastClose = 'killed' }
 }
 
 function Wait-Frontend([int]$gamePid) {
@@ -202,7 +293,7 @@ if ($Live) {
   if ($LASTEXITCODE -ne 0) { throw 'this checkout does not contain 62e28935 (updater disabled)' }
   if (Get-Process boiii -ErrorAction SilentlyContinue) { throw 'boiii.exe is already running' }
   Write-Host "LIVE: this starts Black Ops III (case $Case, home $HomeDir)."
-} elseif ($Case -eq 'restart' -or $Case -eq 'cli') {
+} elseif (@('vanilla', 'modded', 'crash') -notcontains $Case) {
   throw "-Case $Case needs the game running: it has no dry form (add -Live with the user's go-ahead)"
 }
 New-Item -ItemType Directory -Force $HomeDir | Out-Null
@@ -215,19 +306,7 @@ if ($Case -eq 'restart') {
     throw 'no unfinished journal to protect: run -Case crash first'
   }
   $raw = Get-Content (Join-Path $HomeDir 'logs\journal.json') -Raw
-  $gamePath = (Get-Content (Join-Path $HomeDir 'config\launcher.json') -Raw | ConvertFrom-Json).game_dir
-  if (-not $gamePath) {
-    $detected = Newest-Log '*launcher*.jsonl' ([datetime]::MinValue)
-    $event = if ($detected) { Find-Event $detected.FullName 'launcher.game.detected' } else { $null }
-    $prefix = 'Black Ops III found at '
-    if ($event -and $event.msg.StartsWith($prefix)) {
-      # Logs write the profile folder as %USERPROFILE%.
-      $gamePath = $event.msg.Substring($prefix.Length).Replace('%USERPROFILE%', $env:USERPROFILE)
-    }
-  }
-  if (-not $gamePath -or -not (Test-Path (Join-Path $gamePath 'BlackOps3.exe'))) {
-    throw 'cannot tell where the game is (no game_dir in launcher.json, no launcher.game.detected event)'
-  }
+  $gamePath = Get-GameDir
   $env:XERCES_HOME = $HomeDir
   $env:XERCES_DATA_PATH = Join-Path $repo 'data'
   Remove-Item Env:XERCES_LAUNCH_ID -ErrorAction SilentlyContinue
@@ -235,12 +314,25 @@ if ($Case -eq 'restart') {
   if ($Stack.Count -gt 1) { $arguments += @('+set', 'fs_extramods', (($Stack | Select-Object -Skip 1) -join ',')) }
   $game = Start-Process -FilePath $client -ArgumentList $arguments -WorkingDirectory $gamePath -PassThru
   Note 'game started without a launch id' 'info' "pid $($game.Id)"
+  # Without a launch id the game says so (loader.journal.none) and writes no
+  # phases; loader.journal.skipped is the case of an id that is not the
+  # journal's.
   $skipped = Wait-For {
     $log = Get-ChildItem (Join-Path $HomeDir 'logs') -Filter "*-game-$($game.Id).jsonl" -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($log) { Find-Event $log.FullName 'loader.journal.skipped' }
+    if ($log) {
+      Read-Events $log.FullName | Where-Object { $_.event -eq 'loader.journal.none' -or $_.event -eq 'loader.journal.skipped' } |
+        Select-Object -First 1
+    }
   } $TimeoutSeconds
-  if ($skipped) { Note 'the game leaves the crashed journal alone' 'pass' $skipped.msg }
-  else { Note 'the game leaves the crashed journal alone' 'fail' 'no loader.journal.skipped event' }
+  if ($skipped) { Note 'the game leaves the crashed journal alone' 'pass' "$($skipped.event): $($skipped.msg)" }
+  else { Note 'the game leaves the crashed journal alone' 'fail' 'no loader.journal.none or loader.journal.skipped event' }
+  # Give it time to reach the menu, where a game that owned the journal
+  # would write frontend.
+  Start-Sleep -Seconds 25
+  $gameLog = Get-ChildItem (Join-Path $HomeDir 'logs') -Filter "*-game-$($game.Id).jsonl" -ErrorAction SilentlyContinue | Select-Object -First 1
+  $phases = if ($gameLog) { @(Read-Events $gameLog.FullName | Where-Object { $_.event -eq 'loader.phase' }) } else { @() }
+  if ($phases.Count -eq 0) { Note 'no phases written by the restarted game' 'pass' }
+  else { Note 'no phases written by the restarted game' 'fail' (($phases | ForEach-Object { $_.msg }) -join ', ') }
   Start-Sleep -Seconds 5
   $after = Get-Content (Join-Path $HomeDir 'logs\journal.json') -Raw
   if ($after -eq $raw) { Note 'journal unchanged' 'pass' "still $($before.phase), plan '$($before.plan_id)'" }
@@ -249,8 +341,167 @@ if ($Case -eq 'restart') {
   $after = Get-Content (Join-Path $HomeDir 'logs\journal.json') -Raw
   if ($after -eq $raw) { Note 'journal unchanged after the restarted game quit' 'pass' }
   else { Note 'journal unchanged after the restarted game quit' 'fail' 'the quit wrote the journal' }
-  $results | Format-Table -AutoSize | Out-String -Width 200
-  exit 0
+  Finish
+}
+
+# --- safeoff: Home's "Launch with mods off" after a crash -------------------
+if ($Case -eq 'safeoff') {
+  $before = Read-Journal
+  if (-not $before -or $before.phase -eq 'clean_exit' -or -not $before.stack) {
+    throw 'no crashed modded launch to recover from: run -Case crash first'
+  }
+  Note 'crashed launch on record' 'info' "phase $($before.phase), $(@($before.stack).Count) mods"
+  Write-Config $true
+  $launcherProcess = Start-Launcher @('+3000 click safe-off') ($TimeoutSeconds + 180)
+  $started = Wait-Started $launcherProcess
+  if (-not $started) { Close-Launcher $launcherProcess; Finish }
+  $gamePid = [int]$started.data.pid
+  if ($started.msg -match 'fs_game|fs_extramods|xerces-plan') { Note 'no mods on the command line' 'fail' $started.msg }
+  else { Note 'no mods on the command line' 'pass' }
+  $journal = Wait-Frontend $gamePid
+  if ($journal) {
+    if ($journal.safe_mode) { Note 'journal marks the launch as safe mode' 'pass' }
+    else { Note 'journal marks the launch as safe mode' 'fail' 'safe_mode is false' }
+    Start-Sleep -Seconds 3
+    Note 'fs_game' 'info' (Console-Value 'fs_game')
+  }
+  $log = Game-Log $gamePid
+  $start = if ($log) { Find-Event $log.FullName 'loader.start' } else { $null }
+  if ($start -and $start.msg.StartsWith('no plan')) { Note 'the game loads no plan' 'pass' $start.msg }
+  else { Note 'the game loads no plan' 'fail' $(if ($start) { $start.msg } else { 'no loader.start event' }) }
+  Quit-Game $null
+  Close-Launcher $launcherProcess
+  $shot = Join-Path $HomeDir 'm1-after-safe.png'
+  $again = Start-Launcher @("+2500 shot $shot", '+1000 quit') 30
+  [void]$again.WaitForExit(40000)
+  if (Test-Path $shot) { Note 'Home after the safe launch (no safe-mode offer expected)' 'info' $shot }
+  Finish
+}
+
+# --- reopen: close the launcher while the game runs, open it again ----------
+if ($Case -eq 'reopen') {
+  Write-Config $true
+  Reset-Journal
+  Warm-Catalog
+  $first = Start-Launcher @('+3000 click launch-modded') ($TimeoutSeconds + 180)
+  $started = Wait-Started $first
+  if (-not $started) { Close-Launcher $first; Finish }
+  $gamePid = [int]$started.data.pid
+  $journal = Wait-Frontend $gamePid
+  if (-not $journal) { Close-Launcher $first; Quit-Game $null; Finish }
+  Close-Launcher $first
+  Note 'launcher closed while the game runs' $(if ($lastClose -eq 'killed') { 'fail' } else { 'pass' }) $lastClose
+  Start-Sleep -Seconds 3
+  if (-not (Get-Process -Id $gamePid -ErrorAction SilentlyContinue)) {
+    Note 'the game keeps running without the launcher' 'fail' "pid $gamePid is gone"
+    Finish
+  }
+  Note 'the game keeps running without the launcher' 'pass' "pid $gamePid"
+  $runEntries = @(Get-ChildItem (Join-Path $HomeDir 'run') -ErrorAction SilentlyContinue)
+  Note 'run folder' 'info' (($runEntries | ForEach-Object { $_.Name }) -join ', ')
+  $journalBefore = Get-Content (Join-Path $HomeDir 'logs\journal.json') -Raw
+  $shot = Join-Path $HomeDir 'm1-reopen.png'
+  $second = Start-Launcher @("+3000 shot $shot", '+1000 click launch-modded') ($TimeoutSeconds + 120)
+  $refused = Wait-For {
+    $log = Launcher-Log $second
+    if ($log) { Read-Events $log.FullName | Where-Object { $_.event -eq 'launcher.launch.refused' -or $_.event -eq 'launcher.launch.started' } | Select-Object -First 1 }
+  } 20
+  if ($refused -and $refused.event -eq 'launcher.launch.refused') { Note 'a second launch is refused while the game runs' 'pass' $refused.msg }
+  elseif ($refused) { Note 'a second launch is refused while the game runs' 'fail' "it started one: $($refused.msg)" }
+  else { Note 'a second launch is refused while the game runs' 'fail' 'neither refused nor started' }
+  if (Test-Path $shot) { Note 'Home of the reopened launcher (no safe-mode offer expected)' 'info' $shot }
+  $journalNow = Get-Content (Join-Path $HomeDir 'logs\journal.json') -Raw
+  if ($journalNow -eq $journalBefore -or (Read-Journal).phase -in @('frontend', 'in_game')) {
+    Note 'the reopened launcher leaves the running launch alone' 'pass' "phase $((Read-Journal).phase)"
+  } else { Note 'the reopened launcher leaves the running launch alone' 'fail' "phase $((Read-Journal).phase)" }
+  Quit-Game $null
+  $gone = Wait-For {
+    $log = Launcher-Log $second
+    if ($log) { Find-Event $log.FullName 'launcher.game.gone' }
+  } 15
+  if ($gone) { Note 'the reopened launcher saw the game exit' 'pass' $gone.msg }
+  else { Note 'the reopened launcher saw the game exit' 'fail' 'no launcher.game.gone event' }
+  Close-Launcher $second
+  Finish
+}
+
+# --- dvars: a launcher setting wins for the session, config.cfg keeps its own
+if ($Case -eq 'dvars') {
+  $gameDir = Get-GameDir
+  $cfg = Join-Path $gameDir 'boiii_players\user\config.cfg'
+  $pattern = '^\s*seta?\s+' + [regex]::Escape($DvarName) + '\s'
+  $savedLine = $null
+  if (Test-Path $cfg) {
+    $backup = Join-Path $HomeDir ('config.cfg.before-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    Copy-Item $cfg $backup
+    Note 'config.cfg backed up' 'info' $backup
+    $savedLine = Get-Content $cfg | Where-Object { $_ -match $pattern } | Select-Object -First 1
+  }
+  Note "config.cfg's $DvarName" 'info' $(if ($savedLine) { $savedLine } else { '(none)' })
+  $value = $DvarValue
+  if (-not $value) { $value = if ($savedLine -match '"90"') { '100' } else { '90' } }
+  Write-Config $true @{ $DvarName = $value }
+  Reset-Journal
+  Warm-Catalog
+  $launcherProcess = Start-Launcher @('+3000 click launch-modded') ($TimeoutSeconds + 180)
+  $started = Wait-Started $launcherProcess
+  if (-not $started) { Close-Launcher $launcherProcess; Write-Config $true; Finish }
+  $gamePid = [int]$started.data.pid
+  if ($started.msg.Contains("+set $DvarName $value")) { Note 'the setting is on the command line' 'pass' "+set $DvarName $value" }
+  else { Note 'the setting is on the command line' 'fail' $started.msg }
+  $journal = Wait-Frontend $gamePid
+  $log = Game-Log $gamePid
+  foreach ($name in @('xerces.dvars.session', 'xerces.dvars.reapplied')) {
+    $event = if ($log) { Find-Event $log.FullName $name } else { $null }
+    if ($event) { Note $name 'pass' $event.msg } else { Note $name 'fail' 'not in the game log' }
+  }
+  if ($journal) {
+    Start-Sleep -Seconds 3
+    $now = Console-Value $DvarName
+    if ($now -match ('is: "' + [regex]::Escape($value) + '"')) { Note "$DvarName in the game" 'pass' $now }
+    else { Note "$DvarName in the game" 'fail' $now }
+  }
+  Quit-Game $null
+  Close-Launcher $launcherProcess
+  $afterLine = if (Test-Path $cfg) { Get-Content $cfg | Where-Object { $_ -match $pattern } | Select-Object -First 1 } else { $null }
+  if ($afterLine -eq $savedLine) { Note 'config.cfg keeps its own value' 'pass' $(if ($afterLine) { $afterLine } else { '(none)' }) }
+  else {
+    Note 'config.cfg keeps its own value' 'fail' "now '$afterLine', was '$savedLine'"
+    if ($backup) { Copy-Item $backup $cfg -Force; Note 'config.cfg restored from the backup' 'info' $backup }
+  }
+  Write-Config $true # the home's config without the test setting
+  Finish
+}
+
+# --- cliapply: xerces_cli plan apply starts the game -----------------------
+if ($Case -eq 'cliapply') {
+  Write-Config $true
+  Reset-Journal
+  Warm-Catalog
+  $apply = Run-Cli @('plan', 'apply', '--mode', $Mode, '--json')
+  $doc = $null
+  try { $doc = $apply.Out | ConvertFrom-Json } catch { }
+  if ($apply.Code -eq 0 -and $doc -and $doc.started) {
+    Note 'xerces_cli plan apply started the game' 'pass' "pid $($doc.pid); $($doc.command_line)"
+  } else {
+    Note 'xerces_cli plan apply started the game' 'fail' "exit $($apply.Code): $($apply.Err) $($apply.Out)"
+    Finish
+  }
+  if ($apply.Err) { Note 'plan apply notes' 'info' $apply.Err }
+  $gamePid = [int]$doc.pid
+  $journal = Wait-Frontend $gamePid
+  Check-GameLog $gamePid $true
+  if ($journal) {
+    Start-Sleep -Seconds 3
+    Note 'fs_game' 'info' (Console-Value 'fs_game')
+    Note 'fs_extramods' 'info' (Console-Value 'fs_extramods')
+  }
+  $sig = Run-Cli @('sig', 'check')
+  Note 'xerces_cli sig check' $(if ($sig.Code -eq 0) { 'pass' } else { 'fail' }) "exit $($sig.Code): $($sig.Out)"
+  $tail = Run-Cli @('logs', 'tail', '--role', 'game', '--lines', '4')
+  Note 'xerces_cli logs tail --role game' $(if ($tail.Code -eq 0 -and $tail.Out) { 'pass' } else { 'fail' }) $tail.Out
+  Quit-Game $null
+  Finish
 }
 
 # --- the launcher cases ---------------------------------------------------
@@ -286,6 +537,7 @@ if (-not $Live) {
   if (Read-Journal) { Note 'a dry launch writes no journal' 'fail' 'logs\journal.json exists' }
   else { Note 'a dry launch writes no journal' 'pass' }
   $results | Format-Table -AutoSize | Out-String -Width 200
+  if ($results | Where-Object { $_.Result -eq 'fail' }) { exit 1 }
   exit 0
 }
 

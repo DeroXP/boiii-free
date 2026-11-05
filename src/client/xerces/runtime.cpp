@@ -181,12 +181,16 @@ void decide_journal() {
     return;
   }
   journal_decided = true;
-  const std::string_view id(start_launch_id);
-  if (id.empty()) {
-    return; // not started by the launcher, or restarted from a crash
-  }
   if (!game::is_client() || !game::is_new_client()) {
     return; // only the client role walks through the phases
+  }
+  const std::string_view id(start_launch_id);
+  if (id.empty()) {
+    // Not started by the launcher, or restarted from a crash. Said in the
+    // log so a bug report shows why this run has no phases.
+    log_info("loader.journal.none",
+             "Started without a launch id; the journal is left alone");
+    return;
   }
   auto journal = xerces_core::parse_journal(read_file(journal_path()));
   if (!xerces_core::journal_claimable(journal, id)) {
