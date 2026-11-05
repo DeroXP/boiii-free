@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <xerces_core/launch.hpp>
 #include <xerces_core/servers_book.hpp>
@@ -45,6 +46,26 @@ std::string short_name(const std::string &name) {
 // hand-edited launcher.json left the name empty.
 const std::string &shown_name(const xerces_core::favorite_server &server) {
   return server.name.empty() ? server.address : server.name;
+}
+
+// The favourite a Remove dialog asked about: the clicked row when it still
+// holds that exact entry, else the same entry elsewhere, else the same
+// server. launcher.json can hold two favourites for one server (written by
+// hand, differing only in case), and an address lookup alone would remove
+// the first of them whichever row was confirmed.
+std::optional<std::size_t>
+locate_favorite(const std::vector<xerces_core::favorite_server> &list,
+                std::size_t row, const xerces_core::favorite_server &server) {
+  const auto same = [&](const xerces_core::favorite_server &entry) {
+    return entry.name == server.name && entry.address == server.address;
+  };
+  if (row < list.size() && same(list[row])) {
+    return row;
+  }
+  if (const auto it = std::ranges::find_if(list, same); it != list.end()) {
+    return std::size_t(it - list.begin());
+  }
+  return xerces_core::find_favorite(list, server.address);
 }
 
 bool is_text_field(const Rml::Element *element) {
@@ -338,14 +359,19 @@ private:
     if (modded && !mods_off) {
       const xerces_core::safe_mode_decision decision = svc.safe_mode();
       if (decision.safe_mode) {
+        // Cancel returns to the Join that asked (a favourite or recent row
+        // deep in a list), not the default focus the dialog closed onto.
+        const std::string asked_from = focused_id();
         owner_->dialog(
             "The last modded launch crashed", decision.message,
             {"Join with mods off", "Join with mods anyway", "Cancel"},
-            [this, address](int choice) {
+            [this, address, asked_from](int choice) {
               if (choice == 0) {
                 join(address, true, true);
               } else if (choice == 1) {
                 launch_join(address, true, false);
+              } else if (!asked_from.empty()) {
+                focus_later(asked_from, 1);
               }
             });
         return false;
@@ -437,7 +463,13 @@ private:
     } else if (action == "edit") {
       editing_ = true;
       editing_index_ = std::size_t(index);
-      fav_name_ = server.name;
+      // A favourite saved without a name is named after its address (Save
+      // on a Recent row). That name is not the player's: the field starts
+      // empty, so a changed address renames it too instead of leaving the
+      // old address as the label of a different server.
+      fav_name_ = xerces_core::same_server(server.name, server.address)
+                      ? std::string()
+                      : server.name;
       fav_address_ = server.address;
       fav_problem_.clear();
       form_label_ = owner_->tr("Edit favourite");
@@ -455,13 +487,17 @@ private:
               : server.name + " (" + server.address + ")";
       owner_->dialog(
           "Remove this favourite?", shown, {"Remove", "Cancel"},
-          [this, server](int choice) {
+          [this, server, index](int choice) {
+            // The dialog closed onto the screen's default focus at the top;
+            // back out to the Remove that asked, so a long list keeps the
+            // player's place.
             if (choice != 0) {
+              focus_later("fav-remove-" + std::to_string(index), 1);
               return;
             }
             services &s = owner_->svc();
             auto &list = s.config().favorites;
-            const auto found = xerces_core::find_favorite(list, server.address);
+            const auto found = locate_favorite(list, std::size_t(index), server);
             if (!found) {
               return;
             }
@@ -536,7 +572,9 @@ private:
   }
 
   // Saves an address as a favourite named after itself (Edit renames it).
-  void quick_save(const std::string &typed, const char *problem_field) {
+  // True when it joined the favourites list, even if launcher.json could not
+  // be written: the list on screen changes either way.
+  bool quick_save(const std::string &typed, const char *problem_field) {
     const std::string address = xerces_core::trim_server_address(typed);
     services &svc = owner_->svc();
     auto &favorites = svc.config().favorites;
@@ -548,21 +586,21 @@ private:
         owner_->notify(owner_->tr("Favourites could not be saved:") + " " +
                            svc.config_error(),
                        true);
-        return;
+        return true;
       }
       owner_->notify(owner_->tr("Saved to favourites. Use Edit to name it:") +
                      " " + short_name(address));
-      return;
+      return true;
     case xerces_core::favorite_status::duplicate:
       owner_->notify(owner_->tr("Already in your favourites as") + " \"" +
                          short_name(shown_name(favorites[edit.index])) + "\".",
                      true);
-      return;
+      return false;
     case xerces_core::favorite_status::full:
       owner_->notify(owner_->tr("Favourites are full (100). Remove one before "
                                 "adding another."),
                      true);
-      return;
+      return false;
     default:
       if (std::string(problem_field) == "address") {
         address_checked_ = true;
@@ -581,7 +619,7 @@ private:
                            short_name(address),
                        true);
       }
-      return;
+      return false;
     }
   }
 
@@ -625,7 +663,14 @@ private:
         focus_later("recent-join-0", 2);
       }
     } else if (action == "save") {
-      quick_save(address, "recent");
+      // The row's Save hides once the server is a favourite, and RmlUi hands
+      // a hidden button's focus to its row, which arrows and A cannot leave.
+      // Focus takes Remove, which slides into Save's place: a second press of
+      // A then only drops a recent entry that is now a favourite, where Join
+      // would start the game.
+      if (quick_save(address, "recent")) {
+        focus_later("recent-remove-" + std::to_string(index), 2);
+      }
     } else if (action == "remove") {
       xerces_core::forget_recent_server(recent, address);
       if (!svc.save_config()) {
@@ -663,7 +708,10 @@ private:
                      "The list of servers you joined is emptied. Favourites "
                      "stay.",
                      {"Clear", "Cancel"}, [this](int choice) {
+                       // Kept: back to the button that asked, not the
+                       // default focus the dialog closed onto.
                        if (choice != 0) {
+                         focus_later("clear-recent", 1);
                          return;
                        }
                        services &svc = owner_->svc();
@@ -721,6 +769,14 @@ private:
     // view, so the whole row and the focus ring show, not just the button.
     element->ScrollIntoView(Rml::ScrollIntoViewOptions(
         Rml::ScrollAlignment::Adaptive, Rml::ScrollAlignment::Nearest));
+  }
+
+  // The id of the focused element when it is on this screen, else empty.
+  std::string focused_id() const {
+    Rml::Context *context = owner_->context();
+    Rml::Element *focus = context ? context->GetFocusElement() : nullptr;
+    return focus && doc && focus->GetOwnerDocument() == doc ? focus->GetId()
+                                                            : std::string();
   }
 
   std::string field_value(const char *element_id) const {
