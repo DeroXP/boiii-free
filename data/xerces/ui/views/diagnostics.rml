@@ -21,6 +21,7 @@
 			<button id="copy-report" class="primary-button default-focus" data-event-click="act('copy')"><span>Copy report</span></button>
 			<button id="refresh" class="outline" data-class-busy="busy" data-event-click="act('refresh')"><span>{{refresh_label}}</span></button>
 			<button id="verify" class="outline" data-event-click="act('verify')"><span>Verify with Steam</span></button>
+			<button id="bundle" class="outline" data-event-click="act('bundle')"><span>Make a bundle</span></button>
 		</div>
 	</div>
 

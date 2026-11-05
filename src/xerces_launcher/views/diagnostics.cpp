@@ -936,6 +936,30 @@ private:
       owner_->notify(owner_->tr(
           "Report copied. Paste it into your bug report; your user folder "
           "shows as %USERPROFILE%."));
+    } else if (action == "bundle") {
+      // The diagnostics zip (DESIGN.md 5.10) in <home>\crash; it stays here.
+      std::string error;
+      const fs::path bundle = svc.make_bundle(&error);
+      refresh_files();
+      handle_.DirtyAllVariables();
+      if (bundle.empty()) {
+        owner_->notify(owner_->tr("The bundle could not be written:") + " " +
+                           error,
+                       true);
+        return;
+      }
+      owner_->dialog(
+          "Bundle ready",
+          owner_->tr("Saved as") + " " + utf8(bundle.filename()) + ". " +
+              owner_->tr("It holds the latest logs, the launch journal, the "
+                         "plan, the signature report, the launcher settings "
+                         "without your player name, and this PC's specs, with "
+                         "your user folder hidden. Nothing was sent anywhere."),
+          {"Open its folder", "Close"}, [this, bundle](int choice) {
+            if (choice == 0) {
+              owner_->open_folder(bundle.parent_path());
+            }
+          });
     } else if (action == "refresh") {
       // Done means this refresh's own detection has landed (each one bumps
       // game_rev) and the scan after it has ended. If a detection is still
