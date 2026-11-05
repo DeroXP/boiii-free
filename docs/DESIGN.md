@@ -653,7 +653,9 @@ All in `xerces_core`:
      `null`, and their plans get the info `plan.memory.unknown` instead of a
      check. Detection matches the installed game to an entry
      (`game_state::zone_memory`) and the profile's request carries the mode's
-     budget; `xerces_cli plan resolve` takes `--game-build` and `--zone-memory`.
+     budget; `xerces_cli plan resolve`, `conflicts check` and `packs import`
+     take `--game-build` and `--zone-memory` (a pack is checked in its own
+     mode).
    - The planner adds, per stacked mod, the zones that load in the mode
      (core_mod, the mode's tier, their `_patch`, the largest language copy of
      each), and every zone of the plan's map. Each installed custom map of the
@@ -661,15 +663,23 @@ All in `xerces_core`:
      stack + map against the pool. The plan JSON's `zone_memory` (`checked`,
      `pool_mib`, `baseline_mib`, `stack_mib`, `map_mib`, `total_mib`,
      `maps_over` with `id`, `name`, `need_mib`, `over_by_mib` and
-     `over_without_mods`, most over first, and `unread` for ids with a header
-     Xerces could not read) is outside `plan_id` and `content_id`, as
-     `asset_pools` is: it depends on every installed map.
+     `over_without_mods`, most over first, `maps_unread` with `id` and `name`
+     for the installed maps of the mode with a zone header Xerces could not read
+     and that fit without it, so whether they fit is unknown, and `unread`: the
+     ids of the stack's mods and the plan's map with such a header, a zone that
+     `stack_mib` and `map_mib` leave out) is outside `plan_id` and `content_id`,
+     as `asset_pools` is: it depends on every installed map. A map over the pool
+     without its unread zones is in `maps_over`.
    - A plan whose own map does not fit is an error (`plan.memory.over`, so
-     Launch refuses it); the other maps that do not fit are a warning
-     (`plan.memory.maps_over`) that names them, the MiB over and the mod that
-     takes the most, and says the game closes while loading them.
+     Launch refuses it). The other maps that do not fit are warnings that name
+     them and the MiB over and say the game closes while loading them:
+     `plan.memory.maps_over` for those that would fit with fewer mods (it says
+     to remove a mod and names the mod that takes the most), and
+     `plan.memory.maps_too_big` for those that do not fit even with no mods (it
+     says to play another map; with no mods every map over is one of these).
+     `plan.memory.maps_unread` names the maps in `maps_unread` as not checked.
      `xerces_cli plan` and `plan apply` print a zone memory line; Mods shows the
-     note as a plan note, in words the screen translates.
+     notes as plan notes, in words the screen translates.
    - Not known yet: whether the baseline moves with the player's language, the
      stock zones a map pulls in, or settings; the in-game check is in
      `docs/TESTING.md` (Loader and manifest).

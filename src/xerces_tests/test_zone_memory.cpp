@@ -448,18 +448,30 @@ TEST_CASE(
   CHECK_EQ(memory.maps_over[2].need_mib, 2103.0);
   CHECK_EQ(memory.maps_over[3].need_mib, 2103.0);
 
+  // Removing a mod helps B, A and F; E needs another map, so it gets its own
+  // warning without that advice.
   const diagnostic *warning = find_diag(p, "plan.memory.maps_over");
   REQUIRE(warning != nullptr);
   CHECK(warning->level == severity::warning);
-  CHECK(contains(warning->message, "4 maps do not fit"));
-  CHECK(contains(warning->message, "Map E (504 MiB over, even with no mods)"));
-  CHECK(contains(warning->message, "Map B (414 MiB over)"));
+  CHECK(contains(warning->message, "3 maps do not fit in the game's memory "
+                                   "with these mods: Map B (414 MiB over), "
+                                   "Map A (55 MiB over) and Map F (55 MiB "
+                                   "over)."));
+  CHECK(!contains(warning->message, "Map E"));
   CHECK(contains(warning->message, "closes while loading them"));
   CHECK(contains(warning->message, "Remove a mod"));
   CHECK(contains(warning->message,
                  "The mod that takes the most is Big Mod (452 MiB)."));
+  const diagnostic *too_big = find_diag(p, "plan.memory.maps_too_big");
+  REQUIRE(too_big != nullptr);
+  CHECK(too_big->level == severity::warning);
+  CHECK_EQ(too_big->message,
+           std::string("The map Map E (504 MiB over) does not fit in the "
+                       "game's memory even with no mods: the game closes "
+                       "while loading it. Play another map."));
   CHECK(find_diag(p, "plan.memory.over") == nullptr);
   CHECK(find_diag(p, "plan.memory.unknown") == nullptr);
+  CHECK(find_diag(p, "plan.memory.maps_unread") == nullptr);
 
   // The plan JSON carries the numbers; MiB to one decimal.
   const std::string text = plan_to_json(p);
@@ -471,13 +483,29 @@ TEST_CASE(
                        R"("unread":[]})"));
   CHECK(contains(text, R"("zone_mib":452)"));
 
-  // One mod left: only the map too big on its own is over.
+  // One mod left: only the map too big on its own is over, and removing the
+  // mod would not help.
   const plan small = resolve_plan(scan.catalog, zombies({"ws.101"}));
   CHECK(over_ids(small) == std::vector<std::string>{"ws.204"});
-  const diagnostic *one = find_diag(small, "plan.memory.maps_over");
+  CHECK(find_diag(small, "plan.memory.maps_over") == nullptr);
+  const diagnostic *one = find_diag(small, "plan.memory.maps_too_big");
   REQUIRE(one != nullptr);
-  CHECK(contains(one->message, "The map Map E ("));
+  CHECK(contains(one->message, "The map Map E (52 MiB over)"));
   CHECK(contains(one->message, "closes while loading it"));
+  CHECK(!contains(one->message, "Remove a mod"));
+
+  // No mods at all: nothing says "with these mods" or "Remove a mod".
+  const plan none = resolve_plan(scan.catalog, zombies({}));
+  REQUIRE(none.ok());
+  CHECK(none.stack.empty());
+  CHECK(over_ids(none) == std::vector<std::string>{"ws.204"});
+  CHECK(find_diag(none, "plan.memory.maps_over") == nullptr);
+  REQUIRE(find_diag(none, "plan.memory.maps_too_big") != nullptr);
+  for (const auto &item : none.diags.items()) {
+    CHECK(!contains(item.message, "with these mods"));
+    CHECK(!contains(item.message, "Remove a mod"));
+    CHECK(!contains(item.message, "takes the most"));
+  }
   std::error_code ec;
   fs::remove_all(root, ec);
 }
@@ -500,8 +528,12 @@ TEST_CASE("zone memory: the plan's own map over the pool is an error") {
   // The others are still named, without the plan's map.
   const diagnostic *warning = find_diag(p, "plan.memory.maps_over");
   REQUIRE(warning != nullptr);
-  CHECK(contains(warning->message, "3 maps do not fit"));
+  CHECK(contains(warning->message, "2 maps do not fit"));
+  CHECK(contains(warning->message, "Map B (414 MiB over) and Map F"));
   CHECK(!contains(warning->message, "Map A"));
+  const diagnostic *too_big_other = find_diag(p, "plan.memory.maps_too_big");
+  REQUIRE(too_big_other != nullptr);
+  CHECK(contains(too_big_other->message, "The map Map E (504 MiB over)"));
   CHECK(over_ids(p) ==
         (std::vector<std::string>{"ws.204", "ws.201", "ws.200", "ws.205"}));
   CHECK(contains(plan_to_json(p), R"("map_mib":801,)"));
@@ -541,7 +573,8 @@ TEST_CASE("zone memory: without figures the check is skipped with a note") {
   CHECK(find_diag(p, "plan.memory.maps_over") == nullptr);
   const std::string text = plan_to_json(p);
   CHECK(contains(text, R"("zone_memory":{"baseline_mib":null,"checked":false,)"
-                       R"("map_mib":801,"maps_over":[],"pool_mib":null,)"
+                       R"("map_mib":801,"maps_over":[],"maps_unread":[],)"
+                       R"("pool_mib":null,)"
                        R"("stack_mib":452,"total_mib":null,"unread":[]})"));
   std::error_code ec;
   fs::remove_all(root, ec);
@@ -557,6 +590,61 @@ TEST_CASE("zone memory: unread headers are named, and counted as nothing") {
   CHECK_EQ(p.zone_memory.stack_bytes, 10 * MiB);
   CHECK(p.zone_memory.unread == std::vector<std::string>{"ws.102"});
   CHECK(contains(plan_to_json(p), R"("unread":["ws.102"])"));
+  std::error_code ec;
+  fs::remove_all(root, ec);
+}
+
+TEST_CASE("zone memory: installed maps with an unread header are not called "
+          "fine") {
+  // Map G's main zone has another fastfile version and Map I's another
+  // magic, so only G's language copy (1 MiB) is known: both are named as not
+  // checked. Map H's language copy is too short, but its main zone alone is
+  // over, so it is over.
+  const fs::path root = write_catalog("unread_maps");
+  workshop_item(root, "206", "map", "Map G",
+                {{"zm_g.ff", ff(0, 1160 * MiB, fastfile_magic, 0x252)},
+                 {"en_zm_g.ff", ff(1 * MiB, 0)}});
+  workshop_item(
+      root, "207", "map", "Map H",
+      {{"zm_h.ff", ff(0, 1300 * MiB)}, {"en_zm_h.ff", "TAff0000 too short"}});
+  workshop_item(root, "208", "map", "Map I",
+                {{"zm_i.ff", ff(0, 900 * MiB, "XXff0000")}});
+  const catalog_scan scan = scan_mods_directory(root);
+  const plan p = resolve_plan(scan.catalog, zombies({"ws.101"}, "ws.202"));
+  REQUIRE(p.ok());
+  const zone_memory_report &memory = p.zone_memory;
+  CHECK(memory.unread.empty()); // the stack and the plan's map were read
+  CHECK(over_ids(p) == (std::vector<std::string>{"ws.207", "ws.204"}));
+  REQUIRE_EQ(memory.maps_unread.size(), std::size_t(2));
+  CHECK_EQ(memory.maps_unread[0].id, std::string("ws.206"));
+  CHECK_EQ(memory.maps_unread[0].name, std::string("Map G"));
+  CHECK_EQ(memory.maps_unread[1].id, std::string("ws.208"));
+  const diagnostic *unread = find_diag(p, "plan.memory.maps_unread");
+  REQUIRE(unread != nullptr);
+  CHECK(unread->level == severity::warning);
+  CHECK_EQ(unread->message,
+           std::string("Xerces could not read part of 2 maps, Map G and Map "
+                       "I, so it did not check whether they fit in the "
+                       "game's memory. If Steam is updating them, check "
+                       "again once Steam is done."));
+  CHECK(contains(plan_to_json(p),
+                 R"("maps_unread":[{"id":"ws.206","name":"Map G"},)"
+                 R"({"id":"ws.208","name":"Map I"}],"pool_mib":2048,)"));
+
+  // The plan's own map unread: in unread and named as not checked, but not
+  // refused, since nothing says it is over.
+  const plan own = resolve_plan(scan.catalog, zombies({"ws.101"}, "ws.206"));
+  CHECK(own.ok());
+  CHECK(own.zone_memory.unread == std::vector<std::string>{"ws.206"});
+  CHECK_EQ(own.zone_memory.map_bytes, std::optional(1 * MiB));
+  REQUIRE_EQ(own.zone_memory.maps_unread.size(), std::size_t(2));
+  CHECK_EQ(own.zone_memory.maps_unread[0].id, std::string("ws.206"));
+
+  // Without figures nothing is checked, so nothing is named.
+  const plan unknown =
+      resolve_plan(scan.catalog, zombies({"ws.101"}, "ws.202", false));
+  CHECK(unknown.zone_memory.maps_unread.empty());
+  CHECK(find_diag(unknown, "plan.memory.maps_unread") == nullptr);
   std::error_code ec;
   fs::remove_all(root, ec);
 }
@@ -610,6 +698,8 @@ TEST_CASE("zone memory: the Mods screen shows it as a plan-wide note") {
   }
   CHECK(std::ranges::find(general, "plan.memory.over") != general.end());
   CHECK(std::ranges::find(general, "plan.memory.maps_over") != general.end());
+  CHECK(std::ranges::find(general, "plan.memory.maps_too_big") !=
+        general.end());
   std::error_code ec;
   fs::remove_all(root, ec);
 }

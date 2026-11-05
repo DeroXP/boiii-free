@@ -541,12 +541,10 @@ private:
     const auto whole_mib = [](double mib) {
       return std::to_string(static_cast<long long>(std::ceil(mib))) + " MiB";
     };
+    // The sentence before the list says whether removing a mod helps.
     const auto over = [&](const xc::zone_memory_map &map) {
       return xc::mods_plain_name(map.name) + " (" + whole_mib(map.over_by_mib) +
-             " " + owner_->tr("over") +
-             (map.over_without_mods ? ", " + owner_->tr("even with no mods")
-                                    : std::string()) +
-             ")";
+             " " + owner_->tr("over") + ")";
     };
     const xc::plan_entry *biggest = nullptr;
     for (const auto &entry : plan_.stack) {
@@ -580,19 +578,42 @@ private:
                " " + over(map) + "." + most;
       }
     }
-    if (note.code == "plan.memory.maps_over") {
+    // The other maps over, split as the planner splits them: removing a mod
+    // helps only those that fit with no mods.
+    const bool too_big = note.code == "plan.memory.maps_too_big";
+    if (note.code == "plan.memory.maps_over" || too_big) {
       std::string list;
       for (const auto &map : maps) {
-        if (plan_.map && map.id == plan_.map->id) {
+        if ((plan_.map && map.id == plan_.map->id) ||
+            map.over_without_mods != too_big) {
           continue;
         }
         list += (list.empty() ? "" : ", ") + over(map);
+      }
+      if (!list.empty() && too_big) {
+        return owner_->tr("Some maps do not fit in the game's memory even "
+                          "with no mods: the game closes while loading them. "
+                          "Play another map.") +
+               " " + list + ".";
       }
       if (!list.empty()) {
         return owner_->tr("Some maps do not fit in the game's memory with "
                           "these mods: the game closes while loading them. "
                           "Remove a mod to play them, or play another map.") +
                " " + list + "." + most;
+      }
+    }
+    if (note.code == "plan.memory.maps_unread") {
+      std::string list;
+      for (const auto &map : plan_.zone_memory.maps_unread) {
+        list += (list.empty() ? "" : ", ") + xc::mods_plain_name(map.name);
+      }
+      if (!list.empty()) {
+        return owner_->tr("Xerces could not read part of some maps, so it did "
+                          "not check whether they fit in the game's memory. "
+                          "If Steam is updating them, check again once Steam "
+                          "is done.") +
+               " " + list + ".";
       }
     }
     return tidy(note.message);

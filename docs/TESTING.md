@@ -308,15 +308,28 @@ each one does not cover is said under its item.
       prints the same numbers; in Multiplayer it says the check is skipped. A
       scripted capture of Mods (`check-screens.ps1 -Views mods`) shows the
       warning as the plan note.
+- [x] (2026-11-05, offline) Zone memory after review, with `xerces_cli` on a
+      header-only copy of the Workshop folder (each item's `workshop.json` and
+      the first 0x100 bytes of each `.ff`, outside the Steam folders): with no
+      mods, a 1300 MiB test map gets `plan.memory.maps_too_big` ("Play another
+      map", no "Remove a mod"); with DS4C it is listed apart from Super Mario
+      64, which keeps `plan.memory.maps_over`. With BACKROOMZ's main zone cut
+      short in the copy, it is named as not checked (`maps_unread`,
+      `plan.memory.maps_unread`) instead of fitting. `packs import` and
+      `conflicts check --pack` with `--game-build 0x6531394` refuse a DS4C +
+      Super Mario 64 pack (`plan.memory.over`, exit 2).
 - [ ] Zone memory in the game: with DS4C, Xerces warns about Super Mario 64 and
       BACKROOMZ; load one of them anyway (`tools\dev\session\map-check.ps1`,
       after asking) and confirm the game still exits while the map loads, then
-      load the largest map it calls fine (RETURN TO HOGWARTZ, 1909.8 MiB with
-      DS4C) and Super Mario 64 without DS4C (about 1661 MiB), and confirm both
-      load. Re-measure the Zombies baseline in another game language and on
-      another stock map's lobby, and measure Multiplayer and Campaign (a dump
-      before a custom map's main zone loads), then fill
-      `compat/zone_memory.json`.
+      load the largest map it calls fine, SANCTUM OBITUS (`zm_log_overunder`:
+      Xerces prints 1994.2 MiB with DS4C, game 849 + mods 451.3 + map 693.9,
+      about 54 MiB to spare; it loaded with DS4C alone before this check
+      existed, DESIGN.md 6.10), and Super Mario 64 without DS4C (1661.5 MiB),
+      and confirm both load. RETURN TO HOGWARTZ (`zm_wizardcastle`, 1911.6 MiB
+      with DS4C) is an extra case with more room. Re-measure the Zombies
+      baseline in another game language and on another stock map's lobby, and
+      measure Multiplayer and Campaign (a dump before a custom map's main zone
+      loads), then fill `compat/zone_memory.json`.
 - [x] (2026-11-05, 3a7266c6) `xerces_cli plan apply` (no `--dry-launch`), from
       the build with `boiii.exe` next to `xerces_cli.exe`, with the D3 stack as
       the Zombies profile and `XERCES_HOME` outside AppData: the game started

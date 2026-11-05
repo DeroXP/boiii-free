@@ -556,9 +556,10 @@ std::string join_and(const std::vector<std::string> &items) {
   return out;
 }
 
-// Step 5's second half: zone memory, reported in no hash, with a warning for
-// the installed maps that do not fit with the plan's mods and an error when
-// the plan's own map does not.
+// Step 5's second half: zone memory, reported in no hash, with warnings for
+// the installed maps that do not fit with the plan's mods, those that do not
+// fit even with no mods and those whose headers were not all read, and an
+// error when the plan's own map does not fit.
 void check_zone_memory(
     plan &out, const catalog_index &index,
     const std::map<std::string, const installed_content *> &selected,
@@ -607,17 +608,22 @@ void check_zone_memory(
     if (!own && !map_for_mode(*content, request.mode)) {
       continue;
     }
-    const double map_mib = to_mib(
-        own ? out.map->zone_memory
-            : zone_memory_of(content->zone_headers, request.mode, false).bytes);
+    const zone_memory_use use =
+        zone_memory_of(content->zone_headers, request.mode,
+                       content->info.kind != content_kind::map);
+    const std::string name =
+        content->info.name.empty() ? id : content->info.name;
+    const double map_mib = to_mib(own ? out.map->zone_memory : use.bytes);
     const double need = budget.baseline_mib + stack_mib + map_mib;
-    if (need <= budget.pool_mib) {
-      continue;
+    if (need > budget.pool_mib) {
+      // Over without the zones not read, so over with them too.
+      memory.maps_over.push_back(
+          {id, name, need, need - budget.pool_mib,
+           budget.baseline_mib + map_mib > budget.pool_mib});
+    } else if (!use.unread.empty()) {
+      // It takes more than map_mib, by how much is unknown.
+      memory.maps_unread.push_back({id, name});
     }
-    memory.maps_over.push_back(
-        {id, content->info.name.empty() ? id : content->info.name, need,
-         need - budget.pool_mib,
-         budget.baseline_mib + map_mib > budget.pool_mib});
   }
   std::ranges::sort(memory.maps_over, [](const auto &a, const auto &b) {
     if (a.over_by_mib != b.over_by_mib) {
@@ -630,7 +636,11 @@ void check_zone_memory(
       biggest ? " The mod that takes the most is " + biggest->name + " (" +
                     whole_mib(to_mib(biggest->zone_memory)) + ")."
               : "";
-  std::vector<std::string> others;
+  // Maps that removing a mod would make fit, and maps too big even with no
+  // mods, for which that advice would be wrong (and with no mods, every map
+  // over is one of these).
+  std::vector<std::string> with_mods;
+  std::vector<std::string> too_big;
   for (const auto &map : memory.maps_over) {
     const std::string over = whole_mib(map.over_by_mib) + " over";
     if (out.map && map.id == out.map->id) {
@@ -646,26 +656,55 @@ void check_zone_memory(
                                  most));
       continue;
     }
-    others.push_back(map.name + " (" + over +
-                     (map.over_without_mods ? ", even with no mods" : "") +
-                     ")");
+    (map.over_without_mods ? too_big : with_mods)
+        .push_back(map.name + " (" + over + ")");
   }
-  if (others.size() == 1) {
+  if (with_mods.size() == 1) {
     diags.warning("plan.memory.maps_over", "",
-                  "The map " + others.front() +
+                  "The map " + with_mods.front() +
                       " does not fit in the game's memory with these mods: "
                       "the game closes while loading it. Remove a mod to "
                       "play it, or play another map." +
                       most);
-  } else if (!others.empty()) {
+  } else if (!with_mods.empty()) {
     diags.warning("plan.memory.maps_over", "",
-                  std::to_string(others.size()) +
+                  std::to_string(with_mods.size()) +
                       " maps do not fit in the game's memory with these "
                       "mods: " +
-                      join_and(others) +
+                      join_and(with_mods) +
                       ". The game closes while loading them. Remove a mod "
                       "to play them, or play another map." +
                       most);
+  }
+  if (too_big.size() == 1) {
+    diags.warning("plan.memory.maps_too_big", "",
+                  "The map " + too_big.front() +
+                      " does not fit in the game's memory even with no "
+                      "mods: the game closes while loading it. Play another "
+                      "map.");
+  } else if (!too_big.empty()) {
+    diags.warning("plan.memory.maps_too_big", "",
+                  std::to_string(too_big.size()) +
+                      " maps do not fit in the game's memory even with no "
+                      "mods: " +
+                      join_and(too_big) +
+                      ". The game closes while loading them. Play another "
+                      "map.");
+  }
+  if (!memory.maps_unread.empty()) {
+    std::vector<std::string> names;
+    for (const auto &map : memory.maps_unread) {
+      names.push_back(map.name);
+    }
+    const bool one = names.size() == 1;
+    diags.warning(
+        "plan.memory.maps_unread", "",
+        "Xerces could not read part of " +
+            (one ? "the map " : std::to_string(names.size()) + " maps, ") +
+            join_and(names) + ", so it did not check whether " +
+            (one ? "it fits" : "they fit") +
+            " in the game's memory. If Steam is updating " +
+            (one ? "it" : "them") + ", check again once Steam is done.");
   }
 }
 
@@ -1377,6 +1416,14 @@ std::string plan_to_json(const plan &value, bool pretty) {
     maps_over.PushBack(std::move(object), alloc);
   }
   json::set(zone_memory, "maps_over", std::move(maps_over), alloc);
+  Value maps_unread(rapidjson::kArrayType);
+  for (const auto &map : memory.maps_unread) {
+    Value object(rapidjson::kObjectType);
+    json::set(object, "id", map.id, alloc);
+    json::set(object, "name", map.name, alloc);
+    maps_unread.PushBack(std::move(object), alloc);
+  }
+  json::set(zone_memory, "maps_unread", std::move(maps_unread), alloc);
   json::set(zone_memory, "unread", json::string_array(memory.unread, alloc),
             alloc);
   json::set(doc, "zone_memory", std::move(zone_memory), alloc);

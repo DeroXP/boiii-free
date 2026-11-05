@@ -120,12 +120,19 @@ struct zone_memory_map {
   bool over_without_mods = false;
 };
 
+// An installed custom map whose fit is unknown: a zone's header was not read.
+struct zone_memory_unread_map {
+  std::string id;
+  std::string name;
+};
+
 // Zone memory (5.3 step 5): when a custom map loads, blocks 5 and 6 of every
 // loaded zone come from one fixed pool, the DB stack's main pool, and a map
 // that does not fit makes the engine exit the game while it loads. What the
 // plan's mods and map take, and which installed maps of the mode would not
-// fit with these mods. Not part of plan_id or content_id: it depends on
-// every installed map and on compat/zone_memory.json, not only on the plan.
+// fit with these mods or could not be checked. Not part of plan_id or
+// content_id: it depends on every installed map and on compat/zone_memory.json,
+// not only on the plan.
 struct zone_memory_report {
   // From the request; nullopt: no figures for the build and mode, so maps
   // are not checked and maps_over is empty.
@@ -137,8 +144,14 @@ struct zone_memory_report {
   // first, then by id. Each map's highest installed version, or the one the
   // plan picked for its map.
   std::vector<zone_memory_map> maps_over;
-  // Ids in the stack, then the map, with a zone whose header was not read
-  // (zone_memory_use::unread): what those zones take is missing above.
+  // Every installed custom map of the mode (the plan's own included, same
+  // versions as above) with a zone whose header was not read and that fits
+  // without that zone, so whether it fits is unknown: by id. A map over the
+  // pool without the zone is in maps_over instead. Empty when not checked.
+  std::vector<zone_memory_unread_map> maps_unread;
+  // Ids in the stack, then the plan's map, with a zone whose header was not
+  // read (zone_memory_use::unread): what those zones take is missing from
+  // stack_bytes and map_bytes. Other installed maps: maps_unread.
   std::vector<std::string> unread;
 };
 
