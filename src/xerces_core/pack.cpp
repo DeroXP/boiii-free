@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <random>
 
 #include <zstd.h>
@@ -38,12 +39,23 @@ std::string lower(std::string_view text) {
 
 // Packs never carry local paths or user names (8.1).
 bool looks_like_local_path(std::string_view text) {
-  if (text.size() >= 3 && std::isalpha(static_cast<unsigned char>(text[0])) &&
-      text[1] == ':' && (text[2] == '\\' || text[2] == '/')) {
-    return true;
+  const auto alnum = [](char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) != 0;
+  };
+  // "D:\" or "D:/" anywhere, unless the letter ends a word ("http://").
+  for (std::size_t i = 0; i + 2 < text.size(); ++i) {
+    if (std::isalpha(static_cast<unsigned char>(text[i])) &&
+        text[i + 1] == ':' && (text[i + 2] == '\\' || text[i + 2] == '/') &&
+        (i == 0 || !alnum(text[i - 1]))) {
+      return true;
+    }
+  }
+  if (text.size() >= 3 && text.starts_with("//") && alnum(text[2])) {
+    return true; // a network share written with forward slashes
   }
   const std::string l = lower(text);
   return l.find("\\\\") != std::string::npos ||
+         l.find("file:/") != std::string::npos ||
          l.find("/users/") != std::string::npos ||
          l.find("/home/") != std::string::npos ||
          l.find("\\users\\") != std::string::npos ||
@@ -216,7 +228,7 @@ pack_result parse_pack(std::string_view text) {
     diags.error("pack.id", "/id", "A pack id is a lower-case UUID.");
   }
   p.name = json::get_string(root, "name").value_or("");
-  if (p.name.empty() || p.name.size() > 80) {
+  if (p.name.empty() || json::length(p.name) > 80) {
     diags.error("pack.name", "/name",
                 "A pack needs a name of 1 to 80 characters.");
   }
@@ -545,11 +557,14 @@ pack pack_from_plan(const plan &resolved, const std::string &name,
     if (const auto it = workshop_ids.find(mod_id); it != workshop_ids.end()) {
       return it->second;
     }
-    if (mod_id.starts_with("ws.") &&
-        std::ranges::all_of(mod_id.substr(3),
-                            [](char c) { return c >= '0' && c <= '9'; }) &&
-        mod_id.size() > 3) {
-      return std::stoull(mod_id.substr(3));
+    std::uint64_t number = 0;
+    const char *end = mod_id.data() + mod_id.size();
+    if (mod_id.starts_with("ws.") && mod_id.size() > 3) {
+      // Digits past 64 bits are not a published file id.
+      if (const auto parsed = std::from_chars(mod_id.data() + 3, end, number);
+          parsed.ec == std::errc{} && parsed.ptr == end) {
+        return number;
+      }
     }
     return std::nullopt;
   };

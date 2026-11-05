@@ -193,6 +193,10 @@
         "type": "string",
         "pattern": "^sha256:[0-9a-f]{64}$"
       }
+    },
+    "legacy": {
+      "type": "boolean",
+      "description": "Set by Xerces on the manifests it synthesizes for mods that have none (DESIGN.md 5.2); ignored in a mod's own file."
     }
   },
   "$defs": {

@@ -15,7 +15,9 @@ namespace xerces_core {
 // content folder, or test fixtures), read in sorted order (6.8).
 struct catalog_scan {
   std::vector<installed_content> catalog;
-  std::map<std::string, std::filesystem::path> roots; // id -> folder
+  // id -> folder. With two versions of one id this is the folder scanned last;
+  // installed_content::path is the folder of each version.
+  std::map<std::string, std::filesystem::path> roots;
   diagnostics diags;
 };
 

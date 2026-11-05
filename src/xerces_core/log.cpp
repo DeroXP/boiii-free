@@ -39,15 +39,18 @@ std::string replace_all_case_insensitive(std::string text,
   }
 }
 
+// As UTF-8, the encoding of every path xerces_core writes; the narrow
+// environment is in the ANSI code page and would never match a non-ASCII
+// profile folder.
 std::string profile_from_environment() {
-  char *value = nullptr;
+  wchar_t *value = nullptr;
   std::size_t size = 0;
-  if (_dupenv_s(&value, &size, "USERPROFILE") != 0 || value == nullptr) {
+  if (_wdupenv_s(&value, &size, L"USERPROFILE") != 0 || value == nullptr) {
     return {};
   }
-  std::string out(value);
+  const std::u8string text = std::filesystem::path(value).u8string();
   std::free(value);
-  return out;
+  return {reinterpret_cast<const char *>(text.data()), text.size()};
 }
 } // namespace
 

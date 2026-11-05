@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cmath>
 
 #include "json.hpp"
@@ -35,6 +36,14 @@ bool is_sha256_tag(std::string_view text) {
   return std::ranges::all_of(text.substr(7), [](char c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
   });
+}
+
+std::string lower_ascii(std::string_view text) {
+  std::string out(text);
+  std::ranges::transform(out, out.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  return out;
 }
 
 bool is_executable_file(std::string_view path) {
@@ -76,7 +85,7 @@ public:
                    "\"" + std::string(key) + "\" must be a string.");
       return std::nullopt;
     }
-    if (value->GetStringLength() > max_length) {
+    if (json::length(view(*value)) > max_length) {
       diags_.error("manifest.field.too_long", json::pointer(path_, key),
                    "\"" + std::string(key) + "\" is longer than " +
                        std::to_string(max_length) + " characters.");
@@ -183,7 +192,7 @@ void read_assets(const Value *list, const std::string &path, bool overrides,
     }
     object_reader reader(item, item_path, diags);
     asset_ref ref;
-    ref.type = reader.string("type", true, 64).value_or("");
+    ref.type = lower_ascii(reader.string("type", true, 64).value_or(""));
     ref.name =
         normalize_asset_name(reader.string("name", true, 256).value_or(""));
     ref.reason = reader.string("reason", false, 512).value_or("");
@@ -332,14 +341,6 @@ void read_setting(const Value &item, const std::string &path, manifest &m,
     return;
   }
   m.settings.push_back(std::move(setting));
-}
-
-std::string lower_ascii(std::string_view text) {
-  std::string out(text);
-  std::ranges::transform(out, out.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
-  return out;
 }
 
 void put_assets(Value &object, std::string_view key,
@@ -535,15 +536,20 @@ manifest_result parse_manifest(std::string_view text) {
         diags.error("manifest.id.invalid", json::pointer(path, "id"),
                     "\"" + dep.id + "\" is not a valid mod id.");
       }
-      if (const auto range_text = dep_reader.string("version", false, 128)) {
-        std::string error;
-        if (auto range = version_range::parse(*range_text, &error)) {
-          dep.range = std::move(*range);
-          dep.range_text = *range_text;
-        } else {
+      const auto range_text = dep_reader.string("version", false, 128);
+      std::string error;
+      if (auto range = range_text ? version_range::parse(*range_text, &error)
+                                  : std::nullopt) {
+        dep.range = std::move(*range);
+        dep.range_text = *range_text;
+      } else if (json::member(item, "version") != nullptr) {
+        // A range that does not parse fits nothing; it must not become "*".
+        if (range_text) {
           diags.error("manifest.range.invalid", json::pointer(path, "version"),
                       error);
         }
+        dep.range = version_range::none();
+        dep.range_text = range_text.value_or("(invalid)");
       }
       dep.optional = dep_reader.boolean("optional").value_or(false);
       dep_reader.finish(m.unknown_fields);
@@ -718,6 +724,10 @@ manifest_result parse_manifest(std::string_view text) {
       m.integrity[file] = std::string(view(it->value));
     }
   }
+
+  // Written by manifest_to_json for synthesized manifests; the catalog does
+  // not honour it in a mod's own file.
+  m.legacy = reader.boolean("legacy").value_or(false);
 
   reader.finish(m.unknown_fields);
 
@@ -922,14 +932,20 @@ manifest synthesize_legacy(const legacy_input &input,
     }
   }
 
-  const bool numeric_publisher = publisher_id && !publisher_id->empty() &&
-                                 std::ranges::all_of(*publisher_id, [](char c) {
-                                   return c >= '0' && c <= '9';
-                                 });
+  // A published file id; digits past 64 bits fall back to the folder name.
+  std::optional<std::uint64_t> workshop_id;
+  if (publisher_id && !publisher_id->empty()) {
+    std::uint64_t number = 0;
+    const char *end = publisher_id->data() + publisher_id->size();
+    if (const auto parsed = std::from_chars(publisher_id->data(), end, number);
+        parsed.ec == std::errc{} && parsed.ptr == end) {
+      workshop_id = number;
+    }
+  }
   std::string id;
-  if (numeric_publisher) {
+  if (workshop_id) {
     id = "ws." + *publisher_id;
-    m.workshop_id = std::stoull(*publisher_id);
+    m.workshop_id = workshop_id;
   } else {
     std::string clean;
     for (const char c : lower_ascii(input.folder)) {

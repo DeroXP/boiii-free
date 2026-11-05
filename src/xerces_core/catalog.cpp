@@ -63,6 +63,8 @@ installed_content load_mod_folder(const std::filesystem::path &folder,
                                   diagnostics &diags) {
   installed_content content;
   content.folder = utf8(folder.filename().u8string());
+  std::error_code ec;
+  content.path = std::filesystem::absolute(folder, ec);
   const auto files = read_files(folder);
   for (const auto &[path, contents] : files) {
     content.files.push_back(path);
@@ -73,10 +75,18 @@ installed_content load_mod_folder(const std::filesystem::path &folder,
       files, [](const auto &file) { return file.first == manifest_file_name; });
   if (manifest_file != files.end()) {
     manifest_result parsed = parse_manifest(manifest_file->second);
+    if (parsed.value.legacy) {
+      // Only manifests Xerces synthesizes are legacy; a mod cannot opt out
+      // of rule 3 by claiming it.
+      parsed.diags.warning("manifest.legacy.ignored", "/legacy",
+                           "\"legacy\" is for synthesized manifests; ignored.");
+      parsed.value.legacy = false;
+    }
     for (const auto &item : parsed.diags.items()) {
       diags.add(item.level, item.code, content.folder + item.path,
                 content.folder + ": " + item.message);
     }
+    content.valid_manifest = parsed.ok();
     content.info = std::move(parsed.value);
     return content;
   }
