@@ -1,6 +1,8 @@
 // xerces_cli: the command interface for scripts and Claude (DESIGN.md 15.2).
 // Commands that only need xerces_core work without the game; the ones that
-// talk to a running Xerces exit with 3 until the game-side pipe exists.
+// talk to the running game use its pipe and exit with 3 when there is none.
+// The commands on <home> (mods, plan apply, packs apply, logs, the signature
+// report) are in home_commands.cpp.
 
 #include <algorithm>
 #include <charconv>
@@ -23,6 +25,7 @@
 #include <xerces_core/hooks.hpp>
 #include <xerces_core/ipc.hpp>
 #include <xerces_core/json.hpp>
+#include <xerces_core/launcher_home.hpp>
 #include <xerces_core/log.hpp>
 #include <xerces_core/manifest.hpp>
 #include <xerces_core/pack.hpp>
@@ -32,43 +35,18 @@
 #include <xerces_core/sigscan.hpp>
 #include <xerces_core/version.hpp>
 
+#include "cli.hpp"
+
 using namespace xerces_core;
 namespace fs = std::filesystem;
 
+namespace xerces_cli {
 namespace {
-enum exit_code {
-  exit_ok = 0,
-  exit_error = 1,
-  exit_failed = 2, // validation or conflict failures
-  exit_not_running = 3,
-  exit_signatures = 4,
-};
-
 const std::set<std::string> flag_names = {
-    "--json",    "--code",        "--help",    "-h",
-    "--version", "--api-version", "--map-last"};
-
-struct arguments {
-  std::vector<std::string> words;
-  std::map<std::string, std::vector<std::string>> options;
-  std::set<std::string> flags;
-
-  bool has(const std::string &flag) const { return flags.contains(flag); }
-  std::optional<std::string> get(const std::string &name) const {
-    const auto it = options.find(name);
-    if (it == options.end() || it->second.empty()) {
-      return std::nullopt;
-    }
-    return it->second.back();
-  }
-  std::vector<std::string> all(const std::string &name) const {
-    const auto it = options.find(name);
-    return it == options.end() ? std::vector<std::string>{} : it->second;
-  }
-  std::string word(std::size_t index) const {
-    return index < words.size() ? words[index] : std::string{};
-  }
-};
+    "--json",        "--code",       "--help",  "-h",     "--version",
+    "--api-version", "--map-last",   "--up",    "--down", "--vanilla",
+    "--mods-off",    "--dry-launch", "--follow"};
+} // namespace
 
 arguments parse_arguments(int argc, char **argv) {
   arguments out;
@@ -133,7 +111,7 @@ Work without the game:
   mod validate <folder|xerces.mod.json> [--json]   check a manifest and its files
   mod lint <folder|xerces.mod.json> [--json]       validate, plus author advice
   mod new <id> [--dir <parent>] [--name <name>] [--mode zm|mp|cp]
-  mods list --mods-dir <dir> [--json]
+  mods list --mods-dir <dir> [--json]             the mods in a folder
   plan resolve --mods-dir <dir> [--mode zm] --mod <id>... [--map <id>]
                [--stock-zones <n>] [--game-build <0x...>] [--json]
   plan explain  (same options)                     why the order is what it is
@@ -152,6 +130,35 @@ Work without the game:
                                                    a memory dump (newest .bin in
                                                    a folder)
 
+Work on <home> as Xerces.exe does (--home <dir>, else XERCES_HOME, else
+%LOCALAPPDATA%\Xerces); --mode zm|mp|cp defaults to the launcher's mode:
+  mods list [--mode m] [--json]                    the launcher's catalog and
+                                                   the mode's load order
+  mods info <id> [--mode m] [--json]               the Mods screen's details
+  mods enable <id> [--mode m]                      switch on (at the bottom), or
+                                                   pick a map
+  mods disable <id> [--mode m]
+  mods order <id> (--up | --down | --to <n>) [--mode m]
+                                                   these three edit launcher.json
+                                                   as the Mods screen does, and
+                                                   refuse while Xerces.exe runs
+                                                   on the home
+  plan apply [--mode m] [--vanilla | --mods-off] [--dry-launch] [--json]
+                                                   Home's Launch: resolve the
+                                                   profile, write the plan file
+                                                   and the journal, start the
+                                                   game. --dry-launch writes the
+                                                   plan file, logs and prints
+                                                   the command, starts nothing
+  packs apply <file|XRC1.code|pack id> [--mode m] [--json]
+                                                   the Packs screen's Apply:
+                                                   backup, profile, plan check
+  logs tail [--role launcher|game|cli] [--lines <n>] [--follow]
+                                                   the newest log, one line per
+                                                   event; --follow until Ctrl+C
+  sig check [--json]                               the game's last signature
+                                                   report (exit 4 on a miss)
+
 Talk to the running game (started from Xerces.exe, or with -xerces-ipc), over
 its pipe in <home>\run (--home <dir>, else XERCES_HOME, else
 %LOCALAPPDATA%\Xerces):
@@ -165,8 +172,7 @@ its pipe in <home>\run (--home <dir>, else XERCES_HOME, else
                                                    journal, plan, signatures,
                                                    system), scrubbed; stays local
 
-Not built yet (exit 3): mods enable/disable/order, plan apply, index run,
-  packs apply, sig check (without --dump), bench run, test run, logs tail
+Not built yet (exit 3): index run, bench run, test run
 
 Exit codes: 0 ok, 1 error, 2 validation or conflict failures,
             3 Xerces not running, 4 signature failures.
@@ -599,9 +605,7 @@ int cmd_packs(const arguments &args) {
     return failed ? exit_failed : exit_ok;
   }
   if (action == "apply") {
-    std::cerr
-        << "Xerces is not running (applying a pack needs the launcher).\n";
-    return exit_not_running;
+    return cmd_packs_apply(args);
   }
   return usage();
 }
@@ -719,16 +723,11 @@ int not_running(const std::string &command) {
 
 // <home> as the launcher and the game find it (DESIGN.md 3.5).
 fs::path xerces_home(const arguments &args) {
-  if (const auto given = args.get("--home")) {
-    return fs::path(*given);
+  std::optional<fs::path> given;
+  if (const auto home = args.get("--home")) {
+    given = fs::path(*home);
   }
-  if (const char *set = std::getenv("XERCES_HOME"); set && *set) {
-    return fs::path(set);
-  }
-  if (const char *local = std::getenv("LOCALAPPDATA"); local && *local) {
-    return fs::path(local) / "Xerces";
-  }
-  return fs::path("xerces_home");
+  return find_home(given);
 }
 
 // diag bundle (5.10): the scrubbed zip a bug report needs, from <home>.
@@ -875,7 +874,7 @@ int cmd_sig(const arguments &args, const std::string &action) {
   }
   const auto given = args.get("--dump");
   if (!given) {
-    return not_running("sig check");
+    return cmd_sig_report(args);
   }
   const auto dump = dump_file(fs::path(*given));
   if (!dump) {
@@ -973,7 +972,9 @@ int cmd_sig(const arguments &args, const std::string &action) {
   }
   return all_ok ? exit_ok : exit_signatures;
 }
-} // namespace
+} // namespace xerces_cli
+
+using namespace xerces_cli;
 
 int main(int argc, char **argv) {
   const arguments args = parse_arguments(argc, argv);
@@ -998,10 +999,24 @@ int main(int argc, char **argv) {
       return cmd_mod_new(args);
     }
     if (group == "mods" && action == "list") {
-      return cmd_mods_list(args);
+      return args.get("--mods-dir") ? cmd_mods_list(args)
+                                    : cmd_mods_home_list(args);
+    }
+    if (group == "mods" && action == "info") {
+      return cmd_mods_info(args);
+    }
+    if (group == "mods" &&
+        (action == "enable" || action == "disable" || action == "order")) {
+      return cmd_mods_edit(args, action);
     }
     if (group == "plan" && (action == "resolve" || action == "explain")) {
       return cmd_plan(args, action == "explain");
+    }
+    if (group == "plan" && action == "apply") {
+      return cmd_plan_apply(args);
+    }
+    if (group == "logs" && action == "tail") {
+      return cmd_logs_tail(args);
     }
     if (group == "conflicts" && action == "check") {
       return cmd_conflicts(args);
