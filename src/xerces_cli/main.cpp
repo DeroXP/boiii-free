@@ -2,7 +2,8 @@
 // Commands that only need xerces_core work without the game; the ones that
 // talk to the running game use its pipe and exit with 3 when there is none.
 // The commands on <home> (mods, plan apply, packs apply, logs, the signature
-// report) are in home_commands.cpp.
+// report) are in home_commands.cpp; the offline benchmark (bench) is in
+// bench_commands.cpp.
 
 #include <algorithm>
 #include <charconv>
@@ -191,6 +192,18 @@ Work without the game:
                                                    the signature registry against
                                                    a memory dump (newest .bin in
                                                    a folder)
+  bench analyze <frames.csv|folder>... [--source probe|presentmon]
+                [--warmup-s <s>] [--json]
+                                                   frame times of each run (the
+                                                   probe's *.frames.csv or
+                                                   PresentMon's CSV; folders
+                                                   and their run subfolders):
+                                                   mean, percentiles, 1% and
+                                                   0.1% lows, hitches, drift
+  bench compare --a <folder|csv> --b <folder|csv> [--source probe|presentmon]
+                [--margin-mean 1] [--margin-p99 3] [--warmup-s <s>] [--json]
+                                                   runs as samples: CIs, Welch,
+                                                   TOST equivalence, pooled lows
 
 Work on <home> as Xerces.exe does (--home <dir>, else XERCES_HOME, else
 %LOCALAPPDATA%\Xerces); --mode zm|mp|cp defaults to the launcher's mode:
@@ -222,6 +235,13 @@ Work on <home> as Xerces.exe does (--home <dir>, else XERCES_HOME, else
                                                    event; --follow until Ctrl+C
   sig check [--json]                               the game's last signature
                                                    report (exit 4 on a miss)
+  bench loads [--logs <dir>]... [--console <dir>]... [--json]
+                                                   game starts (launch to the
+                                                   first main frame) and map
+                                                   loads from the logs and
+                                                   map-check folders
+  bench launcher [--logs <dir>]... [--json]        Xerces.exe's startup marks
+                                                   and Workshop scans
 
 Talk to the running game (started from Xerces.exe, or with -xerces-ipc), over
 its pipe in <home>\run (--home <dir>, else XERCES_HOME, else
@@ -236,7 +256,7 @@ its pipe in <home>\run (--home <dir>, else XERCES_HOME, else
                                                    journal, plan, signatures,
                                                    system), scrubbed; stays local
 
-Not built yet (exit 3): index run, bench run, test run
+Not built yet (exit 3): index run, bench run (needs the game), test run
 
 The commands on <home> refuse, with exit 1 and before doing anything, an
 option or word they do not take; a flag never takes a value (--json=1).
@@ -1343,6 +1363,9 @@ int main(int argc, char **argv) {
     }
     if (group == "sig") {
       return cmd_sig(args, action);
+    }
+    if (group == "bench") {
+      return cmd_bench(args, action);
     }
     if (group == "diag" && action == "bundle") {
       return cmd_diag_bundle(args);

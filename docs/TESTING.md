@@ -10,6 +10,7 @@ can show (docs/DESIGN.md 15.3 and 15.4). The checklist grows every milestone.
 | Core unit tests: manifests, SemVer, the planner and its determinism, merges, conflict rules, hook chains, packs and share codes, logs, the loose both-apply pair | `tools\build.ps1 -Tests`                                       | LLVM 23, Ninja, premake 5.0.0 |
 | CLI smoke: plan, conflicts and pack round trip on the fixtures                                                                                                   | `tools\build.ps1 -Tests`                                       | the same                      |
 | CLI smoke on a home: mods enable, disable, order and info, `plan apply --dry-launch`, `packs apply`, `logs tail`, `sig check` on a fake game folder              | `tools\build.ps1 -Tests` (`tools\ci\cli_smoke.ps1`)            | the same                      |
+| Benchmark: frame statistics, Welch, TOST, the bootstrap, the probe/PresentMon/console/log readers; `bench` on small logs and CSVs                                | `tools\build.ps1 -Tests`                                       | the same                      |
 | Signature registry against a stored dump (`compat/signatures.json`)                                                                                              | `xerces_cli sig check --dump C:\Users\Ginld\XercesDev\dumps`   | a dump on this PC             |
 | Pre-flight check of the installed game against `compat/builds.json`                                                                                              | `xerces_cli game check`                                        | the game on this PC           |
 | Backend: auth, rate limits, privacy, migrations                                                                                                                  | `cd backend` then `pytest -q`                                  | Python 3.12+                  |
@@ -121,7 +122,8 @@ too.
       the process: not in the front end, not in the match, and not after DS4C
       became the main mod.
 - [ ] Uncapped performance baseline (`com_maxfps 0`, vsync off, PresentMon). Not
-      run: PresentMon is not installed, and downloading it is yours to approve.
+      run yet. PresentMon 2.4.1 is installed (Performance, below); capturing
+      needs an elevated terminal and your go-ahead for the game session.
 - [x] A memory dump:
       `C:\Users\Ginld\XercesDev\dumps\BlackOps3-20261104-223001.bin` (the 471 MB
       in-memory image of `BlackOps3.exe`), with a `.json` sidecar and a `.pe`
@@ -520,3 +522,193 @@ what still needs you:
 - [ ] The same with the fastfile pair built with the BO3 Mod Tools.
 - [ ] The pre-launch conflict report matches what happens in the game for two
       legacy mods that replace the same script.
+
+## Performance
+
+How to get numbers (DESIGN.md 12.2 and 12.3; the plan is
+`C:\Users\Ginld\XercesDev\perf-plan-20261105.md`). The `bench` commands below
+read files that already exist. They start nothing and write nothing.
+
+### Game starts and map loads, from logs
+
+```
+xerces_cli bench loads --logs C:\Users\Ginld\XercesHome-maps\logs --console C:\Users\Ginld\XercesDev\map-checks [--json]
+```
+
+`--logs` takes a home's `logs` folder and can be repeated. `--home <dir>` adds
+`<dir>\logs`, and with neither `--logs` nor `--console` the default home is
+used. `--console` takes a map-check folder (one run per subfolder, with
+`results.jsonl` beside them).
+
+- **Game start:** `launch.started` (matched to the game log by pid) to the
+  game's first `loader.phase frontend`, the first main frame. Xerces.exe logs
+  `launcher.launch.started` and `xerces_cli` logs `cli.launch.started`; each
+  launch says which (`launched_by`), and the summary keeps them apart
+  (`startup.game_start_to_frontend_s.launcher` and `.cli`). The game log's first
+  line comes 14 to 16 s after the launch, when Xerces' code first runs.
+  `first_log_to_frontend_s` measures from that line, for logs with no launcher
+  log beside them.
+- **Map loads (map-check runs):**
+  - "to level" is the console's `map` command to the engine being in the level.
+  - "to player" is the command to the journal's `in_game`: the player is in the
+    level (`loader.map.ready`).
+  - "level->player" is the game log's `loading_map` to `loader.map.ready`.
+  - The logs do not timestamp the command yet, so the first two come from
+    map-check's stopwatch, which is not the command's time:
+    - it starts after `console-command.ps1`'s 1.5 s echo wait, so about 1.5 s
+      after the game ran the command;
+    - it stops when map-check sees the journal's `in_game`. map-check polls
+      about once a second, and with `-SkipCinematic` a poll can first hold Space
+      for 1.5 s. The game itself writes each phase up to 1 s late (it checks
+      once a second).
+    - So each figure is off by roughly -1.5 to +2.5 s: low when the polls are
+      quick, high when they are slow. Compare them only with other stopwatch
+      figures. A load the game times itself (perf plan H3's `xerces_bench_map`)
+      will not match them.
+  - "To player" includes any intro or wait before the player is in. With
+    `-SkipCinematic`, map-check presses keys every 6 s from 15 s on. The one
+    Shadows of Evil run that did not skip waited 214 s for its intro.
+  - Journals from before 2026-11-05 11:25 have no `loading_map`. Their `in_game`
+    came as soon as the engine was in the level, so those runs give "to level"
+    only (`"journal": "old"`). A log that never reached a level (the game ended
+    right after the map command) cannot show which kind it is:
+    `"journal": "unknown"`.
+  - A run that failed while loading still counts, from its map-check record.
+- **Zones:** the console's own `FastFileLoad ... in N ms` times, summed by group
+  (map, main mod, extra mods, front end, stock) up to the map's own zone. Zones
+  after it, such as a drop back to the menu, are `after_map_zone`. Zone loads
+  can overlap, so the sum is not wall time.
+- A home's `logs` folder keeps only its last 20 sessions. Save the JSON, and a
+  copy of the logs, whenever a set of runs matters.
+
+### Launcher starts, from logs
+
+```
+xerces_cli bench launcher --logs C:\Users\Ginld\XercesHome-maps\logs --logs C:\Users\Ginld\XercesHome-m1\logs [--json]
+```
+
+This gives the median, p90, mean and 95% CI of each `launcher.startup.step` mark
+(ms from the launcher's start), the time to the session's first
+`launcher.game.detected` and first `launcher.catalog.scanned`, and the Workshop
+scans. Rescan, a new game folder and other refreshes log both events again;
+those count as `later_detections` and `later_scans`, not as startup samples. A
+scan is warm when the hash cache had every file and cold when files were hashed
+(GB/s per scan). Warm and cold take every scan, startup or later
+(`scans.list[].startup` says which).
+
+### Frame times
+
+```
+xerces_cli bench analyze <run.csv|folder>... [--source probe|presentmon] [--warmup-s 10] [--json]
+xerces_cli bench compare --a <folder|csv> --b <folder|csv> [--source probe|presentmon] [--margin-mean 1] [--margin-p99 3] [--warmup-s 10] [--json]
+```
+
+Each CSV is one run, in one of two formats:
+
+- the probe's frames CSV (`i,t_ms,dt_ms,present_ms,overlay_us,cpu,flags`). The
+  probe is not built yet (perf plan H3).
+- PresentMon's CSV, with 1.x, 2.0 or 2.3+ column names. The process and swap
+  chain with the most rows are kept.
+
+A CSV named on the command line is one run (a `*.main.csv` is refused). A folder
+gives the runs in it and in its subfolders, one level down, which fits the
+plan's layout of one folder per run (`bench\<run>\` with `<run>.frames.csv`,
+`<run>.main.csv` and PresentMon's `presentmon.csv`):
+
+- each `*.frames.csv` is a probe run;
+- each other CSV with PresentMon's columns is a PresentMon run;
+- `*.main.csv` (the probe's main-thread cadence) and other CSVs are left out.
+
+The probe and PresentMon time the same frames, so one command takes one source.
+When the runs found hold both, `--source probe` or `--source presentmon` picks
+one; without it the command stops rather than count a run twice.
+
+`--warmup-s` drops the frames before that many seconds from the first frame. The
+counts (`rows`, `rows_skipped`, `not_displayed`, `present_modes`,
+`flagged_frames`, `frames_per_cpu`) are then taken over the frames kept, and
+`warmup_rows_dropped` and `warmup_frames_dropped` say what went. PresentMon's
+`other_rows` (other processes and swap chains) is for the whole capture.
+
+The numbers, as `src/xerces_core/perf_stats.hpp` defines them:
+
+- mean frame time (total time / frames) and average FPS;
+- median, p95, p99, p99.9 and max (percentiles interpolate between the closest
+  ranks);
+- 1% and 0.1% lows, each given two ways and labelled: 1000 / the mean of the
+  worst frames, and 1000 / p99 or p99.9;
+- hitches, frames over 50 ms and over 100 ms, and stutter time (the time spent
+  in hitch frames / the total). A hitch is a frame longer than both 2x the
+  rolling median of 31 frames and that median + 4 ms;
+- drift between the two halves of the run. Above 2% the run was not steady;
+- for PresentMon, the mean CPU-busy and GPU-busy times. They tell whether the
+  game is CPU-bound or GPU-bound.
+
+`compare` treats each run as one sample, because the frames inside a run are not
+independent:
+
+- 95% t intervals for each side;
+- Welch's B - A, with its interval and p;
+- TOST equivalence: B is equivalent when the 90% interval of B - A lies inside
+  ±margin, a percentage of A's mean. The defaults are 1% on mean frame time and
+  3% on p99, the proposed M7 margins.
+- pooled 1% and 0.1% lows from a cluster bootstrap (whole runs resampled 2000
+  times, seed 20261105). These describe the data; they are not a test.
+
+For a comparison, take 5 or 6 runs a side of the same scene, in A-B-B-A order.
+
+PresentMon 2.4.1 is installed at
+`C:\Program Files\Intel\PresentMon\PresentMonConsoleApplication\PresentMon-2.4.1-x64.exe`.
+Capturing needs an elevated terminal, and each game session needs your go-ahead.
+Check the flags with `--help` first; the plan's capture is:
+
+```
+PresentMon-2.4.1-x64.exe --process_name boiii.exe --output_file <run>\presentmon.csv --timed 80 --terminate_after_timed
+```
+
+With `--qpc_time` the start times are QPC ticks, which `bench` does not convert.
+It then sums the frame times instead (for `--warmup-s`).
+
+- [ ] No frame times have been recorded yet: no probe build, no PresentMon
+      capture.
+
+### First baseline (2026-11-05, existing logs only)
+
+The baseline is in `C:\Users\Ginld\XercesDev\bench\baseline-20261105\`:
+`loads.json` and `launcher.json` (both homes), the per-home files, the same as
+text, `commands.txt`, and copies of the logs read (`inputs\`). It was taken at
+19:14 UTC.
+
+- [x] Game start to the first main frame:
+  - D3 stack, the six newest launches on XercesHome-maps (12:52 to 13:03 local,
+    three of them crashing later at the map): 36.2 s mean (95% CI 34.8 to 37.7,
+    range 34.5 to 37.9);
+  - XercesHome-m1, through Xerces.exe: 34.4 s (range 33.0 to 35.4, n 5). One
+    more launch there came from `xerces_cli` (33.8 s); the first baseline files
+    counted it with the others (34.3 s, n 6).
+  - The game log starts 20.0 s before the first main frame (n 53): 18.9 s with
+    no mods, 20.4 s with the D3 stack.
+- [x] Startup zone loads, summed over 48 consoles that hold the whole start:
+      14.9 s in total. The front end takes 3.5 s, the stock zones 10.3 s, and
+      the extra mods 1.1 s when stacked.
+- [x] Map loads, 53 attempts, 32 reaching the match:
+  - "To level" and "to player" are map-check's stopwatch. It starts 1.5 s after
+    the map command and stops up to about 2.5 s after the event, so each figure
+    is off by roughly -1.5 to +2.5 s (above, Map loads).
+  - With mods: 4.5 to 7.5 s to the level on the stopwatch, then 16 to 41 s more
+    before the player is in (from the game log, ±1 s).
+  - Cheese Cube with the stack: 7.1 s to the level (n 5) and 27.0 s to the
+    player (n 4) on the stopwatch; 20.3 s from level to player.
+  - With no main mod, every custom-map load first reloads the front end's zones
+    inside the usermaps ModLoad (3.4 to 3.6 s, 7 loads). The stock map zm_zod
+    does not.
+  - The baseline's `loads.json` predates two fixes. It labels the four runs
+    whose game ended before the level `"journal": "old"`, though three of them
+    (12:52 to 12:55) had the new journal; `bench loads` now calls all four
+    `"unknown"`. It also gives game starts by variant only, with Xerces.exe and
+    `xerces_cli` launches together.
+- [x] Launcher, 26 starts, all warm:
+  - first frame at 220 ms median (p90 239 ms);
+  - game detected at 324 ms;
+  - catalog scanned at 410 ms;
+  - every scan was warm (0.08 s). No cold scan is in these logs, so the 195 s
+    first scan above is not re-measured.
