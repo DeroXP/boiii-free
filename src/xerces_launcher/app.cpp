@@ -1106,11 +1106,9 @@ int app::run() {
   // instead of writing the same config and journal.
   bool taken_over = false;
   {
-    std::uint32_t hash = 2166136261u;
-    for (const wchar_t c : paths.home.wstring()) {
-      hash = (hash ^ static_cast<std::uint32_t>(towlower(c))) * 16777619u;
-    }
-    const std::wstring name = L"Local\\xerces_launcher_" + std::to_wstring(hash);
+    // xerces_core names it, so xerces_cli can tell a launcher runs here.
+    const std::uint32_t hash = xerces_core::launcher_home_hash(paths.home);
+    const std::wstring name = xerces_core::launcher_instance_name(paths.home);
     // Never 0, which is what GetPropW returns for a window without the tag.
     home_tag_ = (std::uintptr_t(hash) << 1) | 1;
     instance_mutex_ = CreateMutexW(nullptr, TRUE, name.c_str());

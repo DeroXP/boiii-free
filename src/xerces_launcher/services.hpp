@@ -25,77 +25,22 @@
 #include <xerces_core/journal.hpp>
 #include <xerces_core/launch.hpp>
 #include <xerces_core/launcher_config.hpp>
+#include <xerces_core/launcher_home.hpp>
+#include <xerces_core/launcher_state.hpp>
 #include <xerces_core/planner.hpp>
 #include <xerces_core/sigregistry.hpp>
 
 namespace xerces_launcher {
 namespace fs = std::filesystem;
 
-struct launcher_paths {
-  fs::path home;    // %LOCALAPPDATA%\Xerces, XERCES_HOME or --home
-  fs::path config;  // <home>\config
-  fs::path plans;   // <home>\config\plans
-  fs::path cache;   // <home>\cache
-  fs::path logs;    // <home>\logs
-  fs::path crash;   // <home>\crash
-  fs::path data;    // data\xerces: ui, fonts, i18n
-  fs::path compat;  // compat\: builds.json, signatures.json
-  fs::path client;  // the game role's executable (boiii.exe until the rename)
-  std::optional<fs::path> dev_data; // repo data\ for XERCES_DATA_PATH
-  fs::path config_file() const { return config / "launcher.json"; }
-  fs::path journal_file() const { return logs / "journal.json"; }
-};
-
-// Finds the paths: <home> from the override, else XERCES_HOME, else
-// %LOCALAPPDATA%\Xerces; data and compat next to the executable or, in a
-// development build, in the repository the executable was built in.
-launcher_paths find_paths(const std::optional<fs::path> &home_override);
-
-struct game_state {
-  bool searched = false;
-  std::optional<fs::path> dir; // the Black Ops III folder
-  std::vector<std::string> tried;
-  std::optional<std::uint64_t> steam_build; // appmanifest "buildid"
-  std::optional<xerces_core::exe_facts> exe;
-  std::optional<xerces_core::preflight_result> preflight;
-  std::string error; // why the exe or the registry could not be read
-  fs::path workshop_dir; // <library>\steamapps\workshop\content\311210
-  fs::path mods_dir;     // <game>\mods
-  fs::path usermaps_dir; // <game>\usermaps
-  bool can_launch() const { return dir && preflight && preflight->can_launch(); }
-};
-
-struct catalog_state {
-  bool scanning = false;
-  bool scanned = false; // at least one full scan finished
-  std::size_t done = 0, total = 0;
-  std::string current; // folder being read
-  // Workshop items, then the game's mods and usermaps folders.
-  std::vector<xerces_core::installed_content> items;
-  xerces_core::diagnostics diags;
-  std::size_t cache_hits = 0, cache_misses = 0;
-  std::uint64_t bytes_hashed = 0;
-  double seconds = 0;
-  // Where each item came from: "workshop", "mods" or "usermaps", by index.
-  std::vector<std::string> sources;
-  const xerces_core::installed_content *find(std::string_view id) const;
-};
-
-// The client's last signature report (<home>\cache\signatures-report.json,
-// written by the game role when it resolves the registry, DESIGN.md 4.3).
-struct signature_state {
-  bool known = false;
-  std::size_t matched = 0, total = 0;
-  std::string game_build;
-  std::string checked; // UTC time
-  std::vector<std::string> missing; // names that did not resolve
-  std::vector<std::string> disabled; // features the game turned off
-  std::string problem; // why nothing resolved (registry missing, ...)
-  bool multi_mod_off() const {
-    return std::find(disabled.begin(), disabled.end(), "multi_mod") !=
-           disabled.end();
-  }
-};
+// The paths under <home>, the game, the catalog and the signature report are
+// xerces_core's (launcher_home.hpp, launcher_state.hpp), so xerces_cli sees
+// exactly what the launcher sees.
+using xerces_core::catalog_state;
+using xerces_core::find_paths;
+using xerces_core::game_state;
+using xerces_core::launcher_paths;
+using xerces_core::signature_state;
 
 struct launch_outcome {
   bool started = false;

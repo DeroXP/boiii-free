@@ -11,6 +11,8 @@
 #include <xerces_core/detect.hpp>
 #include <xerces_core/ipc.hpp>
 #include <xerces_core/json.hpp>
+#include <xerces_core/launcher_home.hpp>
+#include <xerces_core/launcher_state.hpp>
 #include <xerces_core/version.hpp>
 
 #include "log.hpp"
@@ -28,31 +30,11 @@ fs::path from_utf8(std::string_view text) {
 }
 
 std::optional<std::string> read_text(const fs::path &path) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in) {
-    return std::nullopt;
-  }
-  return std::string(std::istreambuf_iterator<char>(in),
-                     std::istreambuf_iterator<char>());
+  return xerces_core::read_text_file(path);
 }
 
 bool write_text(const fs::path &path, std::string_view text) {
-  std::error_code ec;
-  fs::create_directories(path.parent_path(), ec);
-  fs::path temporary = path;
-  temporary += ".tmp";
-  {
-    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    if (!out) {
-      return false;
-    }
-    out.write(text.data(), static_cast<std::streamsize>(text.size()));
-    if (!out.flush()) {
-      return false;
-    }
-  }
-  fs::rename(temporary, path, ec);
-  return !ec;
+  return xerces_core::write_text_file(path, text);
 }
 
 std::optional<fs::path> env_path(const wchar_t *name) {
@@ -64,87 +46,8 @@ std::optional<fs::path> env_path(const wchar_t *name) {
   return fs::path(std::wstring(buffer, size));
 }
 
-fs::path module_dir() {
-  std::wstring buffer(32768, L'\0');
-  const DWORD size =
-      GetModuleFileNameW(nullptr, buffer.data(), DWORD(buffer.size()));
-  buffer.resize(size);
-  return fs::path(buffer).parent_path();
-}
-
-// Walks up from the executable's folder for a file, as development builds
-// sit in <repo>\build\bin\x64\Release.
-std::optional<fs::path> find_up(const fs::path &start, const fs::path &relative) {
-  fs::path dir = start;
-  for (int i = 0; i < 8 && !dir.empty(); ++i) {
-    std::error_code ec;
-    if (fs::exists(dir / relative, ec)) {
-      return dir;
-    }
-    const fs::path parent = dir.parent_path();
-    if (parent == dir) {
-      break;
-    }
-    dir = parent;
-  }
-  return std::nullopt;
-}
-
 std::string now_utc() { return xerces_core::json_log::now_utc(); }
 } // namespace
-
-launcher_paths find_paths(const std::optional<fs::path> &home_override) {
-  launcher_paths out;
-  if (home_override) {
-    out.home = *home_override;
-  } else if (const auto home = env_path(L"XERCES_HOME")) {
-    out.home = *home;
-  } else if (const auto local = env_path(L"LOCALAPPDATA")) {
-    out.home = *local / "Xerces";
-  } else {
-    out.home = module_dir() / "home";
-  }
-  std::error_code ec;
-  out.home = fs::absolute(out.home, ec);
-  out.config = out.home / "config";
-  out.plans = out.config / "plans";
-  out.cache = out.home / "cache";
-  out.logs = out.home / "logs";
-  out.crash = out.home / "crash";
-  for (const fs::path &dir :
-       {out.config, out.plans, out.cache, out.logs, out.crash}) {
-    fs::create_directories(dir, ec);
-  }
-
-  const fs::path exe_dir = module_dir();
-  if (const auto root = find_up(exe_dir, fs::path("data/xerces/ui/shell.rml"))) {
-    out.data = *root / "data" / "xerces";
-    // A repository checkout: the client needs its data folder (815545d3).
-    if (fs::exists(*root / "premake5.lua", ec)) {
-      out.dev_data = *root / "data";
-    }
-  } else {
-    out.data = exe_dir / "data" / "xerces";
-  }
-  if (const auto root = find_up(exe_dir, fs::path("compat/builds.json"))) {
-    out.compat = *root / "compat";
-  } else {
-    out.compat = exe_dir / "compat";
-  }
-  out.client = exe_dir / "boiii.exe";
-  return out;
-}
-
-const xerces_core::installed_content *
-catalog_state::find(std::string_view id) const {
-  const xerces_core::installed_content *best = nullptr;
-  for (const auto &item : items) {
-    if (item.info.id == id && (!best || best->info.ver < item.info.ver)) {
-      best = &item;
-    }
-  }
-  return best;
-}
 
 services::services(launcher_paths paths, poster post, bool dry_launch)
     : paths_(std::move(paths)), post_(std::move(post)),
@@ -209,46 +112,7 @@ bool services::save_config() {
 // --------------------------------------------------------------------- game
 game_state services::detect_now(
     const std::optional<std::string> &saved_dir) const {
-  game_state next;
-  next.searched = true;
-  std::optional<fs::path> saved;
-  if (saved_dir) {
-    saved = from_utf8(*saved_dir);
-  }
-  const xerces_core::detection found = xerces_core::detect_game(
-      saved, xerces_core::steam_roots_from_registry(),
-      xerces_core::real_filesystem());
-  next.tried = found.tried;
-  next.dir = found.game_dir;
-  if (next.dir) {
-    const fs::path dir = *next.dir;
-    const fs::path steamapps = dir.parent_path().parent_path();
-    next.workshop_dir = steamapps / "workshop" / "content" /
-                        std::string(xerces_core::bo3_app_id);
-    next.mods_dir = dir / "mods";
-    next.usermaps_dir = dir / "usermaps";
-    if (const auto acf = read_text(steamapps / ("appmanifest_" +
-                                                std::string(xerces_core::bo3_app_id) +
-                                                ".acf"))) {
-      next.steam_build = xerces_core::appmanifest_buildid(*acf);
-    }
-    std::string error;
-    next.exe = xerces_core::read_exe_facts(
-        dir / std::string(xerces_core::bo3_exe), &error);
-    if (!next.exe) {
-      next.error = "BlackOps3.exe could not be read: " + error;
-    } else {
-      const auto registry_text = read_text(paths_.compat / "builds.json");
-      const xerces_core::build_registry registry =
-          xerces_core::parse_build_registry(registry_text.value_or(""));
-      if (!registry_text || !registry.ok()) {
-        next.error = "compat/builds.json is missing or broken.";
-      }
-      next.preflight =
-          xerces_core::preflight_check(*next.exe, next.steam_build, registry);
-    }
-  }
-  return next;
+  return xerces_core::detect_game_state(saved_dir, paths_.compat);
 }
 
 void services::apply_detection(game_state next) {
@@ -298,10 +162,6 @@ void services::refresh(bool detect) {
   ++catalog_rev_;
   scan_cancel_ = std::make_shared<std::atomic<bool>>(false);
 
-  struct source {
-    std::string name;
-    fs::path dir;
-  };
   const fs::path cache_file = paths_.cache / "hashes.txt";
   auto cancel = scan_cancel_;
   std::optional<std::string> saved_dir = config_.game_dir;
@@ -319,53 +179,17 @@ void services::refresh(bool detect) {
         apply_detection(game);
       });
     }
-    std::vector<source> sources;
-    if (game.dir) {
-      sources = {{"workshop", game.workshop_dir},
-                 {"mods", game.mods_dir},
-                 {"usermaps", game.usermaps_dir}};
-    }
-    const auto started = std::chrono::steady_clock::now();
-    auto result = std::make_shared<catalog_state>();
-    xerces_core::hash_cache cache;
-    cache.load(cache_file);
-    for (const source &from : sources) {
-      std::error_code ec;
-      if (!fs::is_directory(from.dir, ec)) {
-        continue;
-      }
-      xerces_core::scan_options options;
-      options.cache = &cache;
-      options.cancel = cancel.get();
-      options.progress = [this, &from](std::size_t index, std::size_t total,
-                                       const std::string &name) {
-        post_([this, index, total, name, label = from.name] {
-          catalog_.done = index;
-          catalog_.total = total;
-          catalog_.current = label + ": " + name;
-          ++catalog_rev_;
-        });
-      };
-      xerces_core::catalog_scan scan =
-          xerces_core::scan_mods_directory(from.dir, options);
-      for (auto &item : scan.catalog) {
-        result->items.push_back(std::move(item));
-        result->sources.push_back(from.name);
-      }
-      result->diags.append(scan.diags);
-      if (scan.cancelled) {
-        break;
-      }
-    }
-    const bool cancelled = cancel->load();
-    cache.save(cache_file, !cancelled);
-    result->cache_hits = cache.hits();
-    result->cache_misses = cache.misses();
-    result->bytes_hashed = cache.bytes_hashed();
-    result->seconds = std::chrono::duration<double>(
-                          std::chrono::steady_clock::now() - started)
-                          .count();
-    result->scanned = !cancelled;
+    auto result = std::make_shared<catalog_state>(xerces_core::scan_catalog(
+        game, cache_file, cancel.get(),
+        [this](const std::string &source, std::size_t index, std::size_t total,
+               const std::string &name) {
+          post_([this, index, total, name, source] {
+            catalog_.done = index;
+            catalog_.total = total;
+            catalog_.current = source + ": " + name;
+            ++catalog_rev_;
+          });
+        }));
     post_([this, result] { finish_scan(result); });
   });
 }
@@ -373,12 +197,8 @@ void services::refresh(bool detect) {
 void services::finish_scan(std::shared_ptr<catalog_state> result) {
   const bool keep_old = !result->scanned && catalog_.scanned;
   if (!keep_old) {
+    // Names come without colour codes (scan_catalog).
     catalog_ = std::move(*result);
-    // Workshop titles carry the game's colour codes; the launcher shows plain
-    // text (ids and hashes are untouched, so plans do not change).
-    for (auto &item : catalog_.items) {
-      item.info.name = xerces_core::strip_color_codes(item.info.name);
-    }
   }
   catalog_.scanning = false;
   catalog_.current.clear();
@@ -804,43 +624,8 @@ void services::settle_culprit_test(bool crashed) {
 
 // --------------------------------------------------------------- signatures
 void services::reload_signatures() {
-  signature_state next;
-  const auto text = read_text(paths_.cache / "signatures-report.json");
-  if (text) {
-    const auto parsed = xerces_core::json::parse(*text);
-    if (parsed.ok && parsed.document.IsObject()) {
-      const auto &root = parsed.document;
-      next.known = true;
-      next.game_build = xerces_core::json::get_string(root, "game_build").value_or("");
-      next.checked = xerces_core::json::get_string(root, "checked").value_or("");
-      next.problem = xerces_core::json::get_string(root, "problem").value_or("");
-      if (const auto *disabled = xerces_core::json::member(root, "disabled");
-          disabled && disabled->IsObject()) {
-        for (auto it = disabled->MemberBegin(); it != disabled->MemberEnd();
-             ++it) {
-          next.disabled.emplace_back(it->name.GetString(),
-                                     it->name.GetStringLength());
-        }
-      }
-      if (const auto *entries = xerces_core::json::member(root, "entries");
-          entries && entries->IsArray()) {
-        for (const auto &entry : entries->GetArray()) {
-          if (!entry.IsObject()) {
-            continue;
-          }
-          ++next.total;
-          const auto *resolved = xerces_core::json::member(entry, "resolved");
-          if (resolved && resolved->IsBool() && resolved->GetBool()) {
-            ++next.matched;
-          } else {
-            next.missing.push_back(
-                xerces_core::json::get_string(entry, "name").value_or("?"));
-          }
-        }
-      }
-    }
-  }
-  signatures_ = std::move(next);
+  signatures_ = xerces_core::parse_signature_report(
+      read_text(paths_.cache / "signatures-report.json").value_or(""));
   ++signatures_rev_;
 }
 } // namespace xerces_launcher
