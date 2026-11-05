@@ -1766,7 +1766,7 @@ folder holds 686 files, 63.3 GB; the largest is 9.0 GB.
 | What                                                | Before         | After                 |
 | --------------------------------------------------- | -------------- | --------------------- |
 | First scan of the Workshop folder (no cache)        | 195 s          | 10.4 s (6.1 GB/s)     |
-| Hashing 8.15 GiB of Workshop files already in RAM  | 24.4 s, 1 file | 0.95 s, 4 files       |
+| Hashing 8.15 GiB of Workshop files already in RAM   | 24.4 s, 1 file | 0.95 s, 4 files       |
 | Hashing in memory, one thread                       | 394 MiB/s      | 4,099 MiB/s (CNG)     |
 | Game detected (start to `launcher.game.detected`)   | 322 ms         | 54 ms                 |
 | Catalog ready (start to `launcher.catalog.scanned`) | 409 ms         | 214 ms                |
@@ -1788,9 +1788,10 @@ What changed:
 - **Several files at once.** A scan lists every file first and hashes the
   largest first, on half the logical processors (1 to 6; 1 on a drive with a
   seek penalty, a spinning disk, and 1 when the launcher rescans while a game
-  runs), then reads the folders in their sorted order as before. Cancel is checked before each file and between 1 MiB reads. The 9
-  GB file alone takes 8.7 s at the 1 GB/s each of six readers gets, so the first
-  scan is bound by the disk (about 6.5 GB/s unbuffered).
+  runs), then reads the folders in their sorted order as before. Cancel is
+  checked before each file and between 1 MiB reads. The 9 GB file alone takes
+  8.7 s at the 1 GB/s each of six readers gets, so the first scan is bound by
+  the disk (about 6.5 GB/s unbuffered).
 - **The cache is kept.** A version 1 cache is migrated (the entries that held a
   failed read are dropped, as version 2 drops them) instead of being thrown
   away, which would have cost the 195 s again. Keys ignore ASCII letter case, so
