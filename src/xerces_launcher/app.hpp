@@ -169,5 +169,6 @@ private:
   std::size_t script_next_ = 0;
   unsigned pad_previous_ = 0;
   double pad_repeat_at_ = 0;
+  void *instance_mutex_ = nullptr; // one launcher per home
 };
 } // namespace xerces_launcher

@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cwctype>
 #include <fstream>
 #include <iterator>
 #include <sstream>
@@ -274,7 +275,12 @@ options parse_options(int argc, wchar_t **argv) {
 
 app::app(options opts) : opts_(std::move(opts)) {}
 
-app::~app() = default;
+app::~app() {
+  if (instance_mutex_) {
+    ReleaseMutex(instance_mutex_);
+    CloseHandle(instance_mutex_);
+  }
+}
 
 double app::now() const { return ms_since_process_start() / 1000.0 - started_; }
 
@@ -785,6 +791,28 @@ void app::run_script(double seconds) {
 int app::run() {
   started_ = ms_since_process_start() / 1000.0;
   launcher_paths paths = find_paths(opts_.home);
+
+  // One launcher per home: a second start brings the first window forward
+  // instead of writing the same config and journal.
+  {
+    std::uint32_t hash = 2166136261u;
+    for (const wchar_t c : paths.home.wstring()) {
+      hash = (hash ^ static_cast<std::uint32_t>(towlower(c))) * 16777619u;
+    }
+    const std::wstring name = L"Local\\xerces_launcher_" + std::to_wstring(hash);
+    instance_mutex_ = CreateMutexW(nullptr, TRUE, name.c_str());
+    if (instance_mutex_ && GetLastError() == ERROR_ALREADY_EXISTS) {
+      if (HWND other = FindWindowW(L"xerces_launcher_window", nullptr)) {
+        if (IsIconic(other)) {
+          ShowWindow(other, SW_RESTORE);
+        }
+        SetForegroundWindow(other);
+      }
+      CloseHandle(instance_mutex_);
+      instance_mutex_ = nullptr;
+      return 0;
+    }
+  }
   open_log(generic(paths.logs));
   log_info("launcher.start", "Xerces " + services::version(),
            "{\"home\":" + xerces_core::json::quote(generic(paths.home)) +

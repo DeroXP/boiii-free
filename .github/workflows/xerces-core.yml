@@ -20,6 +20,9 @@ jobs:
       - name: Host lint
         run: python tools/ci/check_hosts.py
 
+      - name: Launcher colour contrast
+        run: python tools/ci/check_contrast.py
+
       - name: Setup LLVM
         uses: ZhongRuoyu/setup-llvm@v0
         with:
