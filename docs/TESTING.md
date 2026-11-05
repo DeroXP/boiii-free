@@ -252,7 +252,10 @@ $env:XERCES_HOME = 'C:\Users\Ginld\XercesHome'
 build\bin\x64\Release\Xerces.exe --dry-launch --skip-boot --view home --script steps.txt --seconds 20
 ```
 
-A script plays timed steps, the first at 1 s: `+500 key down`, `+300 pad a`,
+`tools\dev\launcher\check-screens.ps1 -Out <folder>` opens every screen that
+way, captures it and lists any RmlUi warning (also with `-Theme light`,
+`-Theme contrast` or `-Language pseudo`). A script plays timed steps, the
+first at 1 s: `+500 key down`, `+300 pad a`,
 `+200 view mods`, `+100 click launch-vanilla`, `+100 type text`,
 `+100 focus search`, `+100 shot C:\path\screen.png` (a PNG of the next frame),
 `+100 quit`. The log is `<home>\logs\<date>-<time>-launcher-<pid>.jsonl`.
