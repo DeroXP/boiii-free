@@ -1,0 +1,210 @@
+/* Settings (DESIGN.md 7.3, 7.5, 14). Each section is a row: its number, title
+   and a line about it on the left, the fields on the right, a white rule on
+   top and 1 dp rules between the fields. Choices look like Home's mode switch;
+   switches are square (corners stay 0 to 2 dp). */
+
+.settings-page { max-width: 1160dp; padding-bottom: 64dp; }
+
+/* -------------------------------------------------------- section index */
+.jump
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	column-gap: 8dp;
+	row-gap: 4dp;
+	margin-top: 24dp;
+}
+.jump-link
+{
+	gap: 8dp;
+	min-height: 40dp;
+	padding: 0dp 8dp;
+	color: var(--text2);
+	font-size: 13dp;
+	font-weight: 500;
+}
+.jump-link:hover, .jump-link:focus { color: var(--text); }
+.jump-num { font-family: "IBM Plex Mono"; font-size: 11dp; color: var(--text2); }
+
+/* -------------------------------------------------------------- sections */
+.set-section
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	column-gap: 40dp;
+	row-gap: 8dp;
+	margin-top: 40dp;
+	padding-top: 16dp;
+	border-top: 1dp var(--text);
+}
+.jump + .set-section { margin-top: 24dp; }
+.set-head { flex: 0 0 232dp; }
+.set-num
+{
+	font-family: "IBM Plex Mono";
+	font-size: 11dp;
+	line-height: 16dp;
+	letter-spacing: 0.88dp;
+	color: var(--text2);
+}
+.set-title { margin-top: 6dp; font-size: 28dp; line-height: 32dp; font-weight: 800; letter-spacing: -0.84dp; }
+.set-desc { margin-top: 8dp; font-size: 13dp; line-height: 18dp; color: var(--text2); }
+.set-body { flex: 1 1 520dp; }
+
+/* ---------------------------------------------------------------- fields */
+/* A row's control drops under its text when both do not fit (longer
+   translations), instead of squeezing the text into a narrow column. */
+.set-body .field { flex-wrap: wrap; row-gap: 12dp; }
+.set-body .field > .field-text { flex: 1 1 320dp; }
+.set-body .field-stack > .field-text { flex: 0 0 auto; }
+.field-stack { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 12dp; }
+.field-control { display: flex; flex-direction: row; align-items: center; gap: 16dp; flex: 0 0 auto; }
+.field-note
+{
+	margin-top: 6dp;
+	font-family: "IBM Plex Mono";
+	font-size: 12dp;
+	line-height: 16dp;
+	color: var(--text2);
+}
+.field-stack .field-note { margin-top: 0dp; }
+.field-error { font-size: 13dp; line-height: 18dp; color: var(--accent-text); }
+.set-value
+{
+	margin-top: 6dp;
+	font-family: "IBM Plex Mono";
+	font-size: 13dp;
+	line-height: 18dp;
+	word-break: break-word;
+}
+.set-value.missing { color: var(--accent-text); }
+.tried
+{
+	margin-top: 4dp;
+	font-family: "IBM Plex Mono";
+	font-size: 12dp;
+	line-height: 16dp;
+	color: var(--text2);
+	word-break: break-word;
+}
+.set-actions { margin-top: 12dp; }
+.status-mark
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 6dp;
+	flex: 0 0 auto;
+	font-family: "IBM Plex Mono";
+	font-size: 12dp;
+	line-height: 16dp;
+	font-weight: 500;
+}
+.tick { display: block; width: 10dp; height: 10dp; border: 1dp var(--text); }
+
+/* A click on a slider's track or knob focuses the slider itself (RmlUi gives
+   focus to the clicked element unless it has focus: none), so the screen
+   sees the change as the player's, the focus ring shows, and the arrow keys
+   and Up/Down carry on from it. */
+input.range slidertrack, input.range sliderprogress, input.range sliderbar,
+input.range sliderarrowdec, input.range sliderarrowinc { focus: none; }
+
+.name-field { width: 240dp; flex: 0 0 auto; }
+/* An empty field's hint reads as a hint, not as a value. */
+.settings-page input.text:placeholder-shown { color: var(--text2); }
+.number-field { width: 72dp; text-align: right; }
+.flags-field { width: 100%; }
+
+/* --------------------------------------------------------------- choices */
+.choices
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	column-gap: 20dp;
+	row-gap: 4dp;
+	flex: 0 0 auto;
+}
+/* Stacked under their label, choices may wrap (UI scale has seven). */
+.field-stack .choices { flex: 0 1 auto; }
+.choice
+{
+	gap: 8dp;
+	min-height: 36dp;
+	padding: 0dp 2dp;
+	border-bottom: 2dp transparent;
+	color: var(--text2);
+	font-size: 14dp;
+	font-weight: 600;
+}
+.choice .mark-dot { display: block; width: 6dp; height: 6dp; }
+.choice.on { color: var(--text); border-bottom-color: var(--text); }
+.choice.on .mark-dot { background-color: var(--accent); }
+.choice:hover { color: var(--text); }
+
+/* -------------------------------------------------------------- switches */
+.toggle { gap: 10dp; min-height: 32dp; padding: 0dp 2dp; flex: 0 0 auto; }
+.track
+{
+	display: block;
+	width: 40dp;
+	height: 20dp;
+	padding: 2dp;
+	box-sizing: border-box;
+	border: 1dp var(--text2);
+	border-radius: 2dp;
+	transition: background-color border-color 0.2s cubic-out;
+}
+.knob
+{
+	display: block;
+	width: 14dp;
+	height: 14dp;
+	background-color: var(--text2);
+	transition: margin-left background-color 0.2s cubic-out;
+}
+.toggle.on .track { border-color: var(--accent); background-color: var(--accent); }
+.toggle.on .knob { margin-left: 20dp; background-color: var(--on-accent); }
+.toggle-state
+{
+	display: block;
+	width: 28dp;
+	font-family: "IBM Plex Mono";
+	font-size: 12dp;
+	line-height: 16dp;
+	color: var(--text2);
+}
+.toggle.on .toggle-state { color: var(--text); }
+
+/* ------------------------------------------------- launch and game options */
+.command
+{
+	padding: 12dp 14dp;
+	background-color: var(--surface);
+	border-left: 2dp var(--accent);
+	font-family: "IBM Plex Mono";
+	font-size: 13dp;
+	line-height: 20dp;
+	word-break: break-word;
+}
+.command.bad { color: var(--accent-text); }
+.dvar-row
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12dp;
+	padding: 8dp 0dp;
+	border-top: 1dp var(--line);
+}
+.dvar-text { font-family: "IBM Plex Mono"; font-size: 13dp; line-height: 18dp; }
+.look-note { margin-top: 12dp; }
+
+/* --------------------------------------------------------------- privacy */
+.statement { padding-bottom: 14dp; border-bottom: 1dp var(--line); }
+.statement p { max-width: 640dp; font-size: 15dp; line-height: 22dp; }
+.statement p + p { margin-top: 10dp; }
