@@ -229,6 +229,16 @@ state resolve() {
     s.problem = std::string("signature resolution failed: ") + e.what();
   }
 
+  // mod_stack hooks these entries whatever the registry tags them with. One
+  // that is missing or did not resolve turns multi-mod off here, in the
+  // report, and not only in mod_stack's log: feature_enabled, the pipe's
+  // status, the loader's plan check and the launcher's pre-launch warning all
+  // read this. When nothing could be resolved (no registry, a broken one, an
+  // unreadable image) every one is listed with that reason.
+  xerces_core::require_signatures(
+      s.report, "multi_mod", xerces_core::multi_mod_signatures::all,
+      s.problem.empty() ? "not in compat/signatures.json" : s.problem);
+
   std::size_t matched = 0;
   for (const auto &result : s.report.results) {
     matched += result.ok ? 1 : 0;

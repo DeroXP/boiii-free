@@ -812,11 +812,13 @@ hook_targets server_targets() {
   return targets;
 }
 
-// On the client every target comes from the signature registry. "multi_mod"
-// being on only says no entry tagged with it missed; a registry that lacks one
-// of these ids, or tags it with another feature (an older file through
-// XERCES_COMPAT_PATH, say), would still pass. So every address is looked up
-// before anything is patched, and if one is missing nothing is hooked.
+// On the client every target comes from the signature registry. The client
+// already turns "multi_mod" off when one of these ids is missing or did not
+// resolve, whatever the registry tags it with (require_signatures in
+// signatures.cpp, so the launcher and the pipe say so too). This is the last
+// check before patching: every address is looked up first, and if one is
+// still missing nothing is hooked, so an address is never read from an empty
+// optional even if that rule or the id list changes.
 std::optional<hook_targets> client_targets() {
   namespace ids = xerces_core::multi_mod_signatures;
   hook_targets targets;

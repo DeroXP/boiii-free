@@ -53,4 +53,31 @@ bool cached_signatures_agree(const signature_report &cached,
   }
   return true;
 }
+
+std::vector<std::string>
+require_signatures(signature_report &report, std::string_view feature,
+                   std::span<const std::string_view> ids,
+                   std::string_view absent) {
+  std::vector<std::string> added;
+  for (const std::string_view id : ids) {
+    const signature_result *result = report.find(id);
+    if (result != nullptr && result->ok) {
+      continue;
+    }
+    if (result == nullptr) {
+      signature_result missing;
+      missing.id = std::string(id);
+      missing.symbol = std::string(id); // no registry entry names the symbol
+      missing.error = std::string(absent);
+      report.results.push_back(std::move(missing));
+    }
+    // Looked up only now, so a feature that misses nothing gets no key.
+    std::vector<std::string> &off = report.disabled[std::string(feature)];
+    if (std::ranges::find(off, id) == off.end()) {
+      off.emplace_back(id);
+      added.emplace_back(id);
+    }
+  }
+  return added;
+}
 } // namespace xerces_core

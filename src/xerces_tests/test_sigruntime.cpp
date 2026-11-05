@@ -4,6 +4,7 @@
 #include "harness.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <stdexcept>
@@ -114,6 +115,123 @@ TEST_CASE("signature registry: the shipped file has every multi-mod hook") {
       CHECK(std::ranges::find(multi_mod_signatures::all, entry.id) !=
             multi_mod_signatures::all.end());
     }
+  }
+}
+
+TEST_CASE("required signatures: all resolved leaves the feature on") {
+  auto text = code(0x200);
+  text[0x80] = 0x48;
+  text[0x81] = 0x8B;
+  text[0x82] = 0x8B;
+  text[0x83] = 0xC3;
+  const std::vector<section_view> sections = {{".text", 0x1000, text}};
+  auto one = sig("one", "48 8B 8B C3");
+  one.features = {"multi_mod"};
+  signature_report report = resolve_signatures({one}, sections, 42);
+  REQUIRE(report.find("one") != nullptr);
+  REQUIRE(report.find("one")->ok);
+
+  const std::array<std::string_view, 1> ids = {"one"};
+  CHECK(require_signatures(report, "multi_mod", ids, "absent").empty());
+  CHECK(report.feature_enabled("multi_mod"));
+  // No empty list either: the launcher reads any "disabled" key as off.
+  CHECK(report.disabled.find("multi_mod") == report.disabled.end());
+  CHECK_EQ(report.results.size(), std::size_t(1));
+}
+
+TEST_CASE("required signatures: an id the registry lacks turns the feature "
+          "off and is named") {
+  // The registry resolved everything it has, so its tags alone say multi-mod
+  // is on; the feature's own list says otherwise.
+  signature_report report;
+  signature_result found;
+  found.id = "one";
+  found.symbol = "One";
+  found.ok = true;
+  found.rva = 0x1080;
+  report.results.push_back(found);
+  REQUIRE(report.feature_enabled("multi_mod"));
+
+  const std::array<std::string_view, 2> ids = {"one", "two"};
+  const auto added = require_signatures(report, "multi_mod", ids,
+                                        "not in compat/signatures.json");
+  CHECK((added == std::vector<std::string>{"two"}));
+  CHECK(!report.feature_enabled("multi_mod"));
+  REQUIRE(report.disabled.count("multi_mod") == 1);
+  CHECK((report.disabled.at("multi_mod") == std::vector<std::string>{"two"}));
+
+  // The report gets a failed entry for it, so the log's miss lines and the
+  // launcher's "Missing:" list name it, and resolved stays resolved.
+  const signature_result *two = report.find("two");
+  REQUIRE(two != nullptr);
+  CHECK(!two->ok);
+  CHECK_EQ(two->symbol, std::string("two"));
+  CHECK_EQ(two->error, std::string("not in compat/signatures.json"));
+  CHECK(report.find("one")->ok);
+  CHECK_EQ(report.results.size(), std::size_t(2));
+
+  const std::string message =
+      report.message("multi_mod", "Multi-mod", "Single mods still work.");
+  CHECK(message.starts_with("Multi-mod is off"));
+  CHECK(message.find("two") != std::string::npos);
+  CHECK(message.find("not in compat/signatures.json") != std::string::npos);
+
+  // Applying it again changes nothing.
+  CHECK(require_signatures(report, "multi_mod", ids, "absent").empty());
+  CHECK_EQ(report.disabled.at("multi_mod").size(), std::size_t(1));
+  CHECK_EQ(report.results.size(), std::size_t(2));
+}
+
+TEST_CASE("required signatures: a miss tagged for another feature turns this "
+          "one off too") {
+  // "label" is tagged mod_label in this registry and does not match: the scan
+  // turns mod_label off, but multi_mod uses it as well.
+  const auto text = code(0x200);
+  const std::vector<section_view> sections = {{".text", 0x1000, text}};
+  auto label = sig("label", "C3 C3 C3 C3");
+  label.features = {"mod_label"};
+  signature_report report = resolve_signatures({label}, sections, 42);
+  REQUIRE(!report.find("label")->ok);
+  REQUIRE(report.feature_enabled("multi_mod"));
+  REQUIRE(!report.feature_enabled("mod_label"));
+
+  const std::array<std::string_view, 1> ids = {"label"};
+  const auto added = require_signatures(report, "multi_mod", ids, "absent");
+  CHECK((added == std::vector<std::string>{"label"}));
+  CHECK(!report.feature_enabled("multi_mod"));
+  // The entry it already had is kept, with the scan's own error.
+  CHECK_EQ(report.results.size(), std::size_t(1));
+  CHECK(report.message("multi_mod", "Multi-mod", "").find("0 matches") !=
+        std::string::npos);
+}
+
+TEST_CASE("required signatures: a miss tagged for the feature is listed once") {
+  const auto text = code(0x200);
+  const std::vector<section_view> sections = {{".text", 0x1000, text}};
+  auto one = sig("one", "C3 C3 C3 C3");
+  one.features = {"multi_mod"};
+  signature_report report = resolve_signatures({one}, sections, 42);
+  REQUIRE((report.disabled.at("multi_mod") == std::vector<std::string>{"one"}));
+
+  const std::array<std::string_view, 1> ids = {"one"};
+  CHECK(require_signatures(report, "multi_mod", ids, "absent").empty());
+  CHECK((report.disabled.at("multi_mod") == std::vector<std::string>{"one"}));
+}
+
+TEST_CASE("required signatures: nothing resolved lists every id with the "
+          "reason") {
+  // No registry at all (or a broken one): the report is empty and each id the
+  // feature needs is listed with why nothing resolved.
+  signature_report report;
+  const auto added =
+      require_signatures(report, "multi_mod", multi_mod_signatures::all,
+                         "compat/signatures.json was not found");
+  CHECK_EQ(added.size(), multi_mod_signatures::all.size());
+  CHECK(!report.feature_enabled("multi_mod"));
+  CHECK_EQ(report.results.size(), multi_mod_signatures::all.size());
+  for (const auto &result : report.results) {
+    CHECK(!result.ok);
+    CHECK_EQ(result.error, std::string("compat/signatures.json was not found"));
   }
 }
 

@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -15,9 +16,10 @@
 namespace xerces_core {
 // The registry entries mod_stack hooks on the client. compat/signatures.json
 // is a data file that can be swapped (XERCES_COMPAT_PATH, an older checkout),
-// so mod_stack looks every one of them up before it patches anything and
-// keeps multi-mod off if one is missing. A new mod_stack hook is added here
-// as well, so the registry test checks it is in the shipped registry.
+// so the client requires every one of them in its report (require_signatures
+// below) and mod_stack looks each up again before it patches anything; either
+// way multi-mod stays off if one is missing. A new mod_stack hook is added
+// here as well, so the registry test checks it is in the shipped registry.
 namespace multi_mod_signatures {
 inline constexpr std::string_view expand_zone_list_call =
     "db.load_xassets.expand_zone_list_call";
@@ -62,4 +64,21 @@ bool cached_signatures_agree(const signature_report &cached,
                              const std::vector<signature> &signatures,
                              std::uint32_t build_checksum,
                              std::string *why = nullptr);
+
+// Turns `feature` off in a finished report unless every id in `ids` resolved
+// (DESIGN.md 4.4: each feature declares the symbols it needs). The registry's
+// "features" tags only turn a feature off when an entry tagged with it
+// misses; an entry the feature uses that the registry lacks, or tags for
+// another feature, would leave it on while its hooks are not installed. After
+// this the report says it is off, so everything that reads it agrees: the
+// client's feature_enabled, the pipe's status, the loader's plan check and
+// the launcher's "Multi-mod was off" warning (it reads the report's
+// "disabled" map). An id the report has no entry for gets a failed one with
+// the error `absent`, so the log and the launcher name it. Nothing is added
+// when every id resolved, not even an empty list: the launcher treats any
+// "disabled" key as off. Returns the ids added to report.disabled[feature].
+std::vector<std::string>
+require_signatures(signature_report &report, std::string_view feature,
+                   std::span<const std::string_view> ids,
+                   std::string_view absent);
 } // namespace xerces_core
