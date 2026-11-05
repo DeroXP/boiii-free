@@ -26,8 +26,23 @@ struct log_event {
 // with %USERPROFILE%, so logs can be shared.
 std::string redact_profile(std::string_view text, std::string_view profile);
 
+// The text written to logs and diagnostics bundles is shared in bug reports,
+// and a server address there can be a friend's home IP (DESIGN.md 5.10, 15.1).
+// Replaced by redacted_address:
+//   - IPv4 addresses, with a ":port" if one follows;
+//   - IPv6 addresses in brackets ("[::1]:27017"), and without brackets when
+//     they hold "::" or all eight groups;
+//   - a host name with a dot and a port ("friend.example.org:27017");
+//   - whatever follows "+connect", the launcher's join command.
+// A host name without a port is left alone: it cannot be told apart from
+// file and event names such as "plan.json". The patterns may also catch the
+// odd "file.cpp:91"; losing that is the price of never leaking an address.
+inline constexpr std::string_view redacted_address = "<address>";
+std::string redact_addresses(std::string_view text);
+
 // JSON Lines, one file per session: <logs>/<date>-<time>-<role>.jsonl.
-// Addresses never go into these files.
+// Addresses never go into these files: format() passes every message and data
+// object through redact_addresses.
 class json_log {
 public:
   json_log(std::string role, std::string session);

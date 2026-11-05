@@ -52,6 +52,198 @@ std::string profile_from_environment() {
   std::free(value);
   return {reinterpret_cast<const char *>(text.data()), text.size()};
 }
+
+// ASCII only: the patterns below are ASCII, and testing UTF-8 bytes with the
+// <cctype> functions depends on the locale.
+bool is_digit(char c) { return c >= '0' && c <= '9'; }
+bool is_alpha(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+bool is_alnum(char c) { return is_digit(c) || is_alpha(c); }
+bool is_hex(char c) {
+  return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+bool is_word(char c) { return is_alnum(c) || c == '_'; }
+
+// The longest texts the scanners look at. Bounding them keeps a long run of
+// colons or dots from making the scrubber quadratic.
+constexpr std::size_t max_ipv6_text = 64;
+constexpr std::size_t max_host_text = 260;
+
+// Length of ":<port>" at text[at] (one to five digits, then no other digit or
+// letter), or 0.
+std::size_t port_length(std::string_view text, std::size_t at) {
+  if (at >= text.size() || text[at] != ':') {
+    return 0;
+  }
+  std::size_t end = at + 1;
+  while (end < text.size() && is_digit(text[end]) && end - at <= 5) {
+    ++end;
+  }
+  if (end == at + 1 || (end < text.size() && is_word(text[end]))) {
+    return 0;
+  }
+  return end - at;
+}
+
+// Length of an IPv4 address at text[at], or 0. Four numbers of up to 255
+// with nothing that continues them, so a version or build number with more
+// parts or bigger numbers ("10.0.26300.1") is not one.
+std::size_t ipv4_length(std::string_view text, std::size_t at) {
+  std::size_t end = at;
+  for (int part = 0; part < 4; ++part) {
+    if (part > 0) {
+      if (end >= text.size() || text[end] != '.') {
+        return 0;
+      }
+      ++end;
+    }
+    int value = 0;
+    std::size_t digits = 0;
+    while (end < text.size() && is_digit(text[end]) && digits < 3) {
+      value = value * 10 + (text[end] - '0');
+      ++end;
+      ++digits;
+    }
+    if (digits == 0 || value > 255) {
+      return 0;
+    }
+  }
+  if (end < text.size() && is_word(text[end])) {
+    return 0;
+  }
+  if (end + 1 < text.size() && text[end] == '.' && is_digit(text[end + 1])) {
+    return 0;
+  }
+  return end - at;
+}
+
+// Length of "[IPv6]" or "[IPv6%zone]" at text[at] (a '['), or 0. Every IPv6
+// address has at least two colons.
+std::size_t bracketed_ipv6_length(std::string_view text, std::size_t at) {
+  std::size_t end = at + 1;
+  int colons = 0;
+  bool zone = false;
+  for (; end < text.size() && end - at < max_ipv6_text; ++end) {
+    const char c = text[end];
+    if (c == ']') {
+      break;
+    }
+    if (zone) {
+      if (!is_word(c) && c != '.' && c != '-') {
+        return 0;
+      }
+    } else if (c == '%') {
+      zone = true;
+    } else if (c == ':') {
+      ++colons;
+    } else if (!is_hex(c) && c != '.') {
+      return 0;
+    }
+  }
+  if (end >= text.size() || text[end] != ']' || colons < 2) {
+    return 0;
+  }
+  return end + 1 - at;
+}
+
+// Length of an IPv6 address without brackets at text[at], or 0. Only the
+// forms that cannot be a time of day or a "key:value" pair count: one "::"
+// or all eight groups, each group at most four hex digits, optionally ending
+// in an IPv4 address ("::ffff:192.0.2.1").
+std::size_t bare_ipv6_length(std::string_view text, std::size_t at) {
+  std::size_t end = at;
+  int colons = 0;
+  bool double_colon = false;
+  bool any_digit = false;
+  std::size_t group = 0;
+  for (; end < text.size() && end - at < max_ipv6_text; ++end) {
+    const char c = text[end];
+    if (c == ':') {
+      if (end > at && text[end - 1] == ':') {
+        if (double_colon) {
+          return 0; // ":::" or a second "::"
+        }
+        double_colon = true;
+      }
+      ++colons;
+      group = 0;
+    } else if (is_hex(c)) {
+      if (++group > 4) {
+        return 0;
+      }
+      any_digit = true;
+    } else {
+      break;
+    }
+  }
+  if (end < text.size() && text[end] == '.') {
+    std::size_t last = end;
+    while (last > at && text[last - 1] != ':') {
+      --last;
+    }
+    const std::size_t v4 = last == at ? 0 : ipv4_length(text, last);
+    if (v4 == 0) {
+      return 0;
+    }
+    end = last + v4;
+  }
+  if (colons < 2 || !any_digit || (!double_colon && colons != 7)) {
+    return 0;
+  }
+  if (end < text.size() && is_word(text[end])) {
+    return 0;
+  }
+  return end - at;
+}
+
+// Length of "host.name:port" at text[at], or 0: at least two labels of
+// letters, digits and '-' (not at either end), the last starting with a
+// letter so "1.2:3" is not one, then a port.
+std::size_t host_port_length(std::string_view text, std::size_t at) {
+  std::size_t end = at;
+  std::size_t labels = 0;
+  std::size_t label_start = at;
+  for (;;) {
+    label_start = end;
+    while (end < text.size() && end - at < max_host_text &&
+           (is_alnum(text[end]) || text[end] == '-')) {
+      ++end;
+    }
+    if (end == label_start || text[label_start] == '-' ||
+        text[end - 1] == '-') {
+      return 0;
+    }
+    ++labels;
+    if (end < text.size() && text[end] == '.') {
+      ++end;
+      continue;
+    }
+    break;
+  }
+  if (labels < 2 || !is_alpha(text[label_start])) {
+    return 0;
+  }
+  const std::size_t port = port_length(text, end);
+  return port == 0 ? 0 : end + port - at;
+}
+
+bool starts_with_case_insensitive(std::string_view text, std::size_t at,
+                                  std::string_view prefix) {
+  if (text.size() - at < prefix.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < prefix.size(); ++i) {
+    char c = text[at + i];
+    if (c >= 'A' && c <= 'Z') {
+      c = static_cast<char>(c + 32);
+    }
+    if (c != prefix[i]) {
+      return false;
+    }
+  }
+  return true;
+}
 } // namespace
 
 const char *to_string(log_level level) {
@@ -90,6 +282,74 @@ std::string redact_profile(std::string_view text, std::string_view profile) {
   return out;
 }
 
+std::string redact_addresses(std::string_view text) {
+  constexpr std::string_view connect = "+connect";
+  std::string out;
+  out.reserve(text.size());
+  std::size_t i = 0;
+  while (i < text.size()) {
+    // "+connect <address>": the launcher's join command, whatever the address
+    // looks like (a host name without a port included).
+    if (text[i] == '+' && starts_with_case_insensitive(text, i, connect) &&
+        (i + connect.size() == text.size() ||
+         !is_word(text[i + connect.size()]))) {
+      std::size_t end = i + connect.size();
+      while (end < text.size() && (text[end] == ' ' || text[end] == '\t')) {
+        ++end;
+      }
+      // A quoted argument, also as it reads inside a JSON string.
+      if (text.substr(end).starts_with("\\\"")) {
+        end += 2;
+      } else if (end < text.size() && text[end] == '"') {
+        ++end;
+      }
+      out.append(text.substr(i, end - i));
+      std::size_t token = end;
+      while (token < text.size() && token - end < max_host_text &&
+             (is_word(text[token]) ||
+              std::string_view(".:-[]%").find(text[token]) !=
+                  std::string_view::npos)) {
+        ++token;
+      }
+      if (token > end) {
+        out.append(redacted_address);
+      }
+      i = token;
+      continue;
+    }
+
+    // The other patterns start only where a word starts, so the tail of
+    // "v1.2.3.4" or of a longer dotted number is never taken for an address.
+    const char before = i == 0 ? ' ' : text[i - 1];
+    const bool word_start = !is_word(before) && before != '.' && before != '-';
+    std::size_t length = 0;
+    if (text[i] == '[') {
+      length = bracketed_ipv6_length(text, i);
+      if (length != 0) {
+        length += port_length(text, i + length);
+      }
+    } else if (word_start) {
+      length = ipv4_length(text, i);
+      if (length != 0) {
+        length += port_length(text, i + length);
+      } else {
+        length = host_port_length(text, i);
+        if (length == 0) {
+          length = bare_ipv6_length(text, i);
+        }
+      }
+    }
+    if (length != 0) {
+      out.append(redacted_address);
+      i += length;
+    } else {
+      out.push_back(text[i]);
+      ++i;
+    }
+  }
+  return out;
+}
+
 json_log::json_log(std::string role, std::string session)
     : role_(std::move(role)), session_(std::move(session)),
       profile_(profile_from_environment()) {}
@@ -109,13 +369,19 @@ std::string json_log::format(const log_event &event,
   json::set(doc, "role", role_, alloc);
   json::set(doc, "component", event.component, alloc);
   json::set(doc, "event", event.event, alloc);
-  json::set(doc, "msg", redact_profile(event.message, profile_), alloc);
+  // Messages and data are where callers put paths, command lines and server
+  // addresses; the other fields are names chosen in code.
+  json::set(doc, "msg",
+            redact_addresses(redact_profile(event.message, profile_)), alloc);
   json::set(doc, "session", session_, alloc);
   if (!event.plan_id.empty()) {
     json::set(doc, "plan_id", event.plan_id, alloc);
   }
   if (!event.data_json.empty()) {
-    const auto parsed = json::parse(redact_profile(event.data_json, profile_));
+    // Scrubbed as text: the replacement holds no JSON syntax, and an address
+    // only ever sits inside a string there.
+    const auto parsed = json::parse(
+        redact_addresses(redact_profile(event.data_json, profile_)));
     if (parsed.ok && parsed.document.IsObject()) {
       json::set(doc, "data", json::copy(parsed.document, alloc), alloc);
     }

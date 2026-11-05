@@ -238,7 +238,13 @@ int cmd_mod_validate(const arguments &args, bool lint) {
     if (!fs::exists(path)) {
       diags.error("mod.integrity.missing_file", "/integrity/" + file,
                   file + " is listed in integrity but missing.");
-    } else if ("sha256:" + file_sha256_hex(path) != expected) {
+    } else if (const auto digest = try_file_sha256_hex(path); !digest) {
+      // Not a mismatch: the file may be fine, it just could not be read.
+      diags.error("mod.integrity.unreadable", "/integrity/" + file,
+                  file + " could not be read in full (another program may "
+                         "hold it open), so its integrity hash was not "
+                         "checked.");
+    } else if ("sha256:" + *digest != expected) {
       diags.error("mod.integrity.mismatch", "/integrity/" + file,
                   file + " does not match its integrity hash.");
     }

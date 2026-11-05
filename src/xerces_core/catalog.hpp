@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -43,8 +44,10 @@ public:
   bool save(const std::filesystem::path &file, bool prune) const;
 
   // The file's hash: cached if its size and write time are unchanged,
-  // otherwise read and remembered.
-  std::string file_sha256(const std::filesystem::path &path);
+  // otherwise read and remembered. Nothing when the file could not be read in
+  // full; then nothing is remembered for it either, so the next scan tries
+  // again instead of reusing a wrong hash.
+  std::optional<std::string> file_sha256(const std::filesystem::path &path);
 
   std::size_t hits() const { return hits_; }
   std::size_t misses() const { return misses_; }
@@ -93,13 +96,22 @@ read_files(const std::filesystem::path &folder);
 std::vector<std::string> list_files(const std::filesystem::path &folder);
 
 // Lower-case hex SHA-256 of one file, read in 1 MiB pieces so multi-gigabyte
-// fastfiles never sit in memory. A file that cannot be opened hashes as
-// empty, the way read_files reads it.
+// fastfiles never sit in memory. Nothing when the file cannot be opened, a
+// read fails, or the bytes read are not the file's size (it changed while
+// being read): a hash of what happened to be read would look valid.
+std::optional<std::string>
+try_file_sha256_hex(const std::filesystem::path &path);
+
+// The same, with an empty string (never a valid hash) when it fails, for
+// callers that only compare the result with a known hash.
 std::string file_sha256_hex(const std::filesystem::path &path);
 
-// Every file under a folder as (relative '/' path, SHA-256 hex), sorted.
+// Every file under a folder as (relative '/' path, SHA-256 hex), sorted. A
+// file that could not be read has an empty hash and, if unreadable is given,
+// its relative path is added there.
 std::vector<std::pair<std::string, std::string>>
-hash_files(const std::filesystem::path &folder, hash_cache *cache = nullptr);
+hash_files(const std::filesystem::path &folder, hash_cache *cache = nullptr,
+           std::vector<std::string> *unreadable = nullptr);
 
 // SHA-256 over the sorted (path, file hash) list, leaving out workshop.json
 // as upstream's content hash does.

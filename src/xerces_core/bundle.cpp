@@ -232,9 +232,16 @@ bundle_result make_bundle(const std::filesystem::path &home,
   zip_writer zip;
   std::string listing =
       "Xerces diagnostics bundle. Nothing in it was sent anywhere; share it\n"
-      "only if you want to. The user folder is written as %USERPROFILE%.\n\n";
+      "only if you want to. The user folder is written as %USERPROFILE% and\n"
+      "server addresses as " +
+      std::string(redacted_address) +
+      ". launcher.json has no player name, and only\n"
+      "counts of the favourite and recent servers.\n\n";
   const auto add = [&](const std::string &name, std::string text) {
-    text = redact_profile(text, profile);
+    // Logs written by older builds were never scrubbed of addresses, and a
+    // file a person edited may hold one anywhere, so every file is scrubbed
+    // again here.
+    text = redact_addresses(redact_profile(text, profile));
     listing += name + "  (" + std::to_string(text.size()) + " bytes)\n";
     zip.add(name, text);
     result.contents.push_back(name);
@@ -281,8 +288,23 @@ bundle_result make_bundle(const std::filesystem::path &home,
   if (std::filesystem::exists(config, ec)) {
     auto parsed = json::parse(read_text(config));
     if (parsed.ok && parsed.document.IsObject()) {
-      parsed.document.RemoveMember("player_name"); // not needed to debug
-      add("launcher.json", json::pretty(parsed.document));
+      auto &doc = parsed.document;
+      auto &alloc = doc.GetAllocator();
+      doc.RemoveMember("player_name"); // not needed to debug
+      // Favourites pair a name ("Dave's house") with an address, and recent
+      // servers are addresses: a bug report only needs how many there are.
+      for (const char *key : {"favorites", "recent_servers"}) {
+        const auto *list = json::member(doc, key);
+        const std::int64_t count = list != nullptr && list->IsArray()
+                                       ? static_cast<std::int64_t>(list->Size())
+                                       : 0;
+        const bool present = list != nullptr;
+        doc.RemoveMember(key);
+        if (present) {
+          json::set(doc, std::string(key) + "_count", count, alloc);
+        }
+      }
+      add("launcher.json", json::pretty(doc));
     }
   }
   add("system.json", std::string(system_json));

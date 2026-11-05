@@ -115,6 +115,61 @@ TEST_CASE("launch: values that could inject commands are refused") {
   CHECK(cmd.command_line.find("fs_game") == std::string::npos);
 }
 
+TEST_CASE("launch: ';' and '//' never reach the command line") {
+  // The engine's command buffer runs what follows a ';' as another command,
+  // and its tokenizer drops the rest after "//". Values are refused rather
+  // than quoted: how the engine reads quotes in "+set" is not verified.
+  plan p = two_mod_plan();
+  p.stack[1].folder = "zm_pack;unbindall";
+  const launch_command folder = build_launch_command(&p, {});
+  CHECK(folder.diags.has("launch.folder.invalid"));
+  CHECK(folder.args.empty());
+
+  launch_options options;
+  options.dvars = {{"com_maxfps", "1;disconnect"}};
+  const launch_command value = build_launch_command(nullptr, options);
+  CHECK(value.diags.has("launch.dvar.invalid"));
+  CHECK(value.command_line.empty());
+  options.dvars = {{"name", "a//b"}};
+  CHECK(
+      build_launch_command(nullptr, options).diags.has("launch.dvar.invalid"));
+  options.dvars = {{"name", "one/two"}}; // a single slash is fine
+  CHECK(build_launch_command(nullptr, options).ok());
+
+  launch_options join;
+  join.connect = "10.0.0.1:27017;quit";
+  CHECK(
+      build_launch_command(nullptr, join).diags.has("launch.connect.invalid"));
+}
+
+TEST_CASE("launch: settings cannot reach the mod dvars by case or hash") {
+  // The engine finds dvars by a hash of the lower-cased name, and takes
+  // "0x<hash>" as that hash, so both reach fs_game and fs_extramods.
+  const plan p = two_mod_plan();
+  launch_options options;
+  options.dvars = {{"FS_GAME", "2846283723"}, {"Fs_ExtraMods", "1,2"}};
+  const launch_command modded = build_launch_command(&p, options);
+  REQUIRE(modded.ok());
+  CHECK(modded.command_line.find("FS_GAME") == std::string::npos);
+  CHECK(modded.command_line.find("Fs_ExtraMods") == std::string::npos);
+  CHECK(modded.command_line.find("2846283723") == std::string::npos);
+
+  // Safe mode still launches without any mod.
+  options.mods_off = true;
+  const launch_command safe = build_launch_command(&p, options);
+  REQUIRE(safe.ok());
+  CHECK((safe.args == std::vector<std::string>{"-launch", "-nointro"}));
+
+  launch_options hashed;
+  hashed.dvars = {{"0x1a2b3c4d", "2846283723"}};
+  CHECK(build_launch_command(nullptr, hashed).diags.has("launch.dvar.invalid"));
+  hashed.dvars = {{"0X1A2B3C4D", "1"}};
+  CHECK(build_launch_command(nullptr, hashed).diags.has("launch.dvar.invalid"));
+  // A digit first is still a name when it is not "0x".
+  hashed.dvars = {{"0r_mode", "1"}};
+  CHECK(build_launch_command(nullptr, hashed).ok());
+}
+
 TEST_CASE("launch: a plan with errors or no id does not launch") {
   plan p = two_mod_plan();
   p.diags.error("plan.test", "", "broken");

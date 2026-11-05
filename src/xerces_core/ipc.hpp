@@ -90,10 +90,17 @@ public:
   // own thread, one client at a time.
   bool start(const std::filesystem::path &run_dir, std::string role,
              handler on_request, std::string *error = nullptr);
-  // Stops serving and removes the run file.
+  // Stops serving and removes the run file. Returns promptly whatever a
+  // connected client is doing.
   void stop();
   const std::string &pipe_name() const { return pipe_; }
   std::size_t served() const { return served_; }
+
+  // How long a client gets for each step: sending its request, taking the
+  // reply, and closing its end once it has read it. A client that misses a
+  // step is disconnected, so it cannot keep others out for longer. Matches
+  // call()'s default timeout; set before start() (tests shorten it).
+  void set_client_timeout(std::uint32_t ms) { client_timeout_ms_ = ms; }
 
 private:
   void serve();
@@ -106,7 +113,14 @@ private:
   std::thread thread_;
   std::atomic<bool> stopping_ = false;
   std::atomic<std::size_t> served_ = 0;
+  std::uint32_t client_timeout_ms_ = 5000;
 };
+
+// Whether two executable paths (UTF-8) name the same file: compared by volume
+// serial number and file index when both can be opened, so a junction, a
+// symbolic link or a subst drive does not make one exe look like another;
+// by lower-cased path otherwise.
+bool same_image(std::string_view a, std::string_view b);
 
 struct call_result {
   bool ok = false;        // a response arrived (it may still be an error)
