@@ -1,0 +1,113 @@
+#pragma once
+
+// Home's "Launch" (DESIGN.md 5.4, 5.6), shared by Xerces.exe and
+// `xerces_cli plan apply` so the two can never start the game differently:
+// a mode's profile turned into a plan request, the command line, the plan
+// file in <home>\config\plans, the journal with a fresh launch id, and the
+// client started from the game folder with XERCES_HOME, XERCES_DATA_PATH and
+// XERCES_LAUNCH_ID in its environment only. Headless: no UI.
+
+#include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "diagnostics.hpp"
+#include "event_log.hpp"
+#include "launcher_config.hpp"
+#include "launcher_home.hpp"
+#include "launcher_state.hpp"
+#include "planner.hpp"
+
+namespace xerces_core {
+// The plan request for a mode's profile: its mods, map, pins, allowed
+// conflicts and settings, the planner's saved positions, the Steam build
+// (game_build) and this Xerces version.
+plan_request profile_request(const launcher_config &config,
+                             const std::string &mode,
+                             const std::optional<std::uint64_t> &steam_build);
+
+// The profile resolved against the catalog; mods, when given, replace the
+// profile's list (a culprit-search test launch).
+plan resolve_profile(const std::vector<installed_content> &catalog,
+                     const launcher_config &config, const std::string &mode,
+                     const std::optional<std::uint64_t> &steam_build,
+                     const std::vector<std::string> *mods = nullptr);
+
+// What stopped a launch, so callers can tell the player's plan from the PC.
+enum class launch_refusal {
+  none,
+  plan,    // the plan has problems, or no mods are enabled
+  command, // a setting the command line cannot carry (build_launch_command)
+  game,    // the game was not found, or its build is not supported
+  running, // a game is already running
+  client,  // boiii.exe is missing next to the program
+  start,   // Windows refused to start it
+};
+
+struct launch_outcome {
+  bool started = false;
+  bool dry_run = false; // --dry-launch: built and logged, not started
+  std::string message;  // what the screen shows
+  std::string command_line;
+  std::string plan_id;
+  std::filesystem::path plan_file; // written for a modded launch
+  unsigned long pid = 0;
+  diagnostics diags;
+  launch_refusal refusal = launch_refusal::none;
+  std::optional<plan> resolved; // a modded launch's plan
+};
+
+struct launch_inputs {
+  const launcher_paths *paths = nullptr;
+  const launcher_config *config = nullptr;
+  const game_state *game = nullptr;
+  const std::vector<installed_content> *catalog = nullptr;
+  std::string mode = "zm";
+  bool modded = true;    // false: vanilla
+  bool mods_off = false; // safe mode: the last modded launch crashed
+  std::optional<std::string> connect; // "+connect host:port" (Servers)
+  const std::vector<std::string> *mods = nullptr; // instead of the profile's
+  bool dry_launch = false;
+};
+
+// The command line the launch would use, without starting or writing
+// anything. A plan with problems, an empty stack and values the command line
+// cannot carry are refused here.
+launch_outcome preview_launch(const launch_inputs &in);
+
+// The launch: preview_launch, then the game (found and supported), no game
+// running already, and the client next to the program. Writes the plan file
+// (modded) and the journal (phase launching, the mode and a fresh launch id),
+// then starts the client from the game folder with XERCES_HOME,
+// XERCES_DATA_PATH (development builds) and XERCES_LAUNCH_ID set for it alone.
+// If Windows refuses, the old journal is put back. game_running is asked
+// after the plan and game checks. On success *process (when given) receives
+// the process handle, which the caller closes.
+//
+// A dry launch (in.dry_launch) writes the plan file but no journal, starts
+// nothing and logs the command (launch.dry); a missing client or an
+// unsupported game build do not stop it, the message says what a real launch
+// would refuse. Logs launch.refused, launch.dry, launch.started and
+// launch.failed.
+launch_outcome launch_game(const launch_inputs &in,
+                           const std::function<bool()> &game_running,
+                           const event_log &log, void **process = nullptr);
+
+// A game announces itself in <home>\run while it runs (15.2), also one this
+// program did not start.
+bool game_in_run_folder(const std::filesystem::path &home);
+
+// The environment block for a child process: block (as from
+// GetEnvironmentStringsW, double-NUL terminated) with each change applied (a
+// value sets the variable, nullopt removes it; names compare ignoring case, as
+// Windows does), sorted by name as CreateProcessW asks. The drive entries
+// ("=C:=C:\...") stay first.
+using environment_changes =
+    std::vector<std::pair<std::wstring, std::optional<std::wstring>>>;
+std::wstring child_environment(const wchar_t *block,
+                               const environment_changes &changes);
+} // namespace xerces_core

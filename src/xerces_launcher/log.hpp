@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 
+#include <xerces_core/event_log.hpp>
 #include <xerces_core/log.hpp>
 
 namespace xerces_launcher {
@@ -28,4 +29,7 @@ inline void log_error(std::string_view event, std::string_view message,
                       std::string_view data_json = {}) {
   log(xerces_core::log_level::error, event, message, data_json);
 }
+// For shared xerces_core code (launches, packs): its events land in this log
+// as "launcher.<event>".
+xerces_core::event_log launcher_events();
 } // namespace xerces_launcher

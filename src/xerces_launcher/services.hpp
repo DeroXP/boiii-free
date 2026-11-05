@@ -26,6 +26,7 @@
 #include <xerces_core/launch.hpp>
 #include <xerces_core/launcher_config.hpp>
 #include <xerces_core/launcher_home.hpp>
+#include <xerces_core/launcher_launch.hpp>
 #include <xerces_core/launcher_state.hpp>
 #include <xerces_core/planner.hpp>
 #include <xerces_core/sigregistry.hpp>
@@ -42,15 +43,9 @@ using xerces_core::game_state;
 using xerces_core::launcher_paths;
 using xerces_core::signature_state;
 
-struct launch_outcome {
-  bool started = false;
-  bool dry_run = false;    // --dry-launch: built and logged, not started
-  std::string message;     // what the screen shows
-  std::string command_line;
-  std::string plan_id;
-  unsigned long pid = 0;
-  xerces_core::diagnostics diags;
-};
+// A launch is xerces_core's too (launcher_launch.hpp), shared with
+// `xerces_cli plan apply`.
+using xerces_core::launch_outcome;
 
 class services {
 public:
@@ -160,6 +155,10 @@ public:
   static std::string version();
 
 private:
+  xerces_core::launch_inputs inputs(const std::string &mode, bool modded,
+                                    bool mods_off,
+                                    const std::optional<std::string> &connect,
+                                    const std::vector<std::string> *mods) const;
   void load_config();
   void finish_scan(std::shared_ptr<catalog_state> result);
   void save_culprit();

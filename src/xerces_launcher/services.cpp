@@ -12,6 +12,7 @@
 #include <xerces_core/ipc.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/launcher_home.hpp>
+#include <xerces_core/launcher_launch.hpp>
 #include <xerces_core/launcher_state.hpp>
 #include <xerces_core/version.hpp>
 
@@ -22,11 +23,6 @@ namespace {
 std::string utf8(const fs::path &path) {
   const auto text = path.u8string();
   return {reinterpret_cast<const char *>(text.data()), text.size()};
-}
-
-fs::path from_utf8(std::string_view text) {
-  return fs::path(std::u8string(reinterpret_cast<const char8_t *>(text.data()),
-                                text.size()));
 }
 
 std::optional<std::string> read_text(const fs::path &path) {
@@ -227,33 +223,13 @@ void services::cancel_scan() {
 
 // --------------------------------------------------------------------- plan
 xerces_core::plan_request services::request_for(const std::string &mode) const {
-  xerces_core::plan_request request;
-  request.mode = mode;
-  if (const auto it = config_.profiles.find(mode); it != config_.profiles.end()) {
-    request.mods = it->second.mods;
-    request.map = it->second.map;
-    request.pins = it->second.pins;
-    request.allowed_conflicts = it->second.allowed_conflicts;
-    request.settings = it->second.settings;
-  }
-  request.saved_positions = config_.saved_positions;
-  if (game_.steam_build) {
-    request.game_build = std::to_string(*game_.steam_build);
-  }
-  request.xerces_version =
-      xerces_core::version::parse(xerces_core::xerces_version_text)
-          .value_or(xerces_core::version{});
-  request.protocol_version = xerces_core::protocol_version;
-  return request;
+  return xerces_core::profile_request(config_, mode, game_.steam_build);
 }
 
 xerces_core::plan services::resolve(const std::string &mode,
                                    const std::vector<std::string> *mods) const {
-  xerces_core::plan_request request = request_for(mode);
-  if (mods) {
-    request.mods = *mods;
-  }
-  return xerces_core::resolve_plan(catalog_.items, request);
+  return xerces_core::resolve_profile(catalog_.items, config_, mode,
+                                      game_.steam_build, mods);
 }
 
 std::vector<const xerces_core::installed_content *>
@@ -279,45 +255,30 @@ std::vector<const xerces_core::installed_content *> services::maps() const {
 }
 
 // ------------------------------------------------------------------- launch
+xerces_core::launch_inputs services::inputs(
+    const std::string &mode, bool modded, bool mods_off,
+    const std::optional<std::string> &connect,
+    const std::vector<std::string> *mods) const {
+  xerces_core::launch_inputs in;
+  in.paths = &paths_;
+  in.config = &config_;
+  in.game = &game_;
+  in.catalog = &catalog_.items;
+  in.mode = mode;
+  in.modded = modded;
+  in.mods_off = mods_off;
+  in.connect = connect;
+  in.mods = mods;
+  in.dry_launch = dry_launch_;
+  return in;
+}
+
 launch_outcome services::preview_launch(
     const std::string &mode, bool modded, bool mods_off,
     const std::optional<std::string> &connect,
     const std::vector<std::string> *mods) const {
-  launch_outcome out;
-  xerces_core::launch_options options;
-  options.connect = connect;
-  options.nointro = config_.nointro;
-  options.mods_off = mods_off;
-  options.extra_flags = config_.extra_flags;
-  for (const auto &[name, value] : config_.dvars) {
-    options.dvars.emplace_back(name, value);
-  }
-  std::optional<xerces_core::plan> resolved;
-  if (modded && !mods_off) {
-    resolved = resolve(mode, mods);
-    out.plan_id = resolved->plan_id;
-    if (!resolved->ok()) {
-      out.diags.append(resolved->diags);
-      out.message = "The plan has problems. Open Mods to fix them.";
-      return out;
-    }
-    if (resolved->stack.empty()) {
-      out.message = "No mods are enabled for this mode. Enable some in Mods, "
-                    "or launch vanilla.";
-      out.diags.error("launch.plan.empty", "", out.message);
-      return out;
-    }
-  }
-  const xerces_core::launch_command command = xerces_core::build_launch_command(
-      resolved ? &*resolved : nullptr, options);
-  out.diags.append(command.diags);
-  out.command_line = command.command_line;
-  if (!command.ok()) {
-    out.message = command.diags.items().empty()
-                      ? "The launch command could not be built."
-                      : command.diags.items().front().message;
-  }
-  return out;
+  return xerces_core::preview_launch(
+      inputs(mode, modded, mods_off, connect, mods));
 }
 
 bool services::game_running() const {
@@ -328,136 +289,27 @@ bool services::game_running() const {
   }
   // A game this launcher did not start (or started before it was closed and
   // opened again) announces itself in the run folder while it runs (15.2).
-  const auto entries = xerces_core::ipc::live_run_entries(paths_.home / "run");
-  return std::ranges::any_of(entries, [](const xerces_core::ipc::run_entry &e) {
-    return e.role == "game";
-  });
+  return xerces_core::game_in_run_folder(paths_.home);
 }
 
 launch_outcome services::launch(const std::string &mode, bool modded,
                                 bool mods_off,
                                 const std::optional<std::string> &connect,
                                 const std::vector<std::string> *mods) {
-  launch_outcome out = preview_launch(mode, modded, mods_off, connect, mods);
-  if (out.diags.has_errors()) {
-    log_warn("launcher.launch.refused", out.message);
-    return out;
+  void *process = nullptr;
+  launch_outcome out = xerces_core::launch_game(
+      inputs(mode, modded, mods_off, connect, mods),
+      [this] { return game_running(); }, launcher_events(), &process);
+  if (!out.dry_run && (out.started || out.refusal ==
+                                          xerces_core::launch_refusal::start)) {
+    ++journal_rev_; // the journal was written; screens re-read it
   }
-  if (!game_.can_launch()) {
-    out.message = !game_.dir ? "Black Ops III was not found. Set its folder "
-                               "in Settings."
-                             : (game_.preflight ? game_.preflight->message
-                                                : game_.error);
-    out.diags.error("launch.game", "", out.message);
-    return out;
-  }
-  if (game_running()) {
-    out.message = "The game is already running.";
-    out.diags.error("launch.running", "", out.message);
-    return out;
-  }
-  std::error_code ec;
-  const bool client_present = fs::exists(paths_.client, ec);
-  // A dry launch starts nothing, so a checkout without boiii.exe can still
-  // check its command lines; it says what a real launch would refuse.
-  if (!client_present && !dry_launch_) {
-    out.message = "The game client (" + utf8(paths_.client.filename()) +
-                  ") is missing next to Xerces.exe.";
-    out.diags.error("launch.client", "", out.message);
-    return out;
-  }
-
-  // The plan file the client reads (5.4) and the journal (5.6).
-  xerces_core::launch_journal journal;
-  journal.phase = xerces_core::launch_phase::launching;
-  journal.started = journal.updated = now_utc();
-  journal.safe_mode = mods_off;
-  journal.mode = mode;
-  journal.launch_id = xerces_core::new_launch_id();
-  if (modded && !mods_off) {
-    const xerces_core::plan resolved = resolve(mode, mods);
-    const std::string id = xerces_core::plan_file_id(resolved.plan_id);
-    write_text(paths_.plans / (id + ".json"),
-               xerces_core::plan_to_json(resolved, true));
-    journal.plan_id = resolved.plan_id;
-    for (const auto &entry : resolved.stack) {
-      journal.stack.push_back(entry.id);
+  if (process) {
+    if (game_process_) {
+      CloseHandle(static_cast<HANDLE>(game_process_));
     }
-  } else if (mods_off) {
-    if (const auto last = last_journal()) {
-      journal.plan_id = last->plan_id;
-      journal.stack = last->stack;
-    }
+    game_process_ = process;
   }
-  if (dry_launch_) {
-    out.dry_run = true;
-    out.message = client_present
-                      ? "Dry launch: the command was written to the log."
-                      : "Dry launch: the command was written to the log (a "
-                        "real launch would stop: " +
-                            utf8(paths_.client.filename()) + " is missing).";
-    log_info("launcher.launch.dry", out.command_line,
-             "{\"plan_id\":" + xerces_core::json::quote(out.plan_id) + "}");
-    return out; // no journal: nothing ran that could crash
-  }
-  // Kept so a launch Windows refuses can put it back (below).
-  const std::optional<std::string> previous_journal =
-      read_text(paths_.journal_file());
-  write_text(paths_.journal_file(), xerces_core::journal_to_json(journal));
-  ++journal_rev_; // screens re-read it after this call, either way
-
-  // The game role finds <home> and, in a development build, its data folder
-  // through the environment it inherits, and the launch id that lets it take
-  // this journal over.
-  SetEnvironmentVariableW(L"XERCES_HOME", paths_.home.wstring().c_str());
-  if (paths_.dev_data) {
-    SetEnvironmentVariableW(L"XERCES_DATA_PATH",
-                            paths_.dev_data->wstring().c_str());
-  }
-  const std::wstring launch_id(journal.launch_id.begin(),
-                               journal.launch_id.end()); // hex digits
-  SetEnvironmentVariableW(L"XERCES_LAUNCH_ID", launch_id.c_str());
-  std::wstring command = L"\"" + paths_.client.wstring() + L"\" ";
-  const fs::path args_path = from_utf8(out.command_line);
-  command += args_path.wstring();
-  STARTUPINFOW startup{};
-  startup.cb = sizeof(startup);
-  PROCESS_INFORMATION process{};
-  const std::wstring cwd = game_.dir->wstring();
-  const BOOL created = CreateProcessW(
-      paths_.client.wstring().c_str(), command.data(), nullptr, nullptr, FALSE,
-      0, nullptr, cwd.c_str(), &startup, &process);
-  const DWORD error = GetLastError();
-  // The id belongs to this one launch; nothing else this launcher opens
-  // (Steam, Explorer) may carry it.
-  SetEnvironmentVariableW(L"XERCES_LAUNCH_ID", nullptr);
-  if (!created) {
-    // Nothing ran, so nothing crashed: put the journal back as it was. Left
-    // as "launching" it would read as a crash next time, and it would have
-    // replaced the record of a real crash.
-    if (previous_journal) {
-      write_text(paths_.journal_file(), *previous_journal);
-    } else {
-      fs::remove(paths_.journal_file(), ec);
-    }
-    out.message = "Windows could not start the game (error " +
-                  std::to_string(error) + ").";
-    out.diags.error("launch.start", "", out.message);
-    log_error("launcher.launch.failed", out.message);
-    return out;
-  }
-  CloseHandle(process.hThread);
-  if (game_process_) {
-    CloseHandle(static_cast<HANDLE>(game_process_));
-  }
-  game_process_ = process.hProcess;
-  out.started = true;
-  out.pid = process.dwProcessId;
-  out.message = modded && !mods_off ? "Starting Black Ops III with mods."
-                                    : "Starting Black Ops III.";
-  log_info("launcher.launch.started", out.command_line,
-           "{\"pid\":" + std::to_string(out.pid) + ",\"plan_id\":" +
-               xerces_core::json::quote(out.plan_id) + "}");
   return out;
 }
 
