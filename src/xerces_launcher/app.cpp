@@ -412,6 +412,8 @@ void app::wire_shell(Rml::ElementDocument *doc) {
          [this](Rml::Event &) { window_.toggle_maximize(); });
   listen(doc->GetElementById("win-close"), "click",
          [this](Rml::Event &) { window_.request_close(); });
+  listen(doc->GetElementById("shell-about"), "click",
+         [this](Rml::Event &) { show("about"); });
   if (Rml::Element *version = doc->GetElementById("shell-version")) {
     version->SetInnerRML(escape(services::version()));
   }

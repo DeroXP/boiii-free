@@ -41,7 +41,10 @@
 			<span class="hint"><span class="kbd">/</span><span class="kbd">Y</span><span>Search</span></span>
 			<span class="hint"><span class="kbd">Q</span><span class="kbd">E</span><span class="kbd">LB</span><span class="kbd">RB</span><span>Switch tab</span></span>
 		</div>
-		<div id="notice"></div>
+		<div class="footer-end">
+			<div id="notice"></div>
+			<button id="shell-about" class="link footer-link"><span>About</span></button>
+		</div>
 	</div>
 </body>
 </template>

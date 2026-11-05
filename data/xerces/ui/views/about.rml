@@ -1,0 +1,66 @@
+<rml>
+<head>
+	<title>About</title>
+	<link type="text/template" href="../shell.rml"/>
+	<style>
+		.about-columns { display: flex; flex-direction: row; flex-wrap: wrap; gap: 40dp; margin-top: 32dp; }
+		.about-column { flex: 1 1 360dp; max-width: 600dp; }
+		.about-item { padding: 12dp 0dp; border-bottom: 1dp var(--line); }
+		.about-name { font-size: 15dp; font-weight: 600; line-height: 20dp; }
+		.about-text { margin-top: 3dp; font-size: 13dp; line-height: 19dp; color: var(--text2); }
+		.about-version { font-family: "IBM Plex Mono"; font-size: 13dp; color: var(--text2); margin-top: 8dp; }
+	</style>
+</head>
+<!-- About and Legal (docs/DESIGN.md 7.3, 16.5): the version, the licence and
+     what Xerces is built from, with the credits their licences ask for.
+     Reached from the footer's About link. -->
+<body template="shell" data-model="about">
+<div class="page">
+	<div class="page-title">About Xerces</div>
+	<div class="about-version">{{version}}</div>
+	<div class="page-sub">A multi-mod launcher and loader for Call of Duty: Black Ops III, for people who own the game on Steam. Self-hosted servers and offline play only. Free software under the GNU General Public License, version 3.</div>
+
+	<div class="about-columns">
+		<div class="about-column">
+			<div class="label section-label">Built on</div>
+			<div class="about-item">
+				<div class="about-name">BOIII</div>
+				<div class="about-text">The client by momo5502 and its contributors, and the Ezz BOIII client it continues (GPL-3.0). Xerces keeps their code, notices and licence.</div>
+			</div>
+			<div class="about-item">
+				<div class="about-name">mod-stack</div>
+				<div class="about-text">Additive loading of several mods, from the Ezz BOIII mod-stack branch (GPL-3.0).</div>
+			</div>
+			<div class="about-item">
+				<div class="about-name">Call of Duty: Black Ops III</div>
+				<div class="about-text">A game by Treyarch, published by Activision. Xerces is not made, endorsed or supported by them and adds no game data.</div>
+			</div>
+		</div>
+		<div class="about-column">
+			<div class="label section-label">Third-party software in the launcher</div>
+			<div class="about-item">
+				<div class="about-name">RmlUi 6.3</div>
+				<div class="about-text">MIT licence. Copyright (c) 2008-2014 CodePoint Ltd, Shift Technology Ltd, and contributors; (c) 2019-2025 The RmlUi Team, and contributors.</div>
+			</div>
+			<div class="about-item">
+				<div class="about-name">FreeType 2.14.3</div>
+				<div class="about-text">Portions of this software are copyright (c) The FreeType Project (www.freetype.org). All rights reserved. Used under the FreeType License.</div>
+			</div>
+			<div class="about-item">
+				<div class="about-name">Inter Tight and IBM Plex Mono</div>
+				<div class="about-text">Fonts under the SIL Open Font License 1.1, unmodified; the licence texts are next to the fonts in data\xerces\fonts.</div>
+			</div>
+			<div class="about-item">
+				<div class="about-name">RapidJSON and Zstandard</div>
+				<div class="about-text">RapidJSON under the MIT licence; Zstandard under the BSD licence.</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="section toolbar">
+		<button id="about-licence" class="outline default-focus"><span>Read the GPL-3.0</span></button>
+		<button id="about-home" class="link"><span>Back to Home</span></button>
+	</div>
+</div>
+</body>
+</rml>

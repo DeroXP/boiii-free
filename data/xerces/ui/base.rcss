@@ -393,6 +393,9 @@ input.range sliderarrowdec, input.range sliderarrowinc { width: 0dp; }
 .hints { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 20dp; row-gap: 6dp; }
 .hint { display: flex; flex-direction: row; align-items: center; gap: 6dp; }
 
+.footer-end { display: flex; flex-direction: row; align-items: center; gap: 20dp; margin-left: auto; }
+.footer-link { min-height: 24dp; padding: 0dp 2dp; font-family: "IBM Plex Mono"; font-size: 11dp; color: var(--text2); }
+.footer-link:hover, .footer-link:focus { color: var(--text); }
 #notice { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text); opacity: 0; transition: opacity 0.2s cubic-out; }
 #notice.on { opacity: 1; }
 #notice.error { color: var(--accent-text); }

@@ -1009,6 +1009,19 @@ Upstream launcher features and where they go (part of M3's exit):
 | Version picker                                               | Removed (D9)                                                           |
 | Credits                                                      | About and Legal                                                        |
 
+Where the rows stand on 2026-11-05, in `Xerces.exe`: PLAY is Home's Launch
+modded and Launch vanilla; the launch options are in Settings (skip intro,
+skip cinematics, display mode through `-windowed`/`-borderless`, FPS limit,
+field of view, V-Sync and the FPS counter as dvars confirmed in the client,
+extra flags, close on launch). The player name is in Settings, written where
+the client reads it (`boiii_players\properties.json`). The Library is Mods;
+Friends is a page that says what is off until M5; Verify installation is
+Diagnostics' "Verify with Steam"; Credits is About (the footer link), with
+the licences and credits. Not placed yet: asset pools and binds (Settings).
+Patches, the version picker and the archive.org
+exe download wait for D9; manage installation and the Workshop downloader
+are not carried over.
+
 ### 7.4 Navigation and input
 
 One action map for keyboard (Enter, Esc, `/` search, Q and E tabs, Ctrl+Z undo)
