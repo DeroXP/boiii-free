@@ -781,6 +781,8 @@ private:
       s.refresh(true);
       owner_->notify(owner_->tr("Looking for Black Ops III..."));
       refresh();
+    } else if (action == "game files") {
+      owner_->show("game_files"); // views/game_files.cpp
     } else if (action == "open game") {
       if (s.game().dir && !owner_->open_folder(*s.game().dir)) {
         owner_->notify(owner_->tr("The game folder could not be opened."), true);

@@ -287,7 +287,11 @@ Screens, each built and checked by scripted runs (dry launches) on
 - [ ] Settings: the player name shows in the game (written to
       `boiii_players\properties.json`, where the client reads it); FPS limit,
       field of view, V-Sync and the FPS counter take effect in the game;
-      display mode (windowed, borderless).
+      display mode (windowed, borderless); a value the game had saved in
+      config.cfg no longer wins over Xerces' (launch_dvars.cpp).
+- [ ] Binds and asset pools (from Settings): a custom bind works in the game;
+      with larger asset pools off, a big mod that needs them fails as it did
+      upstream. Checked on a copy of the folder only, never the real files.
 - [ ] Servers: join a self-hosted server by address (needs a server).
 - [ ] Packs: export a pack, apply it on another profile or PC, and get the
       same plan id; a share code round trip.

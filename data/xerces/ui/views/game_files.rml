@@ -1,0 +1,65 @@
+<rml>
+<head>
+	<title>Binds and asset pools</title>
+	<link type="text/template" href="../shell.rml"/>
+	<style>
+		.gf-columns { display: flex; flex-direction: row; flex-wrap: wrap; gap: 40dp; margin-top: 32dp; }
+		.gf-column { flex: 1 1 380dp; max-width: 640dp; }
+		.gf-note { margin-top: 16dp; }
+		.bind-row { display: flex; flex-direction: row; align-items: center; gap: 16dp; padding: 10dp 0dp; border-bottom: 1dp var(--line); }
+		.bind-key { flex: 0 0 120dp; font-family: "IBM Plex Mono"; font-size: 13dp; }
+		.bind-command { flex: 1 1 auto; font-family: "IBM Plex Mono"; font-size: 13dp; color: var(--text2); }
+		.bind-add { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12dp; margin-top: 16dp; }
+		#bind-key { width: 140dp; }
+		#bind-command { flex: 1 1 240dp; }
+		.bind-error { margin-top: 8dp; font-size: 13dp; line-height: 18dp; color: var(--accent-text); }
+		.toggle-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 24dp; padding: 16dp 0dp; border-bottom: 1dp var(--line); }
+		.gf-toggle { min-height: 40dp; padding: 0dp 16dp; border: 1dp var(--text2); border-radius: 2dp; font-family: "IBM Plex Mono"; font-size: 13dp; }
+		.gf-toggle.on { background-color: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+	</style>
+</head>
+<!-- Binds and asset pools (docs/DESIGN.md 7.3): the files in
+     <game>\boiii_players\user that the client reads when it starts. Data:
+     the "game_files" model in src/xerces_launcher/views/game_files.cpp. -->
+<body template="shell" data-model="game_files">
+<div class="page">
+	<div class="page-title">Binds and asset pools</div>
+	<div class="page-sub">Two things the game reads from boiii_players\user in its folder each time it starts. Xerces only changes them while the game is closed.</div>
+	<div class="notice-box gf-note" data-if="game_note != ''">{{game_note}}</div>
+
+	<div class="gf-columns" data-if="game_found">
+		<div class="gf-column">
+			<div class="label section-label">Asset pools</div>
+			<div class="toggle-row">
+				<div class="field-text">
+					<div class="field-name">Larger asset pools</div>
+					<div class="field-help">Big mods need more room for images, sounds and scripts than the game sets aside. On, the game makes its pools larger when it starts (launcher_settings.json). Pool sizes you set elsewhere are kept.</div>
+				</div>
+				<button id="pools" class="gf-toggle default-focus" data-class-on="pools_on" data-event-click="act('pools')"><span data-if="pools_on">On</span><span data-if="!pools_on">Off</span></button>
+			</div>
+		</div>
+
+		<div class="gf-column">
+			<div class="label section-label">Custom binds</div>
+			<div class="field-help">A key and the console command it runs, saved in binds.cfg; the game runs them after its own settings.</div>
+			<div class="bind-row" data-for="b : binds">
+				<span class="bind-key">{{b.key}}</span>
+				<span class="bind-command">{{b.command}}</span>
+				<button class="small-button" data-attr-id="'unbind-' + b.key" data-event-click="remove(b.key)"><span>Remove</span></button>
+			</div>
+			<div class="empty-note" data-if="binds.size == 0">No custom binds.</div>
+			<div class="bind-add">
+				<input id="bind-key" type="text" class="text mono-field" maxlength="32" placeholder="Key" data-value="new_key"/>
+				<input id="bind-command" type="text" class="text mono-field" maxlength="512" placeholder="Command, for example toggle cg_drawFPS" data-value="new_command"/>
+				<button id="bind-add" class="outline" data-event-click="act('add')"><span>Add bind</span></button>
+			</div>
+			<div class="bind-error" data-if="bind_error != ''">{{bind_error}}</div>
+		</div>
+	</div>
+
+	<div class="section toolbar">
+		<button id="gf-settings" class="link" data-event-click="act('settings')"><span>Back to Settings</span></button>
+	</div>
+</div>
+</body>
+</rml>

@@ -54,6 +54,14 @@
 				</div>
 				<input id="player-name" type="text" class="text name-field" maxlength="24" data-value="name" data-attr-placeholder="name_placeholder" data-event-blur="commit('name')"/>
 			</div>
+
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Binds and asset pools</div>
+					<div class="field-help">Custom key binds and the larger asset pools big mods need, in the game's own files.</div>
+				</div>
+				<button id="game-files" class="small-button" data-event-click="act('game files')"><span>Open</span></button>
+			</div>
 		</div>
 	</div>
 

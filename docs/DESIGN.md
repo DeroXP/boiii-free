@@ -1017,8 +1017,8 @@ extra flags, close on launch). The player name is in Settings, written where
 the client reads it (`boiii_players\properties.json`). The Library is Mods;
 Friends is a page that says what is off until M5; Verify installation is
 Diagnostics' "Verify with Steam"; Credits is About (the footer link), with
-the licences and credits. Not placed yet: asset pools and binds (Settings).
-Patches, the version picker and the archive.org
+the licences and credits; asset pools and binds are Settings' "Binds and
+asset pools" (the game's binds.cfg and launcher_settings.json). Patches, the version picker and the archive.org
 exe download wait for D9; manage installation and the Workshop downloader
 are not carried over.
 
