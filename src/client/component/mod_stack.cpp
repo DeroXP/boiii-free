@@ -15,6 +15,7 @@
 
 #include <xerces/runtime.hpp>
 #include <xerces/signatures.hpp>
+#include <xerces_core/sigruntime.hpp>
 
 namespace mod_stack {
 namespace {
@@ -780,51 +781,101 @@ bool is_loaded() {
 // as ModStack.Reload in the mods menu.
 void request_reload() { reload_pending = true; }
 
+// Where each hook goes. The last four are hooked on the client only.
+struct hook_targets {
+  std::uintptr_t expand_zone_list_call = 0;
+  std::uintptr_t load_xzone_call = 0;
+  std::uintptr_t build_os_path_for_thread = 0;
+  std::uintptr_t link_xasset_entry = 0;
+  std::uintptr_t override_asset = 0;
+  std::uintptr_t key_value_pairs_get_next_value = 0;
+  std::uintptr_t start_header_read = 0;
+  std::uintptr_t render_loaded_mod_label_call = 0;
+  std::uintptr_t mod_change_apply_queued = 0;
+};
+
+// The dedicated server keeps upstream's tables until it has its own
+// signature set (D22).
+hook_targets server_targets() {
+  using game::db::load::DB_LoadXAssets;
+  hook_targets targets;
+  targets.expand_zone_list_call =
+      DB_LoadXAssets.offset(game::select_value(0x347, 0x0, 0x32D));
+  targets.load_xzone_call =
+      DB_LoadXAssets.offset(game::select_value(0x353, 0x0, 0x339));
+  targets.build_os_path_for_thread =
+      reinterpret_cast<std::uintptr_t>(game::fs::FS_BuildOSPathForThread.get());
+  targets.link_xasset_entry = reinterpret_cast<std::uintptr_t>(
+      game::db::load::DB_LinkXAssetEntry.get());
+  targets.override_asset =
+      reinterpret_cast<std::uintptr_t>(game::db::load::DB_OverrideAsset.get());
+  return targets;
+}
+
+// On the client every target comes from the signature registry. The client
+// already turns "multi_mod" off when one of these ids is missing or did not
+// resolve, whatever the registry tags it with (require_signatures in
+// signatures.cpp, so the launcher and the pipe say so too). This is the last
+// check before patching: every address is looked up first, and if one is
+// still missing nothing is hooked, so an address is never read from an empty
+// optional even if that rule or the id list changes.
+std::optional<hook_targets> client_targets() {
+  namespace ids = xerces_core::multi_mod_signatures;
+  hook_targets targets;
+  std::vector<std::string> missing;
+  const auto take = [&](std::string_view id, std::uintptr_t &out) {
+    if (const std::optional<std::uintptr_t> address =
+            xerces_signatures::address(id)) {
+      out = *address;
+    } else {
+      missing.emplace_back(id);
+    }
+  };
+  take(ids::expand_zone_list_call, targets.expand_zone_list_call);
+  take(ids::load_xzone_call, targets.load_xzone_call);
+  take(ids::build_os_path_for_thread, targets.build_os_path_for_thread);
+  take(ids::link_xasset_entry, targets.link_xasset_entry);
+  take(ids::override_asset, targets.override_asset);
+  take(ids::key_value_pairs_get_next_value,
+       targets.key_value_pairs_get_next_value);
+  take(ids::start_header_read, targets.start_header_read);
+  take(ids::render_loaded_mod_label_call, targets.render_loaded_mod_label_call);
+  take(ids::mod_change_apply_queued, targets.mod_change_apply_queued);
+  if (missing.empty()) {
+    return targets;
+  }
+
+  std::string names;
+  std::string list;
+  for (const std::string &id : missing) {
+    names += (names.empty() ? "" : ", ") + id;
+    list += (list.empty() ? "\"" : ",\"") + id + "\"";
+  }
+  xerces_runtime::log_error(
+      "xerces.feature.off",
+      "Multi-mod is off: the signature registry has no resolved address for " +
+          names + ". The game and a single mod (fs_game) still work.",
+      R"({"feature":"multi_mod","missing":[)" + list + "]}");
+  return std::nullopt;
+}
+
 class component final : public generic_component {
   DEFINE_COMPONENT_NAME("mod_stack");
 
-  static void install_hooks() {
-    const auto target = [](std::string_view id, std::uintptr_t fallback) {
-      if (!game::is_client()) {
-        return fallback;
-      }
-      return *xerces_signatures::address(id);
-    };
-
-    using game::db::load::DB_LoadXAssets;
-    utils::hook::call(
-        target("db.load_xassets.expand_zone_list_call",
-               DB_LoadXAssets.offset(game::select_value(0x347, 0x0, 0x32D))),
-        prepare_zones_stub);
-    utils::hook::call(
-        target("db.load_xassets.load_xzone_call",
-               DB_LoadXAssets.offset(game::select_value(0x353, 0x0, 0x339))),
-        schedule_zones_stub);
-    zone_path_hook.create(
-        target("fs.build_os_path_for_thread",
-               reinterpret_cast<std::uintptr_t>(
-                   game::fs::FS_BuildOSPathForThread.get())),
-        zone_path_stub);
-    link_asset_hook.create(
-        target("db.link_xasset_entry",
-               reinterpret_cast<std::uintptr_t>(
-                   game::db::load::DB_LinkXAssetEntry.get())),
-        link_asset_stub);
-    asset_priority_hook.create(
-        target("db.override_asset",
-               reinterpret_cast<std::uintptr_t>(
-                   game::db::load::DB_OverrideAsset.get())),
-        asset_priority_stub);
+  static void install_hooks(const hook_targets &targets) {
+    utils::hook::call(targets.expand_zone_list_call, prepare_zones_stub);
+    utils::hook::call(targets.load_xzone_call, schedule_zones_stub);
+    zone_path_hook.create(targets.build_os_path_for_thread, zone_path_stub);
+    link_asset_hook.create(targets.link_xasset_entry, link_asset_stub);
+    asset_priority_hook.create(targets.override_asset, asset_priority_stub);
 
     if (game::is_client()) {
-      zone_dependency_hook.create(
-          target("com.key_value_pairs_get_next_value", 0),
-          zone_dependency_stub);
-      open_sound_bank_hook.create(target("snd.start_header_read", 0),
+      zone_dependency_hook.create(targets.key_value_pairs_get_next_value,
+                                  zone_dependency_stub);
+      open_sound_bank_hook.create(targets.start_header_read,
                                   open_sound_bank_stub);
-      utils::hook::call(target("ui.render_loaded_mod.label_call", 0),
-                        mod_label_stub);
-      apply_queued_hook.create(target("ugc.mod_change_apply_queued", 0),
+      utils::hook::call(targets.render_loaded_mod_label_call, mod_label_stub);
+      apply_queued_hook.create(targets.mod_change_apply_queued,
                                apply_queued_stub);
       xerces_runtime::log_info("xerces.feature.on",
                                "Multi-mod hooks installed from signatures",
@@ -855,15 +906,17 @@ public:
     // addresses (extra mods are then not loaded; fs_game still works). The
     // dedicated server keeps upstream's tables until it has its own signature
     // set (D22).
-    if (game::is_client() && !xerces_signatures::feature_enabled("multi_mod")) {
+    if (!game::is_client()) {
+      install_hooks(server_targets());
+    } else if (!xerces_signatures::feature_enabled("multi_mod")) {
       xerces_runtime::log_error(
           "xerces.feature.off",
           xerces_signatures::feature_message(
               "multi_mod", "Multi-mod",
               "The game and a single mod (fs_game) still work."),
           R"({"feature":"multi_mod"})");
-    } else {
-      install_hooks();
+    } else if (const std::optional<hook_targets> targets = client_targets()) {
+      install_hooks(*targets);
     }
 
     if (game::is_client()) {

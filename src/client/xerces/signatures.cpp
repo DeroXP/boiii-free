@@ -7,6 +7,7 @@
 
 #include <xerces_core/json.hpp>
 #include <xerces_core/sigregistry.hpp>
+#include <xerces_core/sigruntime.hpp>
 #include <xerces_core/sigscan.hpp>
 
 namespace xerces_signatures {
@@ -142,8 +143,9 @@ state resolve() {
                   "client or in its repository";
     } else {
       registry_path = path->generic_string();
+      const std::string registry_text = xerces_runtime::read_file(*path);
       const xerces_core::signature_registry registry =
-          xerces_core::parse_signature_registry(xerces_runtime::read_file(*path));
+          xerces_core::parse_signature_registry(registry_text);
       if (!registry.ok()) {
         s.problem = "compat/signatures.json is broken: " +
                     registry.diags.items().front().message;
@@ -172,12 +174,30 @@ state resolve() {
                 !readable(text->bytes.data(), text->bytes.size())) {
               s.problem = "the game's code section is not readable";
             } else {
+              // Keyed by the registry as well as the build, so an edited
+              // registry scans again instead of reusing what an older one
+              // found.
               const auto cache_file =
                   xerces_runtime::home() / "cache" /
-                  ("signatures-" + hex(s.checksum) + ".json");
-              if (auto cached = xerces_core::load_signature_cache(
-                      xerces_runtime::read_file(cache_file), s.checksum,
-                      layout->sections, registry.signatures)) {
+                  xerces_core::signature_cache_name(s.checksum, registry_text);
+              auto cached = xerces_core::load_signature_cache(
+                  xerces_runtime::read_file(cache_file), s.checksum,
+                  layout->sections, registry.signatures);
+              std::string stale;
+              if (cached &&
+                  !xerces_core::cached_signatures_agree(
+                      *cached, registry.signatures, s.checksum, &stale)) {
+                // A cache hit obeys the registry's known addresses too
+                // (DESIGN.md 4.3); one that does not is scanned again.
+                xerces_runtime::log_warn(
+                    "xerces.signatures.cache_stale", stale,
+                    "{\"cache\":" +
+                        xerces_core::json::quote(
+                            cache_file.filename().generic_string()) +
+                        "}");
+                cached.reset();
+              }
+              if (cached) {
                 s.report = std::move(*cached);
                 from_cache = true;
               } else {
@@ -208,6 +228,16 @@ state resolve() {
   } catch (const std::exception &e) {
     s.problem = std::string("signature resolution failed: ") + e.what();
   }
+
+  // mod_stack hooks these entries whatever the registry tags them with. One
+  // that is missing or did not resolve turns multi-mod off here, in the
+  // report, and not only in mod_stack's log: feature_enabled, the pipe's
+  // status, the loader's plan check and the launcher's pre-launch warning all
+  // read this. When nothing could be resolved (no registry, a broken one, an
+  // unreadable image) every one is listed with that reason.
+  xerces_core::require_signatures(
+      s.report, "multi_mod", xerces_core::multi_mod_signatures::all,
+      s.problem.empty() ? "not in compat/signatures.json" : s.problem);
 
   std::size_t matched = 0;
   for (const auto &result : s.report.results) {

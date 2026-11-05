@@ -3,8 +3,8 @@
 // xerces_ipc (docs/DESIGN.md 3.1, 15.2): the game role's command pipe, for
 // xerces_cli and the launcher. Served only when the launcher started the game
 // (XERCES_HOME set) or with -xerces-ipc. Every request runs on the game's main
-// thread between frames; a request the main thread cannot take within two
-// seconds (a load screen) gets a "busy" error instead of waiting longer.
+// thread between frames; a request the main thread cannot start within two
+// seconds (a load screen) gets a "busy" error and is dropped, never run late.
 //
 //   status  build, signatures, plan, journal phase, mods (read only)
 //   mods    the main mod and the extra mods, and whether they are loaded
@@ -18,14 +18,13 @@
 #include <game/utils.hpp>
 #include <loader/component_loader.hpp>
 
+#include <xerces_core/handoff.hpp>
 #include <xerces_core/ipc.hpp>
 #include <xerces_core/journal.hpp>
 #include <xerces_core/json.hpp>
 
 #include "runtime.hpp"
 #include "signatures.hpp"
-
-#include <future>
 
 namespace xerces_ipc {
 namespace {
@@ -42,30 +41,29 @@ std::string strings(const std::vector<std::string> &items) {
   return out + "]";
 }
 
-// Runs fn on the main thread and waits for its result.
+// Runs fn on the main thread and waits for its result. "busy" is answered
+// only for a request the main thread had not started within two seconds,
+// which then never runs; one it had started (a reload setting fs_extramods)
+// is waited for, so the caller is never told to retry a change that happened.
 std::string on_main(const ipc::request &request,
                     std::function<std::string()> fn) {
-  auto promise = std::make_shared<std::promise<std::string>>();
-  auto cancelled = std::make_shared<std::atomic<bool>>(false);
-  std::future<std::string> result = promise->get_future();
-  scheduler::once(
-      [promise, cancelled, fn = std::move(fn)] {
-        if (*cancelled) {
-          return; // the caller was told "busy"; do not act late
-        }
+  auto call = std::make_shared<xerces_core::handoff>(
+      [fn = std::move(fn)]() -> std::string {
         try {
-          promise->set_value(fn());
+          return fn();
         } catch (const std::exception &e) {
-          promise->set_value(std::string("!") + e.what());
+          return std::string("!") + e.what();
+        } catch (...) {
+          return "!the request failed";
         }
-      },
-      scheduler::main);
-  if (result.wait_for(2s) != std::future_status::ready) {
-    *cancelled = true;
+      });
+  scheduler::once([call] { call->run(); }, scheduler::main);
+  std::optional<std::string> result = call->wait(2s);
+  if (!result) {
     return ipc::make_error(request.id, ipc::busy,
                            "the game is busy (loading?); try again");
   }
-  std::string value = result.get();
+  std::string value = std::move(*result);
   if (!value.empty() && value.front() == '!') {
     return ipc::make_error(request.id, ipc::internal_error, value.substr(1));
   }
