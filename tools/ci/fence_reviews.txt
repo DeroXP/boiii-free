@@ -2,3 +2,4 @@
 # (docs/FENCED.md). One commit per line: the hash, then what was checked.
 4701c9f4 premake5.lua: only the include of premake/xerces_projects.lua was added; the --dev-build and --no-check lines are unchanged (hashes equal).
 62e28935 src/client/main.cpp: only launch_beta_server_if_needed changed; patch_steam_import, patch_imports, restart_app_if_necessary_stub and handle_process_runner are unchanged (hashes equal).
+128a7ac2 premake5.lua: only the --with-upstream-plugins option and its define were added, next to the D14/D15 switches; the --dev-build and --no-check lines are unchanged (hashes equal).
