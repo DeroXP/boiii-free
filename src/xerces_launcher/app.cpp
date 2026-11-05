@@ -125,6 +125,28 @@ enum pad_bits : unsigned {
 
 constexpr unsigned pad_directions = pad_up | pad_down | pad_left | pad_right;
 
+// The pad_bits in bit order, as check scripts name them (padhold right).
+constexpr const char *pad_names[] = {"up", "down", "left", "right", "a",
+                                     "b",  "y",    "lb",   "rb"};
+
+unsigned pad_bit_by_name(const std::string &name) {
+  for (unsigned i = 0; i < std::size(pad_names); ++i) {
+    if (name == pad_names[i]) {
+      return 1u << i;
+    }
+  }
+  return 0;
+}
+
+const char *pad_name(unsigned bit) {
+  for (unsigned i = 0; i < std::size(pad_names); ++i) {
+    if (bit == 1u << i) {
+      return pad_names[i];
+    }
+  }
+  return "?";
+}
+
 unsigned pad_buttons(const XINPUT_GAMEPAD &pad) {
   const SHORT dead = 16000;
   unsigned out = 0;
@@ -315,6 +337,18 @@ void app::shutdown() {
   if (services_) {
     services_->cancel_scan();
   }
+  // The window goes out of sight at once, though it is closed only after the
+  // worker below has stopped. Detection cannot be cancelled (it hashes the
+  // whole BlackOps3.exe) and the catalog scan stops only between mod
+  // folders, so the join can take seconds, and nothing pumps messages
+  // meanwhile: a window still on screen would freeze and show as Not
+  // Responding. The home tag goes with it, so a second start meanwhile does
+  // not bring this closing window forward; it waits for the mutex instead
+  // (run()).
+  if (HWND handle = static_cast<HWND>(window_.native_handle())) {
+    ShowWindow(handle, SW_HIDE);
+    RemovePropW(handle, home_property);
+  }
   // RmlUi first, with the services still there: closing the documents moves
   // focus, so blur handlers in the screens run (and may save settings).
   if (rml_started_) {
@@ -330,9 +364,6 @@ void app::shutdown() {
   // Then the scan worker is joined, while the queue it posts to and the
   // window it wakes both still exist.
   services_.reset();
-  if (HWND handle = static_cast<HWND>(window_.native_handle())) {
-    RemovePropW(handle, home_property);
-  }
   window_.close();
 }
 
@@ -367,7 +398,9 @@ unsigned app::read_pad(double now) {
     pad_slots_ |= slot;
     out |= pad_buttons(state.Gamepad);
   }
-  return out;
+  // A check script's padhold goes through the same handling as a real
+  // controller (repeat, ignored while not in front); "pad" steps do not.
+  return out | script_pad_;
 }
 
 void app::post(std::function<void()> task) {
@@ -944,6 +977,14 @@ void app::run_script(double seconds) {
       } else if (key != Rml::Input::KI_UNKNOWN) {
         inject_key(key);
       }
+    } else if (step.verb == "padhold") {
+      // padhold right: held as on a controller until "padhold none".
+      script_pad_ =
+          step.arg == "none" ? 0 : script_pad_ | pad_bit_by_name(step.arg);
+    } else if (step.verb == "front") {
+      // front off: the launcher takes the controller as if another window
+      // were in front; front on: as if it were; front auto: the real one.
+      script_front_ = step.arg == "on" ? 1 : step.arg == "off" ? 0 : -1;
     } else if (step.verb == "view") {
       show(step.arg);
     } else if (step.verb == "shot") {
@@ -970,11 +1011,11 @@ void app::run_script(double seconds) {
 }
 
 int app::run() {
-  started_ = ms_since_process_start() / 1000.0;
   launcher_paths paths = find_paths(opts_.home);
 
   // One launcher per home: a second start brings the first window forward
   // instead of writing the same config and journal.
+  bool taken_over = false;
   {
     std::uint32_t hash = 2166136261u;
     for (const wchar_t c : paths.home.wstring()) {
@@ -985,29 +1026,47 @@ int app::run() {
     home_tag_ = (std::uintptr_t(hash) << 1) | 1;
     instance_mutex_ = CreateMutexW(nullptr, TRUE, name.c_str());
     if (instance_mutex_ && GetLastError() == ERROR_ALREADY_EXISTS) {
-      // The first launcher of this home may still be opening its window
-      // (a double-click starts two at once): give it a moment.
-      HWND other = find_home_window(home_tag_);
-      for (int tries = 0; !other && tries < 40; ++tries) {
-        Sleep(50);
+      // The other launcher of this home has no window yet when it is still
+      // opening (a double-click starts two at once), and none any more when
+      // it is closing: it hides its window and drops the tag first, then
+      // waits for its worker, which can take seconds. So: bring its window
+      // forward once there is one, or take over once it lets go of the
+      // mutex, rather than give up and lose this start. Up to 30 s, for a
+      // launcher that is stuck with no window.
+      HWND other = nullptr;
+      for (int tries = 0; tries < 600 && !other && !taken_over; ++tries) {
         other = find_home_window(home_tag_);
-      }
-      if (other) {
-        if (IsIconic(other)) {
-          ShowWindow(other, SW_RESTORE);
+        if (!other) {
+          // Abandoned: the other one ended without letting go (a crash).
+          const DWORD got = WaitForSingleObject(instance_mutex_, 50);
+          taken_over = got == WAIT_OBJECT_0 || got == WAIT_ABANDONED;
         }
-        SetForegroundWindow(other);
       }
-      CloseHandle(instance_mutex_);
-      instance_mutex_ = nullptr;
-      return 0;
+      if (!taken_over) {
+        if (other) {
+          if (IsIconic(other)) {
+            ShowWindow(other, SW_RESTORE);
+          }
+          SetForegroundWindow(other);
+        }
+        CloseHandle(instance_mutex_);
+        instance_mutex_ = nullptr;
+        return 0;
+      }
     }
   }
+  // From here, not from the process start: script steps and --seconds count
+  // from when this launcher really starts, after any wait above.
+  started_ = ms_since_process_start() / 1000.0;
   open_log(generic(paths.logs));
   log_info("launcher.start", "Xerces " + services::version(),
            "{\"home\":" + xerces_core::json::quote(generic(paths.home)) +
                ",\"data\":" + xerces_core::json::quote(generic(paths.data)) +
                ",\"dry_launch\":" + (opts_.dry_launch ? "true" : "false") + "}");
+  if (taken_over) {
+    log_info("launcher.instance.took_over",
+             "Started once the closing launcher of this home had stopped.");
+  }
   services_ = std::make_unique<services>(
       paths, [this](std::function<void()> task) { post(std::move(task)); },
       opts_.dry_launch);
@@ -1141,11 +1200,14 @@ int app::run() {
     // every press meant for the game (toggling mods, switching tabs) and
     // wake up for each one.
     const auto in_front = [this] {
+      if (script_front_ >= 0) {
+        return script_front_ == 1; // a check script says (front on|off)
+      }
       return GetForegroundWindow() ==
              static_cast<HWND>(window_.native_handle());
     };
     const bool front = in_front();
-    if (front && (pad_previous_ & pad_directions)) {
+    if (front && (pad_previous_ & ~pad_ignored_ & pad_directions)) {
       wait = std::min(wait, 8); // a held direction repeats (below)
     }
     // XInput sends no window messages. With a controller connected the idle
@@ -1173,14 +1235,21 @@ int app::run() {
     services_->poll();
     apply_look();
 
-    // Controller: the same action map as the keyboard (7.4). In the
-    // background the buttons are still tracked, so one held while the
-    // launcher comes to the front does not count as a press.
+    // Controller: the same action map as the keyboard (7.4). Whatever is held
+    // while the launcher is not in front belongs to the other window, so it
+    // stays ignored until it is let go: a stick still pushed when the game
+    // exits neither presses nor starts repeating on the launcher's first
+    // frame in front. Only a fresh press counts there.
     const double t = now();
     const unsigned buttons = pad_read ? *pad_read : read_pad(t);
     const bool takes_pad = in_front();
-    const unsigned pressed = takes_pad ? buttons & ~pad_previous_ : 0;
+    pad_ignored_ = takes_pad ? pad_ignored_ & buttons : buttons;
+    const unsigned live = buttons & ~pad_ignored_;
+    const unsigned pressed = live & ~pad_previous_;
     const auto fire = [&](unsigned bit) {
+      if (!opts_.script.empty()) {
+        log_info("launcher.check.pad", pad_name(bit));
+      }
       switch (bit) {
       case pad_up: inject_key(Rml::Input::KI_UP); break;
       case pad_down: inject_key(Rml::Input::KI_DOWN); break;
@@ -1202,7 +1271,7 @@ int app::run() {
         }
       }
     }
-    const unsigned held = takes_pad ? buttons & pad_directions : 0;
+    const unsigned held = live & pad_directions;
     if (held && !(pressed & held) && t >= pad_repeat_at_) {
       for (unsigned bit = 1; bit <= pad_right; bit <<= 1) {
         if (held & bit) {

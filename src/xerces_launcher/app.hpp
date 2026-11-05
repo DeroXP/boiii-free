@@ -181,7 +181,13 @@ private:
   std::vector<script_step> script_;
   std::size_t script_next_ = 0;
   unsigned pad_previous_ = 0;
+  // Held while the launcher was not in front: ignored until let go. All of
+  // them at the start, so a button still down from whatever started the
+  // launcher is not a press either.
+  unsigned pad_ignored_ = ~0u;
   double pad_repeat_at_ = 0;
+  unsigned script_pad_ = 0; // held by a check script (padhold)
+  int script_front_ = -1;   // check script's front on (1) / off (0); -1 real
   unsigned pad_slots_ = 0;    // XInput slots that answered (bit per slot)
   double pad_rescan_at_ = 0;  // when the empty slots are asked again
   int focus_lost_frames_ = 0; // frames the focus has been lost or hidden
