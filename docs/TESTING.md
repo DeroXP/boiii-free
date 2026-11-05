@@ -252,7 +252,9 @@ game).
       name the pools and sizes the plan file's `asset_pools.stack` (or
       `xerces_cli plan resolve ... --game-dir <game>`) says the stack raises,
       and a pool on the file's first line should be missing from both
-      (upstream's parser never counts that line).
+      (upstream's parser never counts that line). Then load a custom map that
+      ships a pool file, with the map in the plan: its pools should print the
+      same lines when the map loads, as `asset_pools.stack` says.
 
 ### Launcher (M3)
 
