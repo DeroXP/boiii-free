@@ -995,6 +995,53 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
                    "yet, so the 63-slot budget is not checked.");
   }
 
+  // Asset pools (5.4 step 4): reported, in no hash. The client reads the pool
+  // files of the main mod and the stacked ones when the mod loads
+  // (UGC_LoadModByPublisherId_Impl), and the map's when the map loads
+  // (UGC_LoadUsermapByPublisherId_Impl), so the map comes last.
+  const pool_settings pool_config =
+      parse_pool_settings(request.launcher_settings);
+  out.pools.enabled = pool_config.enabled;
+  std::vector<mod_pool_limits> stack_pools;
+  const auto add_to_stack = [&](const plan_entry &entry) {
+    if (const auto it = selected.find(entry.id); it != selected.end()) {
+      stack_pools.push_back({entry.id, it->second->pool_limits});
+      if (it->second->pool_file_unread) {
+        out.pools.stack_unread.push_back(entry.id);
+      }
+    }
+  };
+  for (const auto &entry : out.stack) {
+    add_to_stack(entry);
+  }
+  if (out.map) {
+    add_to_stack(*out.map);
+  }
+  out.pools.stack = largest_limits(stack_pools, pool_config);
+  // Every mod and map in the catalog, sorted by id so a tie names the same
+  // one whatever order the catalog is in.
+  std::vector<const installed_content *> pool_items;
+  for (const auto &content : catalog) {
+    if (!content.pool_limits.empty()) {
+      pool_items.push_back(&content);
+    }
+    if (content.pool_file_unread) {
+      out.pools.installed_unread.push_back(content.info.id);
+    }
+  }
+  std::ranges::sort(pool_items, [](const auto *a, const auto *b) {
+    return a->info.id < b->info.id;
+  });
+  std::vector<mod_pool_limits> installed_pools;
+  for (const auto *content : pool_items) {
+    installed_pools.push_back({content->info.id, content->pool_limits});
+  }
+  out.pools.installed = largest_limits(installed_pools, pool_config);
+  // Two versions of one id may both be unread; name it once.
+  std::ranges::sort(out.pools.installed_unread);
+  const auto repeated = std::ranges::unique(out.pools.installed_unread);
+  out.pools.installed_unread.erase(repeated.begin(), repeated.end());
+
   // 6. Hashes over canonical JSON.
   rapidjson::Document doc(rapidjson::kObjectType);
   auto &alloc = doc.GetAllocator();
@@ -1097,6 +1144,42 @@ std::string plan_to_json(const plan &value, bool pretty) {
                 : Value(),
             alloc);
   json::set(doc, "zones", std::move(zones), alloc);
+
+  // Not in plan_id or content_id: the game's pool sizes depend on every
+  // installed mod and map and on launcher_settings.json, not only on the
+  // plan.
+  const auto pool_list = [&](const std::vector<pool_need> &needs) {
+    Value list(rapidjson::kArrayType);
+    for (const auto &need : needs) {
+      const asset_pool_info *pool = find_asset_pool(need.type);
+      Value object(rapidjson::kObjectType);
+      json::set(object, "type", std::int64_t{need.type}, alloc);
+      json::set(object, "name", pool ? pool->name : std::string_view(), alloc);
+      json::set(object, "label", pool ? pool->label : std::string_view(),
+                alloc);
+      json::set(object, "setting_key",
+                pool ? pool->setting_key : std::string_view(), alloc);
+      json::set(object, "size", std::int64_t{need.size}, alloc);
+      json::set(object, "mod", need.mod, alloc);
+      json::set(object, "default",
+                need.default_size ? Value(std::int64_t{*need.default_size})
+                                  : Value(),
+                alloc);
+      json::set(object, "fixed", need.fixed, alloc);
+      json::set(object, "raises", need.raises, alloc);
+      list.PushBack(std::move(object), alloc);
+    }
+    return list;
+  };
+  Value pools(rapidjson::kObjectType);
+  json::set(pools, "enabled", value.pools.enabled, alloc);
+  json::set(pools, "stack", pool_list(value.pools.stack), alloc);
+  json::set(pools, "installed", pool_list(value.pools.installed), alloc);
+  json::set(pools, "stack_unread",
+            json::string_array(value.pools.stack_unread, alloc), alloc);
+  json::set(pools, "installed_unread",
+            json::string_array(value.pools.installed_unread, alloc), alloc);
+  json::set(doc, "asset_pools", std::move(pools), alloc);
 
   Value explanations(rapidjson::kArrayType);
   for (const auto &item : value.explanations) {

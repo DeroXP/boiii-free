@@ -656,12 +656,24 @@ together.
    plan and the files (cached hashes) and registers its hook-bus callbacks:
    ownership capture, override policy, merges, GSC chains.
 4. Asset pools are sized once at `DB_AssetPoolInit` from the largest limits of
-   every installed mod, not just the current plan. mod-stack currently
+   every installed mod and map, not just the current plan. mod-stack currently
    re-applies each extra mod's `assetlimits.txt` on every mod load through
    upstream's growth path, which copies only part of a pool and frees the
-   previous extension while assets may still point into it. Xerces blocks pool
-   growth once assets are live; a plan that would need bigger pools asks for a
-   restart instead.
+   previous extension while assets may still point into it; upstream also
+   applies a custom map's file when the map loads. Xerces blocks pool growth
+   once assets are live; a plan that would need bigger pools asks for a restart
+   instead. Built (2026-11-05), headless only: `xerces_core/asset_limits` reads
+   pool files, the client's default sizes and `launcher_settings.json` the way
+   the client does, and every plan file carries `asset_pools.stack` (per pool,
+   the largest size a stacked mod or the plan's map asks for) and
+   `asset_pools.installed` (the same over every installed mod and map; the CLI's
+   covers one `--mods-dir`), plus `stack_unread` and `installed_unread` for pool
+   files Xerces did not read (over 1 MiB, or held open), outside `plan_id` and
+   `content_id`, shown by `xerces_cli plan` and Mods; sizing the pools in the
+   game and the growth block are not built. Upstream's parser never counts a
+   pool file's first line (`utils::string::replace` replaces at position 0
+   before it searches); the headless parser keeps that so its numbers match
+   today's game, and the in-game half decides whether Xerces does too.
 5. Front end: the engine loads the core tier, and mod-stack adds
    `stack_<id>_core_mod` and its language pair to the same batch. Map load does
    the same for the mode tier (`zm_mod`, `mp_mod`, `cp_mod`) and the map's

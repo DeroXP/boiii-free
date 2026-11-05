@@ -253,6 +253,16 @@ crash). Without `-Live` it only does a dry launch; that form passed on
       change the extra mods and reload them, as the mods menu does; in a match
       they answer that the stack only changes in the menus. The pipe itself is
       tested in `test_ipc.cpp` (a served pipe, a forged run file refused).
+- [ ] Asset pools (DESIGN.md 5.4 step 4; the report is built, the in-game sizing
+      is not): launch a stack with a mod whose `assetlimits.txt` or
+      `assetpools.txt` raises pools. After the mod loads, the client's console
+      lines `Reallocating asset pool type <n>: <old> -> <new> entries` should
+      name the pools and sizes the plan file's `asset_pools.stack` (or
+      `xerces_cli plan resolve ... --game-dir <game>`) says the stack raises,
+      and a pool on the file's first line should be missing from both
+      (upstream's parser never counts that line). Then load a custom map that
+      ships a pool file, with the map in the plan: its pools should print the
+      same lines when the map loads, as `asset_pools.stack` says.
 
 ### Launcher (M3)
 

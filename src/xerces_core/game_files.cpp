@@ -4,6 +4,7 @@
 #include <map>
 #include <sstream>
 
+#include "asset_limits.hpp"
 #include "json.hpp"
 
 namespace xerces_core {
@@ -84,16 +85,7 @@ std::string binds_to_text(const std::vector<game_bind> &binds) {
 }
 
 bool asset_pools_enabled(std::string_view launcher_settings_json) {
-  const auto parsed = json::parse(launcher_settings_json);
-  if (!parsed.ok || !parsed.document.IsObject()) {
-    return true; // the client's default
-  }
-  const auto enabled = json::get_string(parsed.document, "asset_limits_enabled");
-  if (enabled && !enabled->empty() && *enabled != "1") {
-    return false;
-  }
-  return json::get_string(parsed.document, "disable_asset_pools").value_or("") !=
-         "1";
+  return parse_pool_settings(launcher_settings_json).enabled;
 }
 
 std::string set_asset_pools_enabled(std::string_view launcher_settings_json,

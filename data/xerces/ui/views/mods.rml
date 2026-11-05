@@ -209,6 +209,13 @@
 					<div class="d-field" data-for="st : d_settings"><span class="d-l">{{st.l}}</span><span class="d-v">{{st.v}}</span></div>
 					<div class="d-empty" data-if="d_settings.size == 0"><span>{{d_settings_empty}}</span></div>
 				</div>
+
+				<!-- What the mod's or map's assetlimits.txt or assetpools.txt raises above the client's default pool sizes (DESIGN.md 5.4 step 4). -->
+				<div id="d-pools" class="d-section" data-if="d_pools_on">
+					<div class="label section-label d-stop">Asset pools</div>
+					<div class="d-field" data-for="pl : d_pools"><span class="d-l">{{pl.l}}</span><span class="d-v">{{pl.v}}</span></div>
+					<div class="d-empty" data-if="d_pools_note != ''"><span>{{d_pools_note}}</span></div>
+				</div>
 			</div>
 		</div>
 	</div>

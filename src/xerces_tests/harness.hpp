@@ -51,6 +51,14 @@ void check_equal(const A &left, const B &right, const char *expression,
 // executable's location (build/bin/x64/<config>/).
 std::filesystem::path fixtures_dir();
 std::string read_file(const std::filesystem::path &path);
+
+// mklink /J without a shell (junctions need no extra rights). A junction
+// stores the path Windows follows ("\??\C:\...", the substitute name) and
+// one shown to people (the print name); `shown` lets a test make them
+// differ. link is created as an empty folder first.
+bool make_junction(const std::filesystem::path &link,
+                   const std::filesystem::path &target,
+                   const std::filesystem::path &shown = {});
 } // namespace xerces_tests
 
 #define XT_CONCAT_INNER(a, b) a##b

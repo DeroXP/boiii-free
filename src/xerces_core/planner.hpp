@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "asset_limits.hpp"
 #include "diagnostics.hpp"
 #include "manifest.hpp"
 #include "semver.hpp"
@@ -22,6 +23,15 @@ struct installed_content {
   std::vector<std::string> files; // relative paths, '/' separated
   std::string content_hash;       // "sha256:..." over the files
   bool valid_manifest = true;     // false: its xerces.mod.json has errors
+  // The pool file the client reads when the mod or map loads
+  // (find_pool_file), relative to path with '/' separators, empty when there
+  // is none; and what it asks for (parse_pool_limits). pool_file_unread: the
+  // catalog found the file but did not read it (larger than
+  // max_pool_file_bytes, or unreadable), so what it asks for is unknown and
+  // pool_limits is empty. In no hash.
+  std::string pool_file;
+  std::vector<pool_limit> pool_limits;
+  bool pool_file_unread = false;
 };
 
 struct plan_request {
@@ -38,6 +48,9 @@ struct plan_request {
   version xerces_version;
   std::uint32_t protocol_version = 1;
   std::optional<std::size_t> stock_zones; // zones the mode and map use
+  // <game>\boiii_players\user\launcher_settings.json, for the pool report's
+  // defaults; empty when there is none (the client's defaults). In no hash.
+  std::string launcher_settings;
 };
 
 struct plan_entry {
@@ -61,6 +74,30 @@ struct explanation {
   std::string message;
 };
 
+// The asset pools a plan needs (5.4 step 4), from the pool files of its mods
+// and its map (the client reads a map's file when the map loads). Not part of
+// plan_id or content_id.
+struct pool_report {
+  // launcher_settings.json lets the client size its pools (is_enabled).
+  bool enabled = true;
+  // Per type, the largest size a mod in the stack or the plan's map asks
+  // for; on a tie, the mod higher in the stack, and a mod before the map,
+  // which loads last.
+  std::vector<pool_need> stack;
+  // The same over every mod and map of the catalog resolve_plan was given,
+  // whatever its mode. Given every installed item (the launcher's catalog of
+  // Workshop, mods\ and usermaps\), it is what the game's pools are to be
+  // sized with at DB_AssetPoolInit; the CLI gives it one --mods-dir. On a
+  // tie, the lowest id.
+  std::vector<pool_need> installed;
+  // The ids whose pool file the catalog found but did not read
+  // (installed_content::pool_file_unread): in the stack, in its order, then
+  // the map; and in the whole catalog, sorted. What they ask for is unknown,
+  // so it is missing from the lists above.
+  std::vector<std::string> stack_unread;
+  std::vector<std::string> installed_unread;
+};
+
 // Something the player can do to fix a problem (9.4).
 struct fix_action {
   // install, update, unpin, remove, reorder, allow_conflict, update_xerces
@@ -81,6 +118,7 @@ struct plan {
   std::string plan_id;
   std::string content_id;
   std::string canonical; // the JSON plan_id is taken over
+  pool_report pools;
 
   bool ok() const { return !diags.has_errors(); }
   std::string fs_game() const;

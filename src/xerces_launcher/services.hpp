@@ -153,6 +153,10 @@ public:
   xerces_core::plan resolve(const std::string &mode,
                             const std::vector<std::string> *mods = nullptr) const;
   xerces_core::plan_request request_for(const std::string &mode) const;
+  // The game's launcher_settings.json (read on every call: Settings edits
+  // it), as text for plan requests and as the client's pool settings.
+  std::string launcher_settings_text() const;
+  xerces_core::pool_settings pool_settings() const;
   // Content that can be enabled in a mode (mods that support it), catalog
   // order.
   std::vector<const xerces_core::installed_content *>

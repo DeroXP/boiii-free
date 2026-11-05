@@ -17,50 +17,12 @@
 
 #define NOMINMAX
 #include <Windows.h>
-#include <winioctl.h>
 
 using namespace xerces_core;
+using xerces_tests::make_junction;
 namespace fs = std::filesystem;
 
 namespace {
-// mklink /J without a shell (junctions need no extra rights). A junction
-// stores the path Windows follows ("\??\C:\...", the substitute name) and one
-// shown to people (the print name); `shown` lets a test make them differ.
-bool make_junction(const fs::path &link, const fs::path &target,
-                   const fs::path &shown = {}) {
-  std::error_code ec;
-  fs::create_directories(link, ec);
-  const std::wstring substitute = L"\\??\\" + fs::absolute(target).native();
-  const std::wstring print = (shown.empty() ? fs::absolute(target) : shown).native();
-  const std::size_t names = (substitute.size() + 1 + print.size() + 1) * 2;
-  std::vector<unsigned char> data(16 + names, 0);
-  const auto put16 = [&](std::size_t at, std::size_t value) {
-    const auto word = std::uint16_t(value);
-    std::memcpy(data.data() + at, &word, sizeof(word));
-  };
-  const std::uint32_t tag = IO_REPARSE_TAG_MOUNT_POINT;
-  std::memcpy(data.data(), &tag, sizeof(tag));
-  put16(4, 8 + names);                        // data length after the header
-  put16(8, 0);                                // substitute name offset
-  put16(10, substitute.size() * 2);           // and length
-  put16(12, (substitute.size() + 1) * 2);     // print name offset
-  put16(14, print.size() * 2);                // and length
-  std::memcpy(data.data() + 16, substitute.data(), substitute.size() * 2);
-  std::memcpy(data.data() + 16 + (substitute.size() + 1) * 2, print.data(),
-              print.size() * 2);
-  const HANDLE dir = CreateFileW(
-      link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
-      FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-  if (dir == INVALID_HANDLE_VALUE) {
-    return false;
-  }
-  DWORD bytes = 0;
-  const BOOL ok = DeviceIoControl(dir, FSCTL_SET_REPARSE_POINT, data.data(),
-                                  DWORD(data.size()), nullptr, 0, &bytes, nullptr);
-  CloseHandle(dir);
-  return ok != FALSE;
-}
-
 struct temp_dir {
   fs::path path;
   explicit temp_dir(const char *name)

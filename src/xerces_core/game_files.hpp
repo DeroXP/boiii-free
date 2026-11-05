@@ -36,7 +36,8 @@ std::vector<game_bind> parse_binds(std::string_view text);
 std::string binds_to_text(const std::vector<game_bind> &binds);
 
 // asset_limits_enabled as the client reads it: missing or "1" is on (unless
-// disable_asset_pools is "1"), anything else off.
+// disable_asset_pools is "1"), anything else off (parse_pool_settings in
+// asset_limits.hpp, which also reads the pool sizes).
 bool asset_pools_enabled(std::string_view launcher_settings_json);
 // The file with asset_limits_enabled set and disable_asset_pools removed,
 // keeping every other key; a missing or broken file becomes an object.
