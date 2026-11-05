@@ -3,6 +3,7 @@
 
 #include "harness.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -224,6 +225,123 @@ TEST_CASE("bundle: escaped and port-less addresses go too, lines stay JSON") {
   CHECK_EQ(lines, std::size_t{4});
   CHECK(log.find("join <address>") != std::string::npos);
   CHECK(log.find("remove <address>") != std::string::npos);
+  fs::remove_all(home);
+}
+
+TEST_CASE("bundle: favourite names in old logs are scrubbed too") {
+  const fs::path home = fs::temp_directory_path() / "xerces_bundle_names";
+  fs::remove_all(home);
+  // Footer notices as launchers before this one logged them: the name the
+  // player gave a favourite, and a single-label host the patterns miss.
+  write(
+      home / "logs" / "20261105-040000-launcher-5.jsonl",
+      R"({"event":"launcher.notice","msg":"Added to favourites: Dave's house"})"
+      "\n"
+      R"({"event":"launcher.notice","msg":"Removed from favourites: dave's HOUSE"})"
+      "\n"
+      R"({"event":"launcher.notice","msg":"Saved to favourites. Use Edit to name it: davespc:27017"})"
+      "\n");
+  write(home / "config" / "launcher.json",
+        R"({"favorites":[{"name":"Dave's house","address":"davespc:27017"}]})");
+
+  const fs::path out = home / "bundle.zip";
+  REQUIRE(make_bundle(home, out, "C:\\Users\\Someone", "{}").ok);
+  std::string bytes;
+  {
+    std::ifstream in(out, std::ios::binary);
+    bytes.assign(std::istreambuf_iterator<char>(in),
+                 std::istreambuf_iterator<char>());
+  }
+  const auto files = unzip(bytes);
+  const std::string &log = files.at("logs/20261105-040000-launcher-5.jsonl");
+  for (const char *secret : {"Dave", "dave", "davespc"}) {
+    CHECK(log.find(secret) == std::string::npos);
+  }
+  CHECK(log.find("Added to favourites: <address>") != std::string::npos);
+  CHECK(log.find("Removed from favourites: <address>") != std::string::npos);
+  CHECK(log.find("name it: <address>") != std::string::npos);
+  fs::remove_all(home);
+}
+
+TEST_CASE("bundle: a bundle that cannot be written is not reported ready") {
+  const fs::path home = fs::temp_directory_path() / "xerces_bundle_unwritable";
+  fs::remove_all(home);
+  write(home / "logs" / "20261105-050000-launcher-6.jsonl",
+        "{\"msg\":\"ok\"}\n");
+
+  // Where the zip should go is an (empty) folder: refused, and the folder
+  // stays; only a bundle this call began is removed. (A disk that fills
+  // while the last block is written fails at close, which is checked too,
+  // but cannot be staged here.)
+  const fs::path folder = home / "crash" / "taken.zip";
+  fs::create_directories(folder);
+  const bundle_result into_folder = make_bundle(home, folder, "", "{}");
+  CHECK(!into_folder.ok);
+  CHECK(!into_folder.error.empty());
+  CHECK(fs::is_directory(folder));
+
+  // Its folder cannot be made (a file has that name).
+  write(home / "blocked", "file");
+  const bundle_result blocked =
+      make_bundle(home, home / "blocked" / "bundle.zip", "", "{}");
+  CHECK(!blocked.ok);
+  CHECK(!fs::exists(home / "blocked" / "bundle.zip"));
+
+  // Written: the whole zip is on disk, down to its end record.
+  const fs::path out = home / "crash" / "bundle.zip";
+  REQUIRE(make_bundle(home, out, "", "{}").ok);
+  const std::string bytes = xerces_tests::read_file(out);
+  REQUIRE(bytes.size() >= 22);
+  CHECK_EQ(get32(bytes, bytes.size() - 22), std::uint32_t{0x06054b50});
+  CHECK(unzip(bytes).contains("logs/20261105-050000-launcher-6.jsonl"));
+  fs::remove_all(home);
+}
+
+TEST_CASE("bundle: the game log stays in after many launcher sessions") {
+  const fs::path home = fs::temp_directory_path() / "xerces_bundle_roles";
+  fs::remove_all(home);
+  // The game crashed (its log is old), then Xerces was opened eight times
+  // without playing; a CLI run and a file of no known name are older still.
+  const auto now = fs::file_time_type::clock::now();
+  const auto at = [&](const std::string &name, int minutes_ago) {
+    const fs::path file = home / "logs" / name;
+    write(file, "{\"msg\":\"" + name + "\"}\n");
+    fs::last_write_time(file, now - std::chrono::minutes(minutes_ago));
+  };
+  at("20261105-060000-cli-1.jsonl", 100);
+  at("odd.jsonl", 95);
+  at("20261105-061000-game-2.jsonl", 90);
+  for (int i = 0; i < 8; ++i) {
+    at("20261105-07000" + std::to_string(i) + "-launcher-" +
+           std::to_string(10 + i) + ".jsonl",
+       80 - i * 10); // the last one is the newest
+  }
+
+  const fs::path out = home / "bundle.zip";
+  const bundle_result result = make_bundle(home, out, "", "{}");
+  REQUIRE(result.ok);
+  const auto files = unzip(xerces_tests::read_file(out));
+  std::size_t logs = 0;
+  for (const auto &[name, text] : files) {
+    logs += name.starts_with("logs/") ? 1 : 0;
+  }
+  // Six logs: the newest of each role (launcher, game, cli, the odd one),
+  // then the newest of the rest, which are launcher logs.
+  CHECK_EQ(logs, std::size_t(6));
+  CHECK(files.contains("logs/20261105-061000-game-2.jsonl"));
+  CHECK(files.contains("logs/20261105-060000-cli-1.jsonl"));
+  CHECK(files.contains("logs/odd.jsonl"));
+  CHECK(files.contains("logs/20261105-070007-launcher-17.jsonl"));
+  CHECK(files.contains("logs/20261105-070006-launcher-16.jsonl"));
+  CHECK(files.contains("logs/20261105-070005-launcher-15.jsonl"));
+  CHECK(!files.contains("logs/20261105-070004-launcher-14.jsonl"));
+  CHECK(!files.contains("logs/20261105-070000-launcher-10.jsonl"));
+
+  // With room for one, the newest log of all.
+  const auto one = unzip(xerces_tests::read_file(
+      make_bundle(home, home / "one.zip", "", "{}", 1).file));
+  CHECK(one.contains("logs/20261105-070007-launcher-17.jsonl"));
+  CHECK(!one.contains("logs/20261105-061000-game-2.jsonl"));
   fs::remove_all(home);
 }
 

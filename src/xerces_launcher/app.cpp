@@ -757,13 +757,13 @@ void app::next_tab(int delta) {
   }
 }
 
-void app::notify(const std::string &text, bool error) {
+void app::notify(const std::string &text, bool error, std::string_view logged) {
   notice_text_ = text;
   notice_error_ = error;
   notice_until_ = now() + (error ? 8.0 : 5.0);
   notice_dirty_ = true;
   log(error ? xerces_core::log_level::warn : xerces_core::log_level::info,
-      "launcher.notice", text);
+      "launcher.notice", logged.empty() ? std::string_view(text) : logged);
 }
 
 void app::update_notice() {

@@ -447,6 +447,18 @@ private:
     return true;
   }
 
+  // A footer notice that names a server: `shown` (translated) and the
+  // server's address or favourite name. The player sees both; the log, which
+  // goes into bug reports, gets `logged` (English) with redacted_address in
+  // the server's place. Its scrubber would miss a host name without a port,
+  // an address short_name() cut, and any name (DESIGN.md 15.1, log.hpp).
+  void notify_server(const std::string &shown, std::string_view logged,
+                     const std::string &server, bool error = false) {
+    owner_->notify(shown + " " + short_name(server), error,
+                   std::string(logged) + " " +
+                       std::string(xerces_core::redacted_address));
+  }
+
   void set_address_problem(const std::string &address) {
     const std::string problem = xerces_core::server_address_problem(address);
     address_problem_ = problem.empty() ? "" : owner_->tr(problem);
@@ -518,8 +530,8 @@ private:
                              true);
               return;
             }
-            owner_->notify(owner_->tr("Removed from favourites:") + " " +
-                           short_name(shown_name(server)));
+            notify_server(owner_->tr("Removed from favourites:"),
+                          "Removed from favourites:", shown_name(server));
             focus_after_removal("fav-remove-", *found, list.size(), "fav-save");
           });
     }
@@ -569,9 +581,11 @@ private:
                         svc.config_error());
       return;
     }
-    owner_->notify(
-        owner_->tr(was_editing ? "Favourite saved:" : "Added to favourites:") +
-        " " + short_name(shown_name(favorites[edit.index])));
+    // The literals stay inside tr(): the string template is read from it.
+    notify_server(
+        owner_->tr(was_editing ? "Favourite saved:" : "Added to favourites:"),
+        was_editing ? "Favourite saved:" : "Added to favourites:",
+        shown_name(favorites[edit.index]));
     stop_editing();
     focus_later("fav-join-" + std::to_string(edit.index), 2);
   }
@@ -593,13 +607,15 @@ private:
                        true);
         return true;
       }
-      owner_->notify(owner_->tr("Saved to favourites. Use Edit to name it:") +
-                     " " + short_name(address));
+      notify_server(owner_->tr("Saved to favourites. Use Edit to name it:"),
+                    "Saved to favourites. Use Edit to name it:", address);
       return true;
     case xerces_core::favorite_status::duplicate:
       owner_->notify(owner_->tr("Already in your favourites as") + " \"" +
                          short_name(shown_name(favorites[edit.index])) + "\".",
-                     true);
+                     true,
+                     "Already in your favourites as " +
+                         std::string(xerces_core::redacted_address) + ".");
       return false;
     case xerces_core::favorite_status::full:
       owner_->notify(owner_->tr("Favourites are full (100). Remove one before "
@@ -620,9 +636,8 @@ private:
         owner_->notify(address_problem_, true);
         focus_later("address", 0);
       } else {
-        owner_->notify(owner_->tr("Not a server address:") + " " +
-                           short_name(address),
-                       true);
+        notify_server(owner_->tr("Not a server address:"),
+                      "Not a server address:", address, true);
       }
       return false;
     }
@@ -685,8 +700,8 @@ private:
                        true);
         return;
       }
-      owner_->notify(owner_->tr("Removed from recent servers:") + " " +
-                     short_name(address));
+      notify_server(owner_->tr("Removed from recent servers:"),
+                    "Removed from recent servers:", address);
       focus_after_removal("recent-remove-", std::size_t(index), recent.size(),
                           "join-modded");
     }

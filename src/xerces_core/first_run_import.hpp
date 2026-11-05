@@ -21,9 +21,13 @@
 
 #include "diagnostics.hpp"
 #include "launcher_config.hpp"
+#include "servers_book.hpp"
 
 namespace xerces_core {
-// Upstream keeps at most this many recent servers; the import does the same.
+// The most the import reads from upstream's files: upstream keeps at most 50
+// recent servers, and no favourites file it writes is longer than this. What
+// the import adds to Xerces stops at the Servers screen's own limits
+// (max_recent_servers, max_favorite_servers), which Xerces' lists keep.
 inline constexpr std::size_t boiii_recent_limit = 50;
 inline constexpr std::size_t boiii_favorite_limit = 500;
 
@@ -55,11 +59,25 @@ struct boiii_import {
   }
 };
 
-// Looks in boiii_appdata (%LOCALAPPDATA%\boiii) and game_dir\boiii_players.
-// Either may be missing. Reads a few small files; never writes.
-boiii_import find_boiii_import(
-    const std::optional<std::filesystem::path> &boiii_appdata,
-    const std::optional<std::filesystem::path> &game_dir);
+// Upstream BOIII's data folders, %LOCALAPPDATA%\boiii, each with an identity
+// folder (user\) the import never opens. The fenced code that reads the key
+// finds the folder through the Local AppData known folder (known_folder,
+// from SHGetKnownFolderPath); upstream's updater reads the LOCALAPPDATA
+// variable (variable), which usually names the same folder but can be pointed
+// elsewhere. Both are kept, the known folder's first; a variable naming the
+// same folder adds nothing. Empty when the known folder is not known: the
+// identity folder cannot be told then, and find_boiii_import reads nothing.
+std::vector<std::filesystem::path>
+boiii_appdata_dirs(const std::optional<std::filesystem::path> &known_folder,
+                   const std::optional<std::filesystem::path> &variable);
+
+// Looks in game_dir\boiii_players (which may be missing) and says whether
+// boiii_appdata's first folder is there. Every read refuses the identity
+// folder of each of boiii_appdata (boiii_appdata_dirs); with none, nothing in
+// the game folder is read. Reads a few small files; never writes.
+boiii_import
+find_boiii_import(const std::vector<std::filesystem::path> &boiii_appdata,
+                  const std::optional<std::filesystem::path> &game_dir);
 
 // Where a path really leads, as far as the identity folder is concerned.
 enum class boiii_identity_check {
@@ -69,12 +87,14 @@ enum class boiii_identity_check {
 };
 
 // Follows path one name at a time, the way Windows would (long and short
-// names, any case, junctions, symbolic links, subst drives, volume mount
-// points), without opening anything inside boiii_appdata\user: each name is
-// looked up in its parent folder's listing and each link is read as a link.
-// unknown when a step cannot be checked that way (a folder that cannot be
-// listed, a link that cannot be read or points somewhere Windows-internal,
-// a loop of links, a name Windows does not allow).
+// names, any case, ".", "..", trailing dots and spaces, names past MAX_PATH,
+// junctions, symbolic links, subst drives, volume mount points), without
+// opening anything inside boiii_appdata\user: each name is looked up in its
+// parent folder's listing and each link is read as a link. unknown when a
+// step cannot be checked that way (a folder that cannot be listed, a link
+// that cannot be read or points somewhere Windows-internal, a loop of links,
+// a name Windows does not allow) and for every path through a share or a
+// network drive: \\localhost\C$ is this PC's C:\ under another name.
 boiii_identity_check
 check_boiii_identity_path(const std::filesystem::path &path,
                           const std::filesystem::path &boiii_appdata);
@@ -119,18 +139,22 @@ struct boiii_import_result {
 };
 
 // What applying would add to config: favourites and recent servers it does
-// not already have (addresses compared ignoring case). Recent servers stop at
-// boiii_recent_limit, as apply_boiii_import does; *no_room (when given)
+// not already have (addresses compared ignoring case). Like
+// apply_boiii_import, they stop where the Servers screen's lists are full
+// (max_favorite_servers, max_recent_servers): a server past that would be
+// refused there, or dropped at the next join. *no_room (when given)
 // receives how many more are new but do not fit.
 std::size_t new_boiii_favorites(const launcher_config &config,
-                                const boiii_import &found);
+                                const boiii_import &found,
+                                std::size_t *no_room = nullptr);
 std::size_t new_boiii_recent_servers(const launcher_config &config,
                                      const boiii_import &found,
                                      std::size_t *no_room = nullptr);
 
 // Copies the chosen values into config (the caller saves it). Favourites are
-// appended without duplicates; recent servers go after the ones Xerces
-// already has (those are newer), up to boiii_recent_limit.
+// appended without duplicates, in BOIII's order, up to max_favorite_servers;
+// recent servers go after the ones Xerces already has (those are newer), up
+// to max_recent_servers.
 boiii_import_result apply_boiii_import(launcher_config &config,
                                        const boiii_import &found,
                                        const boiii_import_choice &choice);
