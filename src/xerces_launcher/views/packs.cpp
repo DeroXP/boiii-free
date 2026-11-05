@@ -983,8 +983,8 @@ private:
     if (!picked) {
       return; // cancelled
     }
-    // The picker adds no extension of its own, and a name with a dot in it
-    // ("Zombies v1.2") still needs the pack one, or the import picker's
+    // The picker adds .xpack.json only to a name with no dot; a name with a
+    // dot in it ("Zombies v1.2") still needs it, or the import picker's
     // *.xpack.json filter would not show the file.
     const fs::path file = core::with_pack_extension(*picked);
     if (file != *picked) {

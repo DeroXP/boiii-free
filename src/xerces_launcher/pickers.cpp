@@ -61,6 +61,14 @@ std::optional<fs::path> run_dialog(void *owner, REFCLSID kind,
   }
   if (!specs.empty()) {
     dialog->SetFileTypes(UINT(specs.size()), specs.data());
+    // The first filter's extension ("*.xpack.json" -> "xpack.json") is added
+    // to a typed name that has none, so callers need not append it.
+    const std::wstring &pattern = parts[1];
+    if (pattern.size() > 2 && pattern.starts_with(L"*.") &&
+        pattern.find(L'*', 1) == std::wstring::npos &&
+        pattern.find(L';') == std::wstring::npos) {
+      dialog->SetDefaultExtension(pattern.substr(2).c_str());
+    }
   }
   if (!default_name.empty()) {
     dialog->SetFileName(default_name.c_str());
