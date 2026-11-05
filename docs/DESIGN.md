@@ -439,6 +439,17 @@ the installed game.
   inside `DB_LoadXAssets`, `FS_BuildOSPathForThread`, `SND_StartHeaderRead`,
   `KeyValuePairs_GetNextValue`, `UGC_ModChange_ApplyQueued`, and the
   `UIElement_RenderLoadedMod` call site.
+- The engine's out-of-memory handler, `Sys_OutOfMemErrorInternal`
+  (`sys.out_of_mem_error_internal`, added 2026-11-05), is its own feature,
+  `oom_report` (5.6), so a miss turns only that report off, never multi-mod. The
+  function references the strings "Out of Memory", `win_main.cpp`,
+  `WIN_OUT_OF_MEM_TITLE` and `WIN_OUT_OF_MEM_BODY`, and its six callers pass it
+  an empty file name and line 0. Its pattern is longer than the shortest unique
+  one: its first 20 bytes match 75 places in `.text`, `sigmaker.py`'s 25-byte
+  proposal is unique by one instruction, and the client's detour never returns,
+  so a wrong match would end the game. The pattern runs on through the
+  `ShowCursor` import call and the 0x32 that follows it (39 bytes, one match in
+  the first `.text` of the D3 dump, at 0x1422881B0).
 - Resolution runs once in `symbols_resolved`. It scans the first `.text` and
   `.rdata` (string anchors), and the `.interpr` section (the Havok Script
   interpreter, which holds three upstream symbols) read-only. It never scans or
@@ -790,6 +801,55 @@ together.
   (`Com_Error`, and `Sys_Error` before its fatal dialog) are logged as
   `loader.engine.error` the same way. The crash handler writes a `.dmp` file
   before its report, because the engine can end the process during the report.
+- Out of memory (2026-11-05). When a Workshop custom map loads, the engine
+  places blocks 5 and 6 of every loaded zone in one fixed 2 GiB pool (the DB
+  stack's "main" PMem pool), which mods and the map share. With DS4C (about 450
+  MiB of those blocks in `core_mod` and `zm_mod`) the pool holds about 1299 MiB
+  before a custom map's main zone loads, so Super Mario 64 (813 MiB) and
+  BACKROOMZ (1160 MiB) overflow it; the six other installed custom maps fit. A
+  `.ff` file gives its block sizes in its header (`TAff0000`, version 0x251 at
+  +8, ten u64 sizes from +0xA8). The engine's handler,
+  `Sys_OutOfMemErrorInternal`, shows a box only when a dvar is set (it is not)
+  and calls `exit(-1)` on the loading thread: the C runtime ran static
+  destructors while the main thread still drew loading frames, and the main
+  thread crashed on a destroyed object (a Demonware task or the sound queue).
+  The player saw the game vanish, and the crash report blamed the main thread.
+  The client replaces the handler (`src/client/xerces/out_of_memory.cpp`,
+  feature `oom_report`, 4.3). The replacement never returns (5.7): it logs
+  `loader.out_of_memory` with the zone still loading (the console's last
+  `Loading fastfile '<zone>'` line that no later
+  `FastFileLoad: Setting <zone> to XZONE_LOADED` line follows), the map,
+  `fs_game`, `fs_extramods`, the mods by their names from the plan file, the
+  journal phase, the caller's RVA and the console's last 60 lines; notes the
+  crash and leaves the journal's phase, so the launcher counts a crash and
+  nothing writes `clean_exit`; suspends the other threads; shows "Black Ops III
+  ran out of memory" (not with `-headless` or `-quiet-crash`, which it reads
+  before the threads stop); and ends the process with `TerminateProcess` and the
+  engine's code, 0xFFFFFFFF. No destructor runs under the main thread, and no
+  crash dump is written. The text is put together in
+  `xerces_core/out_of_memory`. Without the signature the game ends as the engine
+  ends it.
+  - The map is the engine's active custom map (`mod_stack::active_usermap`, set
+    when the map's load starts), else the `mapname` dvar. `mapname` still names
+    the level before while one loads: in all four out-of-memory runs on
+    2026-11-05, `loader.exit.unexpected` recorded `core_frontend` in phase
+    `loading_map`. That event and `loader.engine.error` still take `mapname`
+    first, so during a load their map is the front end; for a stock map that is
+    still loading, the zone is the better guide here too.
+  - The mods follow `mod_stack::get`: `fs_game` `usermaps` (the engine's
+    pseudo-mod for a custom map played without a mod) is no mod, and without a
+    main mod `fs_extramods` loads nothing, so the box says no mods are loaded
+    and to play another map.
+  - The handler is not only the pool's: two of its six callers (`0x14224FE5C`,
+    `0x14224FF24` in the D3 dump) are the engine's allocation wrappers, one
+    around the C runtime's `malloc`, so a process heap that runs out ends here
+    too. The caller's RVA is logged for that, but Xerces code uses no offsets,
+    so the wording follows the zone instead: with a zone still loading, the box
+    names it and the mods and says to remove a mod or play another map; with
+    none (in a match, say), it only says the game ran out of memory.
+  - With mods loaded, the box also sends the player to Xerces' Mods screen,
+    whose plan note (the zone-memory check, 5.3 step 5) names the installed
+    custom maps that do not fit with the mods.
 - Exit code 0 is not proof of a clean exit: the crash dialog's restart and fatal
   engine errors also end with 0. The launcher counts 0 as clean only when the
   game never took the journal over (it quit before Xerces' code ran); otherwise
@@ -813,6 +873,10 @@ one batch are designed to make the same-name collision impossible (tested in
 M0), plans are validated before anything loads, pools never grow under live
 assets, and when the engine still raises a fatal error, the journal ties it to
 the plan and safe mode takes over.
+
+The engine's out-of-memory handler (5.6) is replaced, not suppressed: Xerces'
+version ends the process as the engine's does, says why first, and skips the C
+runtime's shutdown, which crashed the main thread that was still running.
 
 ### 5.8 Native code and unsafe Lua in mods
 

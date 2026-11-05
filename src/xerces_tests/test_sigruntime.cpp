@@ -118,6 +118,46 @@ TEST_CASE("signature registry: the shipped file has every multi-mod hook") {
   }
 }
 
+TEST_CASE("signature registry: the out-of-memory handler is its own feature") {
+  // A miss of the handler turns only the out-of-memory report off, never
+  // multi-mod; the client's detour never returns, so its pattern must name
+  // exactly one known address on the build it was made from.
+  const auto file = xerces_tests::fixtures_dir().parent_path().parent_path() /
+                    "compat" / "signatures.json";
+  REQUIRE(std::filesystem::exists(file));
+  const signature_registry registry =
+      parse_signature_registry(xerces_tests::read_file(file));
+  REQUIRE(registry.ok());
+  for (const std::string_view id : oom_report_signatures::all) {
+    const auto entry = std::ranges::find_if(
+        registry.signatures, [&](const signature &s) { return s.id == id; });
+    REQUIRE(entry != registry.signatures.end());
+    CHECK(entry->features == std::vector<std::string>{"oom_report"});
+    CHECK(entry->kind == symbol_kind::function);
+    CHECK(entry->known.contains(0x6531394u));
+  }
+  for (const auto &entry : registry.signatures) {
+    if (has(entry.features, "oom_report")) {
+      CHECK(std::ranges::find(oom_report_signatures::all, entry.id) !=
+            oom_report_signatures::all.end());
+    }
+  }
+
+  // Missing from a swapped registry: oom_report goes off, multi_mod stays on.
+  signature_report report;
+  for (const std::string_view id : multi_mod_signatures::all) {
+    signature_result ok;
+    ok.id = std::string(id);
+    ok.ok = true;
+    report.results.push_back(ok);
+  }
+  require_signatures(report, "multi_mod", multi_mod_signatures::all, "absent");
+  require_signatures(report, "oom_report", oom_report_signatures::all,
+                     "absent");
+  CHECK(report.feature_enabled("multi_mod"));
+  CHECK(!report.feature_enabled("oom_report"));
+}
+
 TEST_CASE("required signatures: all resolved leaves the feature on") {
   auto text = code(0x200);
   text[0x80] = 0x48;

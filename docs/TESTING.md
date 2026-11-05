@@ -95,16 +95,16 @@ too.
     returned to the lobby.
   - `loadmod 3171632315` replaced the main mod while the stack was loaded.
 
-  Open: the loaded-mod label ("â€¦ and 2 more") was not checked, and each mod's
-  feature in play needs a person playing.
+  Open: the loaded-mod label ("Ã¢â‚¬Â¦ and 2 more") was not checked, and each
+  mod's feature in play needs a person playing.
 
 - [ ] Joining a server whose mods you lack names the missing mods instead of
       offering a download (the Xerces change in `check_valid_mod_stack`). Not
       run: it needs a server.
 - [x] Two fastfiles that share a name: all three mods ship `core_mod.ff`. With
       mod-stack's aliases PMem raised no error in three cases: the load, a front
-      end â†’ match â†’ front end round trip, and a main-mod switch that
-      unloaded every stacked zone in reverse order.
+      end Ã¢â€ â€™ match Ã¢â€ â€™ front end round trip, and a main-mod switch
+      that unloaded every stacked zone in reverse order.
 - [x] `en_`-prefixed zones of a stacked mod load (`en_stack_<id>_core_mod`,
       `en_stack_<id>_zm_mod`).
 - [x] The queue-add falsification test (DESIGN.md 2.3, row 6), on this session's
@@ -330,6 +330,26 @@ each one does not cover is said under its item.
       baseline in another game language and on another stock map's lobby, and
       measure Multiplayer and Campaign (a dump before a custom map's main zone
       loads), then fill `compat/zone_memory.json`.
+- [ ] Out of memory (DESIGN.md 5.6, feature `oom_report`; built 2026-11-05, not
+      run in the game): DS4C alone, then `map zm_backrooms`, through
+      `tools\dev\session\map-check.ps1 -Map zm_backrooms -Stack 3171632315 -Live`.
+      The run should end `crash_load` with the dialog "Black Ops III ran out of
+      memory" captured (`dialog-load.png`), naming `zm_backrooms` and DS4C
+      Patched v0.85 and saying to remove a mod or play another map, and that the
+      Mods screen lists the custom maps that do not fit. map-check then presses
+      OK, and the game should end by itself within a second with exit code
+      0xFFFFFFFF (`exit_code` in `results.jsonl`; the launcher logs
+      `launcher.game.exited` with 4294967295). The game log should have
+      `xerces.signatures.resolved` (10 of 10), `xerces.feature.on` for
+      `oom_report`, and `loader.out_of_memory` with `zone` `zm_backrooms`, `map`
+      `zm_backrooms` (not `core_frontend`, which `mapname` still says then), the
+      mods, `phase` `loading_map`, a `caller` and the console lines; no
+      `loader.exit.unexpected` and no new `crash-*.dmp` (the run's `dumps` stays
+      empty); the journal stays at `loading_map`, and the next launcher start
+      offers safe mode. `zm_supermario64` should do the same. Then a map that
+      fits with DS4C (`zm_log_overunder`) to see that nothing else changed. The
+      no-mods text (`fs_game` `usermaps`) and the text with no zone loading are
+      covered by the unit tests only: no installed map overflows the pool alone.
 - [x] (2026-11-05, 3a7266c6) `xerces_cli plan apply` (no `--dry-launch`), from
       the build with `boiii.exe` next to `xerces_cli.exe`, with the D3 stack as
       the Zombies profile and `XERCES_HOME` outside AppData: the game started

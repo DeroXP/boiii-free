@@ -60,16 +60,6 @@ std::string console_json() {
   return out + "]";
 }
 
-// The level loaded or loading ("" in the menus).
-std::string current_map() {
-  for (const char *name : {"mapname", "ui_mapname"}) {
-    if (auto value = game::get_dvar_string(name); value && !value->empty()) {
-      return xerces_core::json::valid_utf8(*value, 64);
-    }
-  }
-  return {};
-}
-
 // ---------------------------------------------------------------- quit
 game::cmd::xcommand_t engine_quit = nullptr;
 
@@ -178,6 +168,15 @@ void verify_plan(const std::string &id) {
   }
 }
 } // namespace
+
+std::string current_map() {
+  for (const char *name : {"mapname", "ui_mapname"}) {
+    if (auto value = game::get_dvar_string(name); value && !value->empty()) {
+      return xerces_core::json::valid_utf8(*value, 64);
+    }
+  }
+  return {};
+}
 
 class component final : public generic_component {
   DEFINE_COMPONENT_NAME("xerces_loader");

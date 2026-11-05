@@ -239,6 +239,11 @@ state resolve() {
   xerces_core::require_signatures(
       s.report, "multi_mod", xerces_core::multi_mod_signatures::all,
       s.problem.empty() ? "not in compat/signatures.json" : s.problem);
+  // The same for the out-of-memory report (out_of_memory.cpp): its miss turns
+  // only that feature off.
+  xerces_core::require_signatures(
+      s.report, "oom_report", xerces_core::oom_report_signatures::all,
+      s.problem.empty() ? "not in compat/signatures.json" : s.problem);
 
   std::size_t matched = 0;
   for (const auto &result : s.report.results) {

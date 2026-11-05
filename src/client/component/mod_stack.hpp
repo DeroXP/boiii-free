@@ -14,6 +14,12 @@ bool is_loaded();
 // Reloads the stack at the next front-end frame, as ModStack.Reload does.
 void request_reload();
 
+// The custom map being loaded or played: the engine's active usermap's
+// internal name (the name of its zones), set when its load starts; "" for
+// stock maps. The out-of-memory report names the map by it, because the
+// mapname dvar still names the level before while one loads.
+std::string active_usermap();
+
 // Map-first scripts (DESIGN.md 6.3 rule 6, xerces_map_scripts_first) must be
 // the same on the host and every client. A host announces its own choice
 // ("1" or "0") in getinfo and in the lobby content; a client joining another
