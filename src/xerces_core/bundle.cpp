@@ -61,6 +61,20 @@ std::string utf8(const std::wstring &text) {
   return out;
 }
 
+// The role in a session log's name, <date>-<time>-<role>-<session>.jsonl
+// (DESIGN.md 15.1): "launcher", "game", "cli". Empty for a name that does
+// not follow it; such logs share one role.
+std::string log_role(const std::filesystem::path &file) {
+  const std::string stem = utf8(file.stem().wstring());
+  const std::size_t date = stem.find('-');
+  const std::size_t time =
+      date == std::string::npos ? date : stem.find('-', date + 1);
+  const std::size_t role =
+      time == std::string::npos ? time : stem.find('-', time + 1);
+  return role == std::string::npos ? std::string()
+                                   : stem.substr(time + 1, role - time - 1);
+}
+
 std::string registry_string(HKEY root, const wchar_t *key, const wchar_t *name) {
   wchar_t buffer[512]{};
   DWORD size = sizeof(buffer);
@@ -305,7 +319,10 @@ bundle_result make_bundle(const std::filesystem::path &home,
     result.contents.push_back(name);
   };
 
-  // The newest logs of every role.
+  // The newest logs, at most max_logs, with the newest of every role among
+  // them. Every launcher start writes a log of its own, so the newest logs
+  // of any role would let a few launcher sessions after a crash push out
+  // the game log the report needs.
   std::vector<std::filesystem::directory_entry> logs;
   for (const auto &file : std::filesystem::directory_iterator(home / "logs", ec)) {
     if (file.path().extension() == ".jsonl") {
@@ -314,11 +331,30 @@ bundle_result make_bundle(const std::filesystem::path &home,
   }
   std::ranges::sort(logs, [](const auto &a, const auto &b) {
     std::error_code e;
-    return a.last_write_time(e) > b.last_write_time(e);
+    const auto a_time = a.last_write_time(e);
+    const auto b_time = b.last_write_time(e);
+    return a_time != b_time ? a_time > b_time : a.path() > b.path();
   });
-  for (std::size_t i = 0; i < logs.size() && i < max_logs; ++i) {
-    add("logs/" + utf8(logs[i].path().filename().wstring()),
-        read_text(logs[i].path()));
+  std::vector<bool> taken(logs.size(), false);
+  std::set<std::string> roles;
+  std::size_t count = 0;
+  for (std::size_t i = 0; i < logs.size() && count < max_logs; ++i) {
+    if (roles.insert(log_role(logs[i].path())).second) {
+      taken[i] = true;
+      ++count;
+    }
+  }
+  for (std::size_t i = 0; i < logs.size() && count < max_logs; ++i) {
+    if (!taken[i]) {
+      taken[i] = true;
+      ++count;
+    }
+  }
+  for (std::size_t i = 0; i < logs.size(); ++i) {
+    if (taken[i]) {
+      add("logs/" + utf8(logs[i].path().filename().wstring()),
+          read_text(logs[i].path()));
+    }
   }
 
   const auto journal_path = home / "logs" / "journal.json";
