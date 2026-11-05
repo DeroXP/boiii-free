@@ -186,9 +186,23 @@ bool remove_pack(const fs::path &folder, std::string_view id) {
     removed = true;
   }
   // A copy under another file name would bring the pack back on the next
-  // read; remove those too.
-  for (const auto &entry : read_pack_library(folder).packs) {
-    if (entry.value.id == id && fs::remove(entry.file, ec) && !ec) {
+  // read; remove those too. The library lists only one file per id, so the
+  // folder itself is walked to find every copy.
+  std::vector<fs::path> copies;
+  for (fs::directory_iterator it(folder, ec), end; !ec && it != end;
+       it.increment(ec)) {
+    std::error_code type_ec;
+    if (!it->is_regular_file(type_ec) || it->path().extension() != ".json") {
+      continue;
+    }
+    const pack_result result = read_pack_file(it->path());
+    if (result.ok() && result.value.id == id) {
+      copies.push_back(it->path());
+    }
+  }
+  for (const auto &file : copies) {
+    std::error_code remove_ec;
+    if (fs::remove(file, remove_ec) && !remove_ec) {
       removed = true;
     }
   }
@@ -211,6 +225,20 @@ pack_result read_pack_text(std::string_view text) {
     return decode_share_code(text);
   }
   return parse_pack(text);
+}
+
+pack_result read_pasted_pack(std::string_view text) {
+  std::string_view rest = text;
+  if (rest.starts_with("\xEF\xBB\xBF")) {
+    rest.remove_prefix(3);
+  }
+  while (!rest.empty() && is_space(rest.front())) {
+    rest.remove_prefix(1);
+  }
+  if (rest.starts_with('{')) {
+    return read_pack_text(rest);
+  }
+  return decode_share_code(rest);
 }
 
 pack_result read_pack_file(const fs::path &file) {
@@ -342,6 +370,16 @@ std::string pack_file_stem(std::string_view name) {
   if (std::ranges::find(reserved, base) != reserved.end()) {
     out += "_pack";
   }
+  return out;
+}
+
+fs::path with_pack_extension(const fs::path &file) {
+  const std::string name = lower_ascii(to_utf8(file.filename()));
+  fs::path out = file;
+  if (name.ends_with(".json")) {
+    return out;
+  }
+  out += name.ends_with(".xpack") ? ".json" : ".xpack.json";
   return out;
 }
 

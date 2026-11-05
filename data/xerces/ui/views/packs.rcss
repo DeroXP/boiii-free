@@ -77,7 +77,16 @@
 	border-bottom: 1dp var(--text);
 }
 .items-count { flex: 1 1 auto; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
-.item-row { min-height: 56dp; }
+/* Inset like the pack rows, so the focus ring does not sit on the text. */
+.row.item-row { min-height: 56dp; padding: 12dp 8dp; }
+/* Rows without a Steam button take focus themselves, with the buttons' ring,
+   so keyboard and pad can scroll down the whole list. A row with a button is
+   left out: spatial navigation never moves into a focused element's own
+   children, so its button would become unreachable. */
+.item-row.focusable { nav: auto; tab-index: auto; focus: auto; }
+.item-row.focusable:focus { box-shadow: #000000 0dp 0dp 0dp 3dp, #FF4A1C 0dp 0dp 0dp 5dp; }
+body.theme-light .item-row.focusable:focus { box-shadow: #FFFFFF 0dp 0dp 0dp 3dp, #FF4A1C 0dp 0dp 0dp 5dp; }
+body.theme-contrast .item-row.focusable:focus { box-shadow: #000000 0dp 0dp 0dp 3dp, #FFD400 0dp 0dp 0dp 5dp; }
 .row-n { width: 32dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
 .item-text { display: flex; flex-direction: column; gap: 2dp; flex: 1 1 auto; }
 .item-name { font-size: 14dp; font-weight: 500; line-height: 18dp; }

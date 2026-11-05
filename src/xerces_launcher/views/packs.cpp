@@ -243,11 +243,26 @@ public:
           target && target->IsVisible(true)) {
         target->Focus(true);
         target->ScrollIntoView(Rml::ScrollAlignment::Nearest);
+        // A box shown by the same action (the applied box above the Steam
+        // buttons) is laid out after this, pushing the target down out of
+        // view; scroll again once it has been.
+        scroll_id_ = focus_id_;
+        scroll_frames_ = 2;
         focus_id_.clear();
       } else if (--focus_tries_ <= 0) {
         focus_id_.clear();
       }
+    } else if (scroll_frames_ > 0 && doc) {
+      --scroll_frames_;
+      Rml::Element *target = doc->GetElementById(scroll_id_);
+      Rml::Context *context = doc->GetContext();
+      if (target && context && context->GetFocusElement() == target) {
+        target->ScrollIntoView(Rml::ScrollAlignment::Nearest);
+      } else {
+        scroll_frames_ = 0; // the player has moved on
+      }
     }
+    keep_focus();
     services &svc = owner_->svc();
     const std::uint64_t key[] = {svc.config_rev(), svc.catalog_rev(),
                                  svc.game_rev(), owner_->mode_rev()};
@@ -368,6 +383,21 @@ private:
     return {};
   }
 
+  // "2 mods · map", or "map only" for a custom map saved on its own, which
+  // reads better than "0 mods".
+  std::string contents_text(const core::pack &p,
+                            const std::string &map_part) const {
+    if (p.mods.empty() && p.map) {
+      return owner_->tr("map only");
+    }
+    std::string out = std::to_string(p.mods.size()) + " " +
+                      owner_->tr(p.mods.size() == 1 ? "mod" : "mods");
+    if (p.map) {
+      out += " \xC2\xB7 " + map_part;
+    }
+    return out;
+  }
+
   std::string problems_text(const core::pack_check &check) const {
     std::string out;
     const auto add = [&](std::size_t n, const char *what) {
@@ -401,11 +431,7 @@ private:
       row.name = p.name;
       row.selected = p.id == selected_id_;
       row.meta = owner_->tr(mode_name(p.mode)) + " \xC2\xB7 " +
-                 std::to_string(p.mods.size()) + " " +
-                 owner_->tr(p.mods.size() == 1 ? "mod" : "mods");
-      if (p.map) {
-        row.meta += " \xC2\xB7 " + owner_->tr("map");
-      }
+                 contents_text(p, owner_->tr("map"));
       if (const auto it = config.profiles.find(p.mode);
           it != config.profiles.end() && it->second.pack_id == p.id) {
         row.meta += " \xC2\xB7 " + owner_->tr("in use");
@@ -448,12 +474,8 @@ private:
       const core::pack &p = entry->value;
       const core::pack_check check = core::check_pack(p, catalog.items);
       std::string meta = owner_->tr(mode_name(p.mode)) + " \xC2\xB7 " +
-                         std::to_string(p.mods.size()) + " " +
-                         owner_->tr(p.mods.size() == 1 ? "mod" : "mods");
-      if (p.map) {
-        meta += " \xC2\xB7 1 " + owner_->tr("map");
-      }
-      meta += " \xC2\xB7 " + owner_->tr("id") + " " + short_id(p.id);
+                         contents_text(p, "1 " + owner_->tr("map")) +
+                         " \xC2\xB7 " + owner_->tr("id") + " " + short_id(p.id);
       if (!p.game_build.empty()) {
         meta += " \xC2\xB7 " + owner_->tr("build") + " " + p.game_build;
       }
@@ -525,16 +547,22 @@ private:
       plan_text = owner_->tr("Reading your mods...");
     } else {
       const core::plan plan = svc.resolve(owner_->mode());
-      if (plan.stack.empty() && plan.ok()) {
-        plan_text = owner_->tr("No mods are enabled for") + " " +
+      // The map sits outside the stack, so a custom map on its own (the
+      // usual Zombies setup) is a plan worth saving too.
+      if (plan.stack.empty() && !plan.map && plan.ok()) {
+        plan_text = owner_->tr("No mods or map are enabled for") + " " +
                     owner_->tr(mode) + ". " +
-                    owner_->tr("Enable some in Mods first.");
+                    owner_->tr("Enable some first.");
       } else if (!plan.ok()) {
         const std::size_t errors = plan.diags.count(core::severity::error);
         plan_text = owner_->tr("The") + " " + owner_->tr(mode) + " " +
                     owner_->tr("plan has") + " " + std::to_string(errors) +
                     " " + owner_->tr(errors == 1 ? "problem" : "problems") +
                     ". " + owner_->tr("Fix them in Mods first.");
+      } else if (plan.stack.empty()) {
+        plan_ok = true;
+        plan_text = owner_->tr("Only a map in the") + " " + owner_->tr(mode) +
+                    " " + owner_->tr("plan, pinned by its files.");
       } else {
         plan_ok = true;
         plan_text = std::to_string(plan.stack.size()) + " " +
@@ -571,6 +599,87 @@ private:
     // so focus waits for the next frames.
     focus_id_ = element_id;
     focus_tries_ = 30;
+  }
+
+  // Something the arrows, Enter and the pad can act on.
+  static bool usable(Rml::Element *element) {
+    return element && element->IsVisible(true) &&
+           element->GetComputedValues().tab_index() ==
+               Rml::Style::TabIndex::Auto;
+  }
+
+  // data-if hides an element with display: none, and RmlUi then hands its
+  // focus to the parent div, which has no tab-index: arrows, Enter and the
+  // pad do nothing there until Esc. That happens on this screen when Check
+  // again finds the pack ready (both Check again buttons go), when a Steam
+  // button goes because its mod is now installed, or when a whole box goes
+  // with the focus inside it. Put the focus back on the nearest control. A
+  // mouse click on empty space also focuses a div, but the control focused
+  // before is still there then, so that is left alone.
+  void keep_focus() {
+    if (!doc || !focus_id_.empty() || owner_->current() != id() ||
+        owner_->dialog_open()) {
+      return;
+    }
+    Rml::Context *context = doc->GetContext();
+    Rml::Element *focus = context ? context->GetFocusElement() : nullptr;
+    if (!focus || focus->GetOwnerDocument() != doc) {
+      return;
+    }
+    if (usable(focus)) {
+      last_focus_ = focus->GetId();
+      return;
+    }
+    const bool lost =
+        !focus->IsVisible(true) ||
+        (!last_focus_.empty() && !usable(doc->GetElementById(last_focus_)));
+    if (!lost) {
+      return;
+    }
+    for (const std::string &candidate : recovery_order(last_focus_)) {
+      Rml::Element *target = doc->GetElementById(candidate);
+      if (usable(target)) {
+        target->Focus(true);
+        target->ScrollIntoView(Rml::ScrollAlignment::Nearest);
+        last_focus_ = candidate;
+        return;
+      }
+    }
+    if (Rml::Element *target = default_focus(); usable(target)) {
+      target->Focus(true);
+      target->ScrollIntoView(Rml::ScrollAlignment::Nearest);
+      last_focus_ = target->GetId();
+    } else {
+      last_focus_.clear(); // nothing to go to: do not try every frame
+    }
+  }
+
+  // Where focus goes when the control it was on went away, nearest first.
+  // Hidden candidates are skipped by keep_focus.
+  std::vector<std::string> recovery_order(const std::string &last) const {
+    std::vector<std::string> out;
+    const bool list_row = last.size() > 5 && last.starts_with("pack-") &&
+                          last[5] >= '0' && last[5] <= '9';
+    if (list_row) {
+      return out; // the selected pack in the list (default_focus)
+    }
+    // A pinned mod's row and its Steam button take turns: the row is a stop
+    // only while it has no button.
+    if (last.starts_with("steam-")) {
+      out.push_back("item-" + last.substr(6));
+    } else if (last.starts_with("item-")) {
+      out.push_back("steam-" + last.substr(5));
+    }
+    out.push_back("result-home");
+    for (std::size_t i = 0; i < items_.size(); ++i) {
+      if (!items_[i].ws.empty()) {
+        out.push_back("steam-" + std::to_string(i));
+      }
+    }
+    out.push_back("result-recheck");
+    out.push_back("pack-recheck");
+    out.push_back("pack-apply");
+    return out;
   }
 
   void notify(const std::string &text, bool error = false) {
@@ -643,11 +752,12 @@ private:
                                             "in Mods, then save it as a pack.")));
       return;
     }
-    if (plan.stack.empty()) {
+    // A map with no mods is still a pack: pack_from_plan records the map.
+    if (plan.stack.empty() && !plan.map) {
       set_if_changed("name_error", name_error_,
-                     Rml::String(owner_->tr("No mods are enabled for this "
-                                            "mode, so there is nothing to "
-                                            "save.")));
+                     Rml::String(owner_->tr("No mods or map are enabled for "
+                                            "this mode, so there is nothing "
+                                            "to save.")));
       return;
     }
     // Workshop ids come from each installed manifest, so the pack can send
@@ -676,19 +786,21 @@ private:
           {"Replace it", "Keep both", "Cancel"},
           [this, p, existing_id](int choice) mutable {
             if (choice == 0) {
-              backup("replace pack " + existing_id);
               p.id = existing_id;
-              store(p, "Replaced");
+              store(p, "Replaced", "replace pack ");
             } else if (choice == 1) {
-              store(p, "Saved");
+              store(p, "Saved", "save pack ");
             }
           });
       return;
     }
-    store(p, "Saved");
+    store(p, "Saved", "save pack ");
   }
 
-  void store(const core::pack &p, const char *verb) {
+  void store(const core::pack &p, const char *verb, const char *why) {
+    // Every change to packs is backed up first (DESIGN.md 8.5), a new pack
+    // as much as a replaced one.
+    backup(why + p.id);
     core::diagnostics diags;
     if (!core::write_pack(folder(), p, diags)) {
       const std::string why =
@@ -871,10 +983,12 @@ private:
     if (!picked) {
       return; // cancelled
     }
-    fs::path file = *picked;
-    // The picker adds no extension of its own; a bare name gets the pack one.
-    if (!file.has_extension()) {
-      file += ".xpack.json";
+    // The picker adds no extension of its own, and a name with a dot in it
+    // ("Zombies v1.2") still needs the pack one, or the import picker's
+    // *.xpack.json filter would not show the file.
+    const fs::path file = core::with_pack_extension(*picked);
+    if (file != *picked) {
+      // The picker asked about replacing the name as typed, not this one.
       std::error_code ec;
       if (fs::exists(file, ec)) {
         owner_->dialog("Replace the file?",
@@ -977,7 +1091,9 @@ private:
       focus_later("share-code");
       return;
     }
-    finish_import(core::read_pack_text(text), owner_->tr("share code"), true);
+    // Anything but pasted JSON is read as a share code, so a mistyped code
+    // gets decode_share_code's reasons rather than a JSON parse error.
+    finish_import(core::read_pasted_pack(text), owner_->tr("share code"), true);
   }
 
   void import_file() {
@@ -1032,6 +1148,7 @@ private:
                       owner_->tr("is already in your packs, unchanged."),
                   notes);
     } else {
+      backup("import pack " + p.id); // a change to packs (DESIGN.md 8.5)
       core::diagnostics diags;
       if (!core::write_pack(folder(), p, diags)) {
         std::vector<std::string> why;
@@ -1100,6 +1217,9 @@ private:
   std::size_t result_problems_ = 0;
   std::string focus_id_;
   int focus_tries_ = 0;
+  std::string scroll_id_; // scrolled into view again for scroll_frames_
+  int scroll_frames_ = 0;
+  std::string last_focus_; // the last control that had focus (keep_focus)
 
   Rml::Vector<pack_row> rows_;
   Rml::String count_text_, empty_text_, library_note_;

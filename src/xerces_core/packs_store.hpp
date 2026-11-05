@@ -51,11 +51,17 @@ pack_library read_pack_library(const std::filesystem::path &folder);
 bool write_pack(const std::filesystem::path &folder, const pack &value,
                 diagnostics &diags);
 
-// Removes <folder>\<id>.json. False if it was not there or could not go.
+// Removes <folder>\<id>.json and every other .json file in folder that holds
+// a pack with this id (copies would bring it back on the next read). False if
+// none was there or none could go.
 bool remove_pack(const std::filesystem::path &folder, std::string_view id);
 
 // A file someone gave the player: pack JSON or a share code saved as text.
 pack_result read_pack_text(std::string_view text);
+// What the player pasted into the share-code field: pack JSON when it starts
+// with '{', else a share code, so a mistyped or unknown code gets the
+// share-code reasons rather than a JSON parse error.
+pack_result read_pasted_pack(std::string_view text);
 // The same for a file on disk, refusing missing, unreadable and oversized
 // files with a plain message.
 pack_result read_pack_file(const std::filesystem::path &file);
@@ -87,6 +93,11 @@ std::string strip_colour_codes(std::string_view text);
 // kept, anything else (path separators, ':' and the like) replaced; never
 // empty. Without the extension.
 std::string pack_file_stem(std::string_view name);
+// The file an export writes, from the name typed in the save picker: kept
+// when it already ends in ".json" (any case), else given ".xpack.json"
+// (".json" after a typed ".xpack"). Judged on the end of the name, because
+// std::filesystem sees ".2" as the extension of "Zombies v1.2".
+std::filesystem::path with_pack_extension(const std::filesystem::path &file);
 
 // How each pinned mod (and the map) compares with what is installed.
 enum class pack_item_state {

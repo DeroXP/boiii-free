@@ -59,7 +59,10 @@
 				<span class="items-count">{{sel_state}}</span>
 				<button id="pack-recheck" class="small-button" data-if="show_recheck" data-event-click="act('recheck')"><span>Check again</span></button>
 			</div>
-			<div class="row item-row" data-for="m, j : items">
+			<!-- A row without a Steam button is a focus stop itself, so the arrows
+			     (and the scroll that follows focus) reach every pinned mod; a row with
+			     one is reached through its button. -->
+			<div class="row item-row" data-for="m, j : items" data-attr-id="'item-' + j" data-class-focusable="m.ws == ''">
 				<span class="row-n">{{m.n}}</span>
 				<div class="item-text">
 					<div class="item-name">{{m.name}}</div>

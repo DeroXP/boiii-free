@@ -125,6 +125,50 @@ TEST_CASE("packs store: broken files are skipped and reported, not deleted") {
   CHECK(remove_pack(folder, id_1));
   CHECK(read_pack_library(folder).packs.empty());
   CHECK(!fs::exists(folder / "copy.json"));
+  CHECK(fs::exists(folder / "broken.json"));
+}
+
+TEST_CASE("packs store: delete removes every copy of a pack") {
+  temp_dir root("xerces_tests_packs_copies");
+  const fs::path folder = root.path;
+  diagnostics diags;
+  REQUIRE(write_pack(folder, sample(id_1, "Good"), diags));
+  REQUIRE(write_pack(folder, sample(id_2, "Other"), diags));
+  // The library lists one file per id, so two strays are only reported.
+  write(folder / "copy-a.json", pack_to_json(sample(id_1, "Good")));
+  write(folder / "copy-b.json", pack_to_json(sample(id_1, "Good")));
+  REQUIRE_EQ(read_pack_library(folder).packs.size(), 2u);
+
+  CHECK(remove_pack(folder, id_1));
+  const pack_library library = read_pack_library(folder);
+  REQUIRE_EQ(library.packs.size(), 1u);
+  CHECK_EQ(library.packs[0].value.id, id_2);
+  CHECK(!fs::exists(folder / "copy-a.json"));
+  CHECK(!fs::exists(folder / "copy-b.json"));
+
+  // Only strays are left: they still go, and the call reports it.
+  write(folder / "stray.json", pack_to_json(sample(id_1, "Good")));
+  CHECK(remove_pack(folder, id_1));
+  CHECK(!fs::exists(folder / "stray.json"));
+  CHECK(fs::exists(pack_library_file(folder, id_2)));
+}
+
+TEST_CASE("packs store: a map with no mods is a pack") {
+  temp_dir root("xerces_tests_packs_map_only");
+  pack p;
+  p.id = id_1;
+  p.name = "Just the map";
+  p.mode = "zm";
+  p.map = pack_map{"ws.3735179543", hash_c};
+  diagnostics diags;
+  REQUIRE(write_pack(root.path, p, diags));
+  CHECK(diags.empty());
+  const pack_library library = read_pack_library(root.path);
+  REQUIRE_EQ(library.packs.size(), 1u);
+  REQUIRE(library.packs[0].value.map.has_value());
+  CHECK_EQ(library.packs[0].value.map->id, "ws.3735179543");
+  CHECK(library.packs[0].value.mods.empty());
+  CHECK(read_pasted_pack(encode_share_code(p)).ok());
 }
 
 TEST_CASE("packs store: invalid packs are not written") {
@@ -164,6 +208,34 @@ TEST_CASE("packs store: reading files and share codes") {
   CHECK(read_pack_file(root.path / "big.json").diags.has("pack.file.size"));
   CHECK(read_pack_text("XRC1.!!!").diags.has("pack.code.encoding"));
   CHECK(!read_pack_text("{\"schema\": 2}").ok());
+
+  // The share-code field: codes, and JSON pasted in.
+  CHECK(read_pasted_pack("  " + encode_share_code(p) + "\n").ok());
+  CHECK(read_pasted_pack(" " + pack_to_json(p)).ok());
+  CHECK(read_pasted_pack("\xEF\xBB\xBF" + pack_to_json(p)).ok());
+  // Anything else is a share code that is wrong, said as such.
+  CHECK(read_pasted_pack("XRC-ABCD1234").diags.has("pack.code.prefix"));
+  CHECK(read_pasted_pack("xrc1.abc").diags.has("pack.code.prefix"));
+  CHECK(!read_pasted_pack("XRC-ABCD1234").diags.has("pack.json"));
+  CHECK(read_pasted_pack("XRC1.!!!").diags.has("pack.code.encoding"));
+  CHECK(read_pasted_pack("{ not json").diags.has("pack.json"));
+}
+
+TEST_CASE("packs store: export file names get the pack extension") {
+  const auto named = [](const char *text) {
+    return with_pack_extension(fs::path("C:/out") / text).filename().string();
+  };
+  CHECK_EQ(named("Weekend"), "Weekend.xpack.json");
+  // A dot in the name is not an extension.
+  CHECK_EQ(named("Zombies v1.2"), "Zombies v1.2.xpack.json");
+  CHECK_EQ(named("weekend.v2"), "weekend.v2.xpack.json");
+  CHECK_EQ(named("Weekend.xpack"), "Weekend.xpack.json");
+  // Names that already end in .json are what the player chose.
+  CHECK_EQ(named("Weekend.xpack.json"), "Weekend.xpack.json");
+  CHECK_EQ(named("Weekend.XPACK.JSON"), "Weekend.XPACK.JSON");
+  CHECK_EQ(named("weekend.json"), "weekend.json");
+  CHECK_EQ(with_pack_extension(fs::path("C:/out") / "Zombies v1.2").parent_path(),
+           fs::path("C:/out"));
 }
 
 TEST_CASE("packs store: imports never overwrite a different pack") {
