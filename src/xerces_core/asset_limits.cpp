@@ -10,22 +10,33 @@
 
 namespace xerces_core {
 namespace {
-// utils::string::replace (src/common/utils/string.cpp), as it is. The loop
-// replaces at position 0 before it ever searches, so the first from.length()
-// characters become `to` whatever they are.
-std::string upstream_replace(std::string str, const std::string &from,
+// What utils::string::replace (src/common/utils/string.cpp) returns, in one
+// pass. Upstream's loop replaces at position 0 before it ever searches, so
+// the first from.length() characters (all of them, in a shorter text) become
+// `to` whatever they are; it then searches from just after that `to`, and
+// after each `to` it puts in, so it replaces the non-overlapping matches of
+// the rest from left to right and never looks inside a `to`. Upstream calls
+// str.replace in place for each match, which moves the whole tail every time:
+// a 1 MiB file of "\r" took over a minute. This builds the same text in
+// linear time.
+std::string upstream_replace(const std::string &str, const std::string &from,
                              const std::string &to) {
   if (from.empty()) {
     return str;
   }
 
-  for (size_t start_pos = 0; start_pos != std::string::npos;
-       start_pos = str.find(from, start_pos)) {
-    str.replace(start_pos, from.length(), to);
-    start_pos += to.length();
+  std::string out;
+  out.reserve(str.size() + to.size());
+  out += to;
+  std::size_t pos = std::min(from.size(), str.size());
+  for (std::size_t found = str.find(from, pos); found != std::string::npos;
+       found = str.find(from, pos)) {
+    out.append(str, pos, found - pos);
+    out += to;
+    pos = found + from.size();
   }
-
-  return str;
+  out.append(str, pos);
+  return out;
 }
 
 // utils::string::split(const std::string &, char): every part, empty ones
@@ -71,8 +82,11 @@ constexpr bool valid_asset_type(std::int32_t type) {
 
 // DEFAULT_POOL_CONFIGS in src/client/component/asset_limits.cpp, one row per
 // type in type order; names from XAssetType (core.hpp), labels from
-// upstream's launcher (data/launcher/main.html, Asset Pools), fixed from
-// is_fixed_pool (src/client/game/impl/db/db.cpp).
+// upstream's launcher (data/launcher/main.html, Asset Pools). fixed is where
+// reallocate_asset_pool (src/client/game/impl/db/db.cpp) returns before it
+// grows anything: is_fixed_pool's five types, and UI_MAP and WEAPON_FULL,
+// for which DB_GetXAssetTypeSize_Impl (the same file) gives -1, the only
+// types it has no entry size for.
 constexpr asset_pool_info pool_table[] = {
     {0x00, "PHYSPRESET", "Phys Preset", "ap_physpreset", 0x113, false},
     {0x01, "PHYSCONSTRAINTS", "Phys Constraints", "ap_physconstraints", 0x80,
@@ -96,14 +110,14 @@ constexpr asset_pool_info pool_table[] = {
     {0x10, "GFXWORLD", "Gfx Map", "ap_gfx_map", 0x2, true},
     {0x11, "LIGHT_DEF", "Light Def", "ap_lightdef", 0x20, false},
     {0x12, "LENSFLARE_DEF", "Lensflare Def", "ap_lensflaredef", 0x46, false},
-    {0x13, "UI_MAP", "UI Map", "ap_ui_map", 0x00, false},
+    {0x13, "UI_MAP", "UI Map", "ap_ui_map", 0x00, true},
     {0x14, "FONT", "Font", "ap_font", 0x10, false},
     {0x15, "FONTICON", "Font Icon", "ap_fonticon", 0x10, false},
     {0x16, "LOCALIZE_ENTRY", "Localize", "ap_localize", 0x6400, false},
     {0x17, "WEAPON", "Weapon", "ap_weapon", 0x600, false},
     {0x18, "WEAPONDEF", "Weapon Def", "ap_weapondef", 0x00, false},
     {0x19, "WEAPON_VARIANT", "Weapon Variant", "ap_weaponvariant", 0x00, false},
-    {0x1A, "WEAPON_FULL", "Weapon Full", "ap_weaponfull", 0x00, false},
+    {0x1A, "WEAPON_FULL", "Weapon Full", "ap_weaponfull", 0x00, true},
     {0x1B, "CGMEDIA", "CG Media Table", "ap_cgmediatable", 0x5, false},
     {0x1C, "PLAYERSOUNDS", "Player Sounds Table", "ap_playersoundstable", 0x10,
      false},
@@ -359,7 +373,10 @@ std::vector<pool_need> largest_limits(std::span<const mod_pool_limits> mods,
   std::map<std::int32_t, pool_need> by_type;
   for (const mod_pool_limits &mod : mods) {
     for (const pool_limit &limit : mod.limits) {
-      if (!valid_asset_type(limit.type)) {
+      // reallocate_asset_pool grows only while itemCount <
+      // static_cast<int32_t>(new_size) (db.cpp): a size above INT32_MAX is
+      // negative there and changes nothing, so it is no one's largest.
+      if (!valid_asset_type(limit.type) || limit.size > max_pool_size) {
         continue;
       }
       const auto [it, added] = by_type.try_emplace(limit.type);
@@ -375,8 +392,9 @@ std::vector<pool_need> largest_limits(std::span<const mod_pool_limits> mods,
   for (auto &[type, need] : by_type) {
     need.default_size = default_pool_size(settings, type);
     need.fixed = find_asset_pool(type)->fixed;
-    need.raises =
-        !need.fixed && (!need.default_size || need.size > *need.default_size);
+    // A size of 0 never grows anything (itemCount < 0 is never true).
+    need.raises = !need.fixed && need.size > 0 &&
+                  (!need.default_size || need.size > *need.default_size);
     out.push_back(std::move(need));
   }
   return out;

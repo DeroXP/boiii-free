@@ -5,10 +5,14 @@
 #include "harness.hpp"
 
 #include <algorithm>
+#include <charconv>
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <ostream>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -39,6 +43,71 @@ void write_bytes(const fs::path &path, const std::string &bytes) {
   fs::create_directories(path.parent_path());
   std::ofstream(path, std::ios::binary) << bytes;
 }
+
+// Upstream's asset_limits::parse_list with utils::string::replace and split
+// as they are (src/client/component/asset_limits.cpp,
+// src/common/utils/string.cpp), quadratic replace included: what the
+// one-pass parser must agree with.
+namespace upstream {
+std::string replace(std::string str, const std::string &from,
+                    const std::string &to) {
+  if (from.empty()) {
+    return str;
+  }
+  for (size_t start_pos = 0; start_pos != std::string::npos;
+       start_pos = str.find(from, start_pos)) {
+    str.replace(start_pos, from.length(), to);
+    start_pos += to.length();
+  }
+  return str;
+}
+
+std::vector<std::string> split(const std::string &s, char delim) {
+  std::vector<std::string> result;
+  size_t start = 0;
+  size_t end = s.find(delim);
+  while (end != std::string::npos) {
+    result.push_back(s.substr(start, end - start));
+    start = end + 1;
+    end = s.find(delim, start);
+  }
+  result.push_back(s.substr(start));
+  return result;
+}
+
+template <typename T> std::optional<T> parse_int(const std::string_view &str) {
+  const char *first = str.data();
+  const char *last = str.data() + str.size();
+  int base = 10;
+  if (str.starts_with("0x")) {
+    base = 16;
+    first = str.data() + 2;
+  }
+  T result = {};
+  auto [ptr, ec] = std::from_chars(first, last, result, base);
+  if (ec == std::errc() && ptr == last) {
+    return result;
+  }
+  return std::nullopt;
+}
+
+std::vector<pool_limit> parse_list(std::string data) {
+  std::vector<pool_limit> result;
+  data = replace(replace(replace(data, "\r\n", "\n"), "\r", ""), "\t", " ");
+  for (const std::string &line : split(data, '\n')) {
+    const std::vector<std::string> parts = split(line, ' ');
+    if (parts.size() > 1) {
+      const auto type = parse_int<int32_t>(parts[0]);
+      if (type && *type >= 0 && *type < asset_type_count) {
+        if (const auto size = parse_int<uint32_t>(parts.back())) {
+          result.push_back({*type, *size});
+        }
+      }
+    }
+  }
+  return result;
+}
+} // namespace upstream
 } // namespace
 
 namespace xerces_core {
@@ -104,6 +173,65 @@ TEST_CASE("pools: CRLF, lone CR and tabs normalise as upstream's do") {
   CHECK_EQ(parse_pool_limits(header + "23 4096\t\n"), limits{});
 }
 
+TEST_CASE("pools: the one-pass parser reads what upstream's loop reads") {
+  // Random texts compared with upstream's code as it is: a short start of
+  // any of the characters the rules turn on, then lines of numbers and
+  // near-numbers between spaces and tabs, ended by any kind of line break.
+  const std::vector<std::string> starts = {"/", "\r", "\n", " ", "\t", "1"};
+  const std::vector<std::string> fields = {
+      "23", "0x17", "4096", "0x1F40", "0",  "1", "0X1",
+      "-1", "a2",   "0x67", "x",      "0x", ""};
+  const std::vector<std::string> gaps = {" ",  " ",   " ", "  ",
+                                         "\t", " \t", "\r"};
+  const std::vector<std::string> ends = {"\n", "\n", "\r\n", "\r", "\n\r", ""};
+  std::mt19937 random(5);
+  const auto any = [&](const std::vector<std::string> &from) {
+    return from[std::uniform_int_distribution<std::size_t>(0, from.size() -
+                                                                  1)(random)];
+  };
+  const auto count = [&](std::size_t most) {
+    return std::uniform_int_distribution<std::size_t>(0, most)(random);
+  };
+  std::size_t found = 0;
+  for (int round = 0; round < 50000; ++round) {
+    std::string text;
+    for (std::size_t n = count(4); n > 0; --n) {
+      text += any(starts);
+    }
+    for (std::size_t line = count(4); line > 0; --line) {
+      text += any(fields);
+      for (std::size_t n = count(3); n > 0; --n) {
+        text += any(gaps) + any(fields);
+      }
+      text += any(ends);
+    }
+    const limits expected = upstream::parse_list(text);
+    found += expected.size();
+    const limits got = parse_pool_limits(text);
+    CHECK_EQ(got, expected);
+    if (got != expected) {
+      break; // one failure is enough to read
+    }
+  }
+  CHECK(found > 1000); // the texts did make limits
+}
+
+TEST_CASE("pools: a large file of line breaks parses in linear time") {
+  // Upstream's replace shifts the rest of the text at every match that
+  // shrinks it; copied as it was, a file just under max_pool_file_bytes of
+  // "\r" took over a minute.
+  for (const std::string fill : {"\r", "\r\n", "\t"}) {
+    std::string text;
+    while (text.size() + fill.size() < max_pool_file_bytes) {
+      text += fill;
+    }
+    text += "\n// pools\n23 4096\n";
+    const auto started = std::chrono::steady_clock::now();
+    CHECK_EQ(parse_pool_limits(text), (limits{{23, 4096}}));
+    CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(5));
+  }
+}
+
 TEST_CASE("pools: parts are split at every single space") {
   // Two spaces make an empty middle part, which is ignored.
   CHECK_EQ(parse_pool_limits(header + "23  4096\n"), (limits{{23, 4096}}));
@@ -163,13 +291,15 @@ TEST_CASE("pools: the table is upstream's DEFAULT_POOL_CONFIGS") {
   CHECK_EQ(std::string(find_asset_pool(0x28)->setting_key),
            std::string("ap_klf"));
   CHECK_EQ(find_asset_pool(0x66)->default_size, 0x32u);
-  // is_fixed_pool: the engine sizes these itself.
-  for (const std::int32_t type : {0x5, 0x9, 0xD, 0xE, 0x10}) {
+  // reallocate_asset_pool never grows these: is_fixed_pool's five, which the
+  // engine sizes itself, and UI_MAP and WEAPON_FULL, which have no entry size
+  // (DB_GetXAssetTypeSize_Impl gives -1).
+  for (const std::int32_t type : {0x5, 0x9, 0xD, 0xE, 0x10, 0x13, 0x1A}) {
     CHECK(find_asset_pool(type)->fixed);
   }
   CHECK_EQ(std::count_if(pools.begin(), pools.end(),
                          [](const asset_pool_info &p) { return p.fixed; }),
-           std::ptrdiff_t{5});
+           std::ptrdiff_t{7});
   CHECK(find_asset_pool(-1) == nullptr);
   CHECK(find_asset_pool(0x67) == nullptr);
 }
@@ -237,6 +367,10 @@ TEST_CASE("pools: the default a mod's size is compared with") {
   // Fixed pools and pools whose size is 0 keep the game's own size.
   CHECK(!default_pool_size(stock, 0x9).has_value());
   CHECK(!default_pool_size(stock, 0x13).has_value()); // UI_MAP, 0x00
+  CHECK(!default_pool_size(stock, 0x18).has_value()); // WEAPONDEF, 0x00
+  // UI_MAP never grows, so a setting changes nothing either.
+  CHECK(!default_pool_size(parse_pool_settings(R"({"ap_ui_map":"64"})"), 0x13)
+             .has_value());
   CHECK(!default_pool_size(parse_pool_settings(R"({"ap_weapon":"0"})"), 0x17)
              .has_value());
   CHECK_EQ(
@@ -289,6 +423,60 @@ TEST_CASE("pools: largest limits over many mods") {
   CHECK(!big[3].raises);
   CHECK(!big[4].raises);
   CHECK(largest_limits({}).empty());
+}
+
+TEST_CASE("pools: sizes and pools the client never grows raise nothing") {
+  // A T7Recharged-style list with sizes of 0, and pools with no entry size.
+  // reallocate_asset_pool grows nothing to 0 (itemCount < 0 is never true)
+  // and returns at once for UI_MAP and WEAPON_FULL.
+  const limits t7 = parse_pool_limits("// T7Recharged pools\r\n"
+                                      "19 uimap 0 64\r\n"
+                                      "26 weaponfull 0 64\r\n"
+                                      "24 weapondef 0 0\r\n"
+                                      "68 typeinfo 0 0\r\n"
+                                      "23 weapon 1536 0\r\n");
+  REQUIRE_EQ(t7.size(), std::size_t{5});
+  const std::vector<mod_pool_limits> mods = {{"t7.mod", t7}};
+  for (const auto &settings :
+       {parse_pool_settings(""),
+        parse_pool_settings(R"({"asset_limits_enabled":"0"})")}) {
+    const std::vector<pool_need> needs = largest_limits(mods, settings);
+    REQUIRE_EQ(needs.size(), std::size_t{5});
+    for (const pool_need &need : needs) {
+      CHECK(!need.raises);
+    }
+    CHECK(needs[0].fixed); // UI_MAP
+    CHECK(!needs[1].fixed);
+    CHECK(!needs[2].fixed);
+    CHECK(needs[3].fixed); // WEAPON_FULL
+  }
+  // 1 is the smallest size that grows a pool whose default is unknown.
+  const limits one = {{0x18, 1}};
+  CHECK(
+      largest_limits(std::vector<mod_pool_limits>{{"one.mod", one}})[0].raises);
+}
+
+TEST_CASE("pools: sizes above INT32_MAX are no one's largest") {
+  // reallocate_asset_pool grows only while itemCount <
+  // static_cast<int32_t>(new_size), which is negative above INT32_MAX: the
+  // client ignores those lines, and the next mod's size is what it applies.
+  const limits huge = parse_pool_limits(header + "4 4294967295\n"
+                                                 "23 0x80000000\n");
+  REQUIRE_EQ(huge, (limits{{4, 4294967295u}, {23, 0x80000000u}}));
+  const limits fine = {{4, 20000}, {23, 0x7FFFFFFF}};
+  const std::vector<mod_pool_limits> mods = {{"ws.111", huge},
+                                             {"ws.222", fine}};
+  const std::vector<pool_need> needs = largest_limits(mods);
+  REQUIRE_EQ(needs.size(), std::size_t{2});
+  CHECK_EQ(needs[0].type, 4);
+  CHECK_EQ(needs[0].size, 20000u);
+  CHECK_EQ(needs[0].mod, std::string("ws.222"));
+  CHECK(needs[0].raises);
+  CHECK_EQ(needs[1].size, max_pool_size);
+  CHECK_EQ(needs[1].mod, std::string("ws.222"));
+  CHECK(needs[1].raises);
+  // Alone, they ask for nothing the client applies.
+  CHECK(largest_limits(std::vector<mod_pool_limits>{{"ws.111", huge}}).empty());
 }
 
 TEST_CASE("pools: the file is found where the client looks") {

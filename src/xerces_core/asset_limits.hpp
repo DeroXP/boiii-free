@@ -1,17 +1,19 @@
 #pragma once
 
-// Asset pool limits, headless (docs/DESIGN.md 5.4 step 4): what a mod's
-// assetlimits.txt or assetpools.txt asks for, the client's own pool sizes and
-// their launcher_settings.json overrides, and the largest size each pool needs
-// for a set of mods. The rules are upstream's client's, so the numbers are the
-// ones the game uses today:
+// Asset pool limits, headless (docs/DESIGN.md 5.4 step 4): what a mod's or
+// map's assetlimits.txt or assetpools.txt asks for, the client's own pool
+// sizes and their launcher_settings.json overrides, and the largest size each
+// pool needs for a set of mods and maps. The rules are upstream's client's,
+// so the numbers are the ones the game uses today:
 //
 // - src/client/component/asset_limits.cpp: parse_list, DEFAULT_POOL_CONFIGS,
 //   is_enabled and get_pool_size;
 // - src/client/game/impl/ugc/ugc.cpp: UGC_LoadItem_PrepareAssetPool, which
-//   finds a mod's file when the mod loads;
+//   finds the file when a mod loads (UGC_LoadModByPublisherId_Impl, for the
+//   main mod and each stacked one) and when a custom map loads
+//   (UGC_LoadUsermapByPublisherId_Impl);
 // - src/client/game/impl/db/db.cpp: reallocate_asset_pool only grows a pool,
-//   and never one of the fixed pools (is_fixed_pool).
+//   never past INT32_MAX entries, and never one of the fixed pools.
 //
 // Sizing the pools in the game and blocking growth while assets are live is
 // not here; this makes the numbers known.
@@ -68,23 +70,25 @@ struct pool_limit {
 std::vector<pool_limit> parse_pool_limits(std::string data);
 
 // The names the client looks for. The first file found with either name is
-// the mod's pool file, whatever is in it.
+// the mod's or map's pool file, whatever is in it.
 inline constexpr std::string_view pool_file_names[] = {"assetlimits.txt",
                                                        "assetpools.txt"};
 
-// Where a mod's folder came from, which decides where the client looks.
+// Where a mod's or map's folder came from, which decides where the client
+// looks.
 enum class content_layout {
-  // <game>\mods\<name>: the client's mod entry points at <name>\zone when
-  // that is a folder, else at <name> (ugc.cpp, va_user_content_path in
-  // workshop.cpp; the disk fallback's populate_workshop_paths uses zone too).
+  // <game>\mods\<name> or <game>\usermaps\<name>: the client's entry points
+  // at <name>\zone when that is a folder, else at <name> (ugc.cpp,
+  // va_mods_path and va_user_content_path in workshop.cpp; the disk
+  // fallback's populate_workshop_paths uses zone too).
   game_folder,
-  // A Workshop item (steamapps\workshop\content\311210\<id>): the entry
-  // points at the item folder itself (workshop.cpp,
+  // A Workshop item (steamapps\workshop\content\311210\<id>), mod or map:
+  // the entry points at the item folder itself (workshop.cpp,
   // supplement_ugc_from_workshop).
   workshop,
 };
 
-// The folder the client searches for a mod's pool file.
+// The folder the client searches for a mod's or map's pool file.
 std::filesystem::path pool_search_root(const std::filesystem::path &folder,
                                        content_layout layout);
 
@@ -101,7 +105,14 @@ std::optional<std::filesystem::path>
 find_pool_file(const std::filesystem::path &root);
 
 // Pool files larger than this are not read (a real one is a few kilobytes).
+// The client reads any size, so the catalog marks such a file unread
+// (installed_content::pool_file_unread) rather than as asking for nothing.
 inline constexpr std::uintmax_t max_pool_file_bytes = std::uintmax_t{1} << 20;
+
+// The largest size the client grows a pool to: reallocate_asset_pool
+// (db.cpp) grows only while the pool's count is below
+// static_cast<int32_t>(new_size), which is negative for anything larger.
+inline constexpr std::uint32_t max_pool_size = 0x7FFFFFFF;
 
 // One pool the client sizes at DB_AssetPoolInit (DEFAULT_POOL_CONFIGS).
 struct asset_pool_info {
@@ -110,8 +121,11 @@ struct asset_pool_info {
   std::string_view label;       // upstream launcher's label: "XModel"
   std::string_view setting_key; // launcher_settings.json key: "ap_xmodel"
   std::uint32_t default_size;   // upstream's default
-  // The client never grows it, from settings or mod files: the engine sizes
-  // these itself (is_fixed_pool in db.cpp).
+  // The client never grows it, from settings or pool files:
+  // reallocate_asset_pool (db.cpp) returns first for is_fixed_pool's types,
+  // which the engine sizes itself (IMAGE, XMODELMESH and the three world
+  // pools), and for the two DB_GetXAssetTypeSize_Impl has no entry size for
+  // (it gives -1 for UI_MAP and WEAPON_FULL).
   bool fixed;
 };
 
@@ -148,26 +162,29 @@ std::uint32_t pool_size_setting(const pool_settings &settings,
 std::optional<std::uint32_t> default_pool_size(const pool_settings &settings,
                                                std::int32_t type);
 
-// One mod's pool limits, for largest_limits.
+// One mod's or map's pool limits, for largest_limits.
 struct mod_pool_limits {
   std::string id;
   std::span<const pool_limit> limits;
 };
 
-// One pool a set of mods needs.
+// One pool a set of mods (and maps) needs.
 struct pool_need {
   std::int32_t type = 0;
-  std::uint32_t size = 0; // the largest size any of the mods asks for
-  std::string mod;        // the mod asking for it: the first given, on a tie
+  std::uint32_t size = 0; // the largest size any of them asks for
+  std::string mod; // the mod or map asking for it: the first given, on a tie
   std::optional<std::uint32_t> default_size; // default_pool_size
   bool fixed = false;                        // asset_pool_info::fixed
-  // The client grows the pool for it: not fixed, and larger than the default
-  // (or the default is the game's own size, which Xerces does not know).
+  // The client grows the pool for it: not fixed, not 0, and larger than the
+  // default (or the default is the game's own size, which Xerces does not
+  // know).
   bool raises = false;
 };
 
-// Per type, the largest size any of the mods asks for, by type. Every type a
-// mod asks for is listed, also when the default is larger already.
+// Per type, the largest size any of them asks for, by type. Every type one
+// asks for is listed, also when the default is larger already, but a size
+// above max_pool_size is left out: the client never applies it, so it is no
+// one's largest.
 std::vector<pool_need> largest_limits(std::span<const mod_pool_limits> mods,
                                       const pool_settings &settings = {});
 } // namespace xerces_core
