@@ -1,0 +1,140 @@
+/* Packs (DESIGN.md 7.3, 8.1 to 8.3) in C / Signal: the library and the
+   selected pack on the left, saving and importing on the right, 1 dp rules
+   instead of boxes, the accent only for the selection and for problems. */
+
+#packs-main
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	gap: 40dp;
+	padding: 32dp 32dp 24dp 32dp;
+	box-sizing: border-box;
+}
+.packs-primary { flex: 999 1 560dp; max-width: 880dp; }
+.packs-aside { flex: 1 1 280dp; max-width: 420dp; display: flex; flex-direction: column; gap: 40dp; }
+
+/* --------------------------------------------------------------- library */
+.library { margin-top: 32dp; }
+.pack-row
+{
+	gap: 12dp;
+	width: 100%;
+	min-height: 60dp;
+	padding: 10dp 8dp;
+	border-bottom: 1dp var(--line);
+	text-align: left;
+}
+.pack-row:hover { background-color: var(--surface); }
+.pack-row .mark-dot { display: block; flex: 0 0 8dp; width: 8dp; height: 8dp; }
+.pack-row.selected .mark-dot { background-color: var(--accent); }
+.pack-row.selected { background-color: var(--surface2); }
+.pack-text { display: flex; flex-direction: column; gap: 4dp; flex: 1 1 auto; }
+.pack-name { font-size: 16dp; font-weight: 600; line-height: 20dp; }
+.pack-row.selected .pack-name { font-weight: 700; }
+.pack-meta { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.pack-state { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; font-weight: 500; }
+.pack-state.bad { color: var(--accent-text); }
+.library-note { margin-top: 12dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 18dp; color: var(--text2); }
+
+/* ---------------------------------------------------------------- detail */
+.detail { margin-top: 40dp; }
+.detail-title
+{
+	margin-top: 8dp;
+	font-weight: 800;
+	font-size: 40dp;
+	line-height: 44dp;
+	letter-spacing: -1.2dp;
+}
+.detail-meta { margin-top: 12dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.detail-actions { margin-top: 24dp; column-gap: 12dp; row-gap: 12dp; }
+
+.result-box
+{
+	margin-top: 24dp;
+	padding: 16dp 20dp;
+	border: 1dp var(--accent);
+	border-radius: 2dp;
+}
+.result-box .label { color: var(--accent-text); }
+.result-box.ok { border-color: var(--text); }
+.result-box.ok .label { color: var(--text2); }
+.result-title { margin-top: 6dp; font-size: 15dp; font-weight: 600; line-height: 20dp; }
+.result-line { margin-top: 6dp; font-size: 13dp; line-height: 18dp; color: var(--text2); }
+.result-actions { margin-top: 14dp; }
+
+.items-head
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 12dp;
+	min-height: 32dp;
+	margin-top: 32dp;
+	padding-bottom: 12dp;
+	border-bottom: 1dp var(--text);
+}
+.items-count { flex: 1 1 auto; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.item-row { min-height: 56dp; }
+.row-n { width: 32dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.item-text { display: flex; flex-direction: column; gap: 2dp; flex: 1 1 auto; }
+.item-name { font-size: 14dp; font-weight: 500; line-height: 18dp; }
+.item-sub { font-family: "IBM Plex Mono"; font-size: 11dp; line-height: 16dp; color: var(--text2); }
+.item-ver { flex: 0 0 168dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.item-state { flex: 0 0 112dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; font-weight: 500; }
+.item-state.bad { color: var(--accent-text); }
+/* The Steam button's column is kept when a row has no button, so the
+   version and state columns line up down the list. */
+.item-action { display: flex; flex-direction: row; justify-content: flex-end; flex: 0 0 152dp; }
+
+/* ----------------------------------------------------------------- aside */
+.panel .panel-head { margin-bottom: 16dp; }
+.mode-row { display: flex; flex-direction: row; flex-wrap: wrap; column-gap: 16dp; row-gap: 4dp; border-bottom: 1dp var(--line); }
+.seg
+{
+	gap: 6dp;
+	min-height: 36dp;
+	padding: 0dp 2dp;
+	margin-bottom: -1dp;
+	border-bottom: 2dp transparent;
+	color: var(--text2);
+	font-size: 13dp;
+	font-weight: 600;
+}
+.seg .mark-dot { display: block; width: 6dp; height: 6dp; }
+.seg.on { color: var(--text); border-bottom-color: var(--text); }
+.seg.on .mark-dot { background-color: var(--accent); }
+.seg:hover { color: var(--text); }
+.plan-text { margin-top: 12dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 18dp; color: var(--text2); }
+.plan-text.bad { color: var(--accent-text); }
+.field-label { margin-top: 20dp; margin-bottom: 8dp; }
+.first-label { margin-top: 0dp; }
+.wide-field { width: 100%; }
+input.text:placeholder-shown { color: var(--text2); }
+.field-error { margin-top: 8dp; font-size: 13dp; line-height: 18dp; color: var(--accent-text); }
+.wide-button { width: 100%; margin-top: 16dp; justify-content: center; }
+.import-actions { margin-top: 16dp; }
+
+.import-box
+{
+	margin-top: 16dp;
+	padding: 14dp 16dp;
+	border: 1dp var(--accent);
+	border-radius: 2dp;
+}
+.import-box .label { color: var(--accent-text); }
+.import-box.ok { border-color: var(--line); }
+.import-box.ok .label { color: var(--text2); }
+.import-title { margin-top: 6dp; font-size: 14dp; font-weight: 600; line-height: 20dp; }
+.import-line { margin-top: 6dp; font-size: 13dp; line-height: 18dp; color: var(--text2); }
+.aside-note { margin-top: 16dp; font-size: 13dp; line-height: 18dp; color: var(--text2); }
+
+/* Names, ids and messages can be one long word (an 80-character pack name,
+   a mod id, a planner message quoting one): break it rather than run past
+   the column. */
+.pack-name, .pack-meta, .pack-state, .detail-title, .detail-meta, .result-title,
+.result-line, .item-name, .item-sub, .item-ver, .plan-text, .field-error,
+.import-title, .import-line, .library-note
+{ word-break: break-word; }
