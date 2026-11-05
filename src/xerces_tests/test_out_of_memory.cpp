@@ -155,8 +155,9 @@ TEST_CASE("out of memory: what the player reads with mods loaded") {
   CHECK(contains(text.body, "Mods loaded: DS4C Patched v0.85\n"));
   CHECK(contains(text.body, "Maps and mods share that memory, so remove a "
                             "mod or play another map."));
-  // Not until launcher/zone-memory gives the Mods screen that note.
-  CHECK(!contains(text.body, "Mods screen"));
+  // The Mods screen's zone-memory note names the maps that do not fit.
+  CHECK(contains(text.body, "Xerces' Mods screen lists the custom maps that "
+                            "do not fit with your mods."));
   CHECK(contains(text.body, "The details are in Xerces' game log."));
   CHECK_EQ(text.summary,
            std::string("Out of memory while loading zm_backrooms (mods: DS4C "
