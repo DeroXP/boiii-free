@@ -581,6 +581,9 @@ pack pack_from_plan(const plan &resolved, const std::string &name,
   if (resolved.map) {
     out.map = pack_map{resolved.map->id, resolved.map->content_hash};
   }
+  // The conflicts the player allowed for these mods are part of the pack
+  // (5.3 step 2): without them it would fail where the plan did not.
+  out.decisions.allow_conflicts = resolved.allowed_conflicts;
   return out;
 }
 } // namespace xerces_core

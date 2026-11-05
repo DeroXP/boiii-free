@@ -769,6 +769,8 @@ private:
         workshop_ids[entry.id] = *content->info.workshop_id;
       }
     }
+    // With the mods' settings and the conflicts allowed in Mods, which
+    // apply_now gives back to the profile.
     core::pack p =
         core::pack_from_plan(plan, name, core::new_pack_id(), workshop_ids);
     // The build it was made on, as the CLI's export records it; information

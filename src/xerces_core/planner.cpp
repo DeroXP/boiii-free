@@ -792,6 +792,7 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
                                " are declared incompatible" + reason + ".";
       if (request.allowed_conflicts.contains({a->first, b->first})) {
         diags.warning("plan.conflict.allowed", "", text + " Allowed by you.");
+        out.allowed_conflicts.insert({a->first, b->first});
         continue;
       }
       diags.error("plan.conflict.declared", "", text);
