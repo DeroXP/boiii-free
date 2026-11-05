@@ -91,6 +91,17 @@ name_apply_result apply_player_name(const std::filesystem::path &game_dir,
 bool game_name_differs(std::string_view saved,
                        const std::optional<std::string> &in_file);
 
+// A name that could not go into the game's file yet (no file, the file
+// busy, no game folder) when the game folder or the game changes:
+// - write: the game folder was set or found again; the screen said the name
+//   goes in once there is one.
+// - ask: the game ran (it started or exited). It may have written a name of
+//   its own, the one it uses at every start or one the player gave it in
+//   the game, and Xerces cannot tell them apart, so it does not overwrite
+//   it: the screen shows what the file says, and Enter writes.
+// - wait: there is still no file.
+enum class pending_name_step { write, ask, wait };
+pending_name_step pending_name_after(bool folder_changed, bool file_exists);
 
 // ------------------------------------------------------------ launch flags
 // The rule build_launch_command applies: '-' then letters, digits, '-' or

@@ -205,10 +205,11 @@ public:
     if (std::equal(std::begin(key), std::end(key), std::begin(seen_))) {
       return;
     }
-    const bool game_changed = key[1] != seen_[1] || key[2] != seen_[2];
+    const bool folder_changed = key[1] != seen_[1];
+    const bool game_ran = key[2] != seen_[2];
     std::copy(std::begin(key), std::end(key), std::begin(seen_));
-    if (game_changed) {
-      after_game_change();
+    if (folder_changed || game_ran) {
+      after_game_change(folder_changed);
     }
     refresh();
   }
@@ -1093,9 +1094,10 @@ private:
     }
   }
 
-  // The game folder changed or the game exited: a name that could not be
-  // written before may go in now.
-  void after_game_change() {
+  // The game folder changed (folder_changed: set, or found again), or the
+  // game started or exited: a name that could not be written before may go
+  // in now, or wait for the player's Enter (core::pending_name_after).
+  void after_game_change(bool folder_changed) {
     services &s = svc();
     if (detect_pending_ && !s.detecting() && s.game_rev() != detect_from_) {
       detect_pending_ = false;
@@ -1111,7 +1113,14 @@ private:
                        true);
       }
     }
-    if (name_pending_ && s.game().dir) {
+    if (!name_pending_ || !s.game().dir) {
+      return;
+    }
+    std::error_code ec;
+    const bool file_there = fs::is_regular_file(
+        core::player_properties_file(*s.game().dir), ec);
+    switch (core::pending_name_after(folder_changed, file_there)) {
+    case core::pending_name_step::write: {
       const core::name_apply_result result =
           core::apply_player_name(*s.game().dir, config().player_name);
       if (result.status == core::name_apply::written ||
@@ -1119,8 +1128,20 @@ private:
         name_pending_ = false;
         name_error_.clear();
         log_info("launcher.settings.player_name",
-                 "written to properties.json after the game changed");
+                 "written to properties.json after the game folder changed");
       }
+      break;
+    }
+    case core::pending_name_step::ask:
+      // The game may have stored a name of its own (or the player's, from
+      // its "name" command): the note says what the file holds, and Enter
+      // writes the saved name over it.
+      name_pending_ = false;
+      log_info("launcher.settings.player_name",
+               "not written after the game ran; Enter writes it");
+      break;
+    case core::pending_name_step::wait:
+      break;
     }
   }
 

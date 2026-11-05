@@ -143,6 +143,26 @@ TEST_CASE("settings: Enter on an empty name takes the file's name out") {
   fs::remove_all(game);
 }
 
+TEST_CASE("settings: a waiting name does not overwrite one set in the game") {
+  CHECK(pending_name_after(true, true) == pending_name_step::write);
+  CHECK(pending_name_after(false, true) == pending_name_step::ask);
+  CHECK(pending_name_after(true, false) == pending_name_step::wait);
+  CHECK(pending_name_after(false, false) == pending_name_step::wait);
+
+  // No file yet, so the name waits; the game makes the file when it starts
+  // and the player renames in the game. When the game exits, Xerces asks
+  // instead of writing, and the file keeps the player's newer name.
+  const fs::path game = fresh_game("pending_name");
+  const fs::path file = player_properties_file(game);
+  CHECK_EQ(apply_player_name(game, "Dero").status, name_apply::no_file);
+  CHECK(pending_name_after(false, fs::exists(file)) == pending_name_step::wait);
+  write_bytes(file, "{\"playerName\":\"Other\"}");
+  CHECK(pending_name_after(false, fs::exists(file)) == pending_name_step::ask);
+  CHECK_EQ(read_player_name(read_bytes(file)).value_or(""), std::string("Other"));
+  CHECK(game_name_differs("Dero", read_player_name(read_bytes(file))));
+  fs::remove_all(game);
+}
+
 TEST_CASE("settings: the game's saved skip switches are read from config.cfg") {
   CHECK_EQ(game_config_file("C:/Game"),
            fs::path("C:/Game") / "boiii_players" / "user" / "config.cfg");

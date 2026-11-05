@@ -252,6 +252,13 @@ bool game_name_differs(std::string_view saved,
   return in_file.value_or("") != saved;
 }
 
+pending_name_step pending_name_after(bool folder_changed, bool file_exists) {
+  if (!file_exists) {
+    return pending_name_step::wait;
+  }
+  return folder_changed ? pending_name_step::write : pending_name_step::ask;
+}
+
 // ------------------------------------------------------------ launch flags
 bool valid_launch_flag(std::string_view flag) {
   if (flag.size() < 2 || flag.size() > 64 || flag[0] != '-') {
