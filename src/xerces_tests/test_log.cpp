@@ -62,7 +62,9 @@ TEST_CASE("logs: server addresses are replaced") {
            "-launch +connect " + a);
   CHECK_EQ(redact_addresses("+CONNECT myserver:27017 +set x 1"),
            "+CONNECT " + a + " +set x 1");
-  CHECK_EQ(redact_addresses(R"({"cmd":"+connect \"host\""})"),
+  CHECK_EQ(redact_addresses("+connect \"host\" -x"),
+           "+connect \"" + a + "\" -x");
+  CHECK_EQ(redact_addresses_in_json(R"({"cmd":"+connect \"host\""})"),
            R"({"cmd":"+connect \")" + a + R"(\""})");
   CHECK_EQ(redact_addresses("+connected"), "+connected");
 
@@ -110,6 +112,87 @@ TEST_CASE("logs: lines never carry a server address") {
   CHECK_EQ(json::get_string(*data, "server").value_or(""),
            std::string(redacted_address));
   CHECK(json::member(*data, "pid") != nullptr);
+}
+
+TEST_CASE("logs: an address right after a JSON escape is still found") {
+  const std::string a(redacted_address);
+  // The escape's letter is not part of the address, and the escape survives.
+  CHECK_EQ(redact_addresses_in_json(R"({"m":"line one\n203.0.113.7:27017"})"),
+           R"({"m":"line one\n)" + a + R"("})");
+  CHECK_EQ(redact_addresses_in_json(R"({"m":"name\t203.0.113.7"})"),
+           R"({"m":"name\t)" + a + R"("})");
+  CHECK_EQ(redact_addresses_in_json(R"({"m":"a\nfriend.example.org:27017"})"),
+           R"({"m":"a\n)" + a + R"("})");
+  CHECK_EQ(redact_addresses_in_json(R"({"m":"x 203.0.113.7"})"),
+           R"({"m":"x )" + a + R"("})");
+  CHECK_EQ(redact_addresses_in_json(R"({"203.0.113.7:1":true})"),
+           R"({")" + a + R"(":true})");
+  // Each result is valid JSON again.
+  for (const char *text :
+       {R"({"m":"😀 203.0.113.7","n":[1.5,null]})",
+        R"({"m":"\ud83d 203.0.113.7"})", R"({"m":"\\203.0.113.7"})",
+        R"({"m":"a\"b [::1]:27017 \/ c"})"}) {
+    const std::string scrubbed = redact_addresses_in_json(text);
+    CHECK(scrubbed.find("203.0.113") == std::string::npos);
+    CHECK(scrubbed.find("::1") == std::string::npos);
+    CHECK(json::parse(scrubbed).ok);
+  }
+  // A string with nothing to scrub keeps its escapes byte for byte.
+  const std::string untouched =
+      R"({"m":"café\n\"q\"","n":1.5,"t":"12:34:56"})";
+  CHECK_EQ(redact_addresses_in_json(untouched), untouched);
+  // JSON Lines, the last one cut short by a crash.
+  CHECK_EQ(redact_addresses_in_json("{\"m\":\"a\\n10.1.2.3\"}\n{\"m\":\"b\"}\n"
+                                    "{\"m\":\"cut 10.1.2.4"),
+           "{\"m\":\"a\\n" + a + "\"}\n{\"m\":\"b\"}\n{\"m\":\"cut " + a);
+}
+
+TEST_CASE("logs: a data object with an escaped address keeps its data") {
+  json_log log("launcher", "s4");
+  log.set_profile_path("");
+  for (const char *error :
+       {R"(timed out\n203.0.113.7:27017)", R"(timed out\n203.0.113.7)",
+        R"(timed out\nfriend.example.org:27017)"}) {
+    log_event event;
+    event.event = "launcher.servers.ping";
+    event.message = "ping";
+    event.data_json = std::string(R"({"pid":7,"error":")") + error + R"("})";
+    const std::string line = log.format(event, "t");
+    CHECK(line.find("203.0.113") == std::string::npos);
+    CHECK(line.find("example.org") == std::string::npos);
+    const auto parsed = json::parse(line);
+    REQUIRE(parsed.ok);
+    const auto *data = json::member(parsed.document, "data");
+    REQUIRE(data != nullptr);
+    CHECK_EQ(json::get_string(*data, "error").value_or(""),
+             "timed out\n" + std::string(redacted_address));
+  }
+}
+
+TEST_CASE("logs: known server addresses are found without a port") {
+  const std::string a(redacted_address);
+  const std::vector<std::string> known = {"dave.example.org:27017", "LANBOX",
+                                          "pc", "[2001:db8::9]:27017"};
+  CHECK_EQ(redact_addresses("join dave.example.org vanilla", known),
+           "join " + a + " vanilla");
+  CHECK_EQ(redact_addresses("recent remove DAVE.example.org:27017.", known),
+           "recent remove " + a + ".");
+  CHECK_EQ(redact_addresses("favorite join lanbox", known),
+           "favorite join " + a);
+  CHECK_EQ(redact_addresses("www.dave.example.org", known), "www." + a);
+  // Only whole words: longer names stay, and so do names too short to say
+  // anything about anyone.
+  for (const char *text : {"dave.example.organic", "xdave.example.org",
+                           "dave.example.org-2", "lanbox2", "pc on"}) {
+    CHECK_EQ(redact_addresses(text, known), std::string(text));
+  }
+  // In JSON only strings are searched: a server called "null" leaves the
+  // document intact.
+  const std::vector<std::string> odd = {"null"};
+  CHECK_EQ(redact_addresses_in_json(R"({"m":"join null","v":null})", odd),
+           R"({"m":"join )" + a + R"(","v":null})");
+  CHECK_EQ(redact_addresses_in_json(R"({"m":"x\ndave.example.org"})", known),
+           R"({"m":"x\n)" + a + R"("})");
 }
 
 TEST_CASE("logs: only the newest sessions are kept") {

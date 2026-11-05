@@ -171,6 +171,62 @@ TEST_CASE("bundle: no server address or favourite name goes in") {
   fs::remove_all(home);
 }
 
+TEST_CASE("bundle: escaped and port-less addresses go too, lines stay JSON") {
+  const fs::path home = fs::temp_directory_path() / "xerces_bundle_escapes";
+  fs::remove_all(home);
+  // Lines as a launcher writes them: a message with a newline before the
+  // address, and the Servers screen naming a saved or recent server as it
+  // was typed, without a port.
+  write(home / "logs" / "20261105-030000-launcher-4.jsonl",
+        R"({"event":"a","msg":"timed out\n203.0.113.9:27017"})"
+        "\n"
+        R"({"event":"b","msg":"a\nfriend.example.org:27017","data":{"n":1}})"
+        "\n"
+        R"({"event":"launcher.servers.favorite","msg":"join dave.ddns.example"})"
+        "\n"
+        R"({"event":"launcher.servers.recent","msg":"remove Lan-Box"})"
+        "\n");
+  write(home / "config" / "launcher.json",
+        R"({"favorites":[{"name":"Dave","address":"dave.ddns.example"}],)"
+        R"("recent_servers":["lan-box:27017"]})");
+
+  const fs::path out = home / "bundle.zip";
+  REQUIRE(make_bundle(home, out, "C:\\Users\\Someone", "{}").ok);
+  std::string bytes;
+  {
+    std::ifstream in(out, std::ios::binary);
+    bytes.assign(std::istreambuf_iterator<char>(in),
+                 std::istreambuf_iterator<char>());
+  }
+  const auto files = unzip(bytes);
+  for (const auto &[name, text] : files) {
+    for (const char *secret : {"203.0.113", "friend.example", "dave.ddns",
+                               "lan-box", "Lan-Box"}) {
+      if (text.find(secret) != std::string::npos) {
+        CHECK_EQ(name + " holds " + secret, std::string());
+      }
+    }
+  }
+  const std::string &log = files.at("logs/20261105-030000-launcher-4.jsonl");
+  std::size_t lines = 0;
+  for (std::size_t start = 0; start < log.size();) {
+    const std::size_t end = log.find('\n', start);
+    REQUIRE(end != std::string::npos);
+    const auto line = json::parse(log.substr(start, end - start));
+    CHECK(line.ok);
+    if (line.ok && json::member(line.document, "data") != nullptr) {
+      CHECK_EQ(json::get_string(line.document, "msg").value_or(""),
+               std::string("a\n<address>"));
+    }
+    ++lines;
+    start = end + 1;
+  }
+  CHECK_EQ(lines, std::size_t{4});
+  CHECK(log.find("join <address>") != std::string::npos);
+  CHECK(log.find("remove <address>") != std::string::npos);
+  fs::remove_all(home);
+}
+
 TEST_CASE("bundle: system information is JSON") {
   const auto parsed = json::parse(system_info_json());
   REQUIRE(parsed.ok);

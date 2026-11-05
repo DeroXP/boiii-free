@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <format>
+#include <span>
 #include <vector>
 
 #include "json.hpp"
@@ -228,6 +230,7 @@ std::size_t host_port_length(std::string_view text, std::size_t at) {
   return port == 0 ? 0 : end + port - at;
 }
 
+// prefix is lower case.
 bool starts_with_case_insensitive(std::string_view text, std::size_t at,
                                   std::string_view prefix) {
   if (text.size() - at < prefix.size()) {
@@ -243,6 +246,245 @@ bool starts_with_case_insensitive(std::string_view text, std::size_t at,
     }
   }
   return true;
+}
+
+// Characters that carry a host name or a word on; a match touching one is
+// part of something longer.
+bool is_host_char(char c) { return is_word(c) || c == '-'; }
+
+// Known addresses shorter than this are not looked for: a LAN host called
+// "pc" would blank that word in every line and says nothing about anyone.
+constexpr std::size_t min_known_text = 3;
+
+// The known addresses as they are looked for: lower case, each also without
+// its port (logs name a server either way), longest first so a match takes
+// the port along when there is one.
+std::vector<std::string> known_forms(std::span<const std::string> known) {
+  std::vector<std::string> forms;
+  for (const std::string &address : known) {
+    std::string lower = address;
+    std::ranges::transform(lower, lower.begin(), [](char c) {
+      return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : c;
+    });
+    std::string host = lower;
+    if (!host.empty() && host.front() == '[') {
+      if (const std::size_t close = host.find(']');
+          close != std::string::npos) {
+        host.resize(close + 1);
+      }
+    } else if (const std::size_t colon = host.find(':');
+               colon != std::string::npos && host.rfind(':') == colon) {
+      host.resize(colon); // one colon: host:port (two or more: bare IPv6)
+    }
+    for (std::string *form : {&lower, &host}) {
+      if (form->size() >= min_known_text && form->size() <= max_host_text) {
+        forms.push_back(*form);
+      }
+    }
+  }
+  std::ranges::sort(forms, [](const std::string &a, const std::string &b) {
+    return a.size() != b.size() ? a.size() > b.size() : a < b;
+  });
+  forms.erase(std::unique(forms.begin(), forms.end()), forms.end());
+  return forms;
+}
+
+// Length of a known address (and a ":port" after it) at text[at], or 0. Only
+// a whole word counts: "dave.example.org" is not inside
+// "dave.example.organic". A '.' after it only ends a sentence.
+std::size_t known_length(std::string_view text, std::size_t at,
+                         const std::vector<std::string> &forms) {
+  for (const std::string &form : forms) {
+    if (!starts_with_case_insensitive(text, at, form)) {
+      continue;
+    }
+    const std::size_t end = at + form.size();
+    if (end < text.size() && is_host_char(text[end])) {
+      continue;
+    }
+    if (end + 1 < text.size() && text[end] == '.' &&
+        is_host_char(text[end + 1])) {
+      continue;
+    }
+    return form.size() + port_length(text, end);
+  }
+  return 0;
+}
+
+std::string redact_plain(std::string_view text,
+                         const std::vector<std::string> &forms) {
+  constexpr std::string_view connect = "+connect";
+  std::string out;
+  out.reserve(text.size());
+  std::size_t i = 0;
+  while (i < text.size()) {
+    // "+connect <address>": the launcher's join command, whatever the address
+    // looks like (a host name without a port included).
+    if (text[i] == '+' && starts_with_case_insensitive(text, i, connect) &&
+        (i + connect.size() == text.size() ||
+         !is_word(text[i + connect.size()]))) {
+      std::size_t end = i + connect.size();
+      while (end < text.size() && (text[end] == ' ' || text[end] == '\t')) {
+        ++end;
+      }
+      if (end < text.size() && text[end] == '"') {
+        ++end; // a quoted argument
+      }
+      out.append(text.substr(i, end - i));
+      std::size_t token = end;
+      while (token < text.size() && token - end < max_host_text &&
+             (is_word(text[token]) ||
+              std::string_view(".:-[]%").find(text[token]) !=
+                  std::string_view::npos)) {
+        ++token;
+      }
+      if (token > end) {
+        out.append(redacted_address);
+      }
+      i = token;
+      continue;
+    }
+
+    const char before = i == 0 ? ' ' : text[i - 1];
+    std::size_t length = 0;
+    // A known address may follow a '.': in "www.dave.example.org" the
+    // person's server is still in there.
+    if (!forms.empty() && !is_host_char(before)) {
+      length = known_length(text, i, forms);
+    }
+    // The other patterns start only where a word starts, so the tail of
+    // "v1.2.3.4" or of a longer dotted number is never taken for an address.
+    const bool word_start = !is_word(before) && before != '.' && before != '-';
+    if (length == 0 && text[i] == '[') {
+      length = bracketed_ipv6_length(text, i);
+      if (length != 0) {
+        length += port_length(text, i + length);
+      }
+    } else if (length == 0 && word_start) {
+      length = ipv4_length(text, i);
+      if (length != 0) {
+        length += port_length(text, i + length);
+      } else {
+        length = host_port_length(text, i);
+        if (length == 0) {
+          length = bare_ipv6_length(text, i);
+        }
+      }
+    }
+    if (length != 0) {
+      out.append(redacted_address);
+      i += length;
+    } else {
+      out.push_back(text[i]);
+      ++i;
+    }
+  }
+  return out;
+}
+
+// Appends a code point as UTF-8. Half of a surrogate pair that the text
+// never completed has no UTF-8 form, and the strict parser would refuse the
+// line, so it becomes U+FFFD.
+void append_utf8(std::string &out, std::uint32_t cp) {
+  if (cp >= 0xD800 && cp <= 0xDFFF) {
+    cp = 0xFFFD;
+  }
+  if (cp < 0x80) {
+    out.push_back(static_cast<char>(cp));
+  } else if (cp < 0x800) {
+    out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  } else if (cp < 0x10000) {
+    out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  } else {
+    out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+    out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  }
+}
+
+// The four hex digits of a "\u" escape at text[at].
+bool read_hex4(std::string_view text, std::size_t at, std::uint32_t &value) {
+  if (at > text.size() || text.size() - at < 4) {
+    return false;
+  }
+  value = 0;
+  for (std::size_t k = at; k < at + 4; ++k) {
+    const char c = text[k];
+    if (!is_hex(c)) {
+      return false;
+    }
+    value = value * 16 + static_cast<std::uint32_t>(
+                             is_digit(c)   ? c - '0'
+                             : c >= 'a'    ? c - 'a' + 10
+                                           : c - 'A' + 10);
+  }
+  return true;
+}
+
+// Decodes the JSON string whose body starts at text[at] (after its opening
+// quote) into `decoded`. Returns where the body ends: at the closing quote,
+// or, for a string that never closes (a line cut short), at the end of its
+// line. Escapes JSON does not have decode to their letter; the string is
+// only written back if scrubbing changed it, and then in valid form.
+std::size_t decode_json_string(std::string_view text, std::size_t at,
+                               std::string &decoded) {
+  std::size_t j = at;
+  while (j < text.size() && text[j] != '"' && text[j] != '\n' &&
+         text[j] != '\r') {
+    if (text[j] != '\\') {
+      decoded.push_back(text[j]);
+      ++j;
+      continue;
+    }
+    if (j + 1 >= text.size() || text[j + 1] == '\n' || text[j + 1] == '\r') {
+      decoded.push_back('\\');
+      ++j;
+      continue;
+    }
+    const char escape = text[j + 1];
+    j += 2;
+    switch (escape) {
+    case 'b':
+      decoded.push_back('\b');
+      break;
+    case 'f':
+      decoded.push_back('\f');
+      break;
+    case 'n':
+      decoded.push_back('\n');
+      break;
+    case 'r':
+      decoded.push_back('\r');
+      break;
+    case 't':
+      decoded.push_back('\t');
+      break;
+    case 'u': {
+      std::uint32_t cp = 0;
+      if (!read_hex4(text, j, cp)) {
+        decoded.push_back('u');
+        break;
+      }
+      j += 4;
+      std::uint32_t low = 0;
+      if (cp >= 0xD800 && cp <= 0xDBFF && j + 1 < text.size() &&
+          text[j] == '\\' && text[j + 1] == 'u' &&
+          read_hex4(text, j + 2, low) && low >= 0xDC00 && low <= 0xDFFF) {
+        cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+        j += 6;
+      }
+      append_utf8(decoded, cp);
+      break;
+    }
+    default:
+      decoded.push_back(escape); // '"', '\\' and '/'
+    }
+  }
+  return j;
 }
 } // namespace
 
@@ -282,71 +524,43 @@ std::string redact_profile(std::string_view text, std::string_view profile) {
   return out;
 }
 
-std::string redact_addresses(std::string_view text) {
-  constexpr std::string_view connect = "+connect";
+std::string redact_addresses(std::string_view text,
+                             std::span<const std::string> known) {
+  return redact_plain(text, known_forms(known));
+}
+
+std::string redact_addresses_in_json(std::string_view text,
+                                     std::span<const std::string> known) {
+  const std::vector<std::string> forms = known_forms(known);
+  const std::vector<std::string> no_forms;
   std::string out;
   out.reserve(text.size());
+  std::size_t outside = 0; // start of the text outside strings not yet copied
   std::size_t i = 0;
   while (i < text.size()) {
-    // "+connect <address>": the launcher's join command, whatever the address
-    // looks like (a host name without a port included).
-    if (text[i] == '+' && starts_with_case_insensitive(text, i, connect) &&
-        (i + connect.size() == text.size() ||
-         !is_word(text[i + connect.size()]))) {
-      std::size_t end = i + connect.size();
-      while (end < text.size() && (text[end] == ' ' || text[end] == '\t')) {
-        ++end;
-      }
-      // A quoted argument, also as it reads inside a JSON string.
-      if (text.substr(end).starts_with("\\\"")) {
-        end += 2;
-      } else if (end < text.size() && text[end] == '"') {
-        ++end;
-      }
-      out.append(text.substr(i, end - i));
-      std::size_t token = end;
-      while (token < text.size() && token - end < max_host_text &&
-             (is_word(text[token]) ||
-              std::string_view(".:-[]%").find(text[token]) !=
-                  std::string_view::npos)) {
-        ++token;
-      }
-      if (token > end) {
-        out.append(redacted_address);
-      }
-      i = token;
+    if (text[i] != '"') {
+      ++i;
       continue;
     }
-
-    // The other patterns start only where a word starts, so the tail of
-    // "v1.2.3.4" or of a longer dotted number is never taken for an address.
-    const char before = i == 0 ? ' ' : text[i - 1];
-    const bool word_start = !is_word(before) && before != '.' && before != '-';
-    std::size_t length = 0;
-    if (text[i] == '[') {
-      length = bracketed_ipv6_length(text, i);
-      if (length != 0) {
-        length += port_length(text, i + length);
-      }
-    } else if (word_start) {
-      length = ipv4_length(text, i);
-      if (length != 0) {
-        length += port_length(text, i + length);
-      } else {
-        length = host_port_length(text, i);
-        if (length == 0) {
-          length = bare_ipv6_length(text, i);
-        }
-      }
-    }
-    if (length != 0) {
-      out.append(redacted_address);
-      i += length;
+    out += redact_plain(text.substr(outside, i - outside), no_forms);
+    std::string decoded;
+    const std::size_t body_end = decode_json_string(text, i + 1, decoded);
+    const bool closed = body_end < text.size() && text[body_end] == '"';
+    const std::size_t end = closed ? body_end + 1 : body_end;
+    const std::string scrubbed = redact_plain(decoded, forms);
+    if (scrubbed == decoded) {
+      out.append(text.substr(i, end - i)); // as it was, escapes and all
     } else {
-      out.push_back(text[i]);
-      ++i;
+      std::string quoted = json::quote(scrubbed);
+      if (!closed) {
+        quoted.pop_back(); // it was cut short; leave it that way
+      }
+      out += quoted;
     }
+    i = end;
+    outside = end;
   }
+  out += redact_plain(text.substr(outside), no_forms);
   return out;
 }
 
@@ -378,10 +592,10 @@ std::string json_log::format(const log_event &event,
     json::set(doc, "plan_id", event.plan_id, alloc);
   }
   if (!event.data_json.empty()) {
-    // Scrubbed as text: the replacement holds no JSON syntax, and an address
-    // only ever sits inside a string there.
+    // Scrubbed string by string, decoded: the escapes in JSON text would hide
+    // an address from the plain-text patterns or be cut in half by them.
     const auto parsed = json::parse(
-        redact_addresses(redact_profile(event.data_json, profile_)));
+        redact_addresses_in_json(redact_profile(event.data_json, profile_)));
     if (parsed.ok && parsed.document.IsObject()) {
       json::set(doc, "data", json::copy(parsed.document, alloc), alloc);
     }

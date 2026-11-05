@@ -3,8 +3,10 @@
 // The diagnostics bundle (docs/DESIGN.md 5.10): one zip with what a bug report
 // needs, built from <home> only. Every text file in it has the user's profile
 // folder replaced by %USERPROFILE% (redact_profile) and server addresses
-// replaced (redact_addresses), the config loses the player name and keeps
-// only counts of its favourite and recent servers, and FILES.txt lists what
+// replaced (redact_addresses_in_json, which also looks for the config's
+// favourite and recent server addresses by name), the config loses the
+// player name and keeps only counts of its favourite and recent servers, and
+// FILES.txt lists what
 // is inside, so the player can see it before sharing (uploading stays opt-in
 // per crash, D21, and is not built).
 //

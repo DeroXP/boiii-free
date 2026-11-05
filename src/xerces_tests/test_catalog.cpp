@@ -12,6 +12,7 @@
 #include <windows.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -127,6 +128,46 @@ TEST_CASE("catalog: a file held without shared reads is never cached") {
   }
   CHECK_EQ(reloaded.size(), before - 1);
   CHECK_EQ(reloaded.file_sha256(ff).value_or(""), sha256::hex(bytes + "more"));
+  fs::remove_all(dir);
+}
+
+TEST_CASE("catalog: a failed read written down by an older build is dropped") {
+  const fs::path dir = fresh_dir("poisoned");
+  const fs::path ff = dir / "core_mod.ff";
+  const fs::path empty = dir / "empty.ff";
+  const std::string bytes(4096, 'p');
+  write_bytes(ff, bytes);
+  write_bytes(empty, "");
+  // A cache line exactly as the old builds wrote it for a file they could
+  // not open: the real size and time, and the hash of no bytes.
+  const auto line = [](const fs::path &path, std::uint64_t size) {
+    const auto key = path.generic_u8string();
+    return std::to_string(size) + "\t" +
+           std::to_string(fs::last_write_time(path).time_since_epoch().count()) +
+           "\t" + sha256::hex("") + "\t" +
+           std::string(reinterpret_cast<const char *>(key.data()), key.size()) +
+           "\n";
+  };
+  const fs::path file = dir / "cache" / "hashes.txt";
+
+  // A version 1 cache is not trusted at all.
+  write_bytes(file, "xerces.hashcache/1\n" + line(ff, bytes.size()));
+  hash_cache old;
+  CHECK(!old.load(file));
+  CHECK_EQ(old.size(), std::size_t{0});
+  CHECK_EQ(old.file_sha256(ff).value_or(""), sha256::hex(bytes));
+
+  // In a current cache, the empty-input hash for a file with bytes in it is
+  // skipped; for an empty file it is that file's real hash and stays.
+  write_bytes(file, std::string(hash_cache_header) + "\n" +
+                        line(ff, bytes.size()) + line(empty, 0));
+  hash_cache current;
+  REQUIRE(current.load(file));
+  CHECK_EQ(current.size(), std::size_t{1});
+  CHECK_EQ(current.file_sha256(ff).value_or(""), sha256::hex(bytes));
+  CHECK_EQ(current.misses(), std::size_t{1});
+  CHECK_EQ(current.file_sha256(empty).value_or("none"), sha256::hex(""));
+  CHECK_EQ(current.hits(), std::size_t{1});
   fs::remove_all(dir);
 }
 

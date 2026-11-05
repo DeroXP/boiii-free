@@ -33,7 +33,12 @@ struct catalog_scan {
 // <home>\cache (DESIGN.md 3.5): a header line, then one line per file,
 // "<size>\t<write time>\t<sha256>\t<path>". Not thread-safe: one scan at a
 // time owns it.
-inline constexpr std::string_view hash_cache_header = "xerces.hashcache/1";
+//
+// Version 1 was written by builds that stored the hash of whatever they could
+// read, so a file held open by another program kept SHA-256 of nothing (or
+// of its first part) until it changed. Those caches are not trusted: loading
+// one leaves the cache empty, and the next scan hashes everything once.
+inline constexpr std::string_view hash_cache_header = "xerces.hashcache/2";
 
 class hash_cache {
 public:

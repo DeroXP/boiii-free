@@ -114,6 +114,9 @@ bool hash_cache::load(const std::filesystem::path &file) {
   if (!in || !std::getline(in, line) || line != hash_cache_header) {
     return false;
   }
+  // What a failed read of a file used to give. No file with bytes in it has
+  // this hash, so such an entry is a failure written down, never a hash.
+  static const std::string nothing_read = sha256::hex("");
   while (std::getline(in, line)) {
     // size, write time, sha256 and path, tab-separated; Windows paths hold no
     // tabs.
@@ -131,6 +134,9 @@ bool hash_cache::load(const std::filesystem::path &file) {
       continue;
     }
     value.sha256 = line.substr(b + 1, 64);
+    if (value.size != 0 && value.sha256 == nothing_read) {
+      continue;
+    }
     entries_[line.substr(c + 1)] = std::move(value);
   }
   return true;

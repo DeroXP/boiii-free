@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -33,16 +34,36 @@ std::string redact_profile(std::string_view text, std::string_view profile);
 //   - IPv6 addresses in brackets ("[::1]:27017"), and without brackets when
 //     they hold "::" or all eight groups;
 //   - a host name with a dot and a port ("friend.example.org:27017");
-//   - whatever follows "+connect", the launcher's join command.
-// A host name without a port is left alone: it cannot be told apart from
-// file and event names such as "plan.json". The patterns may also catch the
-// odd "file.cpp:91"; losing that is the price of never leaking an address.
+//   - whatever follows "+connect", the launcher's join command;
+//   - each of `known` (addresses the caller knows the person used, such as
+//     their favourite and recent servers), with or without its port, where
+//     it stands as a whole word.
+// Any other host name without a port is left alone: it cannot be told apart
+// from file and event names such as "plan.json". The patterns may also catch
+// the odd "file.cpp:91"; losing that is the price of never leaking an address.
+//
+// For plain text only. In JSON text an escape such as "\n" glues its letter
+// to the address that follows ("\n203.0.113.7" reads as one word), so JSON
+// goes through redact_addresses_in_json instead.
 inline constexpr std::string_view redacted_address = "<address>";
-std::string redact_addresses(std::string_view text);
+std::string redact_addresses(std::string_view text,
+                             std::span<const std::string> known = {});
+
+// redact_addresses for JSON text: a document or JSON Lines. Every string in
+// it is decoded, scrubbed, and written back escaped only if it changed;
+// everything else is kept byte for byte, so valid JSON stays valid. The
+// scanner is lexical, so a truncated last line (a crash mid-write) or an old
+// file that no longer parses is still scrubbed. Text outside strings, which
+// in JSON is only numbers and punctuation, gets the patterns but not `known`:
+// a server called "null" must not break the document.
+std::string redact_addresses_in_json(std::string_view json_text,
+                                     std::span<const std::string> known = {});
 
 // JSON Lines, one file per session: <logs>/<date>-<time>-<role>.jsonl.
-// Addresses never go into these files: format() passes every message and data
-// object through redact_addresses.
+// format() passes every message through redact_addresses and the data object
+// through redact_addresses_in_json. A host name without a port is not
+// recognised there, so a caller that logs a server address it was given logs
+// redacted_address (or nothing) in its place.
 class json_log {
 public:
   json_log(std::string role, std::string session);
