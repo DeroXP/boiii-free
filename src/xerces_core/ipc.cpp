@@ -455,9 +455,9 @@ void pipe_server::serve() {
         }
       }
       if (!reply.empty()) {
+        ++served_; // before the reply, so a caller that got it sees the count
         write_message(pipe, reply, stop_event, 5000);
         FlushFileBuffers(pipe);
-        ++served_;
       }
     }
     DisconnectNamedPipe(pipe);

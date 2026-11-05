@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iterator>
 
+#include <xerces_core/bundle.hpp>
 #include <xerces_core/detect.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/version.hpp>
@@ -646,6 +647,27 @@ xerces_core::safe_mode_decision services::safe_mode() const {
     return {};
   }
   return xerces_core::decide_safe_mode(last_journal());
+}
+
+// -------------------------------------------------------------- diagnostics
+fs::path services::make_bundle(std::string *error) const {
+  std::string stamp = now_utc().substr(0, 19);
+  std::ranges::replace(stamp, ':', '-');
+  const fs::path out = paths_.crash / ("xerces-bundle-" + stamp + ".zip");
+  std::string profile;
+  if (const auto dir = env_path(L"USERPROFILE")) {
+    profile = utf8(*dir);
+  }
+  const xerces_core::bundle_result result = xerces_core::make_bundle(
+      paths_.home, out, profile, xerces_core::system_info_json());
+  if (!result.ok) {
+    if (error) {
+      *error = result.error;
+    }
+    return {};
+  }
+  log_info("launcher.diag.bundle", utf8(out));
+  return out;
 }
 
 // ---------------------------------------------------------- find the culprit

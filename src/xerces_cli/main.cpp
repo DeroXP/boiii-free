@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include <xerces_core/bundle.hpp>
 #include <xerces_core/catalog.hpp>
 #include <xerces_core/compat.hpp>
 #include <xerces_core/conflicts.hpp>
@@ -22,6 +23,7 @@
 #include <xerces_core/hooks.hpp>
 #include <xerces_core/ipc.hpp>
 #include <xerces_core/json.hpp>
+#include <xerces_core/log.hpp>
 #include <xerces_core/manifest.hpp>
 #include <xerces_core/pack.hpp>
 #include <xerces_core/planner.hpp>
@@ -159,9 +161,12 @@ its pipe in <home>\run (--home <dir>, else XERCES_HOME, else
   reload [--extras <id,id,...>]                    reload (in the menus only)
   unload                                           no extra mods
 
+  diag bundle [--home <dir>] [--out <file.zip>]    the diagnostics zip (logs,
+                                                   journal, plan, signatures,
+                                                   system), scrubbed; stays local
+
 Not built yet (exit 3): mods enable/disable/order, plan apply, index run,
-  packs apply, sig check (without --dump), bench run, test run, diag bundle,
-  logs tail
+  packs apply, sig check (without --dump), bench run, test run, logs tail
 
 Exit codes: 0 ok, 1 error, 2 validation or conflict failures,
             3 Xerces not running, 4 signature failures.
@@ -720,6 +725,32 @@ fs::path xerces_home(const arguments &args) {
   return fs::path("xerces_home");
 }
 
+// diag bundle (5.10): the scrubbed zip a bug report needs, from <home>.
+int cmd_diag_bundle(const arguments &args) {
+  const fs::path home = xerces_home(args);
+  fs::path out;
+  if (const auto given = args.get("--out")) {
+    out = fs::path(*given);
+  } else {
+    std::string stamp = json_log::now_utc().substr(0, 19);
+    std::ranges::replace(stamp, ':', '-');
+    out = home / "crash" / ("xerces-bundle-" + stamp + ".zip");
+  }
+  const char *profile = std::getenv("USERPROFILE");
+  const bundle_result result =
+      make_bundle(home, out, profile ? profile : "", system_info_json());
+  if (!result.ok) {
+    std::cerr << result.error << "\n";
+    return exit_error;
+  }
+  std::cout << "Wrote " << utf8(result.file) << " with:\n";
+  for (const auto &name : result.contents) {
+    std::cout << "  " << name << "\n";
+  }
+  std::cout << "Nothing was sent anywhere.\n";
+  return exit_ok;
+}
+
 // The live commands (15.2): talk to the running game over its pipe.
 //   status [--json]                     build, signatures, plan, phase, mods
 //   load --extras a,b | reload [--extras a,b] | unload   front end only
@@ -980,6 +1011,9 @@ int main(int argc, char **argv) {
     }
     if (group == "sig") {
       return cmd_sig(args, action);
+    }
+    if (group == "diag" && action == "bundle") {
+      return cmd_diag_bundle(args);
     }
     if (group == "status" || group == "load" || group == "reload" ||
         group == "unload") {

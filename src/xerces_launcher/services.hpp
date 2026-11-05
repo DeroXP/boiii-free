@@ -202,6 +202,10 @@ public:
   void reload_signatures();
   std::uint64_t signatures_rev() const { return signatures_rev_; }
 
+  // ------------------------------------------------------------ diagnostics
+  // The scrubbed diagnostics zip (5.10) in <home>\crash; empty on failure.
+  fs::path make_bundle(std::string *error = nullptr) const;
+
   // ---------------------------------------------------------------- version
   static std::string version();
 
