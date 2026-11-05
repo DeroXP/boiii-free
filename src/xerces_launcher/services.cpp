@@ -297,9 +297,16 @@ launch_outcome services::launch(const std::string &mode, bool modded,
                                 const std::optional<std::string> &connect,
                                 const std::vector<std::string> *mods) {
   void *process = nullptr;
+  // A real launch also looks for a client process: a game xerces_cli started
+  // seconds ago has no handle here and no run entry yet.
   launch_outcome out = xerces_core::launch_game(
       inputs(mode, modded, mods_off, connect, mods),
-      [this] { return game_running(); }, launcher_events(), &process);
+      [this] {
+        return game_running() ||
+               (!dry_launch_ &&
+                xerces_core::game_process_running(paths_.client));
+      },
+      launcher_events(), &process);
   if (!out.dry_run && (out.started || out.refusal ==
                                           xerces_core::launch_refusal::start)) {
     ++journal_rev_; // the journal was written; screens re-read it

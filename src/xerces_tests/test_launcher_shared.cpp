@@ -15,6 +15,8 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <cwctype>
 #include <fstream>
 #include <string>
@@ -46,9 +48,27 @@ void write(const fs::path &file, const std::string &text) {
   std::ofstream(file, std::ios::binary) << text;
 }
 
-// A home and a fake game: <root>\steamapps\common\game with a two-byte
-// BlackOps3.exe (detection finds it; the pre-flight cannot read it) and the
-// fixture mods in its mods folder.
+// A file the pre-flight reads as a Windows executable with this checksum: the
+// DOS header, "PE\0\0" at 0x40 and the optional header's CheckSum.
+std::string fake_pe(std::uint32_t checksum) {
+  std::string out(0x40 + 24 + 96, '\0');
+  const auto put = [&](std::size_t at, std::uint32_t value) {
+    std::memcpy(out.data() + at, &value, 4);
+  };
+  out[0] = 'M';
+  out[1] = 'Z';
+  put(0x3C, 0x40);
+  put(0x40, 0x00004550);
+  put(0x40 + 24 + 64, checksum);
+  return out;
+}
+
+constexpr std::uint32_t fake_build_checksum = 0x7E570001;
+
+// A home and a fake game: <root>\steamapps\common\game with a BlackOps3.exe
+// and the fixture mods in its mods folder. Unsupported: a two-byte exe the
+// pre-flight cannot read. Supported: a fake executable that root\compat\
+// builds.json lists as a supported build. The client is never there.
 struct fake_setup {
   fs::path root;
   launcher_paths paths;
@@ -56,9 +76,17 @@ struct fake_setup {
   game_state game;
   catalog_state catalog;
 
-  explicit fake_setup(const std::string &name) : root(fresh(name)) {
+  explicit fake_setup(const std::string &name, bool supported = false)
+      : root(fresh(name)) {
     const fs::path game_dir = root / "steamapps" / "common" / "game";
-    write(game_dir / "BlackOps3.exe", "MZ");
+    write(game_dir / "BlackOps3.exe",
+          supported ? fake_pe(fake_build_checksum) : std::string("MZ"));
+    if (supported) {
+      write(root / "compat" / "builds.json",
+            R"({"schema":"xerces.builds/1","builds":[{"name":"Fake test )"
+            R"(build","exe":"BlackOps3.exe","checksum":"0x7E570001",)"
+            R"("status":"supported"}]})");
+    }
     fs::copy(xerces_tests::fixtures_dir() / "mods", game_dir / "mods",
              fs::copy_options::recursive);
     paths.home = root / "home";
@@ -67,7 +95,7 @@ struct fake_setup {
     paths.cache = paths.home / "cache";
     paths.logs = paths.home / "logs";
     paths.crash = paths.home / "crash";
-    paths.compat = root / "compat"; // none: the pre-flight cannot pass
+    paths.compat = root / "compat";
     paths.client = root / "bin" / "boiii.exe"; // missing
     paths.program = root / "bin" / "xerces_cli.exe";
     config.game_dir = path_utf8(game_dir);
@@ -174,9 +202,9 @@ TEST_CASE("shared launcher: the profile resolves against the catalog") {
 }
 
 TEST_CASE("shared launcher: a dry launch writes the plan, no journal") {
-  fake_setup setup("dry");
+  fake_setup setup("dry", true);
   profile_for(setup.config, "zm").mods = {"fixture.alpha"};
-  CHECK(!setup.game.can_launch()); // the fake exe is no game build
+  REQUIRE(setup.game.can_launch()); // the fake build passes the pre-flight
   recorded log;
   bool asked_running = false;
   const launch_outcome out = launch_game(
@@ -202,28 +230,51 @@ TEST_CASE("shared launcher: a dry launch writes the plan, no journal") {
            plan_file_id(out.plan_id) + ".json");
   CHECK(!fs::exists(setup.paths.journal_file()));
   CHECK(log.has("launch.dry"));
+
+  // A real launch on the same setup stops at the missing client, before the
+  // plan file or the journal.
+  std::error_code ec;
+  fs::remove(out.plan_file, ec);
+  recorded real;
+  const launch_outcome refused =
+      launch_game(setup.inputs(false), [] { return false; }, real.sink());
+  CHECK(!refused.started);
+  CHECK(refused.refusal == launch_refusal::client);
+  CHECK(refused.diags.has("launch.client"));
+  CHECK(refused.plan_file.empty());
+  CHECK(!fs::exists(out.plan_file));
+  CHECK(!fs::exists(setup.paths.journal_file()));
 }
 
 TEST_CASE("shared launcher: refusals") {
   fake_setup setup("refused");
   profile_for(setup.config, "zm").mods = {"fixture.alpha"};
-  {
-    // A real launch stops at the unsupported game before writing anything.
+  REQUIRE(!setup.game.can_launch()); // the two-byte exe is no game build
+  for (const bool dry : {false, true}) {
+    // The unsupported game stops a real launch and a dry one alike, as it
+    // did in Xerces.exe before the launch was shared: no plan file, no
+    // journal, no launch.dry.
     recorded log;
     const launch_outcome out =
-        launch_game(setup.inputs(false), [] { return false; }, log.sink());
+        launch_game(setup.inputs(dry), [] { return false; }, log.sink());
     CHECK(!out.started);
+    CHECK(!out.dry_run);
     CHECK(out.refusal == launch_refusal::game);
     CHECK(out.diags.has("launch.game"));
+    CHECK(out.message.find("could not be read") != std::string::npos);
     CHECK(log.has("launch.refused"));
+    CHECK(!log.has("launch.dry"));
     CHECK(!fs::exists(setup.paths.journal_file()));
     CHECK(out.plan_file.empty());
+    CHECK(!fs::exists(setup.paths.plans));
   }
   {
     // A running game stops even a dry launch.
+    fake_setup supported("refused_running", true);
+    profile_for(supported.config, "zm").mods = {"fixture.alpha"};
     recorded log;
     const launch_outcome out =
-        launch_game(setup.inputs(true), [] { return true; }, log.sink());
+        launch_game(supported.inputs(true), [] { return true; }, log.sink());
     CHECK(!out.dry_run);
     CHECK(out.refusal == launch_refusal::running);
     CHECK(log.has("launch.refused"));
@@ -256,7 +307,7 @@ TEST_CASE("shared launcher: refusals") {
 }
 
 TEST_CASE("shared launcher: vanilla and safe mode need no plan") {
-  fake_setup setup("vanilla");
+  fake_setup setup("vanilla", true);
   launch_inputs in = setup.inputs(true);
   in.modded = false;
   launch_outcome out = launch_game(in, [] { return false; }, {});
@@ -362,6 +413,34 @@ TEST_CASE("shared launcher: one launcher per home") {
   CHECK(!launcher_running(home));
   std::error_code ec;
   fs::remove_all(home, ec);
+}
+
+TEST_CASE("shared launcher: XERCES_DRY_LAUNCH") {
+  wchar_t saved[64] = {};
+  const DWORD had = GetEnvironmentVariableW(L"XERCES_DRY_LAUNCH", saved, 64);
+  SetEnvironmentVariableW(L"XERCES_DRY_LAUNCH", L"1");
+  CHECK(dry_launch_from_environment());
+  SetEnvironmentVariableW(L"XERCES_DRY_LAUNCH", L"0");
+  CHECK(!dry_launch_from_environment());
+  SetEnvironmentVariableW(L"XERCES_DRY_LAUNCH", nullptr);
+  CHECK(!dry_launch_from_environment());
+  if (had > 0 && had < 64) {
+    SetEnvironmentVariableW(L"XERCES_DRY_LAUNCH", saved);
+  }
+}
+
+TEST_CASE("shared launcher: a game process is seen from its start") {
+  // This test's own process stands in for a client of that name: what
+  // matters is the name, wherever the file is.
+  wchar_t self[MAX_PATH] = {};
+  GetModuleFileNameW(nullptr, self, MAX_PATH);
+  const fs::path own(self);
+  CHECK(game_process_running(fs::path("C:/elsewhere") / own.filename()));
+  std::wstring name = own.filename().wstring();
+  for (wchar_t &c : name) {
+    c = static_cast<wchar_t>(towupper(c));
+  }
+  CHECK(game_process_running(fs::path(name))); // names ignore case
 }
 
 TEST_CASE("shared launcher: text files are written whole") {

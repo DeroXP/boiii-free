@@ -5,16 +5,24 @@
   apply --dry-launch, packs apply, logs tail and sig check.
 
 .DESCRIPTION
-  Runs xerces_cli against a fresh home and a copy of a fake game folder (a
-  two-byte BlackOps3.exe and two mods that declare a conflict). The fake game
-  comes from -FakeGame, else XERCES_FAKE_GAME, else
-  C:\Users\Ginld\XercesDev\fake-game when it exists; without one, or with
-  -Generate, the same layout is written here (CI). Everything goes under -WorkDir (default
-  build\cli-smoke), outside AppData.
+  Runs xerces_cli against a fresh home and a copy of a fake game folder (two
+  mods that declare a conflict). The fake game comes from -FakeGame, else
+  XERCES_FAKE_GAME, else C:\Users\Ginld\XercesDev\fake-game when it exists;
+  without one, or with -Generate, the same layout is written here (CI).
+  Everything goes under -WorkDir (default build\cli-smoke), outside AppData.
 
-  It never starts the game: plan apply always runs with --dry-launch, and the
-  fake BlackOps3.exe fails the pre-flight check, so even a real launch would
-  be refused. Every call passes --home; XERCES_HOME is set too and restored.
+  The copy's BlackOps3.exe is replaced by a fake executable that only this
+  test's own compat\builds.json knows, next to a copy of xerces_cli in
+  <WorkDir>\bin. That copy's pre-flight passes, as it does for the real game,
+  so dry launches reach the command line; the build's own xerces_cli reads the
+  repository's compat\builds.json, where the fake game is unknown, and is
+  refused as Xerces.exe would be.
+
+  It never starts the game: plan apply always runs dry (--dry-launch, and
+  XERCES_DRY_LAUNCH=1 for every call), the copy of xerces_cli has no boiii.exe
+  next to it, so even a real launch would stop there, and the build's own one
+  is refused at the pre-flight. Every call passes --home; XERCES_HOME is set
+  too and restored.
 #>
 param(
   [string]$Cli,
@@ -43,13 +51,33 @@ if ($FakeGame) {
   Copy-Item -Recurse $FakeGame $game
 } else {
   New-Item -ItemType Directory -Force "$game\mods\conflict_a\zone", "$game\mods\conflict_b\zone" | Out-Null
-  [IO.File]::WriteAllBytes("$game\BlackOps3.exe", [byte[]](0x4D, 0x5A))
   Set-Content -NoNewline -Encoding ascii "$game\mods\conflict_a\xerces.mod.json" `
     '{"schema":1,"id":"test.conflict_a","name":"Conflict A","version":"1.0.0","license":"MIT","conflicts":[{"id":"test.conflict_b","reason":"Both rewrite the box"}]}'
   Set-Content -NoNewline -Encoding ascii "$game\mods\conflict_b\xerces.mod.json" `
     '{"schema":1,"id":"test.conflict_b","name":"Conflict B","version":"1.0.0","license":"MIT"}'
   New-Item -ItemType File "$game\mods\conflict_a\zone\core_mod.ff", "$game\mods\conflict_b\zone\core_mod.ff" | Out-Null
 }
+# A Windows executable as far as the pre-flight reads one (the DOS header,
+# "PE" at 0x40, the optional header's CheckSum), and a build only this test's
+# compat\builds.json lists. Written into the copy, never the source.
+$pe = New-Object byte[] 184
+$pe[0] = 0x4D; $pe[1] = 0x5A
+[BitConverter]::GetBytes([uint32]0x40).CopyTo($pe, 0x3C)
+[BitConverter]::GetBytes([uint32]0x4550).CopyTo($pe, 0x40)
+[BitConverter]::GetBytes([uint32]0x7E570001).CopyTo($pe, 0x40 + 24 + 64)
+[IO.File]::WriteAllBytes("$game\BlackOps3.exe", $pe)
+
+# The copy of xerces_cli this test runs: its compat\ is the one next to it,
+# and no game client is.
+$bin = Join-Path $WorkDir 'bin'
+New-Item -ItemType Directory -Force "$bin\compat" | Out-Null
+Copy-Item $Cli "$bin\xerces_cli.exe"
+Set-Content -NoNewline -Encoding ascii "$bin\compat\builds.json" `
+  '{"schema":"xerces.builds/1","builds":[{"name":"CLI smoke fake game","exe":"BlackOps3.exe","checksum":"0x7E570001","status":"supported"}]}'
+if (Test-Path "$bin\boiii.exe") { throw "$bin\boiii.exe must not exist: this test never starts a game." }
+$repoCli = $Cli
+$script:exe = "$bin\xerces_cli.exe"
+
 New-Item -ItemType Directory -Force "$homeDir\config" | Out-Null
 $config = [ordered]@{ schema = 'xerces.config/1'; first_run_done = $true; mode = 'zm'; game_dir = $game }
 [IO.File]::WriteAllText("$homeDir\config\launcher.json", ($config | ConvertTo-Json))
@@ -64,7 +92,7 @@ function Invoke-Xcli {
   # Windows PowerShell turns a native program's stderr into errors, which
   # 'Stop' would throw.
   $ErrorActionPreference = 'Continue'
-  $out = & $Cli @rest --home $homeDir 2>&1 | ForEach-Object { "$_" }
+  $out = & $script:exe @rest --home $homeDir 2>&1 | ForEach-Object { "$_" }
   $code = $LASTEXITCODE
   if ($code -ne $expect) {
     $script:failures += "xerces_cli $($rest -join ' '): exit $code, expected $expect`n  $($out -join "`n  ")"
@@ -76,7 +104,7 @@ function Invoke-XcliJson {
   $expect = [int]$args[0]
   $rest = @($args | Select-Object -Skip 1)
   $ErrorActionPreference = 'Continue'
-  $out = & $Cli @rest --home $homeDir 2>$null
+  $out = & $script:exe @rest --home $homeDir 2>$null
   $code = $LASTEXITCODE
   if ($code -ne $expect) {
     $script:failures += "xerces_cli $($rest -join ' '): exit $code, expected $expect"
@@ -91,9 +119,14 @@ function ZmProfile {
   return $json.profiles.zm
 }
 function Mods { return @((ZmProfile).mods) -join ',' }
+function PlanFiles { return @(Get-ChildItem "$homeDir\config\plans" -Filter '*.json' -ErrorAction SilentlyContinue).Count }
+$esc = [string][char]27
+$bel = [string][char]7
 
 $savedHome = $env:XERCES_HOME
+$savedDry = $env:XERCES_DRY_LAUNCH
 $env:XERCES_HOME = $homeDir
+$env:XERCES_DRY_LAUNCH = '1'
 try {
   # ------------------------------------------------------- mods: the catalog
   $list = Invoke-Xcli 0 mods list
@@ -127,14 +160,23 @@ try {
   # ------------------------------------------------- plan apply, dry launch
   $dry = Invoke-Xcli 0 plan apply --dry-launch
   Check ($dry -match 'command: -launch -nointro -xerces-plan [0-9a-f]{64} \+set fs_game conflict_a(\r?\n|$)') "plan apply --dry-launch command`n$dry"
-  Check ($dry -match 'a real launch would stop') "the dry launch says what a real one would refuse`n$dry"
-  $plans = @(Get-ChildItem "$homeDir\config\plans" -Filter '*.json')
-  Check ($plans.Count -eq 1) "one plan file, found $($plans.Count)"
+  Check ($dry -match 'a real launch would stop: boiii\.exe is missing') "the dry launch says what a real one would refuse`n$dry"
+  Check ((PlanFiles) -eq 1) "one plan file, found $(PlanFiles)"
   Check (-not (Test-Path "$homeDir\logs\journal.json")) 'a dry launch writes no journal'
   $json = Invoke-XcliJson 0 plan apply --dry-launch --json
   Check ($json.dry_run -and -not $json.started -and $json.command_line -match 'fs_game conflict_a') "plan apply --json`n$($json | ConvertTo-Json)"
   $vanilla = Invoke-Xcli 0 plan apply --vanilla --dry-launch
   Check ($vanilla -match 'command: -launch -nointro(\r?\n|$)') "vanilla dry launch`n$vanilla"
+  $plans = PlanFiles
+
+  # Xerces.exe's pre-flight: the build's own xerces_cli reads the repository's
+  # compat\builds.json, where the fake game is unknown, and a dry launch is
+  # refused there as Home's is.
+  $script:exe = $repoCli
+  $unknown = Invoke-Xcli 1 plan apply --dry-launch
+  $script:exe = "$bin\xerces_cli.exe"
+  Check ($unknown -match 'not a build Xerces knows') "a dry launch on an unknown build is refused`n$unknown"
+  Check ((PlanFiles) -eq $plans) 'the refused dry launch wrote no plan file'
 
   # ------------------------------------------------------------ packs apply
   $packFile = Join-Path $WorkDir 'smoke.xpack.json'
@@ -159,7 +201,7 @@ try {
   New-Item -ItemType Directory -Force "$homeDir\config\packs" | Out-Null
   Copy-Item $packFile "$homeDir\config\packs\$($pack.id).json"
   Invoke-Xcli 0 packs apply $pack.id.Substring(0, 8) | Out-Null
-  Check ((ZmProfile).pack_name -eq 'Smoke pack') 'packs apply by library id'
+  Check ((ZmProfile).pack_name -eq 'Smoke pack' -and (ZmProfile).pack_id -eq $pack.id) 'packs apply by library id'
   Invoke-Xcli 2 packs apply 'no-such-pack' | Out-Null
 
   # ------------------------------------------ refused while Xerces.exe runs
@@ -197,6 +239,7 @@ try {
   Invoke-Xcli 0 sig check | Out-Null
 } finally {
   $env:XERCES_HOME = $savedHome
+  $env:XERCES_DRY_LAUNCH = $savedDry
 }
 
 if ($script:failures.Count) {

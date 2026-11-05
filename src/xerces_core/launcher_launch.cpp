@@ -8,6 +8,8 @@
 #endif
 #include <windows.h>
 
+#include <tlhelp32.h>
+
 #include <algorithm>
 #include <cwctype>
 
@@ -101,6 +103,28 @@ bool game_in_run_folder(const fs::path &home) {
       entries, [](const ipc::run_entry &e) { return e.role == "game"; });
 }
 
+bool game_process_running(const fs::path &client) {
+  const std::wstring client_name = client.filename().wstring();
+  HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snapshot == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  const auto named = [](const wchar_t *exe, const std::wstring &name) {
+    return !name.empty() &&
+           CompareStringOrdinal(exe, -1, name.c_str(), -1, TRUE) == CSTR_EQUAL;
+  };
+  bool found = false;
+  PROCESSENTRY32W entry{};
+  entry.dwSize = sizeof(entry);
+  for (BOOL more = Process32FirstW(snapshot, &entry); more && !found;
+       more = Process32NextW(snapshot, &entry)) {
+    found = named(entry.szExeFile, client_name) ||
+            named(entry.szExeFile, L"BlackOps3.exe");
+  }
+  CloseHandle(snapshot);
+  return found;
+}
+
 namespace {
 std::wstring upper(std::wstring_view text) {
   std::wstring out(text);
@@ -183,10 +207,8 @@ launch_outcome launch_game(const launch_inputs &in,
     emit(log, log_level::warn, "launch.refused", message);
     return out;
   };
-  // What a real launch would refuse; a dry launch only says so (it starts
-  // nothing, so a checkout without boiii.exe or a fake game folder can still
-  // check its command lines).
-  std::vector<std::string> would_stop;
+  // The game must be found and supported, dry or not: Home, Servers and a
+  // culprit test refuse there, and a dry launch shows the same refusal.
   if (!game.can_launch()) {
     const std::string why =
         !game.dir ? "Black Ops III was not found. Set its folder in Settings."
@@ -195,27 +217,28 @@ launch_outcome launch_game(const launch_inputs &in,
         : !game.error.empty()
             ? game.error
             : std::string("This game build is not supported.");
-    if (!in.dry_launch) {
-      return refuse(launch_refusal::game, "launch.game", why);
-    }
-    would_stop.push_back(why);
+    return refuse(launch_refusal::game, "launch.game", why);
   }
   if (game_running && game_running()) {
     return refuse(launch_refusal::running, "launch.running",
                   "The game is already running.");
   }
+  // A missing client only stops a real launch; a dry one starts nothing, so
+  // a checkout without boiii.exe can still check its command lines, and it
+  // says what a real launch would refuse.
   std::error_code ec;
   const std::string client_name = path_utf8(paths.client.filename());
   const std::string program_name = paths.program.empty()
                                        ? std::string("Xerces.exe")
                                        : path_utf8(paths.program.filename());
+  std::string would_stop;
   if (!fs::exists(paths.client, ec)) {
     if (!in.dry_launch) {
       return refuse(launch_refusal::client, "launch.client",
                     "The game client (" + client_name +
                         ") is missing next to " + program_name + ".");
     }
-    would_stop.push_back(client_name + " is missing");
+    would_stop = client_name + " is missing";
   }
 
   // The plan file the client reads (5.4) and the journal (5.6).
@@ -248,15 +271,11 @@ launch_outcome launch_game(const launch_inputs &in,
   }
   if (in.dry_launch) {
     out.dry_run = true;
-    std::string stops;
-    for (const auto &why : would_stop) {
-      stops += (stops.empty() ? "" : "; ") + why;
-    }
-    out.message = stops.empty()
+    out.message = would_stop.empty()
                       ? "Dry launch: the command was written to the log."
                       : "Dry launch: the command was written to the log (a "
                         "real launch would stop: " +
-                            stops + ").";
+                            would_stop + ").";
     emit(log, log_level::info, "launch.dry", out.command_line,
          "{\"plan_id\":" + json::quote(out.plan_id) + "}");
     return out; // no journal: nothing ran that could crash

@@ -142,6 +142,12 @@ bool launcher_running(const fs::path &home) {
   return GetLastError() == ERROR_ACCESS_DENIED;
 }
 
+bool dry_launch_from_environment() {
+  wchar_t value[8] = {};
+  return GetEnvironmentVariableW(L"XERCES_DRY_LAUNCH", value, 8) > 0 &&
+         value[0] == L'1';
+}
+
 std::optional<std::string> read_text_file(const fs::path &path) {
   std::ifstream in(path, std::ios::binary);
   if (!in) {

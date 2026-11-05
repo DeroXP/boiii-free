@@ -319,9 +319,8 @@ options parse_options(int argc, wchar_t **argv) {
       out.skip_boot = true;
     }
   }
-  wchar_t value[8] = {};
-  if (GetEnvironmentVariableW(L"XERCES_DRY_LAUNCH", value, 8) > 0 &&
-      value[0] == L'1') {
+  // Shared with xerces_cli plan apply, so the variable means the same there.
+  if (xerces_core::dry_launch_from_environment()) {
     out.dry_launch = true;
   }
   return out;

@@ -53,6 +53,10 @@ std::wstring launcher_instance_name(const std::filesystem::path &home);
 // A Xerces.exe runs on this home (its mutex exists).
 bool launcher_running(const std::filesystem::path &home);
 
+// XERCES_DRY_LAUNCH=1 asks for a dry launch, as --dry-launch does: Xerces.exe
+// and `xerces_cli plan apply` both honour it.
+bool dry_launch_from_environment();
+
 // The whole file, or nothing when it cannot be opened.
 std::optional<std::string> read_text_file(const std::filesystem::path &path);
 // Writes through <path>.tmp and a rename, so a reader never sees half a

@@ -88,11 +88,12 @@ launch_outcome preview_launch(const launch_inputs &in);
 // after the plan and game checks. On success *process (when given) receives
 // the process handle, which the caller closes.
 //
-// A dry launch (in.dry_launch) writes the plan file but no journal, starts
-// nothing and logs the command (launch.dry); a missing client or an
-// unsupported game build do not stop it, the message says what a real launch
-// would refuse. Logs launch.refused, launch.dry, launch.started and
-// launch.failed.
+// A dry launch (in.dry_launch) is refused where a real one is (the plan, the
+// command line, the game not found or not supported, a running game), then
+// writes the plan file but no journal, starts nothing and logs the command
+// (launch.dry). Only a missing client does not stop it; the message says a
+// real launch would stop there. Logs launch.refused, launch.dry,
+// launch.started and launch.failed.
 launch_outcome launch_game(const launch_inputs &in,
                            const std::function<bool()> &game_running,
                            const event_log &log, void **process = nullptr);
@@ -100,6 +101,13 @@ launch_outcome launch_game(const launch_inputs &in,
 // A game announces itself in <home>\run while it runs (15.2), also one this
 // program did not start.
 bool game_in_run_folder(const std::filesystem::path &home);
+
+// A process named like the client (boiii.exe) or BlackOps3.exe runs on this
+// PC. A game started seconds ago, by Xerces.exe, xerces_cli or anything else,
+// has no entry in <home>\run until it reaches post_unpack, but its process is
+// there from the start. Both programs ask it before a real launch, so neither
+// starts a second game.
+bool game_process_running(const std::filesystem::path &client);
 
 // The environment block for a child process: block (as from
 // GetEnvironmentStringsW, double-NUL terminated) with each change applied (a
