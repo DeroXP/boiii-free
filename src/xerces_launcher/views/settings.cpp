@@ -541,12 +541,17 @@ private:
                               "boiii_players\\properties.json yet. Start the "
                               "game once, then press Enter here to write the "
                               "name.");
-    } else if (in_game && !c.player_name.empty() && *in_game != c.player_name) {
-      // Renamed in the game (its "name" command), or a write that failed:
+    } else if (in_game && core::game_name_differs(c.player_name, in_game)) {
+      // Renamed in the game (its "name" command), the name the game stored
+      // when it started, a write that failed, or upstream's launcher:
       // Xerces does not overwrite it behind the player's back.
       name_note_ = owner_->tr("The game's file says:") + " " + *in_game + ". " +
-                   owner_->tr("Press Enter in the field to write this name "
-                              "there instead.");
+                   (c.player_name.empty()
+                        ? owner_->tr("Press Enter in the empty field to take "
+                                     "it out: the game then uses your Steam "
+                                     "name from its next start.")
+                        : owner_->tr("Press Enter in the field to write this "
+                                     "name there instead."));
     } else if (in_game) {
       name_note_ = owner_->tr("The game's file says:") + " " + *in_game;
     } else {
@@ -988,8 +993,9 @@ private:
     core::launcher_config &c = config();
     force_ = text_field::name;
     // An unchanged name is only written again on Enter, when the game's file
-    // still lacks it (no file yet, a failed write, or renamed in the game);
-    // leaving the field never rewrites it.
+    // still lacks it (no file yet, a failed write, renamed in the game, or a
+    // name in the file while the field is empty); leaving the field never
+    // rewrites it.
     if (cleaned.name == c.player_name &&
         (!by_enter || (!name_pending_ && !game_file_differs(cleaned.name)))) {
       refresh(); // shows the cleaned text if spaces were trimmed
@@ -1016,9 +1022,12 @@ private:
     refresh();
   }
 
+  // An empty name too: Enter then takes a name the file holds away, so the
+  // game goes back to the Steam name ("Leave it empty to use your Steam
+  // name"); leaving the field still writes nothing.
   bool game_file_differs(const std::string &name) {
     const game_state &game = svc().game();
-    if (name.empty() || !game.dir) {
+    if (!game.dir) {
       return false;
     }
     const fs::path file = core::player_properties_file(*game.dir);
@@ -1026,7 +1035,8 @@ private:
     if (!fs::is_regular_file(file, ec)) {
       return false;
     }
-    return core::read_player_name(read_small(file)).value_or("") != name;
+    return core::game_name_differs(name,
+                                   core::read_player_name(read_small(file)));
   }
 
   // Writes the saved name into the game's properties file; the message for

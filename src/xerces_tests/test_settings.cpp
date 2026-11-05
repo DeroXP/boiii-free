@@ -123,6 +123,26 @@ TEST_CASE("settings: the name goes into an existing properties file only") {
   fs::remove_all(game);
 }
 
+TEST_CASE("settings: Enter on an empty name takes the file's name out") {
+  // "Leave it empty to use your Steam name": a name the file holds (the
+  // game's own, upstream's launcher's) differs from an empty saved name.
+  CHECK(game_name_differs("", std::string("OldName")));
+  CHECK(!game_name_differs("", std::nullopt));
+  CHECK(!game_name_differs("", std::string(""))); // the client reads it as none
+  CHECK(game_name_differs("Dero", std::string("Other")));
+  CHECK(game_name_differs("Dero", std::nullopt));
+  CHECK(!game_name_differs("Dero", std::string("Dero")));
+
+  const fs::path game = fresh_game("empty_name");
+  const fs::path file = player_properties_file(game);
+  write_bytes(file, "{\"playerName\":\"OldName\"}");
+  CHECK(game_name_differs("", read_player_name(read_bytes(file))));
+  CHECK_EQ(apply_player_name(game, "").status, name_apply::written);
+  CHECK(!read_player_name(read_bytes(file)).has_value());
+  CHECK(!game_name_differs("", read_player_name(read_bytes(file))));
+  fs::remove_all(game);
+}
+
 TEST_CASE("settings: the game's saved skip switches are read from config.cfg") {
   CHECK_EQ(game_config_file("C:/Game"),
            fs::path("C:/Game") / "boiii_players" / "user" / "config.cfg");

@@ -243,6 +243,15 @@ name_apply_result apply_player_name(const fs::path &game_dir,
   return out;
 }
 
+bool game_name_differs(std::string_view saved,
+                       const std::optional<std::string> &in_file) {
+  if (saved.empty()) {
+    // The client reads an empty playerName as none (name.cpp).
+    return in_file.has_value() && !in_file->empty();
+  }
+  return in_file.value_or("") != saved;
+}
+
 // ------------------------------------------------------------ launch flags
 bool valid_launch_flag(std::string_view flag) {
   if (flag.size() < 2 || flag.size() > 64 || flag[0] != '-') {

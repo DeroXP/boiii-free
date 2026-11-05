@@ -81,6 +81,17 @@ struct name_apply_result {
 name_apply_result apply_player_name(const std::filesystem::path &game_dir,
                                     std::string_view name);
 
+// Whether the game's file holds something other than the saved name, so
+// that Enter in the name field writes it there again. in_file is the file's
+// "playerName" (nullopt when it has none). An empty saved name means "use
+// your Steam name", which the file only gives without a name of its own:
+// the client stores the name it uses at every start (name.cpp,
+// load_player_name) and on its "name" command, so a name left there by
+// either, or by upstream's launcher, differs from an empty one.
+bool game_name_differs(std::string_view saved,
+                       const std::optional<std::string> &in_file);
+
+
 // ------------------------------------------------------------ launch flags
 // The rule build_launch_command applies: '-' then letters, digits, '-' or
 // '_', at most 64 characters.
