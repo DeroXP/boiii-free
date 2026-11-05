@@ -26,6 +26,8 @@
 
 #include "scheduler.hpp"
 
+#include <xerces/runtime.hpp>
+
 #include <utils/io.hpp>
 #include <utils/nt.hpp>
 
@@ -991,6 +993,10 @@ void queue_message(const char *message) {
   if (!message || !message[0] || is_hidden_developer_message(message)) {
     return;
   }
+
+  // Xerces keeps the last lines for its game log (xerces/runtime.hpp): the
+  // console window dies with the process.
+  xerces_runtime::console_append(message);
 
   if (interceptor_set.load(std::memory_order_acquire)) {
     const std::string msg(message);

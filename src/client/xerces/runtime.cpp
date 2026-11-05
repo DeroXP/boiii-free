@@ -2,6 +2,7 @@
 
 #include "runtime.hpp"
 
+#include <atomic>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -14,6 +15,7 @@
 
 #include <xerces_core/json.hpp>
 #include <xerces_core/launch.hpp>
+#include <xerces_core/text_tail.hpp>
 
 namespace xerces_runtime {
 namespace {
@@ -267,5 +269,48 @@ journal_step::~journal_step() {
 journal_step journal_symbols_step() {
   return journal_step(xerces_core::launch_phase::symbols,
                       xerces_core::launch_phase::launching);
+}
+
+// ---------------------------------------------------------------- the exit
+namespace {
+// Plain values: read during shutdown, after other statics may be gone.
+std::atomic_bool quit_seen{false};
+std::atomic_bool exit_code_known{false};
+std::atomic<std::uint32_t> exit_code_value{0};
+
+std::mutex console_mutex;
+xerces_core::text_tail console_tail; // a fixed buffer, no destructor work
+} // namespace
+
+void note_quit_requested() { quit_seen = true; }
+bool quit_requested() { return quit_seen; }
+
+void note_exit_code(std::uint32_t code) {
+  exit_code_value = code;
+  exit_code_known = true;
+}
+
+std::optional<std::uint32_t> exit_code() {
+  if (!exit_code_known) {
+    return std::nullopt;
+  }
+  return exit_code_value.load();
+}
+
+void console_append(std::string_view text) {
+  std::lock_guard lock(console_mutex);
+  console_tail.append(text);
+}
+
+std::vector<std::string> console_last_lines(std::size_t count) {
+  // A crash can come while another thread holds the lock: never wait long.
+  std::unique_lock lock(console_mutex, std::defer_lock);
+  for (int attempt = 0; attempt < 50 && !lock.try_lock(); ++attempt) {
+    Sleep(2);
+  }
+  if (!lock.owns_lock()) {
+    return {};
+  }
+  return console_tail.last_lines(count);
 }
 } // namespace xerces_runtime

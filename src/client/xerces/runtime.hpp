@@ -5,9 +5,12 @@
 // the game role's JSON log, <home>\logs\<date>-<time>-game-<pid>.jsonl, and
 // the launch journal, <home>\logs\journal.json.
 
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <xerces_core/journal.hpp>
 #include <xerces_core/log.hpp>
@@ -74,4 +77,23 @@ private:
   xerces_core::launch_phase after_;
 };
 [[nodiscard]] journal_step journal_symbols_step();
+
+// ---------------------------------------------------------------- the exit
+// The engine's quit command ran (loader.cpp wraps it): the player chose to
+// leave, so the launch ended cleanly even if the exit that follows is forced
+// (the console's close forces it after 3 s, code 1).
+void note_quit_requested();
+bool quit_requested();
+// main.cpp's exit hook passes the code the game gave ExitProcess, just before
+// the components' shutdown runs; nullopt when the process ends another way.
+void note_exit_code(std::uint32_t code);
+std::optional<std::uint32_t> exit_code();
+
+// ------------------------------------------------------- the console tail
+// console.cpp passes everything the console shows; the last lines go into the
+// game log when a map fails or the game ends without quitting (DESIGN.md
+// 5.10), because the console window dies with the process. Safe to call from
+// any thread and during shutdown.
+void console_append(std::string_view text);
+std::vector<std::string> console_last_lines(std::size_t count);
 } // namespace xerces_runtime

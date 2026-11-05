@@ -66,7 +66,7 @@ New-Item -ItemType Directory -Force $HomeDir, $runDir | Out-Null
 $record = [ordered]@{
   time = (Get-Date).ToString('s'); map = $Map; mode = $Mode; stack = $Stack; command = $StartCommand
   result = 'unknown'; detail = ''; menu_seconds = $null; load_seconds = $null; pid = $null
-  console = $null; dumps = @(); pictures = @(); errors = @()
+  console = $null; detail_console = ''; dumps = @(); pictures = @(); errors = @()
 }
 function Say([string]$text) { Write-Host ('[{0}] {1}' -f (Get-Date -Format 'HH:mm:ss'), $text) }
 
@@ -140,6 +140,9 @@ function Find-Dialog([int]$gamePid) {
   return $null
 }
 
+# The console's lines. Each successful read is kept, so a game that dies
+# still leaves the last text this check saw (up to a second old).
+$script:lastConsole = @()
 function Console-Lines {
   $game = Get-XercesGame
   if (-not $game) { return @() }
@@ -147,11 +150,32 @@ function Console-Lines {
   if (-not $console) { return @() }
   $buffer = (Get-XercesConsoleControls $console).Buffer
   if (-not $buffer) { return @() }
-  return [XercesWin]::ReadText($buffer) -split "\r\n|\r|\n"
+  $lines = [XercesWin]::ReadText($buffer) -split "\r\n|\r|\n"
+  if ($lines.Count -gt 1) { $script:lastConsole = $lines }
+  return $lines
+}
+
+# Waits until no file in the client's minidumps folder has grown for 3 s, so
+# a crash zip being written is not cut short by quitting (at most 60 s).
+function Wait-DumpsSettled {
+  if (-not (Test-Path $minidumps)) { return }
+  $last = ''
+  $stableSince = Get-Date
+  $deadline = (Get-Date).AddSeconds(60)
+  while ((Get-Date) -lt $deadline) {
+    $now = (Get-ChildItem $minidumps -File | ForEach-Object { "$($_.Name):$($_.Length)" }) -join '|'
+    if ($now -ne $last) { $last = $now; $stableSince = Get-Date }
+    elseif (((Get-Date) - $stableSince).TotalSeconds -ge 3) { return }
+    Start-Sleep -Milliseconds 500
+  }
 }
 
 function Save-Console([string]$name) {
   $lines = Console-Lines
+  if ($lines.Count -le 1 -and $script:lastConsole.Count -gt 1) {
+    $lines = $script:lastConsole
+    $record.detail_console = 'last snapshot before the game ended'
+  }
   if ($lines.Count -gt 0) {
     $path = Join-Path $runDir $name
     [System.IO.File]::WriteAllLines($path, $lines, (New-Object System.Text.UTF8Encoding $false))
@@ -175,6 +199,7 @@ function Dump-Files {
 function Finish([string]$result, [string]$detail) {
   $record.result = $result
   $record.detail = $detail
+  Wait-DumpsSettled
   $lines = Save-Console 'console.txt'
   # Lines worth reading first: errors, limits, script problems, freezes.
   $record.errors = @($lines | Where-Object {

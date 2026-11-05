@@ -9,10 +9,20 @@
 //   loader.plan.applied (or loader.plan.mismatch) with the plan id.
 // - The journal: <home>\logs\journal.json, written "launching" by the
 //   launcher, moves through symbols (the signature lookup, signatures.cpp),
-//   launching again while the engine starts, frontend, in_game and
-//   clean_exit. A launch that never reaches clean_exit crashed, and the
-//   launcher offers safe mode next time. Only the launch the launcher
-//   recorded touches the journal (the launch id, runtime.hpp).
+//   launching again while the engine starts, frontend, loading_map (a level
+//   is loading: the client is not yet active in it), in_game and clean_exit.
+//   A launch that never reaches clean_exit crashed, and the launcher offers
+//   safe mode next time. Only the launch the launcher recorded touches the
+//   journal (the launch id, runtime.hpp).
+// - clean_exit is written when the engine's quit command runs (wrapped
+//   below): the console's close forces the exit 3 s later, before any
+//   shutdown code, and leaving a match takes longer than that. A game that
+//   ends through its own ExitProcess without a quit and with a code other
+//   than 0 crashed (seen with two custom maps: 0xFFFFFFFF mid-load); that
+//   exit and every engine error the player sees go into the game log with
+//   the console's last lines.
+
+#include "loader.hpp"
 
 #include <component/scheduler.hpp>
 #include <game/game.hpp>
@@ -30,6 +40,69 @@ namespace xerces_loader {
 namespace {
 using xerces_core::launch_phase;
 using xerces_runtime::set_journal_phase;
+
+// The console lines that go into the log with a failure.
+constexpr std::size_t console_lines_logged = 60;
+
+std::string console_json() {
+  std::string out = "[";
+  bool first = true;
+  for (const auto &line :
+       xerces_runtime::console_last_lines(console_lines_logged)) {
+    if (!first) {
+      out += ',';
+    }
+    first = false;
+    out += xerces_core::json::quote(line.size() > 600 ? line.substr(0, 600)
+                                                      : line);
+  }
+  return out + "]";
+}
+
+// The level loaded or loading ("" in the menus).
+std::string current_map() {
+  for (const char *name : {"mapname", "ui_mapname"}) {
+    if (auto value = game::get_dvar_string(name); value && !value->empty()) {
+      return std::string(*value);
+    }
+  }
+  return {};
+}
+
+// ---------------------------------------------------------------- quit
+game::cmd::xcommand_t engine_quit = nullptr;
+
+void quit_command() {
+  xerces_runtime::note_quit_requested();
+  // Now: the console's close terminates the process 3 s from here.
+  set_journal_phase(launch_phase::clean_exit);
+  if (engine_quit) {
+    engine_quit();
+  }
+}
+
+// Points the engine's "quit" entry at quit_command (the engine's function
+// still runs). Data in the command list, no code bytes.
+bool wrap_quit_command() {
+  for (auto *command = *game::cmd::cmd_functions; command;
+       command = command->next) {
+    if (command->name && _stricmp(command->name, "quit") == 0) {
+      if (command->function != &quit_command) {
+        engine_quit = command->function;
+        command->function = &quit_command;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+// In a level, is the local client playing it yet, or still loading it?
+launch_phase level_phase() {
+  const auto state = game::cg::clientUIActives->actives[0].connectionState;
+  return state == game::connstate_t::ACTIVE ? launch_phase::in_game
+                                            : launch_phase::loading_map;
+}
 
 // The plan file the launcher wrote for this launch, by its id (hex only, so
 // the id can never leave the plans folder).
@@ -105,20 +178,39 @@ public:
           if (!plan_id.empty()) {
             verify_plan(plan_id);
           }
+          // Every engine command exists by the first frame.
+          if (!wrap_quit_command()) {
+            xerces_runtime::log_warn(
+                "loader.quit.unwrapped",
+                "The engine's quit command was not found; quitting relies on "
+                "the exit code alone");
+          }
         },
         scheduler::main);
 
-    // In a match or back in the menus, checked once a second.
+    // Loading a level, playing it, or back in the menus, checked once a
+    // second.
     scheduler::loop(
         [] {
           if (!xerces_runtime::journal_active()) {
             return;
           }
-          const bool in_game = game::com::Com_IsInGame() &&
-                               !game::com::Com_IsRunningUILevel();
-          if (in_game) {
-            set_journal_phase(launch_phase::in_game);
-          } else if (xerces_runtime::journal_phase() == launch_phase::in_game) {
+          const bool in_level =
+              game::com::Com_IsInGame() && !game::com::Com_IsRunningUILevel();
+          const launch_phase now = xerces_runtime::journal_phase();
+          if (in_level) {
+            const launch_phase phase = level_phase();
+            if (phase != now) {
+              set_journal_phase(phase);
+              if (phase == launch_phase::in_game) {
+                xerces_runtime::log_info(
+                    "loader.map.ready", current_map(),
+                    "{\"map\":" + xerces_core::json::quote(current_map()) +
+                        "}");
+              }
+            }
+          } else if (now == launch_phase::in_game ||
+                     now == launch_phase::loading_map) {
             set_journal_phase(launch_phase::frontend);
           }
         },
@@ -126,11 +218,68 @@ public:
   }
 
   void pre_destroy() override {
-    if (game::is_client() && game::is_new_client()) {
-      set_journal_phase(launch_phase::clean_exit);
+    if (!game::is_client() || !game::is_new_client()) {
+      return;
     }
+    const bool quit = xerces_runtime::quit_requested();
+    const auto code = xerces_runtime::exit_code();
+    if (xerces_core::game_exit_is_clean(quit, code)) {
+      set_journal_phase(launch_phase::clean_exit);
+      return;
+    }
+    // The engine ended the game without a quit: the journal keeps its phase,
+    // so the launcher counts the launch as a crash.
+    char hex[16];
+    std::snprintf(hex, sizeof(hex), "0x%08X", code.value_or(0));
+    xerces_runtime::log_error(
+        "loader.exit.unexpected",
+        std::string("The game ended without quitting (exit code ") + hex +
+            ") while " +
+            xerces_core::to_string(xerces_runtime::journal_phase()),
+        "{\"code\":" + std::to_string(code.value_or(0)) + ",\"phase\":" +
+            xerces_core::json::quote(
+                xerces_core::to_string(xerces_runtime::journal_phase())) +
+            ",\"map\":" + xerces_core::json::quote(current_map()) +
+            ",\"console\":" + console_json() + "}");
   }
 };
+
+void engine_error(std::uint32_t code, std::string_view message) {
+  using game::errorParm;
+  const auto parm = static_cast<errorParm>(code);
+  // Restarts and disconnects are how the engine leaves a match normally.
+  const auto quiet = errorParm::SOFTRESTART | errorParm::SOFTRESTART_KEEPDW |
+                     errorParm::SOFTRESTART_SILENT | errorParm::DISCONNECT |
+                     errorParm::SERVERDISCONNECT;
+  if ((parm & quiet) != errorParm::NONE || !game::is_client() ||
+      !game::is_new_client()) {
+    return;
+  }
+  std::string text(message.substr(0, 4000));
+  // The first line that says something ("****" banners carry nothing).
+  std::string headline;
+  std::size_t start = 0;
+  while (start < text.size() && headline.empty()) {
+    const auto end = text.find('\n', start);
+    std::string line = text.substr(
+        start, end == std::string::npos ? std::string::npos : end - start);
+    if (line.find_first_not_of("* \t\r") != std::string::npos) {
+      headline = line;
+    }
+    start = end == std::string::npos ? text.size() : end + 1;
+  }
+  if (headline.size() > 300) {
+    headline.resize(300);
+  }
+  xerces_runtime::log_error(
+      "loader.engine.error", headline.empty() ? "engine error" : headline,
+      "{\"code\":" + std::to_string(code) + ",\"map\":" +
+          xerces_core::json::quote(current_map()) + ",\"phase\":" +
+          xerces_core::json::quote(
+              xerces_core::to_string(xerces_runtime::journal_phase())) +
+          ",\"message\":" + xerces_core::json::quote(text) +
+          ",\"console\":" + console_json() + "}");
+}
 } // namespace xerces_loader
 
 REGISTER_COMPONENT(xerces_loader::component)

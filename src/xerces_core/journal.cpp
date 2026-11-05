@@ -126,6 +126,11 @@ bool exit_counts_as_clean(const launch_journal &journal,
          !journal.launch_id.empty();
 }
 
+bool game_exit_is_clean(bool quit_requested,
+                        std::optional<std::uint32_t> exit_code) {
+  return quit_requested || !exit_code || *exit_code == 0;
+}
+
 bool journal_crashed(const std::optional<launch_journal> &journal) {
   return !journal || journal->phase != launch_phase::clean_exit;
 }
@@ -156,9 +161,8 @@ culprit_search::culprit_search(std::vector<std::string> crashed_stack)
 culprit_search::culprit_search(std::vector<std::string> suspects,
                                bool testing_second_half, bool combination,
                                std::size_t launches)
-    : suspects_(std::move(suspects)),
-      testing_second_half_(testing_second_half), combination_(combination),
-      launches_(launches) {}
+    : suspects_(std::move(suspects)), testing_second_half_(testing_second_half),
+      combination_(combination), launches_(launches) {}
 
 std::vector<std::string> culprit_search::next_test() const {
   if (done()) {
@@ -226,11 +230,11 @@ std::string culprit_progress_to_json(const culprit_progress &value) {
   auto &alloc = doc.GetAllocator();
   json::set(doc, "schema", std::int64_t{1}, alloc);
   json::set(doc, "mode", value.mode, alloc);
-  json::set(doc, "crashed_stack", json::string_array(value.crashed_stack, alloc),
-            alloc);
+  json::set(doc, "crashed_stack",
+            json::string_array(value.crashed_stack, alloc), alloc);
   json::set(doc, "testing", json::string_array(value.testing, alloc), alloc);
-  json::set(doc, "suspects",
-            json::string_array(value.search.suspects(), alloc), alloc);
+  json::set(doc, "suspects", json::string_array(value.search.suspects(), alloc),
+            alloc);
   json::set(doc, "second_half", value.search.testing_second_half(), alloc);
   json::set(doc, "combination", value.search.needs_combination(), alloc);
   json::set(doc, "launches", static_cast<std::int64_t>(value.search.launches()),

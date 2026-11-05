@@ -17,6 +17,8 @@
 #include <game/impl/snd/snd.hpp>
 #endif
 
+#include <xerces/loader.hpp>
+
 namespace patches {
 game::EngineDependentDvar lobby_min_players;
 utils::hook::detour com_error_hook;
@@ -83,6 +85,10 @@ void com_error_stub(const char *file, int32_t line, game::errorParm code,
     game::trace("{}", log);
     game::com::Com_Printf(game::consoleChannel_e::CHANNEL_DONT_FILTER,
                           game::consoleLabel_e::DEFAULT, "%s\n", log);
+
+    // Xerces' game log keeps the errors players see, with the map and the
+    // console's last lines (xerces/loader.hpp).
+    xerces_loader::engine_error(static_cast<uint32_t>(code), buffer);
 
     if (!game::is_server() && code == game::errorParm::FATAL) {
       exception::show_fatal_error(buffer);

@@ -21,6 +21,7 @@
 #include "component/updater.hpp"
 #include "launcher/html/html_window.hpp"
 #include "launcher/launcher.hpp"
+#include "xerces/runtime.hpp"
 
 #include <shlobj.h>
 #include <tlhelp32.h>
@@ -29,6 +30,8 @@ namespace {
 volatile bool g_call_tls_callbacks = false;
 
 DECLSPEC_NORETURN void WINAPI exit_hook(const uint32_t code) {
+  // Xerces' journal tells a quit from an engine giving up (xerces/loader.cpp).
+  xerces_runtime::note_exit_code(code);
   component_loader::pre_destroy();
   ExitProcess(code);
 }

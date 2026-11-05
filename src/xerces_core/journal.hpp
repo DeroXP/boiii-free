@@ -58,6 +58,16 @@ bool journal_claimable(const std::optional<launch_journal> &journal,
 bool exit_counts_as_clean(const launch_journal &journal,
                           std::uint32_t exit_code);
 
+// The game's side when it ends through its own ExitProcess (main.cpp's exit
+// hook runs the components' shutdown, and with it the journal's last write).
+// It ended cleanly when the player quit (the engine's quit command ran) or
+// the code is 0. Any other code is a crash and the journal keeps the phase it
+// had: on 2026-11-05 two custom maps ended the game with 0xFFFFFFFF in the
+// middle of their load, which used to be written as clean_exit. Without a
+// code (the process ended another way) it counts as clean as before.
+bool game_exit_is_clean(bool quit_requested,
+                        std::optional<std::uint32_t> exit_code);
+
 // No journal, or one that does not end in clean_exit: the launch crashed.
 bool journal_crashed(const std::optional<launch_journal> &journal);
 
