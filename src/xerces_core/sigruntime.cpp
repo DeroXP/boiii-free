@@ -54,6 +54,24 @@ bool cached_signatures_agree(const signature_report &cached,
   return true;
 }
 
+bool entry_code_matches(std::span<const std::uint8_t> code,
+                        std::span<const std::uint8_t> entry,
+                        const byte_pattern &pattern) {
+  if (entry.empty() || pattern.bytes.empty() || code.size() < entry.size() ||
+      code.size() < pattern.bytes.size()) {
+    return false;
+  }
+  if (!std::equal(entry.begin(), entry.end(), code.begin())) {
+    return false;
+  }
+  for (std::size_t i = 0; i < pattern.bytes.size(); ++i) {
+    if (pattern.fixed[i] && code[i] != pattern.bytes[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 std::vector<std::string>
 require_signatures(signature_report &report, std::string_view feature,
                    std::span<const std::string_view> ids,

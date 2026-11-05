@@ -321,6 +321,76 @@ TEST_CASE("shared launcher: vanilla and safe mode need no plan") {
   CHECK_EQ(out.command_line, std::string("-launch -nointro"));
 }
 
+TEST_CASE("shared launcher: safe mode leaves the larger zone memory off") {
+  fake_setup setup("db_pool", true);
+  setup.config.extra_flags = {"-windowed", "-xerces-db-pool"};
+  launch_inputs in = setup.inputs(true);
+  in.modded = false;
+  launch_outcome out = launch_game(in, [] { return false; }, {});
+  CHECK(out.dry_run);
+  CHECK_EQ(out.command_line,
+           std::string("-launch -nointro -windowed -xerces-db-pool"));
+  CHECK(out.db_pool);
+  in.modded = true;
+  in.mods_off = true;
+  out = launch_game(in, [] { return false; }, {});
+  CHECK(out.dry_run);
+  CHECK_EQ(out.command_line, std::string("-launch -nointro -windowed"));
+  CHECK(!out.db_pool);
+  // Only for that launch: the setting itself stays on.
+  CHECK((setup.config.extra_flags ==
+         std::vector<std::string>{"-windowed", "-xerces-db-pool"}));
+}
+
+TEST_CASE("shared launcher: culprit tests leave the larger zone memory off") {
+  // The crashed launch had the flag. Safe mode and every culprit-search test
+  // (services::launch_culprit_test: part of the crashed stack, crash_followup)
+  // run without it, so a crash the setting causes never narrows the mods.
+  fake_setup setup("db_pool_culprit", true);
+  setup.config.extra_flags = {"-windowed", "-xerces-db-pool"};
+  profile_for(setup.config, "zm").mods = {"fixture.alpha", "fixture.beta"};
+  launch_inputs in = setup.inputs(true);
+  launch_outcome out = launch_game(in, [] { return false; }, {});
+  REQUIRE(out.dry_run);
+  CHECK(out.db_pool); // what the journal records
+  CHECK(out.command_line.starts_with(
+      "-launch -nointro -windowed -xerces-db-pool -xerces-plan "));
+
+  const std::vector<std::string> half = {"fixture.alpha"};
+  in.mods = &half;
+  in.crash_followup = true;
+  out = launch_game(in, [] { return false; }, {});
+  REQUIRE(out.dry_run);
+  CHECK(!out.db_pool);
+  CHECK(
+      out.command_line.starts_with("-launch -nointro -windowed -xerces-plan "));
+  CHECK(out.command_line.find("xerces-db-pool") == std::string::npos);
+  CHECK(out.command_line.ends_with(
+      "+set fs_game fixture.alpha +set fs_extramods fixture.probe"));
+
+  // The first test of a crash with the flag: the whole stack, without it.
+  const std::vector<std::string> whole = {"fixture.alpha", "fixture.beta"};
+  in.mods = &whole;
+  out = launch_game(in, [] { return false; }, {});
+  REQUIRE(out.dry_run);
+  CHECK(!out.db_pool);
+  CHECK(out.command_line.find("xerces-db-pool") == std::string::npos);
+  CHECK(out.command_line.find("fixture.beta") != std::string::npos);
+
+  // Safe mode runs on the same memory as the tests.
+  in.mods = nullptr;
+  in.crash_followup = false;
+  in.mods_off = true;
+  out = launch_game(in, [] { return false; }, {});
+  REQUIRE(out.dry_run);
+  CHECK(!out.db_pool);
+  CHECK_EQ(out.command_line, std::string("-launch -nointro -windowed"));
+
+  // The setting itself stays on until the player turns it off.
+  CHECK((setup.config.extra_flags ==
+         std::vector<std::string>{"-windowed", "-xerces-db-pool"}));
+}
+
 TEST_CASE("shared launcher: a pack becomes the profile") {
   mode_profile profile;
   profile.mods = {"old.mod"};

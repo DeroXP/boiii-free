@@ -11,11 +11,20 @@ had patched when the dump was taken: rel32 call and jump targets, RIP-relative
 displacements, and any jmp whose target lies outside the image (a hook the
 client wrote over the original bytes). It grows one instruction at a time until
 it matches exactly once in the first .text section, at the address asked for.
+--detoured wildcards a function's first five bytes even when the dump still has
+the original ones: for a function Xerces itself detours, so a dump of a client
+with the detour in place (a jmp there) still matches. The client then checks
+those five bytes itself before it writes them (docs/DESIGN.md 4.3). --through
+makes a function's pattern run at least to the instruction at that address, so
+it also pins down what a detour relies on (which register holds what), not only
+a prologue that many functions share.
 
   sigmaker.py --dump D.bin --address 0x141423D20 --id db.override_asset \\
       --symbol DB_OverrideAsset --feature multi_mod
   sigmaker.py --dump D.bin --address 0x141423A07 --site-in 0x1414236C0 \\
       --id db.load_xassets.expand_call --symbol "DB_LoadXAssets+0x347"
+  sigmaker.py --dump D.bin --address 0x1420C3520 --detoured --through 0x1420C35DC \\
+      --id pmem.create_pool --symbol "PMem pool create" --feature db_pool
 
 Prints one entry for compat/signatures.json.
 """
@@ -37,6 +46,7 @@ LINE = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*(.*)$")
 MIN_BYTES = 12
 MIN_FIXED = 8
 MAX_BYTES = 128
+DETOUR_BYTES = 5  # a detour's jmp rel32
 
 
 def parse_pe(image):
@@ -123,11 +133,13 @@ def fixed_bytes(address, code, text, base, image_size):
     return fixed
 
 
-def build(window, base, image_size):
+def build(window, base, image_size, detoured=False):
     pattern = []
     for address, code, text in window:
         for byte, keep in zip(code, fixed_bytes(address, code, text, base, image_size)):
             pattern.append(byte if keep else None)
+    if detoured:
+        pattern[:DETOUR_BYTES] = [None] * min(DETOUR_BYTES, len(pattern))
     return pattern
 
 
@@ -178,10 +190,21 @@ def main():
     parser.add_argument("--id", required=True)
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--feature", action="append", default=[])
+    parser.add_argument(
+        "--detoured",
+        action="store_true",
+        help="wildcard a function's first five bytes (a function Xerces detours)",
+    )
+    parser.add_argument(
+        "--through",
+        help="a function's pattern covers at least the instruction at this address",
+    )
     args = parser.parse_args()
 
     base = int(args.base, 16)
     address = int(args.address, 16)
+    through = int(args.through, 16) if args.through else None
+    max_bytes = MAX_BYTES
     pe = args.pe or Path(str(args.dump) + ".pe")
     if not pe.exists():
         sys.exit(f"{pe} is missing: run tools/dev/re/dump-xrefs.ps1 -Dump {args.dump} -Fix")
@@ -194,6 +217,8 @@ def main():
     if not text_rva <= rva < text_rva + text_size:
         sys.exit(f"0x{address:X} is not in the first .text section")
 
+    if (args.detoured or args.through) and args.site_in:
+        sys.exit("--detoured and --through are for functions, not sites")
     if args.site_in:
         start = int(args.site_in, 16)
         instructions = disassemble(args.objdump, pe, start, address + 64)
@@ -212,15 +237,27 @@ def main():
         kind = "site"
         candidates = [instructions[index - b : index + 1 + f] for b, f in windows]
     else:
-        instructions = disassemble(args.objdump, pe, address, address + MAX_BYTES + 16)
+        stop = address + max_bytes + 16
+        if through is not None:
+            if through < address:
+                sys.exit("--through lies before the function")
+            max_bytes = max(max_bytes, through - address + 16)
+            stop = through + 16
+        instructions = disassemble(args.objdump, pe, address, stop)
         if not instructions or instructions[0][0] != address:
             sys.exit(f"no instruction at 0x{address:X}")
+        if through is not None and not any(insn[0] == through for insn in instructions):
+            sys.exit(f"0x{through:X} is not an instruction boundary from 0x{address:X}")
         kind = "function"
-        candidates = [instructions[:n] for n in range(1, len(instructions) + 1)]
+        candidates = [
+            instructions[:n]
+            for n in range(1, len(instructions) + 1)
+            if through is None or instructions[n - 1][0] >= through
+        ]
 
     for window in candidates:
-        pattern = build(window, base, image_size)
-        if len(pattern) > MAX_BYTES:
+        pattern = build(window, base, image_size, args.detoured and kind == "function")
+        if len(pattern) > max_bytes:
             break
         if not good_enough(pattern):
             continue
@@ -239,7 +276,7 @@ def main():
             }
             print(json.dumps(entry, indent=2))
             return
-    sys.exit(f"no unique pattern of at most {MAX_BYTES} bytes for 0x{address:X}")
+    sys.exit(f"no unique pattern of at most {max_bytes} bytes for 0x{address:X}")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 #include "json.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <random>
 
@@ -65,6 +66,7 @@ std::string journal_to_json(const launch_journal &value) {
   json::set(doc, "safe_mode", value.safe_mode, alloc);
   json::set(doc, "mode", value.mode, alloc);
   json::set(doc, "launch_id", value.launch_id, alloc);
+  json::set(doc, "db_pool", value.db_pool, alloc);
   return json::canonical(doc);
 }
 
@@ -98,6 +100,10 @@ std::optional<launch_journal> parse_journal(std::string_view text) {
   }
   out.mode = json::get_string(root, "mode").value_or("");
   out.launch_id = json::get_string(root, "launch_id").value_or("");
+  if (const auto *db_pool = json::member(root, "db_pool");
+      db_pool != nullptr && db_pool->IsBool()) {
+    out.db_pool = db_pool->GetBool();
+  }
   return out;
 }
 
@@ -147,26 +153,53 @@ safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last) {
   out.crashed_in = last->phase;
   out.crashed_mode = last->mode;
   out.crashed_started = last->started;
-  out.message = "The last launch with " + std::to_string(last->stack.size()) +
-                (last->stack.size() == 1 ? " mod" : " mods") + " crashed " +
+  out.crashed_with_db_pool = last->db_pool;
+  const std::string mods = std::to_string(last->stack.size()) +
+                           (last->stack.size() == 1 ? " mod" : " mods");
+  if (last->db_pool) {
+    // The experimental setting is as much a suspect as the mods (5.4).
+    out.message = "The last launch with " + mods +
+                  " and larger zone memory (experimental) crashed " +
+                  describe(last->phase) +
+                  ". This launch starts with mods and larger zone memory "
+                  "off. Larger zone memory may be the cause: find the "
+                  "culprit runs the same mods without it first. Or retry "
+                  "with mods, report the crash, or turn larger zone memory "
+                  "off in Settings > Launch.";
+    return out;
+  }
+  out.message = "The last launch with " + mods + " crashed " +
                 describe(last->phase) +
                 ". This launch starts with mods off. Retry with mods, report "
                 "the crash, or find the mod that causes it.";
   return out;
 }
 
-culprit_search::culprit_search(std::vector<std::string> crashed_stack)
-    : suspects_(std::move(crashed_stack)) {}
+bool culprit_search_possible(const safe_mode_decision &decision) {
+  return decision.safe_mode &&
+         decision.crashed_stack.size() +
+                 (decision.crashed_with_db_pool ? 1 : 0) >=
+             2;
+}
+
+culprit_search::culprit_search(std::vector<std::string> crashed_stack,
+                               bool crashed_with_db_pool)
+    : suspects_(std::move(crashed_stack)),
+      db_pool_(crashed_with_db_pool ? db_pool_suspect::untested
+                                    : db_pool_suspect::none) {}
 
 culprit_search::culprit_search(std::vector<std::string> suspects,
                                bool testing_second_half, bool combination,
-                               std::size_t launches)
+                               std::size_t launches, db_pool_suspect db_pool)
     : suspects_(std::move(suspects)), testing_second_half_(testing_second_half),
-      combination_(combination), launches_(launches) {}
+      combination_(combination), launches_(launches), db_pool_(db_pool) {}
 
 std::vector<std::string> culprit_search::next_test() const {
   if (done()) {
     return {};
+  }
+  if (db_pool_ == db_pool_suspect::untested) {
+    return suspects_; // the whole crashed stack, without the setting
   }
   const std::size_t half = suspects_.size() / 2;
   return testing_second_half_
@@ -181,6 +214,10 @@ void culprit_search::record(bool crashed) {
     return;
   }
   ++launches_;
+  if (db_pool_ == db_pool_suspect::untested) {
+    db_pool_ = crashed ? db_pool_suspect::cleared : db_pool_suspect::culprit;
+    return;
+  }
   const std::vector<std::string> tested = next_test();
   if (crashed) {
     suspects_ = tested;
@@ -195,16 +232,28 @@ void culprit_search::record(bool crashed) {
 }
 
 bool culprit_search::done() const {
-  return combination_ || suspects_.size() <= 1;
+  if (db_pool_ == db_pool_suspect::untested) {
+    return false;
+  }
+  return db_pool_ == db_pool_suspect::culprit || combination_ ||
+         suspects_.size() <= 1;
 }
 
 std::optional<std::string> culprit_search::culprit() const {
-  if (!combination_ && suspects_.size() == 1) {
+  if (done() && db_pool_ != db_pool_suspect::culprit && !combination_ &&
+      suspects_.size() == 1) {
     return suspects_.front();
   }
   return std::nullopt;
 }
 namespace {
+constexpr std::pair<db_pool_suspect, const char *> db_pool_names[] = {
+    {db_pool_suspect::none, "none"},
+    {db_pool_suspect::untested, "untested"},
+    {db_pool_suspect::cleared, "cleared"},
+    {db_pool_suspect::culprit, "culprit"},
+};
+
 std::vector<std::string> strings_at(const rapidjson::Value &root,
                                     std::string_view key) {
   std::vector<std::string> out;
@@ -239,6 +288,11 @@ std::string culprit_progress_to_json(const culprit_progress &value) {
   json::set(doc, "combination", value.search.needs_combination(), alloc);
   json::set(doc, "launches", static_cast<std::int64_t>(value.search.launches()),
             alloc);
+  for (const auto &[state, name] : db_pool_names) {
+    if (state == value.search.db_pool()) {
+      json::set(doc, "db_pool", name, alloc);
+    }
+  }
   return json::canonical(doc);
 }
 
@@ -261,8 +315,21 @@ std::optional<culprit_progress> parse_culprit_progress(std::string_view text) {
   if (out.mode.empty() || suspects.empty()) {
     return std::nullopt;
   }
+  // Searches saved before the larger zone memory was a suspect have no
+  // "db_pool"; a value this version does not know ends the search.
+  db_pool_suspect db_pool = db_pool_suspect::none;
+  if (const auto name = json::get_string(root, "db_pool")) {
+    const auto *known =
+        std::ranges::find_if(db_pool_names, [&](const auto &entry) {
+          return *name == entry.second;
+        });
+    if (known == std::ranges::end(db_pool_names)) {
+      return std::nullopt;
+    }
+    db_pool = known->first;
+  }
   out.search = culprit_search(std::move(suspects), bool_at(root, "second_half"),
-                              bool_at(root, "combination"), launches);
+                              bool_at(root, "combination"), launches, db_pool);
   return out;
 }
 } // namespace xerces_core

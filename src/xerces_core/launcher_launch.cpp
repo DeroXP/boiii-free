@@ -13,10 +13,12 @@
 #include <algorithm>
 #include <cwctype>
 
+#include "db_pool.hpp"
 #include "ipc.hpp"
 #include "journal.hpp"
 #include "json.hpp"
 #include "launch.hpp"
+#include "settings_options.hpp"
 #include "version.hpp"
 
 namespace xerces_core {
@@ -72,6 +74,14 @@ launch_outcome preview_launch(const launch_inputs &in) {
   options.nointro = config.nointro;
   options.mods_off = in.mods_off;
   options.extra_flags = config.extra_flags;
+  if (in.mods_off || in.crash_followup) {
+    // Safe mode and the culprit search's tests follow a crash. The
+    // experimental larger zone memory is a suspect of its own (the journal
+    // says whether the crashed launch had it), so none of them has it,
+    // whatever the settings say: the tests then compare like with like.
+    options.extra_flags =
+        with_flag(std::move(options.extra_flags), db_pool::flag_name, false);
+  }
   for (const auto &[name, value] : config.dvars) {
     options.dvars.emplace_back(name, value);
   }
@@ -98,6 +108,7 @@ launch_outcome preview_launch(const launch_inputs &in) {
       build_launch_command(out.resolved ? &*out.resolved : nullptr, options);
   out.diags.append(command.diags);
   out.command_line = command.command_line;
+  out.db_pool = db_pool::requested(command.args);
   if (!command.ok()) {
     out.message = command.diags.items().empty()
                       ? "The launch command could not be built."
@@ -258,6 +269,7 @@ launch_outcome launch_game(const launch_inputs &in,
   journal.safe_mode = in.mods_off;
   journal.mode = in.mode;
   journal.launch_id = new_launch_id();
+  journal.db_pool = out.db_pool;
   if (out.resolved) {
     const plan &resolved = *out.resolved;
     out.plan_file = paths.plans / (plan_file_id(resolved.plan_id) + ".json");

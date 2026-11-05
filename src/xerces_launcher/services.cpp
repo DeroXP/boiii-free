@@ -471,11 +471,15 @@ launch_outcome services::launch(const std::string &mode, bool modded,
                                 bool mods_off,
                                 const std::optional<std::string> &connect,
                                 const std::vector<std::string> *mods) {
+  return start(inputs(mode, modded, mods_off, connect, mods));
+}
+
+launch_outcome services::start(const xerces_core::launch_inputs &in) {
   void *process = nullptr;
   // A real launch also looks for a client process: a game xerces_cli started
   // seconds ago has no handle here and no run entry yet.
   launch_outcome out = xerces_core::launch_game(
-      inputs(mode, modded, mods_off, connect, mods),
+      in,
       [this] {
         return game_running() ||
                (!dry_launch_ &&
@@ -604,7 +608,7 @@ void services::save_culprit() {
 
 bool services::start_culprit() {
   const xerces_core::safe_mode_decision decision = safe_mode();
-  if (!decision.safe_mode || decision.crashed_stack.size() < 2) {
+  if (!xerces_core::culprit_search_possible(decision)) {
     return false;
   }
   xerces_core::culprit_progress progress;
@@ -613,11 +617,18 @@ bool services::start_culprit() {
   progress.mode =
       decision.crashed_mode.empty() ? config_.mode : decision.crashed_mode;
   progress.crashed_stack = decision.crashed_stack;
-  progress.search = xerces_core::culprit_search(decision.crashed_stack);
+  // A crashed launch with the larger zone memory has it as a suspect too:
+  // the first test runs the same stack without it.
+  progress.search = xerces_core::culprit_search(decision.crashed_stack,
+                                                decision.crashed_with_db_pool);
   culprit_ = std::move(progress);
   save_culprit();
   log_info("launcher.culprit.start",
-           std::to_string(culprit_->crashed_stack.size()) + " mods");
+           std::to_string(culprit_->crashed_stack.size()) +
+               (culprit_->crashed_stack.size() == 1 ? " mod" : " mods") +
+               (decision.crashed_with_db_pool ? " and larger zone memory" : ""),
+           std::string("{\"db_pool\":") +
+               (decision.crashed_with_db_pool ? "true" : "false") + "}");
   return true;
 }
 
@@ -635,7 +646,12 @@ launch_outcome services::launch_culprit_test() {
     return out;
   }
   const std::vector<std::string> mods = culprit_->search.next_test();
-  out = launch(culprit_->mode, true, false, std::nullopt, &mods);
+  // Without the larger zone memory, as in safe mode: every test runs on the
+  // stock pool, so a crash the setting causes never narrows the mods.
+  xerces_core::launch_inputs in =
+      inputs(culprit_->mode, true, false, std::nullopt, &mods);
+  in.crash_followup = true;
+  out = start(in);
   if (out.started) {
     culprit_->testing = mods;
     save_culprit();
@@ -653,7 +669,8 @@ void services::settle_culprit_test(bool crashed) {
   log_info("launcher.culprit.result", crashed ? "crashed" : "ran fine",
            "{\"launches\":" + std::to_string(culprit_->search.launches()) +
                ",\"done\":" + (culprit_->search.done() ? "true" : "false") +
-               "}");
+               ",\"db_pool_culprit\":" +
+               (culprit_->search.db_pool_culprit() ? "true" : "false") + "}");
 }
 
 // --------------------------------------------------------------- signatures

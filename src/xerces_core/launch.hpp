@@ -67,4 +67,8 @@ std::string plan_file_id(std::string_view plan_id);
 // "+" command, as the client reads its own command line.
 std::optional<std::string> flag_value(const std::vector<std::string> &args,
                                       std::string_view flag);
+// Whether a flag without a value ("-xerces-db-pool") is there, again only
+// before the first "+" command.
+bool has_launch_flag(const std::vector<std::string> &args,
+                     std::string_view flag);
 } // namespace xerces_core

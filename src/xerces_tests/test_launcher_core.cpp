@@ -261,6 +261,49 @@ TEST_CASE("safe mode: a culprit search survives between launches") {
   CHECK(!parse_culprit_progress("{}").has_value());
 }
 
+TEST_CASE("safe mode: the larger zone memory step survives between launches") {
+  culprit_progress progress;
+  progress.mode = "zm";
+  progress.crashed_stack = {"a", "b"};
+  progress.search = culprit_search(progress.crashed_stack, true);
+  progress.testing = progress.search.next_test();
+  CHECK((progress.testing == std::vector<std::string>{"a", "b"}));
+  auto back = parse_culprit_progress(culprit_progress_to_json(progress));
+  REQUIRE(back.has_value());
+  CHECK(back->search.testing_db_pool());
+  CHECK(back->testing == progress.testing);
+
+  progress.search.record(true); // the stack crashed without it too
+  progress.testing.clear();
+  back = parse_culprit_progress(culprit_progress_to_json(progress));
+  REQUIRE(back.has_value());
+  CHECK(back->search.db_pool() == db_pool_suspect::cleared);
+  CHECK((back->search.next_test() == std::vector<std::string>{"a"}));
+  CHECK_EQ(back->search.launches(), std::size_t{1});
+
+  progress.search = culprit_search(progress.crashed_stack, true);
+  progress.search.record(false); // it ran fine without it
+  back = parse_culprit_progress(culprit_progress_to_json(progress));
+  REQUIRE(back.has_value());
+  CHECK(back->search.db_pool_culprit());
+  CHECK(back->search.done());
+  CHECK(!back->search.culprit().has_value());
+
+  // Saved before the setting was a suspect; a state this version does not
+  // know is not read.
+  const std::string older =
+      R"({"schema":1,"mode":"zm","crashed_stack":["a","b"],"testing":[],)"
+      R"("suspects":["a","b"],"second_half":false,"combination":false,)"
+      R"("launches":0})";
+  const auto old = parse_culprit_progress(older);
+  REQUIRE(old.has_value());
+  CHECK(old->search.db_pool() == db_pool_suspect::none);
+  CHECK((old->search.next_test() == std::vector<std::string>{"a"}));
+  std::string unknown = older;
+  unknown.insert(unknown.size() - 1, R"(,"db_pool":"maybe")");
+  CHECK(!parse_culprit_progress(unknown).has_value());
+}
+
 TEST_CASE("config: round trip keeps known and unknown keys") {
   launcher_config c;
   c.game_dir = "D:\\SteamLibrary\\steamapps\\common\\Call of Duty Black Ops III";

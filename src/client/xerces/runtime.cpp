@@ -122,7 +122,7 @@ std::string read_file(const std::filesystem::path &path) {
   return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
-std::string flag_value(std::string_view flag) {
+std::vector<std::string> command_line_args() {
   int argc = 0;
   wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
   if (!argv) {
@@ -133,7 +133,11 @@ std::string flag_value(std::string_view flag) {
     args.push_back(utf8(argv[i]));
   }
   LocalFree(argv);
-  return xerces_core::flag_value(args, flag).value_or("");
+  return args;
+}
+
+std::string flag_value(std::string_view flag) {
+  return xerces_core::flag_value(command_line_args(), flag).value_or("");
 }
 
 // ----------------------------------------------------------- the journal
