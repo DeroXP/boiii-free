@@ -20,26 +20,40 @@ enum class frames_format { probe, presentmon };
 const char *to_string(frames_format format);
 
 // One run's frames. The per-frame extras are empty or as long as dt_ms
-// (NaN where a row had no value).
+// (NaN, -1 or "" where a row had no value).
 struct frame_series {
   frames_format format = frames_format::probe;
-  std::string dt_column;     // where the frame times came from
-  std::string time_column;   // where the times came from; empty: summed dt
-  std::vector<double> t_ms;  // each frame's time, ms after the first frame
-  std::vector<double> dt_ms; // each frame's time
-  std::vector<double> cpu_busy_ms; // PresentMon (MsCPUBusy or CPUBusy)
-  std::vector<double> gpu_busy_ms; // PresentMon (MsGPUBusy or GPUBusy)
-  std::vector<double> present_ms;  // probe: time inside Present
-  std::vector<double> overlay_us;  // probe: the overlay's share of it
+  std::string dt_column;        // where the frame times came from
+  std::string time_column;      // where the times came from; empty: summed dt
+  std::vector<double> t_ms;     // each frame's time, ms after the first frame
+  std::vector<double> dt_ms;    // each frame's time
+  std::vector<std::size_t> row; // each frame's data row (0-based; after
+                                // drop_warmup, from the first row kept)
+  std::vector<double> cpu_busy_ms;       // PresentMon (MsCPUBusy or CPUBusy)
+  std::vector<double> gpu_busy_ms;       // PresentMon (MsGPUBusy or GPUBusy)
+  std::vector<double> present_ms;        // probe: time inside Present
+  std::vector<double> overlay_us;        // probe: the overlay's share of it
+  std::vector<int> cpu;                  // probe: the CPU number
+  std::vector<std::uint8_t> flags_set;   // probe: 1 when flags is not 0
+  std::vector<std::uint8_t> shown;       // PresentMon: 0 when never displayed
+  std::vector<std::string> present_mode; // PresentMon
+  std::string application;               // PresentMon: the process kept
+  std::string process_id;
+
+  // Counts over the frames above, so after drop_warmup over the frames it
+  // kept.
+  std::size_t rows = 0;    // data rows (after drop_warmup: from the first
+                           // kept frame's row on)
+  std::size_t skipped = 0; // of those, rows with no usable frame time
   std::map<int, std::size_t> cpus; // probe: frames per CPU number
   std::size_t flagged = 0;         // probe: frames whose flags are not 0
-  std::string application;         // PresentMon: the process kept
-  std::string process_id;
-  std::size_t rows = 0;          // data rows of the process kept
-  std::size_t skipped = 0;       // of those, rows with no usable frame time
-  std::size_t other_rows = 0;    // PresentMon: other processes, swap chains
-  std::size_t not_displayed = 0; // PresentMon: frames never shown
+  std::size_t not_displayed = 0;   // PresentMon: frames never shown
   std::map<std::string, std::size_t> present_modes; // PresentMon
+  // What drop_warmup left out: data rows and frames.
+  std::size_t warmup_rows = 0;
+  std::size_t warmup_frames = 0;
+  // The whole capture: PresentMon rows of other processes and swap chains.
+  std::size_t other_rows = 0;
 };
 
 struct frames_result {
@@ -54,7 +68,9 @@ struct frames_result {
 // swap chains keeps the one with the most rows.
 frames_result parse_frames_csv(std::string_view text);
 
-// The frames from `warmup_s` seconds after the first frame on.
+// The frames from the first one at least `warmup_s` seconds after the first
+// frame on, with the counts (rows, skipped, cpus, flagged, not_displayed,
+// present_modes) taken again over them.
 frame_series drop_warmup(const frame_series &series, double warmup_s);
 
 // --- The game console --------------------------------------------------

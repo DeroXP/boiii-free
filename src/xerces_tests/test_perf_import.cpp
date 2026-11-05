@@ -51,13 +51,65 @@ TEST_CASE("perf import: the probe's frames CSV") {
   CHECK_EQ(s.cpus.at(5), 2u);
   CHECK_EQ(s.flagged, 1u);
 
-  // A warm-up of 8 ms keeps the frames from t = 8 ms on.
+  CHECK_EQ(s.warmup_rows, 0u);
+
+  // A warm-up of 8 ms keeps the frames from t = 8 ms on, and the counts
+  // cover only them: rows 3 and 4 (CPUs 5 and 3, no flags).
   const frame_series kept = drop_warmup(s, 0.008);
   REQUIRE_EQ(kept.dt_ms.size(), 2u);
   CHECK_NEAR(kept.dt_ms[0], 4.0, 0);
   CHECK_NEAR(kept.dt_ms[1], 18.0, 0);
   CHECK_EQ(kept.present_ms.size(), 2u);
+  CHECK_EQ(kept.rows, 2u);
+  CHECK_EQ(kept.skipped, 0u);
+  CHECK_EQ(kept.warmup_rows, 3u);
+  CHECK_EQ(kept.warmup_frames, 2u);
+  CHECK_EQ(kept.cpus.size(), 2u);
+  CHECK_EQ(kept.cpus.at(3), 1u);
+  CHECK_EQ(kept.cpus.at(5), 1u);
+  CHECK_EQ(kept.flagged, 0u);
+  REQUIRE_EQ(kept.row.size(), 2u);
+  CHECK_EQ(kept.row[0], 0u);
+  // Again on what is left: 10 ms after its first frame (8.5) is 18.5, so
+  // only the last frame stays.
+  const frame_series again = drop_warmup(kept, 0.010);
+  REQUIRE_EQ(again.dt_ms.size(), 1u);
+  CHECK_EQ(again.rows, 1u);
+  CHECK_EQ(again.warmup_rows, 4u);
+  CHECK_EQ(again.warmup_frames, 3u);
   CHECK_EQ(drop_warmup(s, 0).dt_ms.size(), 4u);
+  CHECK_EQ(drop_warmup(s, 0).cpus.at(3), 2u);
+
+  // A warm-up longer than the run keeps nothing.
+  const frame_series none = drop_warmup(s, 1);
+  CHECK(none.dt_ms.empty());
+  CHECK_EQ(none.rows, 0u);
+  CHECK(none.cpus.empty());
+}
+
+TEST_CASE("perf import: rows without a frame time and the warm-up") {
+  const std::string csv = "i,t_ms,dt_ms,cpu,flags\n"
+                          "0,0,4,1,1\n"
+                          "1,4,,1,1\n"
+                          "2,8,4,1,1\n"
+                          "3,12,,2,0\n"
+                          "4,16,4,2,0\n";
+  const auto result = parse_frames_csv(csv);
+  REQUIRE(result.series.has_value());
+  CHECK_EQ(result.series->rows, 5u);
+  CHECK_EQ(result.series->skipped, 2u);
+  CHECK_EQ(result.series->flagged, 2u); // rows 1 and 3 are not frames
+  // From t = 6 ms the first frame kept is row 2: rows 0 and 1 (one of them
+  // without a frame time) go with the warm-up, row 3 stays.
+  const frame_series kept = drop_warmup(*result.series, 0.006);
+  REQUIRE_EQ(kept.dt_ms.size(), 2u);
+  CHECK_EQ(kept.rows, 3u);
+  CHECK_EQ(kept.skipped, 1u);
+  CHECK_EQ(kept.warmup_rows, 2u);
+  CHECK_EQ(kept.warmup_frames, 1u);
+  CHECK_EQ(kept.flagged, 1u);
+  CHECK_EQ(kept.cpus.at(1), 1u);
+  CHECK_EQ(kept.cpus.at(2), 1u);
 }
 
 TEST_CASE("perf import: PresentMon 2.3+ CSV, the game's rows only") {
@@ -94,6 +146,20 @@ TEST_CASE("perf import: PresentMon 2.3+ CSV, the game's rows only") {
   CHECK_EQ(s.not_displayed, 1u);
   CHECK_EQ(s.present_modes.at("Hardware: Independent Flip"), 2u);
   CHECK_EQ(s.present_modes.at("Composed: Flip"), 1u);
+
+  // After a 5 ms warm-up only the last frame is left: its present mode, and
+  // the frame never displayed went with the warm-up. Other processes' rows
+  // stay a count of the whole capture.
+  const frame_series kept = drop_warmup(s, 0.005);
+  REQUIRE_EQ(kept.dt_ms.size(), 1u);
+  CHECK_EQ(kept.rows, 1u);
+  CHECK_EQ(kept.warmup_rows, 2u);
+  CHECK_EQ(kept.not_displayed, 0u);
+  CHECK_EQ(kept.present_modes.size(), 1u);
+  CHECK_EQ(kept.present_modes.at("Composed: Flip"), 1u);
+  CHECK_EQ(kept.other_rows, 1u);
+  REQUIRE_EQ(kept.cpu_busy_ms.size(), 1u);
+  CHECK_NEAR(kept.cpu_busy_ms[0], 2.4, 1e-12);
 }
 
 TEST_CASE("perf import: PresentMon 2.0 and 1.x column names") {

@@ -185,13 +185,16 @@ Work without the game:
                                                    the signature registry against
                                                    a memory dump (newest .bin in
                                                    a folder)
-  bench analyze <frames.csv|folder>... [--warmup-s <s>] [--json]
+  bench analyze <frames.csv|folder>... [--source probe|presentmon]
+                [--warmup-s <s>] [--json]
                                                    frame times of each run (the
-                                                   probe's CSV or PresentMon's):
+                                                   probe's *.frames.csv or
+                                                   PresentMon's CSV; folders
+                                                   and their run subfolders):
                                                    mean, percentiles, 1% and
                                                    0.1% lows, hitches, drift
-  bench compare --a <folder|csv> --b <folder|csv> [--margin-mean 1]
-                [--margin-p99 3] [--warmup-s <s>] [--json]
+  bench compare --a <folder|csv> --b <folder|csv> [--source probe|presentmon]
+                [--margin-mean 1] [--margin-p99 3] [--warmup-s <s>] [--json]
                                                    runs as samples: CIs, Welch,
                                                    TOST equivalence, pooled lows
 

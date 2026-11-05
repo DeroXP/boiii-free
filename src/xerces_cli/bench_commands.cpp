@@ -8,7 +8,8 @@
 //   stopwatch, the game log's loading_map to loader.map.ready, the console's
 //   zone times by zone group).
 // - bench launcher: Xerces.exe's startup marks and Workshop scans.
-// - bench analyze: one frames CSV per run (the probe's or PresentMon's).
+// - bench analyze: one frames CSV per run (the probe's <run>.frames.csv or
+//   PresentMon's), of one source.
 // - bench compare: two sets of runs, each run one sample.
 
 #include <algorithm>
@@ -427,20 +428,30 @@ int cmd_bench_loads(const arguments &args) {
   put(sources, "console", paths_json(consoles, alloc), alloc);
   put(doc, "sources", std::move(sources), alloc);
   put(doc, "definitions",
-      "game_start_to_frontend_s: the launcher's launcher.launch.started to "
-      "the game's first loader.phase frontend (the first main frame). "
-      "first_log_to_frontend_s: the game log's first line (Xerces' first "
-      "code, about 14 s after the process starts) to the same. "
+      "game_start_to_frontend_s: launch.started (Xerces.exe's "
+      "launcher.launch.started or xerces_cli's cli.launch.started, matched "
+      "by pid; launched_by says which, and the startup summary keeps them "
+      "apart) to the game's first loader.phase frontend (the first main "
+      "frame). first_log_to_frontend_s: the game log's first line (Xerces' "
+      "first code, about 14 s after the process starts) to the same. "
       "journal new: the game log has loader.phase loading_map (the engine "
-      "is in the level) and in_game (the player is in it, "
-      "loader.map.ready); journal old (before 2026-11-05 11:25): in_game "
-      "already when the engine was in the level. map_command_to_ready_s "
-      "(new journals): map-check's stopwatch, from its console map command "
-      "(after the command's 1.5 s echo wait) until it saw the journal's "
-      "in_game (polled each second), about +-1 s; it includes any intro or "
-      "wait before the player is in, which map-check skips with keys every "
-      "6 s from 15 s on. loading_map_to_ready_s: the game log's loading_map "
-      "to loader.map.ready, both checked once a second. "
+      "is in the level) or loader.map.ready (in_game, the player is in it); "
+      "journal old (builds before 2026-11-05 11:25 local): in_game with no "
+      "loading_map, as in_game came as soon as the engine was in the level; "
+      "journal unknown: the log never reached a level (the game ended "
+      "first), so it cannot tell. map_command_to_ready_s (new journals) and "
+      "map_command_to_level_s come from map-check's stopwatch. It starts "
+      "after console-command.ps1's 1.5 s echo wait, so about 1.5 s after "
+      "the game ran the map command, and stops when map-check saw the "
+      "journal's in_game: up to about 1.5 s later (polled once a second), "
+      "more with -SkipCinematic (Space held 1.5 s every 6 s from 15 s on), "
+      "and the game writes each phase up to 1 s late (checked once a "
+      "second). Both figures are therefore off by roughly -1.5 to +2.5 s "
+      "(low when the polls are quick): compare them with other stopwatch "
+      "figures only, not with a load the game times itself. "
+      "map_command_to_ready_s includes any intro or wait before the player "
+      "is in. loading_map_to_ready_s: the game log's loading_map to "
+      "loader.map.ready, both checked once a second (+-1 s). "
       "map_command_to_level_s: the command to the engine being in the "
       "level: the stopwatch for old journals, the stopwatch minus "
       "loading_map_to_ready_s for new ones. The logs do not time the "
@@ -452,7 +463,10 @@ int cmd_bench_loads(const arguments &args) {
 
   json_value launches_json(rapidjson::kArrayType);
   json_value loads_json(rapidjson::kArrayType);
-  std::map<std::string, std::vector<double>> to_frontend_by_variant;
+  // By who launched it (launcher: Xerces.exe, cli: xerces_cli), then by
+  // variant.
+  std::map<std::string, std::map<std::string, std::vector<double>>>
+      to_frontend_by_launcher;
   std::map<std::string, std::vector<double>> first_log_by_variant;
   std::map<std::string, std::vector<double>> startup_zone_ms; // by group
   std::size_t startup_consoles = 0;
@@ -460,7 +474,7 @@ int cmd_bench_loads(const arguments &args) {
   struct load_row {
     std::string map;
     std::string variant;
-    bool new_journal = false;
+    std::string journal; // new, old or unknown
     std::optional<double> command_to_ready_s;
     std::optional<double> loading_to_ready_s;
     std::optional<double> command_to_level_s;
@@ -493,14 +507,22 @@ int cmd_bench_loads(const arguments &args) {
     std::string fs_extramods;
     std::vector<map_load> loads;
     bool pending = false;
-    // Journals before loading_map existed said in_game as soon as the engine
-    // was in the level.
-    bool new_journal = false;
+    // Journals before loading_map existed (builds before 2026-11-05 11:25
+    // local) said in_game as soon as the engine was in the level. A log only
+    // shows which kind it is once it reaches a level: one that ended before
+    // (a crash right after the map command) is "unknown".
+    bool marks_loading = false;
+    bool reached_level = false;
     for (const auto &event : events) {
-      new_journal |=
-          event.event == "loader.map.ready" ||
-          (event.event == "loader.phase" && phase_of(event) == "loading_map");
+      const bool phase = event.event == "loader.phase";
+      marks_loading |= event.event == "loader.map.ready" ||
+                       (phase && phase_of(event) == "loading_map");
+      reached_level |= phase && phase_of(event) == "in_game";
     }
+    const std::string journal = marks_loading   ? "new"
+                                : reached_level ? "old"
+                                                : "unknown";
+    const bool new_journal = journal == "new";
     for (const auto &event : events) {
       if (event.event == "loader.phase") {
         const std::string phase = phase_of(event);
@@ -613,8 +635,9 @@ int cmd_bench_loads(const arguments &args) {
     std::optional<double> to_frontend;
     if (launch && marks.contains("frontend")) {
       to_frontend = (marks["frontend"] - launch->ts_ms) / 1000.0;
-      to_frontend_by_variant[variant].push_back(*to_frontend);
-      to_frontend_by_variant["all"].push_back(*to_frontend);
+      auto &by_variant = to_frontend_by_launcher[launch->source];
+      by_variant[variant].push_back(*to_frontend);
+      by_variant["all"].push_back(*to_frontend);
     }
     put(launch_json, "game_start_to_frontend_s", num(to_frontend), alloc);
     std::optional<double> first_to_frontend;
@@ -674,7 +697,7 @@ int cmd_bench_loads(const arguments &args) {
           k < map_sections.size() ? map_sections[k] : nullptr;
       load_row row;
       row.variant = variant;
-      row.new_journal = new_journal;
+      row.journal = journal;
       row.map = load && !load->map.empty() ? load->map
                 : section                  ? section->map
                 : record                   ? record->map
@@ -700,7 +723,7 @@ int cmd_bench_loads(const arguments &args) {
       if (!folder.empty()) {
         put(item, "map_check", folder, alloc);
       }
-      put(item, "journal", new_journal ? "new" : "old", alloc);
+      put(item, "journal", journal, alloc);
       put(item, "ready", json_value(row.ready), alloc);
       if (load && !load->ended.empty()) {
         put(item, "ended", load->ended, alloc);
@@ -762,11 +785,15 @@ int cmd_bench_loads(const arguments &args) {
 
   // Summaries.
   json_value startup(rapidjson::kObjectType);
-  json_value by_variant(rapidjson::kObjectType);
-  for (const auto &[variant, values] : to_frontend_by_variant) {
-    put(by_variant, variant, spread_json(values, alloc), alloc);
+  json_value by_launcher(rapidjson::kObjectType);
+  for (const auto &[launcher, by_variant] : to_frontend_by_launcher) {
+    json_value variants(rapidjson::kObjectType);
+    for (const auto &[variant, values] : by_variant) {
+      put(variants, variant, spread_json(values, alloc), alloc);
+    }
+    put(by_launcher, launcher, std::move(variants), alloc);
   }
-  put(startup, "game_start_to_frontend_s", std::move(by_variant), alloc);
+  put(startup, "game_start_to_frontend_s", std::move(by_launcher), alloc);
   json_value first_by_variant(rapidjson::kObjectType);
   for (const auto &[variant, values] : first_log_by_variant) {
     put(first_by_variant, variant, spread_json(values, alloc), alloc);
@@ -783,6 +810,7 @@ int cmd_bench_loads(const arguments &args) {
     std::size_t runs = 0;
     std::size_t ready = 0;
     std::size_t old_journal = 0;
+    std::size_t unknown_journal = 0;
     std::vector<double> command_to_ready;
     std::vector<double> loading_to_ready;
     std::vector<double> command_to_level;
@@ -795,7 +823,8 @@ int cmd_bench_loads(const arguments &args) {
     auto &g = groups[{row.map, row.variant}];
     ++g.runs;
     g.ready += row.ready ? 1 : 0;
-    g.old_journal += row.new_journal ? 0 : 1;
+    g.old_journal += row.journal == "old" ? 1 : 0;
+    g.unknown_journal += row.journal == "unknown" ? 1 : 0;
     if (row.command_to_level_s) {
       g.command_to_level.push_back(*row.command_to_level_s);
     }
@@ -826,6 +855,7 @@ int cmd_bench_loads(const arguments &args) {
     put(item, "runs", count(g.runs), alloc);
     put(item, "ready", count(g.ready), alloc);
     put(item, "old_journal", count(g.old_journal), alloc);
+    put(item, "unknown_journal", count(g.unknown_journal), alloc);
     put(item, "map_command_to_level_s", spread_json(g.command_to_level, alloc),
         alloc);
     put(item, "map_command_to_ready_s", spread_json(g.command_to_ready, alloc),
@@ -851,13 +881,18 @@ int cmd_bench_loads(const arguments &args) {
   }
 
   std::cout << "Game starts: " << games.size() << " game logs\n";
-  std::cout << "  launch.started to the first main frame (journal frontend):\n";
-  if (to_frontend_by_variant.empty()) {
-    std::cout << "    none: no launcher log names these games' pids\n";
+  if (to_frontend_by_launcher.empty()) {
+    std::cout << "  launch.started to the first main frame: none, no launcher "
+                 "or CLI log names these games' pids\n";
   }
-  for (const auto &[variant, values] : to_frontend_by_variant) {
-    std::cout << "    " << pad(variant, 12) << spread_text(values, 2, " s")
-              << "\n";
+  for (const auto &[launcher, by_variant] : to_frontend_by_launcher) {
+    std::cout << "  launch.started to the first main frame (journal "
+                 "frontend), started by "
+              << (launcher == "cli" ? "xerces_cli" : "Xerces.exe") << ":\n";
+    for (const auto &[variant, values] : by_variant) {
+      std::cout << "    " << pad(variant, 12) << spread_text(values, 2, " s")
+                << "\n";
+    }
   }
   std::cout << "  the game log's first line to the first main frame:\n";
   for (const auto &[variant, values] : first_log_by_variant) {
@@ -874,9 +909,12 @@ int cmd_bench_loads(const arguments &args) {
     }
   }
   std::cout << "\nMap loads: " << rows.size()
-            << " (medians [min-max] in seconds: map-check's console map "
-               "command to the engine in the level and to the player in it, "
-               "about +-1 s; level to player from the game log)\n";
+            << " (medians [min-max] in seconds. \"to level\" and \"to "
+               "player\": map-check's stopwatch from the console map command "
+               "to the engine in the level and to the player in it; it "
+               "starts 1.5 s after the command and stops 0 to 2.5 s after the "
+               "event, so each is off by about -1.5 to +2.5 s. "
+               "\"level->player\": the game log, +-1 s)\n";
   if (!rows.empty()) {
     std::cout << "  " << pad("map", 18) << pad("variant", 12) << pad("ok", 6)
               << pad("to level", 18) << pad("to player", 20)
@@ -952,10 +990,12 @@ int cmd_bench_launcher(const arguments &args) {
     double items = 0;
     double hits = 0;
     double misses = 0;
+    bool startup = false; // the session's first scan
   };
   std::vector<scan> scans;
   std::size_t sessions = 0;
   std::size_t dry = 0;
+  std::size_t later_detections = 0;
   for (const auto &[name, path] : files) {
     const auto text = read_file(path);
     if (!text) {
@@ -964,9 +1004,14 @@ int cmd_bench_launcher(const arguments &args) {
     const auto events = parse_log_events(*text);
     std::optional<std::int64_t> start;
     bool counted = false;
+    // Rescan, a new game folder and the other screens' refreshes log both
+    // events again later in the session; only the first of each is startup.
+    bool detected = false;
+    bool scanned = false;
     for (const auto &event : events) {
       if (event.event == "launcher.start") {
         start = event.ts_ms;
+        detected = scanned = false;
         if (!counted) {
           ++sessions;
           counted = true;
@@ -982,21 +1027,28 @@ int cmd_bench_launcher(const arguments &args) {
           mark_order.push_back(mark);
         }
         marks[mark].push_back(*ms);
-      } else if (event.event == "launcher.game.detected" && start &&
-                 event.ts_ms) {
-        to_detected.push_back(static_cast<double>(*event.ts_ms - *start));
+      } else if (event.event == "launcher.game.detected") {
+        if (detected) {
+          ++later_detections;
+        } else if (start && event.ts_ms) {
+          to_detected.push_back(static_cast<double>(*event.ts_ms - *start));
+        }
+        detected = true;
       } else if (event.event == "launcher.catalog.scanned") {
-        if (start && event.ts_ms) {
+        if (!scanned && start && event.ts_ms) {
           to_scanned.push_back(static_cast<double>(*event.ts_ms - *start));
         }
         scans.push_back({event.session, event.number("seconds").value_or(NAN),
                          event.number("bytes_hashed").value_or(0),
                          event.number("items").value_or(0),
                          event.number("cache_hits").value_or(0),
-                         event.number("cache_misses").value_or(0)});
+                         event.number("cache_misses").value_or(0), !scanned});
+        scanned = true;
       }
     }
   }
+  const std::size_t later_scans = static_cast<std::size_t>(std::count_if(
+      scans.begin(), scans.end(), [](const scan &s) { return !s.startup; }));
   std::vector<double> warm;
   std::vector<double> cold;
   for (const auto &s : scans) {
@@ -1014,10 +1066,15 @@ int cmd_bench_launcher(const arguments &args) {
   put(doc, "definitions",
       "marks: launcher.startup.step times as the launcher logs them (ms "
       "from its start). to_game_detected_ms and to_catalog_scanned_ms: from "
-      "launcher.start to that event, by the log's timestamps. A scan is cold "
-      "when it hashed files (cache misses), warm when the hash cache had "
-      "every file.",
+      "launcher.start to the session's first such event, by the log's "
+      "timestamps; later ones (Rescan, a new game folder) are counted in "
+      "later_detections and later_scans and are not startup samples. A scan "
+      "is cold when it hashed files (cache misses), warm when the hash cache "
+      "had every file; warm_s and cold_s take every scan, startup or later "
+      "(scans.list says which).",
       alloc);
+  put(doc, "later_detections", count(later_detections), alloc);
+  put(doc, "later_scans", count(later_scans), alloc);
   json_value marks_json(rapidjson::kArrayType);
   for (const auto &mark : mark_order) {
     json_value item = spread_json(marks[mark], alloc);
@@ -1034,6 +1091,7 @@ int cmd_bench_launcher(const arguments &args) {
   for (const auto &s : scans) {
     json_value item(rapidjson::kObjectType);
     put(item, "session", s.session, alloc);
+    put(item, "startup", json_value(s.startup), alloc);
     put(item, "seconds", num(s.seconds), alloc);
     put(item, "bytes_hashed", num(s.bytes), alloc);
     put(item, "items", num(s.items), alloc);
@@ -1061,6 +1119,11 @@ int cmd_bench_launcher(const arguments &args) {
             << spread_text(to_detected, 0, "") << "\n";
   std::cout << "    " << pad("start to catalog scanned", 34)
             << spread_text(to_scanned, 0, "") << "\n";
+  if (later_detections || later_scans) {
+    std::cout << "    (each session's first of these only; " << later_detections
+              << " later detections and " << later_scans
+              << " later scans are not startup samples)\n";
+  }
   std::cout << "  Workshop scans: warm (hash cache had every file) "
             << spread_text(warm, 2, " s") << "\n";
   std::cout << "                  cold (hashed files) "
@@ -1083,31 +1146,152 @@ struct run {
   frame_summary summary;
 };
 
-// The frames CSVs a path names: the file, or every .csv in the folder.
-std::vector<fs::path> csv_files(const fs::path &path) {
-  std::error_code ec;
-  if (fs::is_directory(path, ec)) {
-    return files_in(path, ".csv");
+// A capture before the warm-up is dropped.
+struct capture {
+  fs::path path;
+  frame_series series;
+};
+
+bool name_ends_with(const fs::path &path, std::string_view suffix) {
+  std::string name = file_name(path);
+  for (char &c : name) {
+    if (c >= 'A' && c <= 'Z') {
+      c = static_cast<char>(c - 'A' + 'a');
+    }
   }
-  return {path};
+  return name.ends_with(suffix);
 }
 
-std::optional<run> load_run(const fs::path &path, double warmup_s) {
+std::optional<frame_series> read_frames(const fs::path &path,
+                                        std::string &error) {
   const auto text = read_file(path);
   if (!text) {
-    std::cerr << utf8(path) << " cannot be read.\n";
+    error = "cannot be read";
     return std::nullopt;
   }
   auto parsed = parse_frames_csv(*text);
   if (!parsed.series) {
-    std::cerr << utf8(path) << ": " << parsed.error << "\n";
+    error = parsed.error;
     return std::nullopt;
   }
+  return std::move(parsed.series);
+}
+
+// The captures a path names, each one run:
+// - a file: that CSV, the probe's or PresentMon's. <run>.main.csv is the
+//   probe's main-thread cadence, not frame times, and is refused.
+// - a folder: its runs and those of its subfolders, one level down (the
+//   plan's layout: bench\<run>\ with <run>.frames.csv, <run>.main.csv and
+//   PresentMon's presentmon.csv). Each *.frames.csv is a probe run, each
+//   other CSV with PresentMon's columns a PresentMon run; *.main.csv and
+//   other CSVs are left out.
+bool collect_captures(const fs::path &path, std::vector<capture> &out) {
+  std::error_code ec;
+  if (!fs::is_directory(path, ec)) {
+    if (name_ends_with(path, ".main.csv")) {
+      std::cerr << utf8(path)
+                << " is the probe's main-thread cadence, not frame times; "
+                   "give its .frames.csv.\n";
+      return false;
+    }
+    std::string error;
+    auto series = read_frames(path, error);
+    if (!series) {
+      std::cerr << utf8(path) << ": " << error << "\n";
+      return false;
+    }
+    out.push_back({path, std::move(*series)});
+    return true;
+  }
+  std::vector<fs::path> folders{path};
+  for (auto &sub : folders_in(path)) {
+    folders.push_back(std::move(sub));
+  }
+  for (const auto &folder : folders) {
+    for (const auto &file : files_in(folder, ".csv")) {
+      if (name_ends_with(file, ".main.csv")) {
+        continue;
+      }
+      const bool probe_name = name_ends_with(file, ".frames.csv");
+      std::string error;
+      auto series = read_frames(file, error);
+      if (probe_name && !series) {
+        std::cerr << utf8(file) << ": " << error << "\n";
+        return false;
+      }
+      if (!series ||
+          (!probe_name && series->format != frames_format::presentmon)) {
+        std::cerr << "Left out " << utf8(file)
+                  << ": neither a *.frames.csv nor a PresentMon CSV.\n";
+        continue;
+      }
+      out.push_back({file, std::move(*series)});
+    }
+  }
+  return true;
+}
+
+// --source probe|presentmon; false (with the reason printed) when it is
+// something else.
+bool source_option(const arguments &args,
+                   std::optional<frames_format> &source) {
+  const auto given = args.get("--source");
+  if (!given) {
+    return true;
+  }
+  if (*given == "probe" || *given == "presentmon") {
+    source =
+        *given == "probe" ? frames_format::probe : frames_format::presentmon;
+    return true;
+  }
+  std::cerr << "--source takes probe or presentmon, not \"" << *given
+            << "\".\n";
+  return false;
+}
+
+// The probe and PresentMon time the same frames, so a set of runs takes one
+// of them: --source picks it, and without it a set holding both is refused
+// (a run folder with both would count as two runs). Keeps the captures of
+// that source and returns it; nullopt (the reason printed) when refused.
+std::optional<frames_format>
+pick_source(const std::vector<std::vector<capture> *> &sides,
+            std::optional<frames_format> source) {
+  std::size_t counts[2] = {0, 0};
+  for (const auto *side : sides) {
+    for (const auto &c : *side) {
+      ++counts[c.series.format == frames_format::probe ? 0 : 1];
+    }
+  }
+  if (!source) {
+    if (counts[0] && counts[1]) {
+      std::cerr << "Found " << counts[0]
+                << " probe captures (*.frames.csv) and " << counts[1]
+                << " PresentMon captures. They time the same frames, so a "
+                   "run folder holding both would count twice: pick one with "
+                   "--source probe or --source presentmon.\n";
+      return std::nullopt;
+    }
+    source = counts[0] ? frames_format::probe : frames_format::presentmon;
+  }
+  const std::size_t other = counts[*source == frames_format::probe ? 1 : 0];
+  if (other) {
+    std::cerr << "Left out " << other << " "
+              << (*source == frames_format::probe ? "PresentMon" : "probe")
+              << " captures (--source " << to_string(*source) << ").\n";
+  }
+  for (auto *side : sides) {
+    std::erase_if(*side,
+                  [&](const capture &c) { return c.series.format != *source; });
+  }
+  return source;
+}
+
+std::optional<run> load_run(capture &&c, double warmup_s) {
   run out;
-  out.path = path;
-  out.series = drop_warmup(*parsed.series, warmup_s);
+  out.path = std::move(c.path);
+  out.series = drop_warmup(c.series, warmup_s);
   if (out.series.dt_ms.empty()) {
-    std::cerr << utf8(path) << ": no frames left after the " << warmup_s
+    std::cerr << utf8(out.path) << ": no frames left after the " << warmup_s
               << " s warm-up.\n";
     return std::nullopt;
   }
@@ -1145,6 +1329,19 @@ json_value low_json(const low_pair &low, json_alloc &alloc) {
   return out;
 }
 
+constexpr const char *frames_definitions =
+    "Runs: each *.frames.csv (the probe's) or PresentMon CSV is one run, of "
+    "one source (--source when a folder holds both); *.main.csv is not a "
+    "run. Percentiles: linear between closest ranks (type 7). mean_ms = "
+    "total time / frames. Lows both ways: 1000 / mean of the worst x% of "
+    "frames, and 1000 / the (100-x)th percentile. Hitch: longer than 2x the "
+    "rolling median of 31 frames and than that median + 4 ms. stutter_pct: "
+    "time in hitch frames / total time. drift: second half's mean frame "
+    "time against the first's, by time; a warning above 2%. With "
+    "--warmup-s, every count (rows, rows_skipped, not_displayed, "
+    "present_modes, flagged_frames, frames_per_cpu) is over the frames "
+    "kept; presentmon.other_rows is the whole capture.";
+
 json_value run_json(const run &r, double warmup_s, json_alloc &alloc) {
   const frame_summary &s = r.summary;
   const frame_series &f = r.series;
@@ -1154,6 +1351,8 @@ json_value run_json(const run &r, double warmup_s, json_alloc &alloc) {
   put(out, "frame_time_column", f.dt_column, alloc);
   put(out, "time_column", f.time_column, alloc);
   put(out, "warmup_s", num(warmup_s), alloc);
+  put(out, "warmup_rows_dropped", count(f.warmup_rows), alloc);
+  put(out, "warmup_frames_dropped", count(f.warmup_frames), alloc);
   put(out, "rows", count(f.rows), alloc);
   put(out, "rows_skipped", count(f.skipped), alloc);
   put(out, "frames", count(s.frames), alloc);
@@ -1237,6 +1436,10 @@ void print_run(const run &r) {
   const frame_series &f = r.series;
   std::cout << utf8(r.path) << "  (" << to_string(f.format) << ", "
             << f.dt_column << ")\n";
+  if (f.warmup_frames || f.warmup_rows) {
+    std::cout << "  warm-up left out: " << f.warmup_frames << " frames ("
+              << f.warmup_rows << " rows); the counts below are after it\n";
+  }
   std::cout << "  " << s.frames << " frames in " << fixed(s.total_ms / 1000, 1)
             << " s: mean " << fixed(s.mean_ms, 3) << " ms ("
             << fixed(s.avg_fps, 1) << " FPS), median " << fixed(s.median_ms, 3)
@@ -1312,39 +1515,47 @@ int cmd_bench_analyze(const arguments &args) {
                  "or folders of them.\n";
     return exit_error;
   }
-  if (!accept_only(args, args.words.size(), {"--warmup-s"}, {"--json"})) {
+  if (!accept_only(args, args.words.size(), {"--warmup-s", "--source"},
+                   {"--json"})) {
     return exit_error;
   }
   bool ok = true;
   const double warmup = number_option(args, "--warmup-s", 0, ok).value_or(0);
-  if (!ok) {
+  std::optional<frames_format> source;
+  if (!ok || !source_option(args, source)) {
+    return exit_error;
+  }
+  std::vector<capture> captures;
+  for (std::size_t i = 2; i < args.words.size(); ++i) {
+    if (!collect_captures(fs::path(args.words[i]), captures)) {
+      return exit_error;
+    }
+  }
+  if (captures.empty()) {
+    std::cerr << "No frames CSVs found (*.frames.csv or PresentMon CSVs).\n";
+    return exit_error;
+  }
+  const auto picked = pick_source({&captures}, source);
+  if (!picked) {
     return exit_error;
   }
   std::vector<run> runs;
-  for (std::size_t i = 2; i < args.words.size(); ++i) {
-    for (const auto &path : csv_files(fs::path(args.words[i]))) {
-      auto loaded = load_run(path, warmup);
-      if (!loaded) {
-        return exit_error;
-      }
-      runs.push_back(std::move(*loaded));
+  for (auto &c : captures) {
+    auto loaded = load_run(std::move(c), warmup);
+    if (!loaded) {
+      return exit_error;
     }
+    runs.push_back(std::move(*loaded));
   }
   if (runs.empty()) {
-    std::cerr << "No frames CSVs found.\n";
+    std::cerr << "No " << to_string(*picked) << " frames CSVs found.\n";
     return exit_error;
   }
   rapidjson::Document doc(rapidjson::kObjectType);
   auto &alloc = doc.GetAllocator();
   put(doc, "schema", "xerces.bench.analyze/1", alloc);
-  put(doc, "definitions",
-      "Percentiles: linear between closest ranks (type 7). mean_ms = total "
-      "time / frames. Lows both ways: 1000 / mean of the worst x% of frames, "
-      "and 1000 / the (100-x)th percentile. Hitch: longer than 2x the rolling "
-      "median of 31 frames and than that median + 4 ms. stutter_pct: time in "
-      "hitch frames / total time. drift: second half's mean frame time "
-      "against the first's, by time; a warning above 2%.",
-      alloc);
+  put(doc, "source", to_string(*picked), alloc);
+  put(doc, "definitions", frames_definitions, alloc);
   json_value runs_json(rapidjson::kArrayType);
   for (const auto &r : runs) {
     runs_json.PushBack(run_json(r, warmup, alloc), alloc);
@@ -1378,10 +1589,10 @@ int cmd_bench_analyze(const arguments &args) {
 }
 
 int cmd_bench_compare(const arguments &args) {
-  if (!accept_only(
-          args, 2,
-          {"--a", "--b", "--margin-mean", "--margin-p99", "--warmup-s"},
-          {"--json"})) {
+  if (!accept_only(args, 2,
+                   {"--a", "--b", "--margin-mean", "--margin-p99", "--warmup-s",
+                    "--source"},
+                   {"--json"})) {
     return exit_error;
   }
   const auto a_path = args.get("--a");
@@ -1398,21 +1609,37 @@ int cmd_bench_compare(const arguments &args) {
   const double margin_p99 =
       number_option(args, "--margin-p99", 3.0, ok).value_or(3.0);
   const double warmup = number_option(args, "--warmup-s", 0, ok).value_or(0);
-  if (!ok) {
+  std::optional<frames_format> source;
+  if (!ok || !source_option(args, source)) {
+    return exit_error;
+  }
+  const std::string side_paths[2] = {*a_path, *b_path};
+  std::vector<capture> captures[2];
+  for (int side = 0; side < 2; ++side) {
+    if (!collect_captures(fs::path(side_paths[side]), captures[side])) {
+      return exit_error;
+    }
+    if (captures[side].empty()) {
+      std::cerr << side_paths[side] << " has no frames CSVs.\n";
+      return exit_error;
+    }
+  }
+  const auto picked = pick_source({&captures[0], &captures[1]}, source);
+  if (!picked) {
     return exit_error;
   }
   std::vector<run> sides[2];
-  const std::string side_paths[2] = {*a_path, *b_path};
   for (int side = 0; side < 2; ++side) {
-    for (const auto &path : csv_files(fs::path(side_paths[side]))) {
-      auto loaded = load_run(path, warmup);
+    for (auto &c : captures[side]) {
+      auto loaded = load_run(std::move(c), warmup);
       if (!loaded) {
         return exit_error;
       }
       sides[side].push_back(std::move(*loaded));
     }
     if (sides[side].empty()) {
-      std::cerr << side_paths[side] << " has no frames CSVs.\n";
+      std::cerr << side_paths[side] << " has no " << to_string(*picked)
+                << " frames CSVs.\n";
       return exit_error;
     }
   }
@@ -1422,8 +1649,11 @@ int cmd_bench_compare(const arguments &args) {
   rapidjson::Document doc(rapidjson::kObjectType);
   auto &alloc = doc.GetAllocator();
   put(doc, "schema", "xerces.bench.compare/1", alloc);
+  put(doc, "source", to_string(*picked), alloc);
   put(doc, "definitions",
-      "Each run is one sample. ci95: t-based 95% interval of the mean. "
+      "Each run (one *.frames.csv or one PresentMon CSV, of one source) is "
+      "one sample; bench analyze's definitions give each run's numbers. "
+      "ci95: t-based 95% interval of the mean. "
       "welch: mean(B) - mean(A) with its 95% interval and two-sided p. tost: "
       "B is equivalent to A when the 90% interval of the difference lies "
       "inside +-margin (percent of A's mean), alpha 0.05 each side. "
@@ -1606,9 +1836,11 @@ int bench_usage() {
       << "bench loads [--home <dir>] [--logs <dir>]... [--console <dir>]... "
          "[--json]\n"
          "bench launcher [--home <dir>] [--logs <dir>]... [--json]\n"
-         "bench analyze <frames.csv|folder>... [--warmup-s <s>] [--json]\n"
-         "bench compare --a <folder|csv> --b <folder|csv> [--margin-mean 1] "
-         "[--margin-p99 3] [--warmup-s <s>] [--json]\n"
+         "bench analyze <frames.csv|folder>... [--source probe|presentmon] "
+         "[--warmup-s <s>] [--json]\n"
+         "bench compare --a <folder|csv> --b <folder|csv> [--source "
+         "probe|presentmon] [--margin-mean 1] [--margin-p99 3] [--warmup-s "
+         "<s>] [--json]\n"
          "bench run: not built yet (it needs the game).\n";
   return exit_error;
 }

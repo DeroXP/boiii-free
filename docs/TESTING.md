@@ -465,24 +465,39 @@ xerces_cli bench loads --logs C:\Users\Ginld\XercesHome-maps\logs --console C:\U
 used. `--console` takes a map-check folder (one run per subfolder, with
 `results.jsonl` beside them).
 
-- **Game start:** the launcher's `launcher.launch.started` (matched to the game
-  log by pid) to the game's first `loader.phase frontend`, the first main frame.
-  The game log's first line comes 14 to 16 s after the launch, when Xerces' code
-  first runs. `first_log_to_frontend_s` measures from that line, for logs with
-  no launcher log beside them.
+- **Game start:** `launch.started` (matched to the game log by pid) to the
+  game's first `loader.phase frontend`, the first main frame. Xerces.exe logs
+  `launcher.launch.started` and `xerces_cli` logs `cli.launch.started`; each
+  launch says which (`launched_by`), and the summary keeps them apart
+  (`startup.game_start_to_frontend_s.launcher` and `.cli`). The game log's first
+  line comes 14 to 16 s after the launch, when Xerces' code first runs.
+  `first_log_to_frontend_s` measures from that line, for logs with no launcher
+  log beside them.
 - **Map loads (map-check runs):**
   - "to level" is the console's `map` command to the engine being in the level.
   - "to player" is the command to the journal's `in_game`: the player is in the
     level (`loader.map.ready`).
   - "level->player" is the game log's `loading_map` to `loader.map.ready`.
   - The logs do not timestamp the command yet, so the first two come from
-    map-check's stopwatch (about ±1 s).
+    map-check's stopwatch, which is not the command's time:
+    - it starts after `console-command.ps1`'s 1.5 s echo wait, so about 1.5 s
+      after the game ran the command;
+    - it stops when map-check sees the journal's `in_game`. map-check polls
+      about once a second, and with `-SkipCinematic` a poll can first hold Space
+      for 1.5 s. The game itself writes each phase up to 1 s late (it checks
+      once a second).
+    - So each figure is off by roughly -1.5 to +2.5 s: low when the polls are
+      quick, high when they are slow. Compare them only with other stopwatch
+      figures. A load the game times itself (perf plan H3's `xerces_bench_map`)
+      will not match them.
   - "To player" includes any intro or wait before the player is in. With
     `-SkipCinematic`, map-check presses keys every 6 s from 15 s on. The one
     Shadows of Evil run that did not skip waited 214 s for its intro.
   - Journals from before 2026-11-05 11:25 have no `loading_map`. Their `in_game`
     came as soon as the engine was in the level, so those runs give "to level"
-    only (`"journal": "old"`).
+    only (`"journal": "old"`). A log that never reached a level (the game ended
+    right after the map command) cannot show which kind it is:
+    `"journal": "unknown"`.
   - A run that failed while loading still counts, from its map-check record.
 - **Zones:** the console's own `FastFileLoad ... in N ms` times, summed by group
   (map, main mod, extra mods, front end, stock) up to the map's own zone. Zones
@@ -498,15 +513,19 @@ xerces_cli bench launcher --logs C:\Users\Ginld\XercesHome-maps\logs --logs C:\U
 ```
 
 This gives the median, p90, mean and 95% CI of each `launcher.startup.step` mark
-(ms from the launcher's start), the time to `launcher.game.detected` and to
-`launcher.catalog.scanned`, and the Workshop scans. A scan is warm when the hash
-cache had every file and cold when files were hashed (GB/s per scan).
+(ms from the launcher's start), the time to the session's first
+`launcher.game.detected` and first `launcher.catalog.scanned`, and the Workshop
+scans. Rescan, a new game folder and other refreshes log both events again;
+those count as `later_detections` and `later_scans`, not as startup samples. A
+scan is warm when the hash cache had every file and cold when files were hashed
+(GB/s per scan). Warm and cold take every scan, startup or later
+(`scans.list[].startup` says which).
 
 ### Frame times
 
 ```
-xerces_cli bench analyze <run.csv|folder>... [--warmup-s 10] [--json]
-xerces_cli bench compare --a <folder|csv> --b <folder|csv> [--margin-mean 1] [--margin-p99 3] [--warmup-s 10] [--json]
+xerces_cli bench analyze <run.csv|folder>... [--source probe|presentmon] [--warmup-s 10] [--json]
+xerces_cli bench compare --a <folder|csv> --b <folder|csv> [--source probe|presentmon] [--margin-mean 1] [--margin-p99 3] [--warmup-s 10] [--json]
 ```
 
 Each CSV is one run, in one of two formats:
@@ -515,6 +534,25 @@ Each CSV is one run, in one of two formats:
   probe is not built yet (perf plan H3).
 - PresentMon's CSV, with 1.x, 2.0 or 2.3+ column names. The process and swap
   chain with the most rows are kept.
+
+A CSV named on the command line is one run (a `*.main.csv` is refused). A folder
+gives the runs in it and in its subfolders, one level down, which fits the
+plan's layout of one folder per run (`bench\<run>\` with `<run>.frames.csv`,
+`<run>.main.csv` and PresentMon's `presentmon.csv`):
+
+- each `*.frames.csv` is a probe run;
+- each other CSV with PresentMon's columns is a PresentMon run;
+- `*.main.csv` (the probe's main-thread cadence) and other CSVs are left out.
+
+The probe and PresentMon time the same frames, so one command takes one source.
+When the runs found hold both, `--source probe` or `--source presentmon` picks
+one; without it the command stops rather than count a run twice.
+
+`--warmup-s` drops the frames before that many seconds from the first frame. The
+counts (`rows`, `rows_skipped`, `not_displayed`, `present_modes`,
+`flagged_frames`, `frames_per_cpu`) are then taken over the frames kept, and
+`warmup_rows_dropped` and `warmup_frames_dropped` say what went. PresentMon's
+`other_rows` (other processes and swap chains) is for the whole capture.
 
 The numbers, as `src/xerces_core/perf_stats.hpp` defines them:
 
@@ -569,19 +607,30 @@ text, `commands.txt`, and copies of the logs read (`inputs\`). It was taken at
   - D3 stack, the six newest launches on XercesHome-maps (12:52 to 13:03 local,
     three of them crashing later at the map): 36.2 s mean (95% CI 34.8 to 37.7,
     range 34.5 to 37.9);
-  - XercesHome-m1: 34.3 s (33.0 to 35.4, n 6).
+  - XercesHome-m1, through Xerces.exe: 34.4 s (range 33.0 to 35.4, n 5). One
+    more launch there came from `xerces_cli` (33.8 s); the first baseline files
+    counted it with the others (34.3 s, n 6).
   - The game log starts 20.0 s before the first main frame (n 53): 18.9 s with
     no mods, 20.4 s with the D3 stack.
 - [x] Startup zone loads, summed over 48 consoles that hold the whole start:
       14.9 s in total. The front end takes 3.5 s, the stock zones 10.3 s, and
       the extra mods 1.1 s when stacked.
 - [x] Map loads, 53 attempts, 32 reaching the match:
-  - With mods: 4.5 to 7.5 s to the level, then 16 to 41 s more before the player
-    is in.
-  - Cheese Cube with the stack: 7.1 s to the level (n 5), 27.0 s to the player
-    (n 4), 20.3 s from level to player.
-  - With no main mod, every map load first reloads the front end's zones (3.4 to
-    3.6 s, 7 loads).
+  - "To level" and "to player" are map-check's stopwatch. It starts 1.5 s after
+    the map command and stops up to about 2.5 s after the event, so each figure
+    is off by roughly -1.5 to +2.5 s (above, Map loads).
+  - With mods: 4.5 to 7.5 s to the level on the stopwatch, then 16 to 41 s more
+    before the player is in (from the game log, ±1 s).
+  - Cheese Cube with the stack: 7.1 s to the level (n 5) and 27.0 s to the
+    player (n 4) on the stopwatch; 20.3 s from level to player.
+  - With no main mod, every custom-map load first reloads the front end's zones
+    inside the usermaps ModLoad (3.4 to 3.6 s, 7 loads). The stock map zm_zod
+    does not.
+  - The baseline's `loads.json` predates two fixes. It labels the four runs
+    whose game ended before the level `"journal": "old"`, though three of them
+    (12:52 to 12:55) had the new journal; `bench loads` now calls all four
+    `"unknown"`. It also gives game starts by variant only, with Xerces.exe and
+    `xerces_cli` launches together.
 - [x] Launcher, 26 starts, all warm:
   - first frame at 220 ms median (p90 239 ms);
   - game detected at 324 ms;

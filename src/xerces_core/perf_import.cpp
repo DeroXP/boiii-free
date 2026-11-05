@@ -149,6 +149,28 @@ std::string original_name(const std::vector<std::string> &fields,
   return column < fields.size() ? fields[column] : std::string();
 }
 
+// The per-frame counts, from the per-frame values.
+void count_frames(frame_series &series) {
+  series.cpus.clear();
+  series.flagged = 0;
+  series.not_displayed = 0;
+  series.present_modes.clear();
+  for (const int cpu : series.cpu) {
+    if (cpu >= 0) {
+      ++series.cpus[cpu];
+    }
+  }
+  for (const std::uint8_t set : series.flags_set) {
+    series.flagged += set ? 1 : 0;
+  }
+  for (const std::uint8_t shown : series.shown) {
+    series.not_displayed += shown ? 0 : 1;
+  }
+  for (const auto &mode : series.present_mode) {
+    ++series.present_modes[mode];
+  }
+}
+
 frames_result parse_probe(const std::vector<std::string_view> &lines,
                           const std::vector<std::string> &names,
                           const header &head) {
@@ -186,22 +208,27 @@ frames_result parse_probe(const std::vector<std::string_view> &lines,
     summed += *frame;
     out.t_ms.push_back(time);
     out.dt_ms.push_back(*frame);
+    out.row.push_back(out.rows - 1);
     if (present) {
       out.present_ms.push_back(to_number(field_at(row, present)).value_or(nan));
     }
     if (overlay) {
       out.overlay_us.push_back(to_number(field_at(row, overlay)).value_or(nan));
     }
-    if (const auto number = to_number(field_at(row, cpu))) {
-      ++out.cpus[static_cast<int>(*number)];
+    if (cpu) {
+      const auto number = to_number(field_at(row, cpu));
+      out.cpu.push_back(number && *number >= 0 ? static_cast<int>(*number)
+                                               : -1);
     }
-    if (const auto value = to_number(field_at(row, flags)); value && *value) {
-      ++out.flagged;
+    if (flags) {
+      const auto value = to_number(field_at(row, flags));
+      out.flags_set.push_back(value && *value ? 1 : 0);
     }
   }
   if (out.dt_ms.empty()) {
     return {std::nullopt, "no frames with a frame time in the probe CSV"};
   }
+  count_frames(out);
   return {std::move(out), {}};
 }
 
@@ -288,6 +315,7 @@ frames_result parse_presentmon(const std::vector<std::string_view> &lines,
     summed += *frame;
     out.t_ms.push_back(time);
     out.dt_ms.push_back(*frame);
+    out.row.push_back(out.rows - 1);
     if (cpu_busy) {
       out.cpu_busy_ms.push_back(
           to_number(field_at(row, cpu_busy)).value_or(nan));
@@ -300,16 +328,15 @@ frames_result parse_presentmon(const std::vector<std::string_view> &lines,
         displayed && !to_number(field_at(row, displayed)).has_value();
     const bool was_dropped =
         dropped && to_number(field_at(row, dropped)).value_or(0) != 0;
-    if (shown_unknown || was_dropped) {
-      ++out.not_displayed;
-    }
+    out.shown.push_back(shown_unknown || was_dropped ? 0 : 1);
     if (mode) {
-      ++out.present_modes[std::string(field_at(row, mode))];
+      out.present_mode.emplace_back(field_at(row, mode));
     }
   }
   if (out.dt_ms.empty()) {
     return {std::nullopt, "no frames with a frame time in the PresentMon CSV"};
   }
+  count_frames(out);
   return {std::move(out), {}};
 }
 
@@ -401,31 +428,41 @@ frame_series drop_warmup(const frame_series &series, double warmup_s) {
   if (warmup_s <= 0 || series.t_ms.empty()) {
     return series;
   }
-  frame_series out = series;
-  out.t_ms.clear();
-  out.dt_ms.clear();
-  out.cpu_busy_ms.clear();
-  out.gpu_busy_ms.clear();
-  out.present_ms.clear();
-  out.overlay_us.clear();
   const double from = series.t_ms.front() + warmup_s * 1000.0;
-  for (std::size_t i = 0; i < series.t_ms.size(); ++i) {
-    if (series.t_ms[i] < from) {
-      continue;
-    }
-    out.t_ms.push_back(series.t_ms[i]);
-    out.dt_ms.push_back(series.dt_ms[i]);
-    const auto keep = [&](const std::vector<double> &from_series,
-                          std::vector<double> &to) {
-      if (i < from_series.size()) {
-        to.push_back(from_series[i]);
-      }
-    };
-    keep(series.cpu_busy_ms, out.cpu_busy_ms);
-    keep(series.gpu_busy_ms, out.gpu_busy_ms);
-    keep(series.present_ms, out.present_ms);
-    keep(series.overlay_us, out.overlay_us);
+  std::size_t first = 0; // the first frame kept
+  while (first < series.t_ms.size() && series.t_ms[first] < from) {
+    ++first;
   }
+  const auto tail = [first](auto values) {
+    values.erase(values.begin(),
+                 values.begin() + static_cast<std::ptrdiff_t>(
+                                      std::min(first, values.size())));
+    return values;
+  };
+  frame_series out = series;
+  out.t_ms = tail(series.t_ms);
+  out.dt_ms = tail(series.dt_ms);
+  out.row = tail(series.row);
+  out.cpu_busy_ms = tail(series.cpu_busy_ms);
+  out.gpu_busy_ms = tail(series.gpu_busy_ms);
+  out.present_ms = tail(series.present_ms);
+  out.overlay_us = tail(series.overlay_us);
+  out.cpu = tail(series.cpu);
+  out.flags_set = tail(series.flags_set);
+  out.shown = tail(series.shown);
+  out.present_mode = tail(series.present_mode);
+  // The rows before the first kept frame's (frames and rows without a
+  // frame time) went with the warm-up.
+  const std::size_t rows_before =
+      first < series.row.size() ? series.row[first] : series.rows;
+  for (std::size_t &row : out.row) {
+    row -= rows_before;
+  }
+  out.warmup_rows = series.warmup_rows + rows_before;
+  out.warmup_frames = series.warmup_frames + first;
+  out.rows = series.rows - std::min(rows_before, series.rows);
+  out.skipped = out.rows - std::min(out.rows, out.dt_ms.size());
+  count_frames(out);
   return out;
 }
 

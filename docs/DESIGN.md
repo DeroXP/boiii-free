@@ -1746,7 +1746,9 @@ percent confidence interval of upstream on every scenario, and load times are no
 worse.
 
 Status (2026-11-05): the comparison exists offline.
-`xerces_cli bench compare --a <runs> --b <runs>` treats each run as one sample.
+`xerces_cli bench compare --a <runs> --b <runs>` treats each run as one sample:
+one `<run>.frames.csv` or one PresentMon CSV, never both for the same run
+(`--source` picks one when a run folder holds both; `*.main.csv` is not a run).
 It gives t-based 95 percent intervals, Welch's difference with its interval and
 p, and TOST equivalence with margins in percent of A's mean. The defaults are
 the proposed M7 margins, 1% on mean frame time and 3% on p99, and they are yours
