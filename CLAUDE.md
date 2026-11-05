@@ -14,9 +14,8 @@ III. Self-hosted and offline play only.
 - M0 is under way on `xerces-main`: upstream `beta` f8f7b735 plus `mod-stack`'s
   two commits (conflicts resolved in 6bc02cb4), with the design docs and
   `backend/` merged in (D1). Upstream's updater and the `-beta` self-download
-  are disabled (62e28935). The client has not compiled yet: this PC's Build
-  Tools lack the ATL headers (see Build), so the merge is unverified by a
-  compiler.
+  are disabled (62e28935). The whole client builds (2761e2d8, after the ATL
+  component was added on 2026-11-04) but has not been launched yet.
 - The headless core builds and its tests pass: manifests, the planner, merges,
   conflict rules, hook chains, packs and share codes, logs, and the CLI's
   offline commands (`src/xerces_core`, `src/xerces_tests`, `src/xerces_cli`).
@@ -41,7 +40,7 @@ Requirements: LLVM 23 (clang and LLD; upstream's CI uses 23.x), Ninja, premake
 for latest v143 build tools (x86 & x64)" component, because the client's
 precompiled header includes `atlbase.h`. The VS clang-cl components are not
 needed. On this PC LLVM 23.1.5, Ninja 1.13.2 and premake 5.0.0 are portable in
-`C:\Users\Ginld\XercesDev\tools`; ATL is not installed yet.
+`C:\Users\Ginld\XercesDev\tools`; ATL is installed.
 
 ```
 tools\build.ps1 -Tests -ToolsDir C:\Users\Ginld\XercesDev\tools

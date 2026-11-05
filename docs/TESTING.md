@@ -22,12 +22,13 @@ disabled (commit 62e28935 disables it).
 
 ### Before the first game session (M0)
 
-- [ ] The Visual Studio Build Tools have the "C++ ATL for latest v143 build
-      tools (x86 & x64)" component. Without it the client does not compile:
-      every client file includes `atlbase.h` through `std_include.hpp`.
-- [ ] `tools\build.ps1 -Client` builds `build\bin\x64\Release\boiii.exe` with no
-      errors. This is the first compile of the mod-stack merge (commit 6bc02cb4)
-      and of the updater change.
+- [x] (2026-11-04) The Visual Studio Build Tools have the "C++ ATL for latest
+      v143 build tools (x86 & x64)" component. Without it the client does not
+      compile: every client file includes `atlbase.h` through `std_include.hpp`.
+- [x] (2026-11-04, 2761e2d8) `tools\build.ps1 -Client` builds
+      `build\bin\x64\Release\boiii.exe` with no errors. This is the first
+      compile of the mod-stack merge (commit 6bc02cb4) and of the updater
+      change.
 - [ ] The built exe does not contact upstream's update server on start (watch
       the console; no "update" lines) and leaves `%LOCALAPPDATA%\boiii` alone.
 

@@ -5,8 +5,8 @@ independent reviewers (completeness against your brief, technical accuracy,
 security, privacy and licensing, internal consistency); this version fixes what
 they found. Implementation started on 2026-11-04 on `xerces-main`: D1 and D2 are
 decided, and the headless core of M1, M2 and M4 is built and tested; the game
-client itself waits on the ATL headers and the M0 session (status in section
-18). The first slice of the backend is live on Railway (section 10.9).
+client builds and waits on the M0 session (status in section 18). The first
+slice of the backend is live on Railway (section 10.9).
 
 Xerces is a rename and redesign of the Ezz BOIII client (itself a fork of
 momo5502's boiii, GPL-3.0) into a multi-mod launcher and loader for Call of
@@ -1940,10 +1940,10 @@ M5a, which you asked for now.
 
 - M0: base and toolchain done (D1, D2); the updater and the `-beta`
   self-download are disabled; `xerces_core` and its tests exist, with a CI job
-  (`.github/workflows/xerces-core.yml`) and `tools/build.ps1`. Open: the first
-  client compile (needs the VS ATL component), the fence inventory and its lint,
-  the endpoint inventory with the D9, D14 and D15 switches, the
-  `archive/bundle-poc` tag, and the supervised session (D3).
+  (`.github/workflows/xerces-core.yml`) and `tools/build.ps1`. The whole client
+  builds (2761e2d8). Done too: the fence inventory and its lint, the endpoint
+  inventory with its host lint, and the `archive/bundle-poc` tag (local). Open:
+  the D9, D14 and D15 switches, and the supervised session (D3).
 - M1, headless part done: the manifest and its validator with the schema
   (`docs/schema/mod-1.schema.json`), legacy manifests, the planner with
   `plan_id` and `content_id`, JSON logs (`docs/schema/log-1.schema.json`), and
