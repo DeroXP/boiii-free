@@ -14,6 +14,7 @@ namespace xerces_signatures {
 namespace {
 struct state {
   bool registry_ok = false;
+  std::vector<xerces_core::signature> registry; // its entries, when ok
   xerces_core::signature_report report;
   std::uintptr_t base = 0;
   std::uint32_t checksum = 0;
@@ -152,6 +153,7 @@ state resolve() {
                     registry.diags.items().front().message;
       } else {
         s.registry_ok = true;
+        s.registry = registry.signatures;
         s.base = game::get_engine_base();
         const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(s.base);
         const auto *base_bytes = reinterpret_cast<const std::uint8_t *>(s.base);
@@ -239,6 +241,10 @@ state resolve() {
   xerces_core::require_signatures(
       s.report, "multi_mod", xerces_core::multi_mod_signatures::all,
       s.problem.empty() ? "not in compat/signatures.json" : s.problem);
+  // The same for the opt-in larger zone memory (db_pool.cpp).
+  xerces_core::require_signatures(
+      s.report, "db_pool", xerces_core::db_pool_signatures::all,
+      s.problem.empty() ? "not in compat/signatures.json" : s.problem);
 
   std::size_t matched = 0;
   for (const auto &result : s.report.results) {
@@ -289,6 +295,55 @@ std::optional<std::uintptr_t> address(std::string_view id) {
     return std::nullopt;
   }
   return s.base + static_cast<std::uintptr_t>(result->rva);
+}
+
+bool code_matches(std::string_view id, std::span<const std::uint8_t> entry,
+                  std::string *why) {
+  const auto fail = [&](std::string text) {
+    if (why != nullptr) {
+      *why = std::move(text);
+    }
+    return false;
+  };
+  const state &s = resolved();
+  const std::optional<std::uintptr_t> at = address(id);
+  if (!at) {
+    return fail(std::string(id) + " did not resolve");
+  }
+  const auto sig = std::ranges::find_if(
+      s.registry, [&](const xerces_core::signature &e) { return e.id == id; });
+  if (sig == s.registry.end()) {
+    return fail(std::string(id) + " is not in the registry");
+  }
+  const auto *code = reinterpret_cast<const std::uint8_t *>(*at);
+  for (const std::string &text : sig->patterns) {
+    const auto pattern = xerces_core::parse_pattern(text);
+    if (!pattern) {
+      continue;
+    }
+    const std::size_t size = std::max(entry.size(), pattern->bytes.size());
+    if (!readable(code, size)) {
+      return fail("the code of " + std::string(id) + " at RVA " +
+                  hex(*at - s.base) + " is not readable");
+    }
+    if (xerces_core::entry_code_matches(
+            std::span<const std::uint8_t>(code, size), entry, *pattern)) {
+      return true;
+    }
+  }
+  std::string first;
+  if (readable(code, entry.size())) {
+    for (std::size_t i = 0; i < entry.size(); ++i) {
+      char byte[4];
+      std::snprintf(byte, sizeof(byte), "%s%02X", i == 0 ? "" : " ", code[i]);
+      first += byte;
+    }
+  }
+  return fail("the code of " + std::string(id) + " at RVA " +
+              hex(*at - s.base) +
+              " is not the instruction sequence it was written for (it "
+              "starts " +
+              first + ")");
 }
 
 std::string feature_message(std::string_view feature,

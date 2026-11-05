@@ -438,7 +438,9 @@ the installed game.
   `DB_LinkXAssetEntry`, the `DB_ExpandZoneList` and `DB_LoadXZone` call sites
   inside `DB_LoadXAssets`, `FS_BuildOSPathForThread`, `SND_StartHeaderRead`,
   `KeyValuePairs_GetNextValue`, `UGC_ModChange_ApplyQueued`, and the
-  `UIElement_RenderLoadedMod` call site.
+  `UIElement_RenderLoadedMod` call site. Since 2026-11-05 also the two PMem
+  helpers the opt-in zone memory detours (`pmem.create_pool`,
+  `pmem.init_page_budget`, feature `db_pool`, 5.4).
 - Resolution runs once in `symbols_resolved`. It scans the first `.text` and
   `.rdata` (string anchors), and the `.interpr` section (the Havok Script
   interpreter, which holds three upstream symbols) read-only. It never scans or
@@ -476,7 +478,10 @@ miss turns that feature off and the launcher says, for example:
   address, wildcarding rel32 targets and RIP-relative displacements. A dump
   comes from a running client, so the client's own hooks are in it: a jmp whose
   target lies outside the image is wildcarded too, which is why the detoured
-  functions' entries start with five `??`.
+  functions' entries start with five `??`. For a function Xerces itself detours,
+  `--detoured` wildcards those five bytes up front (the client checks them
+  before writing), and `--through <address>` extends the pattern over what the
+  detour relies on.
 - `xerces_cli sig check --dump <file|folder>` runs the registry against a dump
   offline (exit 4 when a signature misses). One dump of a new build shows
   exactly which signatures need work.
@@ -681,7 +686,8 @@ together.
    Upstream's parser never counts a pool file's first line
    (`utils::string::replace` replaces at position 0 before it searches); the
    headless parser keeps that so its numbers match today's game, and the in-game
-   half decides whether Xerces does too.
+   half decides whether Xerces does too. Zone memory, which is not an asset
+   pool, can be raised with an opt-in flag (Zone memory, below).
 5. Front end: the engine loads the core tier, and mod-stack adds
    `stack_<id>_core_mod` and its language pair to the same batch. Map load does
    the same for the mode tier (`zm_mod`, `mp_mod`, `cp_mod`) and the map's
@@ -691,6 +697,47 @@ together.
 7. Every step writes JSON events (`loader.plan.applied`, `loader.zone.loaded`,
    `loader.asset.override`, `loader.gsc.chain.bound`, `loader.ready`) with the
    `plan_id`.
+
+#### Zone memory (opt-in, built 2026-11-05, not yet run in the game)
+
+- Why: the engine's DB (fastfile) stack keeps blocks 5 and 6 of every loaded
+  zone in a fixed 2 GiB PMem pool, "main". DS4C's zones take about 450 MiB of
+  it, so Super Mario 64 (813 MiB) and BACKROOMZ (1160 MiB) overflow it while
+  their main zone loads, and the engine's out-of-memory handler ends the game
+  (docs/TESTING.md, Mods on custom maps).
+- Where the size comes from: a constant inside a start-up function Arxan keeps
+  encrypted; Xerces never reads, scans or patches that function. It hands each
+  pool's size to a plain helper (`pmem.create_pool`: rcx name, edx flags, r8
+  size, r9 the pool's region; the only writer of the size, which it reserves
+  with `VirtualAlloc(NULL, size, MEM_RESERVE)`) and the shared page budget to
+  another (`pmem.init_page_budget`, rcx in bytes). Both are in the first
+  `.text`, upstream hooks neither, and they run after the components'
+  `post_unpack`.
+- What changes: with `-xerces-db-pool` on the command line (Settings > Launch,
+  "Larger zone memory (experimental)"), `src/client/xerces/db_pool.cpp` detours
+  both. The first pool created, if it is exactly `main`, flags 0x1E, 2 GiB, gets
+  4 GiB; the page budget, if it is exactly 5 GiB, becomes 8 GiB (the budget is
+  bookkeeping, and the page table holds at most 16 GiB). Every other call passes
+  through, including the five later 2 GiB `main` pools of other stacks. Before
+  writing, the client checks the bytes each jmp overwrites (wildcards in the
+  registry) and the whole registry pattern, and installs both detours or
+  neither. The detours only record what they see. The first frame logs
+  `xerces.db_pool` (every pool call, the budget, the size read back), and
+  `xerces.db_pool.usage` gives the pool's committed size the first time it
+  passes 2 GiB and the first time the player is in a level. Safe mode leaves the
+  flag out.
+- Why opt-in: none of it has run in the game. Risks (reverse-engineering
+  verdict, 2026-11-05): Arxan guards may cover these bytes, repair them or use
+  them (a crash before the menu, or hooks that are never hit); no committed pool
+  has used offsets above 2 GiB before, and code inside the encrypted function or
+  the second `.text` could keep such offsets in 32 bits (a crash after the zone
+  allocation); the streamer may use the extra budget; commit grows by what the
+  map uses (about 1.2 GiB more for BACKROOMZ); a Steam update turns the feature
+  off (signature miss). It stays opt-in until the one-run test in
+  docs/TESTING.md passes. If the hooks are never reached, the remaining options
+  are replacing the main pool's reservation after start-up and before the first
+  zone loads, or having the launcher explain the overflow instead of loading the
+  map.
 
 ### 5.5 Unload and reload
 

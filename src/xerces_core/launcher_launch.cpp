@@ -13,10 +13,12 @@
 #include <algorithm>
 #include <cwctype>
 
+#include "db_pool.hpp"
 #include "ipc.hpp"
 #include "journal.hpp"
 #include "json.hpp"
 #include "launch.hpp"
+#include "settings_options.hpp"
 #include "version.hpp"
 
 namespace xerces_core {
@@ -67,6 +69,12 @@ launch_outcome preview_launch(const launch_inputs &in) {
   options.nointro = config.nointro;
   options.mods_off = in.mods_off;
   options.extra_flags = config.extra_flags;
+  if (in.mods_off) {
+    // Safe mode follows a crash. The experimental larger zone memory is
+    // only for heavy mods, so it stays off then whatever the settings say.
+    options.extra_flags =
+        with_flag(std::move(options.extra_flags), db_pool::flag_name, false);
+  }
   for (const auto &[name, value] : config.dvars) {
     options.dvars.emplace_back(name, value);
   }

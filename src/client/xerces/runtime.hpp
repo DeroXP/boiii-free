@@ -42,6 +42,8 @@ inline void log_error(std::string_view event, std::string_view message,
 bool write_file(const std::filesystem::path &path, std::string_view text);
 std::string read_file(const std::filesystem::path &path);
 
+// The game's own command line without the program, as UTF-8.
+std::vector<std::string> command_line_args();
 // The value after a flag on the game's own command line ("-xerces-plan
 // <id>"), looking only before the first "+" command.
 std::string flag_value(std::string_view flag);

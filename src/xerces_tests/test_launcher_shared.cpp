@@ -321,6 +321,25 @@ TEST_CASE("shared launcher: vanilla and safe mode need no plan") {
   CHECK_EQ(out.command_line, std::string("-launch -nointro"));
 }
 
+TEST_CASE("shared launcher: safe mode leaves the larger zone memory off") {
+  fake_setup setup("db_pool", true);
+  setup.config.extra_flags = {"-windowed", "-xerces-db-pool"};
+  launch_inputs in = setup.inputs(true);
+  in.modded = false;
+  launch_outcome out = launch_game(in, [] { return false; }, {});
+  CHECK(out.dry_run);
+  CHECK_EQ(out.command_line,
+           std::string("-launch -nointro -windowed -xerces-db-pool"));
+  in.modded = true;
+  in.mods_off = true;
+  out = launch_game(in, [] { return false; }, {});
+  CHECK(out.dry_run);
+  CHECK_EQ(out.command_line, std::string("-launch -nointro -windowed"));
+  // Only for that launch: the setting itself stays on.
+  CHECK((setup.config.extra_flags ==
+         std::vector<std::string>{"-windowed", "-xerces-db-pool"}));
+}
+
 TEST_CASE("shared launcher: a pack becomes the profile") {
   mode_profile profile;
   profile.mods = {"old.mod"};

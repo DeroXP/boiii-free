@@ -326,4 +326,17 @@ std::optional<std::string> flag_value(const std::vector<std::string> &args,
   }
   return std::nullopt;
 }
+
+bool has_launch_flag(const std::vector<std::string> &args,
+                     std::string_view flag) {
+  for (const std::string &arg : args) {
+    if (!arg.empty() && arg[0] == '+') {
+      return false; // flags only come before the first command
+    }
+    if (arg == flag) {
+      return true;
+    }
+  }
+  return false;
+}
 } // namespace xerces_core

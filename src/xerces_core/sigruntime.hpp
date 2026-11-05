@@ -1,8 +1,8 @@
 #pragma once
 
-// Signature rules the game client applies (src/client/xerces/signatures.cpp
-// and src/client/component/mod_stack.cpp), kept here so they can be tested
-// without the game (docs/DESIGN.md 4.3, 4.4).
+// Signature rules the game client applies (src/client/xerces/signatures.cpp,
+// src/client/component/mod_stack.cpp and src/client/xerces/db_pool.cpp), kept
+// here so they can be tested without the game (docs/DESIGN.md 4.3, 4.4).
 
 #include <array>
 #include <cstdint>
@@ -45,6 +45,28 @@ inline constexpr std::array all = {
     mod_change_apply_queued,
 };
 } // namespace multi_mod_signatures
+
+// The registry entries the opt-in db_pool feature detours on the client
+// (src/client/xerces/db_pool.cpp, docs/DESIGN.md 5.4 step 4). The client
+// requires both in its report, like the multi-mod ones, and the registry test
+// checks the shipped registry has them.
+namespace db_pool_signatures {
+inline constexpr std::string_view create_pool = "pmem.create_pool";
+inline constexpr std::string_view init_page_budget = "pmem.init_page_budget";
+
+inline constexpr std::array all = {create_pool, init_page_budget};
+} // namespace db_pool_signatures
+
+// Whether code about to be detoured is exactly what the detour was written
+// for (DESIGN.md 4.3: no code bytes are written before the whole expected
+// instruction sequence is checked). `entry` is the bytes the detour's jmp
+// overwrites, which the registry leaves as wildcards so a dump of a client
+// with the detour still matches: they must be exactly these. Every fixed byte
+// of `pattern` (the registry's, from the same address) must match too. False
+// when `code` is shorter than either.
+bool entry_code_matches(std::span<const std::uint8_t> code,
+                        std::span<const std::uint8_t> entry,
+                        const byte_pattern &pattern);
 
 // The client's cache file for a game build and the registry text it was made
 // from: "signatures-0x6531394-<first 16 hex digits of the text's

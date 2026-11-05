@@ -71,7 +71,9 @@ struct launch_inputs {
   const std::vector<installed_content> *catalog = nullptr;
   std::string mode = "zm";
   bool modded = true;    // false: vanilla
-  bool mods_off = false; // safe mode: the last modded launch crashed
+  // Safe mode: the last modded launch crashed. Mods are off, and so is the
+  // experimental larger zone memory (-xerces-db-pool).
+  bool mods_off = false;
   std::optional<std::string> connect; // "+connect host:port" (Servers)
   const std::vector<std::string> *mods = nullptr; // instead of the profile's
   bool dry_launch = false;

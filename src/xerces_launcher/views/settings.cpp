@@ -15,6 +15,9 @@
 //   -nocinematics also turn the game's own saved skip switches on, which
 //   Xerces cannot turn off (xerces_core::dvar_skip_intro), so the screen
 //   says so instead of promising the videos play.
+// - Larger zone memory (experimental): the client's -xerces-db-pool
+//   (src/client/xerces/db_pool.cpp), also in config.extra_flags. Safe mode
+//   leaves it out (xerces_core::preview_launch).
 // - FPS limit, FOV, V-Sync, FPS counter: dvars confirmed in the client
 //   (com_maxfps, cg_fov_default, r_vsync, com_drawFPS_PC), kept in
 //   config.dvars and passed as "+set <dvar> <value>".
@@ -29,6 +32,7 @@
 #include <iterator>
 #include <optional>
 
+#include <xerces_core/db_pool.hpp>
 #include <xerces_core/settings_options.hpp>
 
 #include "../app.hpp"
@@ -133,6 +137,7 @@ public:
     model.Bind("intro_note", &intro_note_);
     model.Bind("nocinematics", &nocinematics_);
     model.Bind("cinematics_note", &cinematics_note_);
+    model.Bind("db_pool", &db_pool_);
     model.Bind("close_on_launch", &close_on_launch_);
     model.Bind("flags", &flags_);
     model.Bind("flags_hint", &flags_hint_);
@@ -301,6 +306,7 @@ private:
     const std::vector<std::vector<std::string>> rest = {
         {"nointro"},
         {"nocinematics"},
+        {"db-pool"},
         {"close-on-launch"},
         {"flags-field"},
         {"theme-dark", "theme-light", "theme-contrast"},
@@ -625,6 +631,7 @@ private:
                          "1 in boiii_players\\user\\config.cfg). Turn it off "
                          "in the game's Quick Settings.")
             : std::string();
+    db_pool_ = core::has_flag(c.extra_flags, core::db_pool::flag_name);
     close_on_launch_ = c.close_on_launch;
     if (keep(text_field::flags)) {
       flags_ = core::join_flags(c.extra_flags);
@@ -913,6 +920,13 @@ private:
                     ? owner_->tr("Xerces no longer passes -nocinematics; the "
                                  "game's Quick Settings still skip cinematics.")
                     : owner_->tr("Xerces no longer passes -nocinematics."));
+    } else if (key == "db_pool") {
+      const bool on = !core::has_flag(c.extra_flags, core::db_pool::flag_name);
+      set_flags(core::with_flag(c.extra_flags, core::db_pool::flag_name, on),
+                std::string("db_pool ") + (on ? "on" : "off"),
+                on ? owner_->tr("Larger zone memory is on (-xerces-db-pool). "
+                                "Turn it off if the game crashes.")
+                   : owner_->tr("Xerces no longer passes -xerces-db-pool."));
     } else if (key == "close") {
       c.close_on_launch = !c.close_on_launch;
       save(std::string("close_on_launch ") + (c.close_on_launch ? "on" : "off"),
@@ -1317,6 +1331,7 @@ private:
   Rml::Vector<dvar_row> others_;
 
   bool nointro_ = true, nocinematics_ = false, close_on_launch_ = false;
+  bool db_pool_ = false;
   // The game's own config.cfg has boiii_skipIntro / boiii_skipCinematics on.
   bool game_skips_intro_ = false, game_skips_cinematics_ = false;
   Rml::String intro_note_, cinematics_note_;

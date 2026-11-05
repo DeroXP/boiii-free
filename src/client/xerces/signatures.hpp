@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -21,6 +22,14 @@ namespace xerces_signatures {
 bool feature_enabled(std::string_view feature);
 // The absolute address of a resolved signature, if it resolved.
 std::optional<std::uintptr_t> address(std::string_view id);
+// Right before a detour is written (DESIGN.md 4.3): whether the code at a
+// resolved signature still matches one of the registry's patterns for it,
+// with its first bytes exactly `entry` (the bytes the detour's jmp
+// overwrites, which the registry leaves as wildcards). The cache only
+// re-checks a symbol's first bytes at start-up, so this reads the whole
+// pattern again. On false, *why says what was found.
+bool code_matches(std::string_view id, std::span<const std::uint8_t> entry,
+                  std::string *why = nullptr);
 // Why a feature is off, in the launcher's wording (empty if it is on).
 std::string feature_message(std::string_view feature,
                             std::string_view feature_label,

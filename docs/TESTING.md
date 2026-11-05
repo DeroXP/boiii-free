@@ -347,6 +347,30 @@ extra).
       (`loader.exit.unexpected`, 0xFFFFFFFF while `loading_map`) and the crash
       handler leaves a dump. Not fixed: these two maps cannot load with DS4C
       unless the pool grows.
+- [ ] Larger zone memory (`-xerces-db-pool`, DESIGN.md 5.4 Zone memory; built
+      2026-11-05, never run in the game). One run, with your go-ahead, DS4C
+      alone on BACKROOMZ:
+      `tools\dev\session\map-check.ps1 -Map zm_backrooms -Stack 3171632315 -ExtraFlags -xerces-db-pool -Live`.
+      In the game log (`<home>\logs\<date>-<time>-game-<pid>.jsonl`, copied to
+      the run's folder):
+  - `xerces.db_pool.installed` with both addresses. Without it,
+    `xerces.db_pool.off` says why (a signature or byte check failed) and the run
+    proves nothing.
+  - `xerces.db_pool` at info, after the first frame: 23 pool calls, the first
+    `main` flags 0x1E size 0x80000000 with `size_given` 0x100000000 and
+    `reserved` true, the budget 0x140000000 given 0x200000000, and
+    `main_size_now` 0x100000000. A warning instead means the hooks were not hit
+    or did not apply; its message says which.
+  - `xerces.db_pool.usage`: `above_stock` while BACKROOMZ loads, then `in_game`
+    at about 2450 MiB (more than the stock 2048).
+  - The result is `in_game` with "back to the menu: yes" (leaving frees the
+    pages above 2 GiB), and no `loader.exit.unexpected`.
+  - If it crashes: before the menu with no `xerces.db_pool` line points at the
+    hooks or Arxan; in the dump, a DB thread returning to 0x1420C5A3D means the
+    pool is still too small, 0x1420C5AB0 the page budget ran out, and a crash
+    after the zone allocation an offset kept in 32 bits. Turn the setting off
+    again afterwards either way (map-check writes its own launcher.json, so only
+    that home has the flag).
 - [ ] Shadows of Evil with DS4C when its 3.5 minute intro plays to the end:
       DS4C's scripts error on every frame and the local server's reliable
       commands cycle out (`EXE_ERR_RELIABLE_CYCLED_OUT`) before the client is in

@@ -174,6 +174,14 @@
 
 			<div class="field">
 				<div class="field-text">
+					<div class="field-name">Larger zone memory (experimental)</div>
+					<div class="field-help">Lets big custom maps load with heavy mods. Turn it off if the game crashes. -xerces-db-pool: the game's 2 GiB zone memory for maps and mods becomes 4 GiB. Safe mode always leaves it off.</div>
+				</div>
+				<button id="db-pool" class="toggle" data-class-on="db_pool" data-event-click="toggle('db_pool')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="db_pool">On</span><span class="toggle-state" data-if="!db_pool">Off</span></button>
+			</div>
+
+			<div class="field">
+				<div class="field-text">
 					<div class="field-name">Close Xerces when the game starts</div>
 					<div class="field-help">Off keeps Xerces open, so it can notice a crash and offer safe mode next time.</div>
 				</div>
@@ -183,7 +191,7 @@
 			<div class="field field-stack">
 				<div class="field-text">
 					<div class="field-name">Extra launch flags</div>
-					<div class="field-help">Each a '-' then letters, digits, '-' or '_', separated by spaces, for example -console. Press Enter to save. Display mode and Skip all cinematics show up here too.</div>
+					<div class="field-help">Each a '-' then letters, digits, '-' or '_', separated by spaces, for example -console. Press Enter to save. Display mode, Skip all cinematics and Larger zone memory show up here too.</div>
 				</div>
 				<input id="flags-field" type="text" class="text mono-field flags-field" maxlength="1000" data-attr-placeholder="flags_hint" data-value="flags" data-event-blur="commit('flags')"/>
 				<div class="field-error" data-if="flags_error != ''">{{flags_error}}</div>
