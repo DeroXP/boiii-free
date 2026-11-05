@@ -65,18 +65,46 @@ std::vector<std::string> list_files(const std::filesystem::path &folder) {
   return names;
 }
 
-std::string file_sha256_hex(const std::filesystem::path &path) {
-  sha256 hasher;
+namespace {
+// The hash of exactly `size` bytes of the file, or nothing. Reading fewer or
+// more bytes than the size taken before the read means the file could not be
+// read or changed meanwhile; either way the result is not that file's hash.
+std::optional<std::string> hash_file_of_size(const std::filesystem::path &path,
+                                             std::uint64_t size) {
   std::ifstream in(path, std::ios::binary);
+  if (!in.is_open()) {
+    return std::nullopt; // gone, or held open by a program that shares no reads
+  }
+  sha256 hasher;
   std::vector<char> buffer(std::size_t{1} << 20);
+  std::uint64_t total = 0;
   while (in) {
     in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
     const std::streamsize got = in.gcount();
     if (got > 0) {
       hasher.update(buffer.data(), static_cast<std::size_t>(got));
+      total += static_cast<std::uint64_t>(got);
     }
   }
+  if (in.bad() || total != size) {
+    return std::nullopt;
+  }
   return sha256::to_hex(hasher.finish());
+}
+} // namespace
+
+std::optional<std::string>
+try_file_sha256_hex(const std::filesystem::path &path) {
+  std::error_code ec;
+  const std::uint64_t size = std::filesystem::file_size(path, ec);
+  if (ec) {
+    return std::nullopt;
+  }
+  return hash_file_of_size(path, size);
+}
+
+std::string file_sha256_hex(const std::filesystem::path &path) {
+  return try_file_sha256_hex(path).value_or(std::string());
 }
 
 bool hash_cache::load(const std::filesystem::path &file) {
@@ -86,6 +114,9 @@ bool hash_cache::load(const std::filesystem::path &file) {
   if (!in || !std::getline(in, line) || line != hash_cache_header) {
     return false;
   }
+  // What a failed read of a file used to give. No file with bytes in it has
+  // this hash, so such an entry is a failure written down, never a hash.
+  static const std::string nothing_read = sha256::hex("");
   while (std::getline(in, line)) {
     // size, write time, sha256 and path, tab-separated; Windows paths hold no
     // tabs.
@@ -103,6 +134,9 @@ bool hash_cache::load(const std::filesystem::path &file) {
       continue;
     }
     value.sha256 = line.substr(b + 1, 64);
+    if (value.size != 0 && value.sha256 == nothing_read) {
+      continue;
+    }
     entries_[line.substr(c + 1)] = std::move(value);
   }
   return true;
@@ -134,43 +168,64 @@ bool hash_cache::save(const std::filesystem::path &file, bool prune) const {
   return !ec;
 }
 
-std::string hash_cache::file_sha256(const std::filesystem::path &path) {
+std::optional<std::string>
+hash_cache::file_sha256(const std::filesystem::path &path) {
+  const std::string key = utf8(path.generic_u8string());
   std::error_code ec;
   const std::uint64_t size = std::filesystem::file_size(path, ec);
   if (ec) {
-    return file_sha256_hex(path);
+    entries_.erase(key);
+    return std::nullopt;
   }
   const auto time = std::filesystem::last_write_time(path, ec);
   if (ec) {
-    return file_sha256_hex(path);
+    entries_.erase(key);
+    return std::nullopt;
   }
   const std::int64_t write_time = time.time_since_epoch().count();
-  const std::string key = utf8(path.generic_u8string());
-  entry &value = entries_[key];
-  if (!value.sha256.empty() && value.size == size &&
-      value.write_time == write_time) {
+  const auto found = entries_.find(key);
+  if (found != entries_.end() && !found->second.sha256.empty() &&
+      found->second.size == size && found->second.write_time == write_time) {
     ++hits_;
-    value.used = true;
-    return value.sha256;
+    found->second.used = true;
+    return found->second.sha256;
   }
   ++misses_;
   bytes_hashed_ += size;
+  const std::optional<std::string> digest = hash_file_of_size(path, size);
+  if (!digest) {
+    // Never remembered: a file that is unreadable now (Steam holding a
+    // Workshop file while it updates it) would otherwise keep a wrong hash
+    // across scans and restarts until the file changed again. Any older
+    // entry is stale anyway, since the size or time no longer match it.
+    entries_.erase(key);
+    return std::nullopt;
+  }
+  entry &value = entries_[key];
   value.size = size;
   value.write_time = write_time;
-  value.sha256 = file_sha256_hex(path);
+  value.sha256 = *digest;
   value.used = true;
-  return value.sha256;
+  return digest;
 }
 
 std::vector<std::pair<std::string, std::string>>
-hash_files(const std::filesystem::path &folder, hash_cache *cache) {
+hash_files(const std::filesystem::path &folder, hash_cache *cache,
+           std::vector<std::string> *unreadable) {
   std::vector<std::pair<std::string, std::string>> digests;
   for_each_file(folder, [&](const std::filesystem::path &file) {
-    digests.emplace_back(relative_name(folder, file),
-                         cache ? cache->file_sha256(file)
-                               : file_sha256_hex(file));
+    std::string name = relative_name(folder, file);
+    const std::optional<std::string> digest =
+        cache ? cache->file_sha256(file) : try_file_sha256_hex(file);
+    if (!digest && unreadable) {
+      unreadable->push_back(name);
+    }
+    digests.emplace_back(std::move(name), digest.value_or(std::string()));
   });
   std::ranges::sort(digests);
+  if (unreadable) {
+    std::ranges::sort(*unreadable);
+  }
   return digests;
 }
 
@@ -210,12 +265,22 @@ installed_content load_mod_folder(const std::filesystem::path &folder,
   // Hash file by file: Workshop maps reach several gigabytes, and only the
   // manifest and workshop.json are needed as text.
   // The cache is keyed by absolute paths.
-  const auto digests =
-      hash_files(content.path.empty() ? folder : content.path, cache);
+  std::vector<std::string> unreadable;
+  const auto digests = hash_files(content.path.empty() ? folder : content.path,
+                                  cache, &unreadable);
   for (const auto &[path, digest] : digests) {
     content.files.push_back(path);
   }
   content.content_hash = content_hash_of_digests(digests);
+  // The content hash then covers an unknown file, so plans and pins built
+  // on it are wrong until a rescan reads the file; nothing is cached for it.
+  for (const std::string &name : unreadable) {
+    diags.warning("catalog.file.unreadable", content.folder + "/" + name,
+                  content.folder + ": " + name +
+                      " could not be read in full (another program may "
+                      "hold it open), so this mod's content hash is not "
+                      "its real one. Close that program and scan again.");
+  }
 
   if (has_file(content.files, manifest_file_name)) {
     manifest_result parsed =

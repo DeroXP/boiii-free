@@ -16,8 +16,26 @@ bool safe_flag(std::string_view flag) {
   });
 }
 
+bool equals_case_insensitive(std::string_view a, std::string_view b) {
+  return std::ranges::equal(a, b, [](char x, char y) {
+    const auto fold = [](char c) {
+      return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : c;
+    };
+    return fold(x) == fold(y);
+  });
+}
+
+// The engine names a dvar by a hash of its lower-cased name, and reads a name
+// that starts with "0x" as that hash written out (Dvar_GenerateHash). So
+// "FS_GAME" and "0x<hash of fs_game>" both reach fs_game; a hashed name could
+// be any dvar, and the launcher cannot tell which, so it is refused.
+bool hashed_dvar_name(std::string_view name) {
+  return name.size() >= 2 && name[0] == '0' &&
+         (name[1] == 'x' || name[1] == 'X');
+}
+
 bool safe_dvar_name(std::string_view name) {
-  if (name.empty() || name.size() > 64) {
+  if (name.empty() || name.size() > 64 || hashed_dvar_name(name)) {
     return false;
   }
   return std::ranges::all_of(name, [](char c) {
@@ -26,15 +44,26 @@ bool safe_dvar_name(std::string_view name) {
   });
 }
 
+// Only the plan sets the mod dvars, in any case the engine accepts.
+bool plan_dvar_name(std::string_view name) {
+  return equals_case_insensitive(name, "fs_game") ||
+         equals_case_insensitive(name, "fs_extramods");
+}
+
 // A value the engine reads back unchanged: no '+' (a new command), no '"'
-// (ends the quoted value), no control characters, and not empty.
+// (ends the quoted value), no ';' (the engine's command buffer runs what
+// follows it as another command), no "//" (its tokenizer drops the rest of
+// the line as a comment), no control characters, and not empty. Values are
+// not quoted to protect a ';' instead: how the engine treats quotes inside a
+// "+set" value has not been checked in the game.
 bool safe_value(std::string_view value) {
-  if (value.empty() || value.size() > 1024) {
+  if (value.empty() || value.size() > 1024 ||
+      value.find("//") != std::string_view::npos) {
     return false;
   }
   return std::ranges::none_of(value, [](char c) {
-    return c == '+' || c == '"' || static_cast<unsigned char>(c) < 0x20 ||
-           c == 0x7F;
+    return c == '+' || c == '"' || c == ';' ||
+           static_cast<unsigned char>(c) < 0x20 || c == 0x7F;
   });
 }
 
@@ -117,8 +146,8 @@ launch_command build_launch_command(const plan *resolved,
                         "The folder name \"" + entry.folder + "\" of " +
                             entry.id +
                             " cannot be passed to the game (it holds '+', "
-                            "'\"', ',' or control characters). Rename the "
-                            "folder.");
+                            "'\"', ',', ';' or control characters). Rename "
+                            "the folder.");
       }
     }
   }
@@ -135,15 +164,24 @@ launch_command build_launch_command(const plan *resolved,
     }
   }
   for (const auto &[name, value] : options.dvars) {
+    if (hashed_dvar_name(name)) {
+      out.diags.error("launch.dvar.invalid", name,
+                      "The setting " + name +
+                          " cannot be passed to the game: a name starting "
+                          "with 0x is a hashed dvar name, and it could be "
+                          "any dvar. Use the dvar's real name.");
+      continue;
+    }
     if (!safe_dvar_name(name) || !safe_value(value)) {
       out.diags.error("launch.dvar.invalid", name,
                       "The setting " + name +
                           " cannot be passed to the game (its value holds "
-                          "'+', '\"' or control characters, or is empty).");
+                          "'+', '\"', ';', '//' or control characters, or "
+                          "is empty).");
       continue;
     }
-    if (name == "fs_game" || name == "fs_extramods") {
-      continue; // only the plan sets these
+    if (plan_dvar_name(name)) {
+      continue; // only the plan sets these, also in safe mode (mods_off)
     }
     out.args.push_back("+set");
     out.args.push_back(name);
@@ -151,6 +189,8 @@ launch_command build_launch_command(const plan *resolved,
   }
 
   if (options.connect) {
+    // valid_server_address allows only host, IP and port characters, so no
+    // ';', '+', '"' or '/' reaches the command line through it either.
     if (!valid_server_address(*options.connect)) {
       out.diags.error("launch.connect.invalid", "",
                       "\"" + *options.connect +

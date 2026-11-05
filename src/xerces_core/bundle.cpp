@@ -232,16 +232,76 @@ bundle_result make_bundle(const std::filesystem::path &home,
   zip_writer zip;
   std::string listing =
       "Xerces diagnostics bundle. Nothing in it was sent anywhere; share it\n"
-      "only if you want to. The user folder is written as %USERPROFILE%.\n\n";
+      "only if you want to. The user folder is written as %USERPROFILE% and\n"
+      "server addresses as " +
+      std::string(redacted_address) +
+      ". launcher.json has no player name, and only\n"
+      "counts of the favourite and recent servers.\n\n";
+  std::error_code ec;
+
+  // The servers this person saved or joined. The launcher logs them as they
+  // were typed, and a host name without a port ("dave.example.org") matches
+  // no address pattern, so each is looked for by name in every file below.
+  std::vector<std::string> known;
+  std::string config_text;
+  const auto config = home / "config" / "launcher.json";
+  if (std::filesystem::exists(config, ec)) {
+    auto parsed = json::parse(read_text(config));
+    if (parsed.ok && parsed.document.IsObject()) {
+      auto &doc = parsed.document;
+      auto &alloc = doc.GetAllocator();
+      if (const auto *list = json::member(doc, "favorites");
+          list != nullptr && list->IsArray()) {
+        for (const auto &item : list->GetArray()) {
+          if (item.IsObject()) {
+            if (auto address = json::get_string(item, "address")) {
+              known.push_back(std::move(*address));
+            }
+          }
+        }
+      }
+      if (const auto *list = json::member(doc, "recent_servers");
+          list != nullptr && list->IsArray()) {
+        for (const auto &item : list->GetArray()) {
+          if (item.IsString()) {
+            known.emplace_back(item.GetString(), item.GetStringLength());
+          }
+        }
+      }
+      doc.RemoveMember("player_name"); // not needed to debug
+      // Favourites pair a name ("Dave's house") with an address, and recent
+      // servers are addresses: a bug report only needs how many there are.
+      for (const char *key : {"favorites", "recent_servers"}) {
+        const auto *list = json::member(doc, key);
+        const std::int64_t count = list != nullptr && list->IsArray()
+                                       ? static_cast<std::int64_t>(list->Size())
+                                       : 0;
+        const bool present = list != nullptr;
+        doc.RemoveMember(key);
+        if (present) {
+          json::set(doc, std::string(key) + "_count", count, alloc);
+        }
+      }
+      config_text = json::pretty(doc);
+    }
+  }
+
   const auto add = [&](const std::string &name, std::string text) {
+    // Logs written by older builds were never scrubbed of addresses, and a
+    // file a person edited may hold one anywhere, so every file is scrubbed
+    // again here. Every file in the bundle is JSON; JSON is scrubbed string
+    // by string, decoded, so an escape before an address neither hides it
+    // nor gets cut in half.
     text = redact_profile(text, profile);
+    text = name.ends_with(".json") || name.ends_with(".jsonl")
+               ? redact_addresses_in_json(text, known)
+               : redact_addresses(text, known);
     listing += name + "  (" + std::to_string(text.size()) + " bytes)\n";
     zip.add(name, text);
     result.contents.push_back(name);
   };
 
   // The newest logs of every role.
-  std::error_code ec;
   std::vector<std::filesystem::directory_entry> logs;
   for (const auto &file : std::filesystem::directory_iterator(home / "logs", ec)) {
     if (file.path().extension() == ".jsonl") {
@@ -277,13 +337,8 @@ bundle_result make_bundle(const std::filesystem::path &home,
   if (std::filesystem::exists(report, ec)) {
     add("signatures-report.json", read_text(report));
   }
-  const auto config = home / "config" / "launcher.json";
-  if (std::filesystem::exists(config, ec)) {
-    auto parsed = json::parse(read_text(config));
-    if (parsed.ok && parsed.document.IsObject()) {
-      parsed.document.RemoveMember("player_name"); // not needed to debug
-      add("launcher.json", json::pretty(parsed.document));
-    }
+  if (!config_text.empty()) {
+    add("launcher.json", config_text);
   }
   add("system.json", std::string(system_json));
   zip.add("FILES.txt", listing);

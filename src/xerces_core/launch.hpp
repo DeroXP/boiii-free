@@ -38,7 +38,11 @@ struct launch_command {
 
 // resolved is null for a vanilla launch. A plan with errors is refused, and so
 // is any value the engine's command line cannot carry safely: a '+' starts a
-// new command, a '"' ends a quoted value.
+// new command, a '"' ends a quoted value, a ';' separates commands in the
+// engine's command buffer and "//" starts a comment (values are not quoted
+// instead, because how the engine reads quotes in "+set" is not verified).
+// Settings never set fs_game or fs_extramods, in any letter case, and dvar
+// names written as a hash ("0x...") are refused.
 launch_command build_launch_command(const plan *resolved,
                                     const launch_options &options);
 

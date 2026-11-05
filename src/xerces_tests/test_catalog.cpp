@@ -3,7 +3,16 @@
 
 #include "harness.hpp"
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -51,8 +60,114 @@ TEST_CASE("catalog: a file hashed in pieces matches its whole-file hash") {
   CHECK_EQ(file_sha256_hex(dir / "exact.bin"),
            sha256::hex(std::string(std::size_t{1} << 20, 'x')));
   CHECK_EQ(file_sha256_hex(dir / "empty.txt"), sha256::hex(""));
-  // Unreadable files hash as empty, the way read_files reads them.
-  CHECK_EQ(file_sha256_hex(dir / "missing.bin"), sha256::hex(""));
+  CHECK_EQ(try_file_sha256_hex(dir / "empty.txt").value_or("none"),
+           sha256::hex(""));
+  // A file that cannot be read has no hash: the hash of no bytes would pass
+  // for a real one.
+  CHECK(!try_file_sha256_hex(dir / "missing.bin").has_value());
+  CHECK_EQ(file_sha256_hex(dir / "missing.bin"), std::string());
+  fs::remove_all(dir);
+}
+
+TEST_CASE("catalog: a file held without shared reads is never cached") {
+  const fs::path dir = fresh_dir("held");
+  const fs::path mods = dir / "mods";
+  const fs::path ff = mods / "111" / "zone" / "core_mod.ff";
+  const std::string bytes(4096, 'z');
+  write_bytes(ff, bytes);
+  write_bytes(mods / "111" / "zone" / "workshop.json",
+              R"({"Title":"One","PublisherID":"111","Type":"mod"})");
+  const catalog_scan real = scan_mods_directory(mods);
+  REQUIRE_EQ(real.catalog.size(), std::size_t{1});
+  CHECK(!real.diags.has("catalog.file.unreadable"));
+
+  // Held the way Steam can hold a Workshop file it is updating.
+  const auto hold = [](const fs::path &path) {
+    return CreateFileW(path.wstring().c_str(), GENERIC_READ, 0, nullptr,
+                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  };
+  const fs::path cache_file = dir / "cache" / "hashes.txt";
+  {
+    HANDLE held = hold(ff);
+    REQUIRE(held != INVALID_HANDLE_VALUE);
+    CHECK(!try_file_sha256_hex(ff).has_value());
+    hash_cache cache;
+    CHECK(!cache.file_sha256(ff).has_value());
+    CHECK_EQ(cache.size(), std::size_t{0});
+    scan_options options;
+    options.cache = &cache;
+    const catalog_scan scan = scan_mods_directory(mods, options);
+    CHECK(scan.diags.has("catalog.file.unreadable"));
+    REQUIRE_EQ(scan.catalog.size(), std::size_t{1});
+    CHECK(scan.catalog[0].content_hash != real.catalog[0].content_hash);
+    CHECK(cache.save(cache_file, false));
+    CloseHandle(held);
+  }
+
+  // Once the file is free, the next run (with the saved cache) reads it.
+  hash_cache reloaded;
+  REQUIRE(reloaded.load(cache_file));
+  CHECK_EQ(reloaded.size(), std::size_t{1}); // only workshop.json
+  CHECK_EQ(reloaded.file_sha256(ff).value_or(""), sha256::hex(bytes));
+  scan_options options;
+  options.cache = &reloaded;
+  const catalog_scan again = scan_mods_directory(mods, options);
+  CHECK(!again.diags.has("catalog.file.unreadable"));
+  REQUIRE_EQ(again.catalog.size(), std::size_t{1});
+  CHECK_EQ(again.catalog[0].content_hash, real.catalog[0].content_hash);
+
+  // A cached file that changes and is then held loses its entry rather than
+  // keeping the old hash or getting a wrong one.
+  const std::size_t before = reloaded.size();
+  write_bytes(ff, bytes + "more");
+  {
+    HANDLE held = hold(ff);
+    REQUIRE(held != INVALID_HANDLE_VALUE);
+    CHECK(!reloaded.file_sha256(ff).has_value());
+    CloseHandle(held);
+  }
+  CHECK_EQ(reloaded.size(), before - 1);
+  CHECK_EQ(reloaded.file_sha256(ff).value_or(""), sha256::hex(bytes + "more"));
+  fs::remove_all(dir);
+}
+
+TEST_CASE("catalog: a failed read written down by an older build is dropped") {
+  const fs::path dir = fresh_dir("poisoned");
+  const fs::path ff = dir / "core_mod.ff";
+  const fs::path empty = dir / "empty.ff";
+  const std::string bytes(4096, 'p');
+  write_bytes(ff, bytes);
+  write_bytes(empty, "");
+  // A cache line exactly as the old builds wrote it for a file they could
+  // not open: the real size and time, and the hash of no bytes.
+  const auto line = [](const fs::path &path, std::uint64_t size) {
+    const auto key = path.generic_u8string();
+    return std::to_string(size) + "\t" +
+           std::to_string(fs::last_write_time(path).time_since_epoch().count()) +
+           "\t" + sha256::hex("") + "\t" +
+           std::string(reinterpret_cast<const char *>(key.data()), key.size()) +
+           "\n";
+  };
+  const fs::path file = dir / "cache" / "hashes.txt";
+
+  // A version 1 cache is not trusted at all.
+  write_bytes(file, "xerces.hashcache/1\n" + line(ff, bytes.size()));
+  hash_cache old;
+  CHECK(!old.load(file));
+  CHECK_EQ(old.size(), std::size_t{0});
+  CHECK_EQ(old.file_sha256(ff).value_or(""), sha256::hex(bytes));
+
+  // In a current cache, the empty-input hash for a file with bytes in it is
+  // skipped; for an empty file it is that file's real hash and stays.
+  write_bytes(file, std::string(hash_cache_header) + "\n" +
+                        line(ff, bytes.size()) + line(empty, 0));
+  hash_cache current;
+  REQUIRE(current.load(file));
+  CHECK_EQ(current.size(), std::size_t{1});
+  CHECK_EQ(current.file_sha256(ff).value_or(""), sha256::hex(bytes));
+  CHECK_EQ(current.misses(), std::size_t{1});
+  CHECK_EQ(current.file_sha256(empty).value_or("none"), sha256::hex(""));
+  CHECK_EQ(current.hits(), std::size_t{1});
   fs::remove_all(dir);
 }
 

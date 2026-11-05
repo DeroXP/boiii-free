@@ -54,23 +54,64 @@ std::string lower(std::string text) {
   return text;
 }
 
+// The executable of a process, as Windows reports it; empty if the process is
+// gone. Servers record their own image with the same call (start()), so the
+// two strings agree even when the exe was started through a junction, a
+// symbolic link or a subst drive, where GetModuleFileNameW keeps the path the
+// process was started with.
+std::string image_of(HANDLE process) {
+  std::wstring buffer(32768, L'\0');
+  DWORD size = DWORD(buffer.size());
+  if (!QueryFullProcessImageNameW(process, 0, buffer.data(), &size)) {
+    return {};
+  }
+  buffer.resize(size);
+  return utf8(buffer);
+}
+
 std::string process_image(DWORD pid) {
   HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
   if (!process) {
     return {};
   }
-  std::wstring buffer(32768, L'\0');
-  DWORD size = DWORD(buffer.size());
-  const BOOL ok = QueryFullProcessImageNameW(process, 0, buffer.data(), &size);
+  std::string image = image_of(process);
   DWORD exit_code = 0;
   const bool running =
       GetExitCodeProcess(process, &exit_code) && exit_code == STILL_ACTIVE;
   CloseHandle(process);
-  if (!ok || !running) {
-    return {};
+  return running ? image : std::string();
+}
+
+// A file's identity: the volume's serial number and the file's index on it,
+// the same however the path reaches it (junction, link, subst or mapped
+// drive, short name, hard link).
+struct file_identity {
+  DWORD volume = 0;
+  DWORD index_high = 0;
+  DWORD index_low = 0;
+  bool operator==(const file_identity &) const = default;
+};
+
+std::optional<file_identity> identity_of(std::string_view path) {
+  if (path.empty()) {
+    return std::nullopt;
   }
-  buffer.resize(size);
-  return utf8(buffer);
+  // Attributes only, sharing everything: a running exe opens fine this way.
+  HANDLE file =
+      CreateFileW(wide(path).c_str(), FILE_READ_ATTRIBUTES,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                  nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return std::nullopt;
+  }
+  BY_HANDLE_FILE_INFORMATION info{};
+  const BOOL ok = GetFileInformationByHandle(file, &info);
+  CloseHandle(file);
+  if (!ok) {
+    return std::nullopt;
+  }
+  return file_identity{info.dwVolumeSerialNumber, info.nFileIndexHigh,
+                       info.nFileIndexLow};
 }
 
 // An access list that lets only the current user in; inherited by files
@@ -207,8 +248,43 @@ bool write_message(HANDLE pipe, std::string_view message, HANDLE stop_event,
   return ok;
 }
 
+// Waits until the client closes its end after the reply, so that
+// DisconnectNamedPipe does not throw away a reply it has not read yet. A read
+// on the server end ends with ERROR_BROKEN_PIPE when the client closes.
+// Bounded by timeout_ms and the stop event: FlushFileBuffers did this job
+// before, but it waits for the client with no limit, even on an overlapped
+// handle, so a client that never read held the only pipe instance and made
+// stop() (and the game's exit) hang.
+void wait_for_client_close(HANDLE pipe, HANDLE stop_event, DWORD timeout_ms) {
+  OVERLAPPED overlapped{};
+  overlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  char ignored = 0;
+  DWORD got = 0;
+  if (!ReadFile(pipe, &ignored, 1, &got, &overlapped) &&
+      GetLastError() == ERROR_IO_PENDING) {
+    finish(pipe, overlapped, stop_event, timeout_ms);
+  }
+  // Anything else: the client has gone (ERROR_BROKEN_PIPE) or sent another
+  // message, which one connection does not take; either way it is done.
+  CloseHandle(overlapped.hEvent);
+}
+
 std::string id_or_null(const std::string &id) { return id.empty() ? "null" : id; }
 } // namespace
+
+bool same_image(std::string_view a, std::string_view b) {
+  if (a.empty() || b.empty()) {
+    return false;
+  }
+  const auto first = identity_of(a);
+  const auto second = identity_of(b);
+  if (first && second) {
+    return *first == *second;
+  }
+  // One of them cannot be opened (a file deleted while its process runs, or
+  // no access): only the paths can be compared.
+  return lower(std::string(a)) == lower(std::string(b));
+}
 
 // ------------------------------------------------------------------ run files
 std::string run_entry_to_json(const run_entry &value) {
@@ -258,7 +334,10 @@ std::vector<run_entry> live_run_entries(const std::filesystem::path &run_dir) {
     in.close();
     const auto entry = parse_run_entry(text);
     const std::string image = entry ? process_image(entry->pid) : "";
-    if (!entry || image.empty() || lower(image) != lower(entry->image)) {
+    // Compared as files, not strings: the same exe reached by another path
+    // (a junction, a subst drive) is still the server, and removing its run
+    // file would make a running game look crashed to the launcher.
+    if (!entry || image.empty() || !same_image(image, entry->image)) {
       std::filesystem::remove(file.path(), ec); // gone, or the pid was reused
       continue;
     }
@@ -393,13 +472,19 @@ bool pipe_server::start(const std::filesystem::path &run_dir, std::string role,
   first_instance_ = pipe;
   stop_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
 
-  std::wstring image(32768, L'\0');
-  image.resize(GetModuleFileNameW(nullptr, image.data(), DWORD(image.size())));
+  // The same call clients make (process_image), so the strings match.
+  std::string image = image_of(GetCurrentProcess());
+  if (image.empty()) {
+    std::wstring module(32768, L'\0');
+    module.resize(
+        GetModuleFileNameW(nullptr, module.data(), DWORD(module.size())));
+    image = utf8(module);
+  }
   run_entry entry;
   entry.role = role;
   entry.pid = pid;
   entry.pipe = pipe_;
-  entry.image = utf8(image);
+  entry.image = image;
   entry.started = json_log::now_utc();
   run_file_ = run_dir / (role + "-" + std::to_string(pid) + ".json");
   {
@@ -436,9 +521,12 @@ void pipe_server::serve() {
     if (stopping_) {
       break;
     }
+    // Every step with the client is bounded, so one that stalls (or never
+    // reads) holds the only pipe instance for a few seconds at most.
+    const DWORD timeout = client_timeout_ms_;
     if (connected) {
       bool too_big = false;
-      const auto message = read_message(pipe, stop_event, 5000, &too_big);
+      const auto message = read_message(pipe, stop_event, timeout, &too_big);
       std::string reply;
       if (too_big) {
         reply = make_error("", invalid_request, "the request is too large");
@@ -456,8 +544,9 @@ void pipe_server::serve() {
       }
       if (!reply.empty()) {
         ++served_; // before the reply, so a caller that got it sees the count
-        write_message(pipe, reply, stop_event, 5000);
-        FlushFileBuffers(pipe);
+        if (write_message(pipe, reply, stop_event, timeout)) {
+          wait_for_client_close(pipe, stop_event, timeout);
+        }
       }
     }
     DisconnectNamedPipe(pipe);
@@ -471,6 +560,10 @@ void pipe_server::stop() {
   }
   stopping_ = true;
   SetEvent(static_cast<HANDLE>(stop_event_));
+  // Every wait in serve() also watches the stop event; cancelling whatever
+  // I/O is pending on the pipe as well means no call there can keep join()
+  // waiting, whatever the client does.
+  CancelIoEx(static_cast<HANDLE>(first_instance_), nullptr);
   thread_.join();
   CloseHandle(static_cast<HANDLE>(first_instance_));
   CloseHandle(static_cast<HANDLE>(stop_event_));
@@ -506,7 +599,7 @@ call_result call(const run_entry &server, std::string_view method,
   const std::string image = process_image(server.pid);
   if (!GetNamedPipeServerProcessId(pipe, &server_pid) ||
       server_pid != server.pid || image.empty() ||
-      lower(image) != lower(server.image)) {
+      !same_image(image, server.image)) {
     CloseHandle(pipe);
     out.error = "the pipe's server is not the process its run file names";
     return out;
