@@ -45,6 +45,16 @@ launch_command build_launch_command(const plan *resolved,
 // One argument quoted the way CommandLineToArgvW and the CRT read it back.
 std::string quote_argument(std::string_view arg);
 
+// What the game role checks a launch against (DESIGN.md 5.4 step 3): the
+// plan file's id and the fs_game and fs_extramods values its stack gives, read
+// back from plan_to_json output.
+struct plan_mod_dvars {
+  std::string plan_id;
+  std::string fs_game;
+  std::string fs_extramods;
+};
+std::optional<plan_mod_dvars> read_plan_mod_dvars(std::string_view plan_json);
+
 // A plan id without its "sha256:" tag: the -xerces-plan value and the name of
 // config\plans\<id>.json (':' cannot be in a Windows file name).
 std::string plan_file_id(std::string_view plan_id);

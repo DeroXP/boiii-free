@@ -203,7 +203,9 @@ private:
     if (sigs.known) {
       sig_value_ = std::to_string(sigs.matched) + "/" +
                    std::to_string(sigs.total) + " " + owner_->tr("matched");
-      sig_detail_ = sigs.missing.empty()
+      sig_detail_ = sigs.multi_mod_off()
+                        ? owner_->tr("Multi-mod was off: only the main mod loaded")
+                    : sigs.missing.empty()
                         ? owner_->tr("At the last launch")
                         : owner_->tr("Missing:") + " " + sigs.missing.front();
     } else {

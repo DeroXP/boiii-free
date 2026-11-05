@@ -7,6 +7,7 @@
 // thread; the scan reports back through post(). Screens notice changes by
 // comparing the revision counters.
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
@@ -87,6 +88,12 @@ struct signature_state {
   std::string game_build;
   std::string checked; // UTC time
   std::vector<std::string> missing; // names that did not resolve
+  std::vector<std::string> disabled; // features the game turned off
+  std::string problem; // why nothing resolved (registry missing, ...)
+  bool multi_mod_off() const {
+    return std::find(disabled.begin(), disabled.end(), "multi_mod") !=
+           disabled.end();
+  }
 };
 
 struct launch_outcome {

@@ -13,6 +13,9 @@
 #include <utils/hook.hpp>
 #include <utils/string.hpp>
 
+#include <xerces/runtime.hpp>
+#include <xerces/signatures.hpp>
+
 namespace mod_stack {
 namespace {
 using namespace game::lua;
@@ -776,6 +779,55 @@ bool is_loaded() {
 class component final : public generic_component {
   DEFINE_COMPONENT_NAME("mod_stack");
 
+  static void install_hooks() {
+    const auto target = [](std::string_view id, std::uintptr_t fallback) {
+      if (!game::is_client()) {
+        return fallback;
+      }
+      return *xerces_signatures::address(id);
+    };
+
+    using game::db::load::DB_LoadXAssets;
+    utils::hook::call(
+        target("db.load_xassets.expand_zone_list_call",
+               DB_LoadXAssets.offset(game::select_value(0x347, 0x0, 0x32D))),
+        prepare_zones_stub);
+    utils::hook::call(
+        target("db.load_xassets.load_xzone_call",
+               DB_LoadXAssets.offset(game::select_value(0x353, 0x0, 0x339))),
+        schedule_zones_stub);
+    zone_path_hook.create(
+        target("fs.build_os_path_for_thread",
+               reinterpret_cast<std::uintptr_t>(
+                   game::fs::FS_BuildOSPathForThread.get())),
+        zone_path_stub);
+    link_asset_hook.create(
+        target("db.link_xasset_entry",
+               reinterpret_cast<std::uintptr_t>(
+                   game::db::load::DB_LinkXAssetEntry.get())),
+        link_asset_stub);
+    asset_priority_hook.create(
+        target("db.override_asset",
+               reinterpret_cast<std::uintptr_t>(
+                   game::db::load::DB_OverrideAsset.get())),
+        asset_priority_stub);
+
+    if (game::is_client()) {
+      zone_dependency_hook.create(
+          target("com.key_value_pairs_get_next_value", 0),
+          zone_dependency_stub);
+      open_sound_bank_hook.create(target("snd.start_header_read", 0),
+                                  open_sound_bank_stub);
+      utils::hook::call(target("ui.render_loaded_mod.label_call", 0),
+                        mod_label_stub);
+      apply_queued_hook.create(target("ugc.mod_change_apply_queued", 0),
+                               apply_queued_stub);
+      xerces_runtime::log_info("xerces.feature.on",
+                               "Multi-mod hooks installed from signatures",
+                               R"({"feature":"multi_mod"})");
+    }
+  }
+
 public:
   void post_unpack() override {
     if (!game::is_server() && !game::is_new_client()) {
@@ -793,30 +845,24 @@ public:
         },
         scheduler::main);
 
-    using game::db::load::DB_LoadXAssets;
-    utils::hook::call(
-        DB_LoadXAssets.offset(game::select_value(0x347, 0x0, 0x32D)),
-        prepare_zones_stub);
-    utils::hook::call(
-        DB_LoadXAssets.offset(game::select_value(0x353, 0x0, 0x339)),
-        schedule_zones_stub);
-    zone_path_hook.create(game::fs::FS_BuildOSPathForThread.get(),
-                          zone_path_stub);
-    link_asset_hook.create(game::db::load::DB_LinkXAssetEntry.get(),
-                           link_asset_stub);
-    asset_priority_hook.create(game::db::load::DB_OverrideAsset.get(),
-                               asset_priority_stub);
+    // Xerces (DESIGN.md 4.3, D18): on the client every hook target comes from
+    // the signature registry, resolved against the running game; if any is
+    // missing, multi-mod stays off for this run instead of patching guessed
+    // addresses (extra mods are then not loaded; fs_game still works). The
+    // dedicated server keeps upstream's tables until it has its own signature
+    // set (D22).
+    if (game::is_client() && !xerces_signatures::feature_enabled("multi_mod")) {
+      xerces_runtime::log_error(
+          "xerces.feature.off",
+          xerces_signatures::feature_message(
+              "multi_mod", "Multi-mod",
+              "The game and a single mod (fs_game) still work."),
+          R"({"feature":"multi_mod"})");
+    } else {
+      install_hooks();
+    }
 
     if (game::is_client()) {
-      zone_dependency_hook.create(game::com::KeyValuePairs_GetNextValue.get(),
-                                  zone_dependency_stub);
-      open_sound_bank_hook.create(game::snd::SND_StartHeaderRead.get(),
-                                  open_sound_bank_stub);
-      utils::hook::call(game::ui::UIElement_RenderLoadedMod.offset(0xD5),
-                        mod_label_stub);
-      apply_queued_hook.create(game::ugc::UGC_ModChange_ApplyQueued.get(),
-                               apply_queued_stub);
-
       static constexpr const luaL_Reg ModStackLibrary[] = {
           lua_state::luaL_LoggedReg<"ModStack", "Get", lua_get>(),
           lua_state::luaL_LoggedReg<"ModStack", "Set", lua_set>(),

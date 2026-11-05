@@ -588,11 +588,13 @@ void services::poll() {
   GetExitCodeProcess(static_cast<HANDLE>(game_process_), &code);
   CloseHandle(static_cast<HANDLE>(game_process_));
   game_process_ = nullptr;
-  // The client writes clean_exit itself; a client that never moved past
-  // "launching" but exited with 0 quit normally before it could.
+  // The client writes clean_exit from its shutdown path; a game that quit
+  // with exit code 0 by a path that skips it (ExitProcess) still quit
+  // normally. Any other code leaves the journal as the client left it, which
+  // the next start reads as a crash.
   if (auto journal = last_journal();
       journal && code == 0 &&
-      journal->phase == xerces_core::launch_phase::launching) {
+      journal->phase != xerces_core::launch_phase::clean_exit) {
     journal->phase = xerces_core::launch_phase::clean_exit;
     journal->updated = now_utc();
     write_text(paths_.journal_file(), xerces_core::journal_to_json(*journal));
@@ -630,6 +632,15 @@ void services::reload_signatures() {
       next.known = true;
       next.game_build = xerces_core::json::get_string(root, "game_build").value_or("");
       next.checked = xerces_core::json::get_string(root, "checked").value_or("");
+      next.problem = xerces_core::json::get_string(root, "problem").value_or("");
+      if (const auto *disabled = xerces_core::json::member(root, "disabled");
+          disabled && disabled->IsObject()) {
+        for (auto it = disabled->MemberBegin(); it != disabled->MemberEnd();
+             ++it) {
+          next.disabled.emplace_back(it->name.GetString(),
+                                     it->name.GetStringLength());
+        }
+      }
       if (const auto *entries = xerces_core::json::member(root, "entries");
           entries && entries->IsArray()) {
         for (const auto &entry : entries->GetArray()) {

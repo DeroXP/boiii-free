@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "json.hpp"
+
 namespace xerces_core {
 namespace {
 bool safe_flag(std::string_view flag) {
@@ -229,6 +231,39 @@ bool valid_server_address(std::string_view address) {
     }
   }
   return true;
+}
+
+std::optional<plan_mod_dvars> read_plan_mod_dvars(std::string_view plan_json) {
+  const auto parsed = json::parse(plan_json);
+  if (!parsed.ok || !parsed.document.IsObject()) {
+    return std::nullopt;
+  }
+  const auto *stack = json::member(parsed.document, "stack");
+  if (stack == nullptr || !stack->IsArray()) {
+    return std::nullopt;
+  }
+  plan_mod_dvars out;
+  out.plan_id = json::get_string(parsed.document, "plan_id").value_or("");
+  bool first = true;
+  for (const auto &entry : stack->GetArray()) {
+    if (!entry.IsObject()) {
+      return std::nullopt;
+    }
+    const auto folder = json::get_string(entry, "folder");
+    if (!folder || folder->empty()) {
+      return std::nullopt;
+    }
+    if (first) {
+      out.fs_game = *folder;
+      first = false;
+      continue;
+    }
+    if (!out.fs_extramods.empty()) {
+      out.fs_extramods.push_back(',');
+    }
+    out.fs_extramods += *folder;
+  }
+  return out;
 }
 
 std::string plan_file_id(std::string_view plan_id) {

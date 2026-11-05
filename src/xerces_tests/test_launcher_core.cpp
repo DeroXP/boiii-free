@@ -145,6 +145,21 @@ TEST_CASE("launch: a server address goes last as +connect") {
             .diags.has("launch.connect.invalid"));
 }
 
+TEST_CASE("launch: the game reads the plan's dvars back from the plan file") {
+  plan p = two_mod_plan();
+  plan_entry third;
+  third.id = "ws.333";
+  third.folder = "333";
+  p.stack.push_back(third);
+  const auto back = read_plan_mod_dvars(plan_to_json(p, true));
+  REQUIRE(back.has_value());
+  CHECK_EQ(back->plan_id, p.plan_id);
+  CHECK_EQ(back->fs_game, p.fs_game());
+  CHECK_EQ(back->fs_extramods, p.fs_extramods());
+  CHECK(!read_plan_mod_dvars("{}").has_value());
+  CHECK(!read_plan_mod_dvars("not json").has_value());
+}
+
 TEST_CASE("launch: arguments quote the way CommandLineToArgvW reads them") {
   CHECK_EQ(quote_argument("plain"), std::string("plain"));
   CHECK_EQ(quote_argument(""), std::string("\"\""));

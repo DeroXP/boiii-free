@@ -59,3 +59,10 @@ group("")
 -- (RmlUi, FreeType) are given (D4).
 include("xerces_launcher_spike.lua")
 include("xerces_launcher.lua")
+
+-- The game client uses xerces_core for Xerces' own parts in src/client/xerces
+-- (the signature registry, the launch journal, JSON logs; DESIGN.md 3.3, 5.6).
+-- premake continues the existing client project here; premake5.lua is not
+-- edited.
+project("client")
+links({ "xerces_core" })
