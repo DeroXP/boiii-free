@@ -9,6 +9,7 @@
 
 #include <xerces_core/bundle.hpp>
 #include <xerces_core/detect.hpp>
+#include <xerces_core/ipc.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/version.hpp>
 
@@ -499,9 +500,17 @@ launch_outcome services::preview_launch(
 }
 
 bool services::game_running() const {
-  return game_process_ &&
-         WaitForSingleObject(static_cast<HANDLE>(game_process_), 0) ==
-             WAIT_TIMEOUT;
+  if (game_process_ &&
+      WaitForSingleObject(static_cast<HANDLE>(game_process_), 0) ==
+          WAIT_TIMEOUT) {
+    return true;
+  }
+  // A game this launcher did not start (or started before it was closed and
+  // opened again) announces itself in the run folder while it runs (15.2).
+  const auto entries = xerces_core::ipc::live_run_entries(paths_.home / "run");
+  return std::ranges::any_of(entries, [](const xerces_core::ipc::run_entry &e) {
+    return e.role == "game";
+  });
 }
 
 launch_outcome services::launch(const std::string &mode, bool modded,
