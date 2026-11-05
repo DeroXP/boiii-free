@@ -2,13 +2,301 @@
 <head>
 	<title>Settings</title>
 	<link type="text/template" href="../shell.rml"/>
+	<link type="text/rcss" href="settings.rcss"/>
 </head>
-<!-- Settings (docs/DESIGN.md 7.3): placeholder. -->
-<body template="shell">
-<div class="page">
+<!-- Settings (docs/DESIGN.md 7.3, 7.5, 14): game folder and player name,
+     display options passed to the game, launch options, look and
+     accessibility, language, privacy and updates. Every change is saved at
+     once. Data: the "settings" model in src/xerces_launcher/views/settings.cpp. -->
+<body template="shell" data-model="settings">
+<div class="page settings-page">
 	<div class="page-title">Settings</div>
-	<div class="page-sub">Game, display, input, network, privacy, updates, accessibility and language.</div>
-	<div class="section"><button class="outline default-focus" id="settings-back"><span>Back to Home</span></button></div>
+	<div class="page-sub">Every change is saved the moment you make it.</div>
+
+	<div class="jump">
+		<button id="jump-game" class="jump-link" data-event-click="act('jump game')"><span class="jump-num">01</span><span>Game</span></button>
+		<button id="jump-display" class="jump-link" data-event-click="act('jump display')"><span class="jump-num">02</span><span>Display</span></button>
+		<button id="jump-launch" class="jump-link" data-event-click="act('jump launch')"><span class="jump-num">03</span><span>Launch</span></button>
+		<button id="jump-look" class="jump-link" data-event-click="act('jump look')"><span class="jump-num">04</span><span>Look</span></button>
+		<button id="jump-language" class="jump-link" data-event-click="act('jump language')"><span class="jump-num">05</span><span>Language</span></button>
+		<button id="jump-privacy" class="jump-link" data-event-click="act('jump privacy')"><span class="jump-num">06</span><span>Privacy</span></button>
+		<button id="jump-updates" class="jump-link" data-event-click="act('jump updates')"><span class="jump-num">07</span><span>Updates</span></button>
+	</div>
+
+	<!-- 01 Game -->
+	<div class="set-section" id="section-game">
+		<div class="set-head">
+			<div class="set-num">01</div>
+			<div class="set-title">Game</div>
+			<div class="set-desc">Where Black Ops III is installed, and the name other players see.</div>
+		</div>
+		<div class="set-body">
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Game folder</div>
+					<div class="set-value" data-class-missing="!game_found">{{game_path}}</div>
+					<div class="field-help">{{game_detail}}</div>
+					<div class="tried" data-if="game_tried != ''">{{game_tried}}</div>
+					<div class="toolbar set-actions">
+						<button id="game-change" class="small-button default-focus" data-event-click="act('change folder')"><span>Change folder</span></button>
+						<button id="game-detect" class="small-button" data-class-disabled="game_busy" data-event-click="act('detect')"><span>Detect again</span></button>
+						<button id="game-open" class="small-button" data-if="game_found" data-event-click="act('open game')"><span>Open folder</span></button>
+					</div>
+				</div>
+				<div class="status-mark" data-if="game_ok"><span class="tick"></span><span>Supported</span></div>
+			</div>
+
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Player name</div>
+					<div class="field-help">Up to 16 plain characters. The game reads it from boiii_players\properties.json in the game folder each time it starts. Leave it empty to use your Steam name.</div>
+					<div class="field-note">{{name_note}}</div>
+				</div>
+				<input id="player-name" type="text" class="text name-field" maxlength="24" data-value="name" data-attr-placeholder="name_placeholder" data-event-blur="commit('name')"/>
+			</div>
+		</div>
+	</div>
+
+	<!-- 02 Display -->
+	<div class="set-section" id="section-display">
+		<div class="set-head">
+			<div class="set-num">02</div>
+			<div class="set-title">Display</div>
+			<div class="set-desc">Passed to the game every time Xerces starts it. Game's setting leaves the game's own choice alone. Not yet tried in a running game.</div>
+		</div>
+		<div class="set-body">
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Display mode</div>
+					<div class="field-help">Adds -windowed or -borderless to the launch flags; the game applies them after loading its own config.</div>
+				</div>
+				<div class="choices">
+					<button id="display-game" class="choice" data-class-on="display == 'game'" data-event-click="choose('display', 'game')"><span class="mark-dot"></span><span>Game's setting</span></button>
+					<button id="display-windowed" class="choice" data-class-on="display == 'windowed'" data-event-click="choose('display', 'windowed')"><span class="mark-dot"></span><span>Windowed</span></button>
+					<button id="display-borderless" class="choice" data-class-on="display == 'borderless'" data-event-click="choose('display', 'borderless')"><span class="mark-dot"></span><span>Borderless</span></button>
+				</div>
+			</div>
+
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">FPS limit</div>
+					<div class="field-help">com_maxfps, 0 to 1000; 0 means no limit. Type a number and press Enter, or use the slider. Empty: the game's setting.</div>
+					<div class="field-note">{{fps_note}}</div>
+				</div>
+				<div class="field-control">
+					<input id="fps-field" type="text" class="text mono-field number-field" maxlength="4" placeholder="Game" data-value="fps" data-event-blur="commit('fps')"/>
+					<input id="fps-slider" type="range" class="range" min="0" step="1" data-attr-max="fps_max" data-attr-value="fps_stop" data-event-change="slid('fps')"/>
+				</div>
+			</div>
+
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Field of view</div>
+					<div class="field-help">cg_fov_default, 65 to 120. The slider's left end is the game's setting.</div>
+					<div class="field-note">{{fov_note}}</div>
+				</div>
+				<div class="field-control">
+					<input id="fov-field" type="text" class="text mono-field number-field" maxlength="3" placeholder="Game" data-value="fov" data-event-blur="commit('fov')"/>
+					<input id="fov-slider" type="range" class="range" min="64" max="120" step="1" data-attr-value="fov_stop" data-event-change="slid('fov')"/>
+				</div>
+			</div>
+
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">V-Sync</div>
+					<div class="field-help">r_vsync: wait for the monitor before showing each frame.</div>
+				</div>
+				<div class="choices">
+					<button id="vsync-game" class="choice" data-class-on="vsync == 'game'" data-event-click="choose('vsync', 'game')"><span class="mark-dot"></span><span>Game's setting</span></button>
+					<button id="vsync-on" class="choice" data-class-on="vsync == 'on'" data-event-click="choose('vsync', 'on')"><span class="mark-dot"></span><span>On</span></button>
+					<button id="vsync-off" class="choice" data-class-on="vsync == 'off'" data-event-click="choose('vsync', 'off')"><span class="mark-dot"></span><span>Off</span></button>
+				</div>
+			</div>
+
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">FPS counter</div>
+					<div class="field-help">com_drawFPS_PC: the game's own frame counter.</div>
+				</div>
+				<div class="choices">
+					<button id="drawfps-game" class="choice" data-class-on="drawfps == 'game'" data-event-click="choose('drawfps', 'game')"><span class="mark-dot"></span><span>Game's setting</span></button>
+					<button id="drawfps-on" class="choice" data-class-on="drawfps == 'on'" data-event-click="choose('drawfps', 'on')"><span class="mark-dot"></span><span>On</span></button>
+					<button id="drawfps-off" class="choice" data-class-on="drawfps == 'off'" data-event-click="choose('drawfps', 'off')"><span class="mark-dot"></span><span>Off</span></button>
+				</div>
+			</div>
+
+			<div class="field field-stack" data-if="others.size > 0">
+				<div class="field-text">
+					<div class="field-name">Other game settings</div>
+					<div class="field-help">Saved in Xerces' config by something else; they are passed to the game too.</div>
+				</div>
+				<div class="dvar-row" data-for="d : others">
+					<span class="dvar-text">+set {{d.name}} {{d.value}}</span>
+					<button class="small-button" data-attr-id="'dvar-' + d.name" data-event-click="remove_dvar(d.name)"><span>Remove</span></button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- 03 Launch -->
+	<div class="set-section" id="section-launch">
+		<div class="set-head">
+			<div class="set-num">03</div>
+			<div class="set-title">Launch</div>
+			<div class="set-desc">How Xerces starts the game, from Home and from Servers.</div>
+		</div>
+		<div class="set-body">
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Skip the intro video</div>
+					<div class="field-help">-nointro: no logo video when the game starts.</div>
+				</div>
+				<button id="nointro" class="toggle" data-class-on="nointro" data-event-click="toggle('nointro')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="nointro">On</span><span class="toggle-state" data-if="!nointro">Off</span></button>
+			</div>
+
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Skip all cinematics</div>
+					<div class="field-help">-nocinematics: no cinematics or videos at all, campaign and Zombies included.</div>
+				</div>
+				<button id="nocinematics" class="toggle" data-class-on="nocinematics" data-event-click="toggle('nocinematics')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="nocinematics">On</span><span class="toggle-state" data-if="!nocinematics">Off</span></button>
+			</div>
+
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Close Xerces when the game starts</div>
+					<div class="field-help">Off keeps Xerces open, so it can notice a crash and offer safe mode next time.</div>
+				</div>
+				<button id="close-on-launch" class="toggle" data-class-on="close_on_launch" data-event-click="toggle('close')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="close_on_launch">On</span><span class="toggle-state" data-if="!close_on_launch">Off</span></button>
+			</div>
+
+			<div class="field field-stack">
+				<div class="field-text">
+					<div class="field-name">Extra launch flags</div>
+					<div class="field-help">Each a '-' then letters, digits, '-' or '_', separated by spaces, for example -console. Press Enter to save. Display mode and Skip all cinematics show up here too.</div>
+				</div>
+				<input id="flags-field" type="text" class="text mono-field flags-field" maxlength="1000" placeholder="No extra flags" data-value="flags" data-event-blur="commit('flags')"/>
+				<div class="field-error" data-if="flags_error != ''">{{flags_error}}</div>
+			</div>
+
+			<div class="field field-stack">
+				<div class="field-text">
+					<div class="field-name">The game starts with</div>
+					<div class="field-help">What Launch vanilla on Home passes today. Launch modded adds the plan and the mods.</div>
+				</div>
+				<div class="command" data-class-bad="command_bad">{{command}}</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- 04 Look and accessibility -->
+	<div class="set-section" id="section-look">
+		<div class="set-head">
+			<div class="set-num">04</div>
+			<div class="set-title">Look and accessibility</div>
+			<div class="set-desc">Applies at once.</div>
+		</div>
+		<div class="set-body">
+			<div class="field field-stack">
+				<div class="field-text">
+					<div class="field-name">Theme</div>
+				</div>
+				<div class="choices">
+					<button id="theme-dark" class="choice" data-class-on="theme == 'dark'" data-event-click="choose('theme', 'dark')"><span class="mark-dot"></span><span>Dark</span></button>
+					<button id="theme-light" class="choice" data-class-on="theme == 'light'" data-event-click="choose('theme', 'light')"><span class="mark-dot"></span><span>Light</span></button>
+					<button id="theme-contrast" class="choice" data-class-on="theme == 'contrast'" data-event-click="choose('theme', 'contrast')"><span class="mark-dot"></span><span>High contrast</span></button>
+				</div>
+			</div>
+
+			<div class="field field-stack">
+				<div class="field-text">
+					<div class="field-name">UI scale</div>
+					<div class="field-help">How big everything in Xerces is drawn.</div>
+				</div>
+				<div class="choices">
+					<button id="scale-0" class="choice" data-class-on="scale == 0" data-event-click="choose('scale', '0')"><span class="mark-dot"></span><span>Follow Windows</span></button>
+					<button id="scale-75" class="choice" data-class-on="scale == 75" data-event-click="choose('scale', '75')"><span class="mark-dot"></span><span>75%</span></button>
+					<button id="scale-100" class="choice" data-class-on="scale == 100" data-event-click="choose('scale', '100')"><span class="mark-dot"></span><span>100%</span></button>
+					<button id="scale-125" class="choice" data-class-on="scale == 125" data-event-click="choose('scale', '125')"><span class="mark-dot"></span><span>125%</span></button>
+					<button id="scale-150" class="choice" data-class-on="scale == 150" data-event-click="choose('scale', '150')"><span class="mark-dot"></span><span>150%</span></button>
+					<button id="scale-175" class="choice" data-class-on="scale == 175" data-event-click="choose('scale', '175')"><span class="mark-dot"></span><span>175%</span></button>
+					<button id="scale-200" class="choice" data-class-on="scale == 200" data-event-click="choose('scale', '200')"><span class="mark-dot"></span><span>200%</span></button>
+				</div>
+			</div>
+
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Reduced motion</div>
+					<div class="field-help">Nothing slides or fades.</div>
+				</div>
+				<button id="reduced-motion" class="toggle" data-class-on="reduced_motion" data-event-click="toggle('reduced')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="reduced_motion">On</span><span class="toggle-state" data-if="!reduced_motion">Off</span></button>
+			</div>
+			<div class="field-note look-note" data-if="look_note != ''">{{look_note}}</div>
+		</div>
+	</div>
+
+	<!-- 05 Language -->
+	<div class="set-section" id="section-language">
+		<div class="set-head">
+			<div class="set-num">05</div>
+			<div class="set-title">Language</div>
+			<div class="set-desc">Takes effect when Xerces restarts.</div>
+		</div>
+		<div class="set-body">
+			<div class="field field-stack">
+				<div class="field-text">
+					<div class="field-name">Language</div>
+					<div class="field-help">Pseudo makes every string longer and marks it, to find text that gets cut off.</div>
+				</div>
+				<div class="choices">
+					<button id="lang-en" class="choice" data-class-on="language == 'en'" data-event-click="choose('language', 'en')"><span class="mark-dot"></span><span>English</span></button>
+					<button id="lang-pseudo" class="choice" data-class-on="language == 'pseudo'" data-event-click="choose('language', 'pseudo')"><span class="mark-dot"></span><span>Pseudo (test truncation)</span></button>
+				</div>
+				<div class="field-note" data-if="language_note != ''">{{language_note}}</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- 06 Privacy -->
+	<div class="set-section" id="section-privacy">
+		<div class="set-head">
+			<div class="set-num">06</div>
+			<div class="set-title">Privacy</div>
+			<div class="set-desc">What leaves this PC: nothing.</div>
+		</div>
+		<div class="set-body">
+			<div class="statement">
+				<p>Xerces sends no telemetry. Nothing about you, this PC or your games is sent anywhere.</p>
+				<p>If the game crashes, a crash report would only ever be uploaded when you agree to it for that one crash. Uploading is not built yet, so today nothing is uploaded at all.</p>
+			</div>
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">What Xerces keeps</div>
+					<div class="set-value">{{home_path}}</div>
+					<div class="field-help">Settings, logs, caches and crash reports, all on this PC.</div>
+				</div>
+				<button id="open-home" class="small-button" data-event-click="act('open home')"><span>Open folder</span></button>
+			</div>
+		</div>
+	</div>
+
+	<!-- 07 Updates -->
+	<div class="set-section" id="section-updates">
+		<div class="set-head">
+			<div class="set-num">07</div>
+			<div class="set-title">Updates</div>
+			<div class="set-desc">{{version}}</div>
+		</div>
+		<div class="set-body">
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Check for updates</div>
+					<div class="field-help">The update client is not built yet, so Xerces checks nothing today. This choice is kept for when it is.</div>
+				</div>
+				<button id="check-updates" class="toggle" data-class-on="check_updates" data-event-click="toggle('updates')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="check_updates">On</span><span class="toggle-state" data-if="!check_updates">Off</span></button>
+			</div>
+		</div>
+	</div>
 </div>
 </body>
 </rml>
