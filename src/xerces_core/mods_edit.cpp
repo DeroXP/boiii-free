@@ -320,6 +320,51 @@ mods_attribute(const plan &resolved,
   return out;
 }
 
+std::vector<fix_action> mods_fixes_for(const plan &resolved,
+                                       const std::string &id, bool enabled,
+                                       const installed_content *item) {
+  std::vector<fix_action> out;
+  const auto add = [&](fix_action fix) {
+    if (std::ranges::none_of(out, [&](const fix_action &f) {
+          return f.kind == fix.kind && f.id == fix.id && f.detail == fix.detail;
+        })) {
+      out.push_back(std::move(fix));
+    }
+  };
+  const bool is_map = resolved.map && resolved.map->id == id;
+  for (const auto &fix : resolved.fixes) {
+    if (fix.kind == "allow_conflict") {
+      if (fix.id == id || fix.detail == id) {
+        add(fix);
+      }
+    } else if (fix.id == id && (enabled || is_map)) {
+      add(fix);
+    }
+  }
+  const bool in_plan =
+      enabled || is_map ||
+      std::ranges::any_of(resolved.stack,
+                          [&](const plan_entry &e) { return e.id == id; });
+  if (item == nullptr || !in_plan) {
+    return out;
+  }
+  for (const auto &dep : item->info.dependencies) {
+    for (const auto &fix : resolved.fixes) {
+      if (fix.id != dep.id || fix.id == id) {
+        continue;
+      }
+      if (fix.kind == "install" || fix.kind == "update") {
+        // The planner gives one range for every mod that asks; this mod's
+        // own is the one to show.
+        add({fix.kind, fix.id, dep.range_text});
+      } else if (fix.kind == "unpin") {
+        add(fix);
+      }
+    }
+  }
+  return out;
+}
+
 std::vector<mods_note> mods_folder_notes(const diagnostics &diags,
                                          const std::string &folder) {
   std::vector<mods_note> out;

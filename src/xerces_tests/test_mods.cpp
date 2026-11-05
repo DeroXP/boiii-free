@@ -4,6 +4,8 @@
 
 #include "harness.hpp"
 
+#include <algorithm>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -19,6 +21,39 @@ installed_content content(const std::string &id, const std::string &name,
   out.info.name = name;
   out.folder = folder;
   return out;
+}
+
+installed_content declared(const std::string &fields) {
+  const manifest_result parsed =
+      parse_manifest("{\"schema\":1,\"name\":\"Mod\"," + fields + "}");
+  if (parsed.diags.has_errors()) {
+    throw std::runtime_error("bad test manifest: " + fields);
+  }
+  installed_content out;
+  out.info = parsed.value;
+  out.folder = out.info.id;
+  out.content_hash = "sha256:" + std::string(64, '0');
+  return out;
+}
+
+// What the launcher's services::request_for builds from a profile.
+plan_request request_of(const mode_profile &profile) {
+  plan_request request;
+  request.mode = "zm";
+  request.mods = profile.mods;
+  request.map = profile.map;
+  request.pins = profile.pins;
+  request.allowed_conflicts = profile.allowed_conflicts;
+  request.settings = profile.settings;
+  request.xerces_version = *version::parse("1.0.0");
+  return request;
+}
+
+bool has_fix(const std::vector<fix_action> &fixes, const std::string &kind,
+             const std::string &id, const std::string &detail) {
+  return std::ranges::any_of(fixes, [&](const fix_action &f) {
+    return f.kind == kind && f.id == id && f.detail == detail;
+  });
 }
 
 launcher_config packed_config() {
@@ -77,6 +112,65 @@ TEST_CASE("mods: the map and pins") {
   profile.pins = {{"ws.1", "1.0.0"}};
   CHECK(mods_unpin(profile, "ws.1"));
   CHECK(!mods_unpin(profile, "ws.1"));
+}
+
+TEST_CASE("mods: which mod offers which fix") {
+  // mm.perks and zz.hud are on; mm.perks needs aa.core, which zz.hud says
+  // it does not work with, and zz.hud says the same of mm.perks.
+  const std::vector<installed_content> catalog = {
+      declared(R"("id":"mm.perks","version":"1.0.0",)"
+               R"("dependencies":[{"id":"aa.core","version":"^1"}])"),
+      declared(R"("id":"zz.hud","version":"1.0.0",)"
+               R"("conflicts":[{"id":"aa.core"},{"id":"mm.perks"}])"),
+      declared(R"("id":"aa.core","version":"1.0.0")")};
+  mode_profile profile;
+  profile.mods = {"mm.perks", "zz.hud"};
+  const plan p = resolve_plan(catalog, request_of(profile));
+  REQUIRE(has_fix(p.fixes, "allow_conflict", "aa.core", "zz.hud"));
+  REQUIRE(has_fix(p.fixes, "allow_conflict", "mm.perks", "zz.hud"));
+
+  // zz.hud offers both conflicts (filed under the other ids) and its remove.
+  const auto hud = mods_fixes_for(p, "zz.hud", true, &catalog[1]);
+  CHECK(has_fix(hud, "allow_conflict", "aa.core", "zz.hud"));
+  CHECK(has_fix(hud, "allow_conflict", "mm.perks", "zz.hud"));
+  CHECK(has_fix(hud, "remove", "zz.hud", ""));
+
+  // aa.core is only a dependency: its conflict, but no remove, which would
+  // switch it on.
+  const auto core = mods_fixes_for(p, "aa.core", false, &catalog[2]);
+  CHECK(has_fix(core, "allow_conflict", "aa.core", "zz.hud"));
+  CHECK(!has_fix(core, "remove", "aa.core", ""));
+
+  // mm.perks: its own conflict, not aa.core's.
+  const auto perks = mods_fixes_for(p, "mm.perks", true, &catalog[0]);
+  CHECK(has_fix(perks, "allow_conflict", "mm.perks", "zz.hud"));
+  CHECK(has_fix(perks, "remove", "mm.perks", ""));
+  CHECK(!has_fix(perks, "allow_conflict", "aa.core", "zz.hud"));
+  // No repeats.
+  for (const auto &fix : perks) {
+    CHECK_EQ(std::ranges::count_if(perks,
+                                   [&](const fix_action &f) {
+                                     return f.kind == fix.kind &&
+                                            f.id == fix.id &&
+                                            f.detail == fix.detail;
+                                   }),
+             1);
+  }
+
+  // A mod outside the plan offers nothing.
+  CHECK(mods_fixes_for(p, "qq.other", false, nullptr).empty());
+
+  // A missing dependency's install, filed under its id, is offered by the
+  // mod that needs it, with that mod's own range.
+  const installed_content needs =
+      declared(R"("id":"qq.mod","version":"1.0.0",)"
+               R"("dependencies":[{"id":"lib.gone","version":"^2"}])");
+  mode_profile alone;
+  alone.mods = {"qq.mod"};
+  const plan missing = resolve_plan({needs}, request_of(alone));
+  REQUIRE(has_fix(missing.fixes, "install", "lib.gone", "^2"));
+  CHECK(has_fix(mods_fixes_for(missing, "qq.mod", true, &needs), "install",
+                "lib.gone", "^2"));
 }
 
 TEST_CASE("mods: a hand edit detaches the pack and saves positions") {

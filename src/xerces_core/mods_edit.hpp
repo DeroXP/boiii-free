@@ -121,6 +121,21 @@ mods_notes
 mods_attribute(const plan &resolved,
                const std::vector<std::pair<std::string, std::string>> &names);
 
+// The planner's fixes the Mods screen offers on one mod's details, in the
+// plan's order, without repeats:
+// - allow_conflict on both mods of the pair (the planner files it under the
+//   smaller id), also on one that is in the plan only as a dependency;
+// - the rest filed under the mod (remove, reorder, unpin, ...) only while it
+//   is enabled or is the plan's map, since they act on the load order;
+// - a missing, pinned or outdated dependency's install, update and unpin,
+//   which the planner files under the dependency's id, on every mod in the
+//   plan that needs it, install and update with this mod's own range.
+// enabled: the mod is in the mode's load order. item: the installed version
+// shown, if any.
+std::vector<fix_action> mods_fixes_for(const plan &resolved,
+                                       const std::string &id, bool enabled,
+                                       const installed_content *item);
+
 // The catalog scan's diagnostics about one folder (its manifest's errors, a
 // broken workshop.json).
 std::vector<mods_note> mods_folder_notes(const diagnostics &diags,

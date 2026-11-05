@@ -1116,37 +1116,9 @@ private:
                       "load it."),
            true});
     }
-    const bool is_plan_map = plan_.map && plan_.map->id == id;
-    if (on || is_plan_map) {
-      for (const auto &fix : plan_.fixes) {
-        if (fix.id == id) {
-          add_fix(fix);
-        }
-      }
-    }
-    // The planner files a missing, pinned or outdated dependency under the
-    // dependency's id, which has no row of its own; the mod that needs it
-    // offers the fix. Also for a mod that is only in the plan as another
-    // mod's dependency.
-    const bool in_plan =
-        on || is_plan_map ||
-        std::ranges::any_of(
-            plan_.stack, [&](const xc::plan_entry &e) { return e.id == id; });
-    if (item && in_plan) {
-      for (const auto &dep : item->info.dependencies) {
-        for (const auto &fix : plan_.fixes) {
-          if (fix.id != dep.id || fix.id == id) {
-            continue;
-          }
-          if (fix.kind == "install" || fix.kind == "update") {
-            // The planner gives one range for every mod that asks; this
-            // mod's own is the one to show here.
-            add_fix({fix.kind, fix.id, dep.range_text});
-          } else if (fix.kind == "unpin") {
-            add_fix(fix);
-          }
-        }
-      }
+    // Which mod offers which fix: mods_fixes_for (unit tested).
+    for (const auto &fix : xc::mods_fixes_for(plan_, id, on, item)) {
+      add_fix(fix);
     }
     // Why this order: the planner's decisions that name this mod.
     for (const auto &why : plan_.explanations) {
@@ -1165,7 +1137,9 @@ private:
     } else if (fix.kind == "reorder" && enabled(fix.detail)) {
       label = owner_->tr("Move below") + " " + name_of(fix.detail);
     } else if (fix.kind == "allow_conflict") {
-      label = owner_->tr("Allow this conflict");
+      // Named: a mod can conflict with more than one other.
+      label = owner_->tr("Allow the conflict with") + " " +
+              name_of(fix.id == sel_.id ? fix.detail : fix.id);
     } else if (fix.kind == "unpin") {
       // A dependency's pin names the dependency; the mod's own does not.
       label =
