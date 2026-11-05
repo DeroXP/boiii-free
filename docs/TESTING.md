@@ -221,6 +221,14 @@ against the plan file named by `-xerces-plan`, and moves the journal
 it has run in the game yet: these items need you (and your go-ahead to start the
 game).
 
+`tools\dev\session\m1-check.ps1 -Case vanilla|modded|crash|restart|cli -Live`
+runs the first five items one case per run through `Xerces.exe` and prints pass
+or fail per check (journal phases, game-log events, `fs_game` and `fs_extramods`
+from the console, the launcher's view of the exit, a capture of Home after the
+crash). Without `-Live` it only does a dry launch; that form passed on
+2026-11-05 and builds the D3 command line. Its home is
+`C:\Users\Ginld\XercesHome-m1`.
+
 - [ ] Launch vanilla from `Xerces.exe` reaches the menu. The game log shows
       `xerces.signatures.resolved` (9 of 9) and the journal reads `frontend`;
       quitting from the menu leaves `clean_exit`.

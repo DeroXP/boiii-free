@@ -174,7 +174,8 @@ the `pgserver` wheel in a throwaway venv.
   because no updater installs it, and flags must come before `+set` commands or
   they become part of the dvar's value. The other scripts there read the
   console, run console commands, post keys to the game window only, capture it
-  and quit it (`docs/TESTING.md`).
+  and quit it (`docs/TESTING.md`). `m1-check.ps1` runs the M1 in-game checks
+  through `Xerces.exe`; it starts the game only with `-Live`.
 - Process tweaks (priority, timer resolution) and early console prints crashed
   the game during startup in earlier tests; apply them only after the main menu.
 - On this PC, files that processes started from the Claude app write under
