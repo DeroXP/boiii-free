@@ -46,6 +46,17 @@ inline constexpr std::array all = {
 };
 } // namespace multi_mod_signatures
 
+// The engine's out-of-memory handler, which the client's xerces_out_of_memory
+// component replaces (feature "oom_report", DESIGN.md 5.6). A miss turns only
+// that feature off: the game then ends as the engine ends it, without a
+// message. Required the same way as the multi-mod ids.
+namespace oom_report_signatures {
+inline constexpr std::string_view out_of_mem_error =
+    "sys.out_of_mem_error_internal";
+
+inline constexpr std::array all = {out_of_mem_error};
+} // namespace oom_report_signatures
+
 // The client's cache file for a game build and the registry text it was made
 // from: "signatures-0x6531394-<first 16 hex digits of the text's
 // SHA-256>.json". The game build alone is not enough: a registry that fixes a

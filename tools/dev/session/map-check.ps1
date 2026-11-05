@@ -68,7 +68,7 @@ New-Item -ItemType Directory -Force $HomeDir, $runDir | Out-Null
 
 $record = [ordered]@{
   time = (Get-Date).ToString('s'); map = $Map; mode = $Mode; stack = $Stack; command = $StartCommand
-  result = 'unknown'; detail = ''; menu_seconds = $null; load_seconds = $null; pid = $null
+  result = 'unknown'; detail = ''; menu_seconds = $null; load_seconds = $null; pid = $null; exit_code = $null
   console = $null; detail_console = ''; dumps = @(); pictures = @(); errors = @()
 }
 function Say([string]$text) { Write-Host ('[{0}] {1}' -f (Get-Date -Format 'HH:mm:ss'), $text) }
@@ -146,6 +146,23 @@ function Find-Dialog([int]$gamePid) {
     }
   }
   return $null
+}
+
+# Xerces' out-of-memory box (DESIGN.md 5.6): after OK the game must end by
+# itself with exit code 0xFFFFFFFF (no crash dump). A handle is taken before
+# OK, so the code can still be read once the process is gone.
+function Close-OutOfMemoryBox($dialog) {
+  $game = Get-Process -Id $gamePid -ErrorAction SilentlyContinue
+  if (-not $game) { return }
+  $null = $game.Handle
+  [void][XercesWin]::PostMessage($dialog.Handle, 0x0111, [IntPtr]1, [IntPtr]::Zero)  # WM_COMMAND, IDOK
+  if ($game.WaitForExit(15000)) {
+    $record.exit_code = '0x{0:X8}' -f $game.ExitCode
+    Say "OK pressed: the game ended by itself, exit code $($record.exit_code)"
+  } else {
+    $record.exit_code = 'still running 15 s after OK'
+    Say 'OK pressed: the game was still running 15 s later'
+  }
 }
 
 # The console's lines. Each successful read is kept, so a game that dies
@@ -298,7 +315,12 @@ $loaded = Wait-For {
 $record.load_seconds = [math]::Round(((Get-Date) - $load_from).TotalSeconds, 1)
 switch ($loaded) {
   'in_game' { Say "in the match after $($record.load_seconds) s" }
-  'dialog' { $d = Find-Dialog $gamePid; Capture 'dialog-load.png' -Screen | Out-Null; Finish 'crash_load' "dialog '$($d.Title)' after $($record.load_seconds) s of loading" }
+  'dialog' {
+    $d = Find-Dialog $gamePid
+    Capture 'dialog-load.png' -Screen | Out-Null
+    if ($d.Title -eq 'Black Ops III ran out of memory') { Close-OutOfMemoryBox $d }
+    Finish 'crash_load' "dialog '$($d.Title)' after $($record.load_seconds) s of loading"
+  }
   'gone' { Finish 'crash_load' "the game ended after $($record.load_seconds) s of loading" }
   'freeze' { Capture 'freeze.png' | Out-Null; Finish 'freeze_load' "freeze report after $($record.load_seconds) s" }
   'error' {

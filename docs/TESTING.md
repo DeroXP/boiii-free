@@ -293,6 +293,22 @@ each one does not cover is said under its item.
       (upstream's parser never counts that line). Then load a custom map that
       ships a pool file, with the map in the plan: its pools should print the
       same lines when the map loads, as `asset_pools.stack` says.
+- [ ] Out of memory (DESIGN.md 5.6, feature `oom_report`; built 2026-11-05, not
+      run in the game): DS4C alone, then `map zm_backrooms`, through
+      `tools\dev\session\map-check.ps1 -Map zm_backrooms -Stack 3171632315 -Live`.
+      The run should end `crash_load` with the dialog "Black Ops III ran out of
+      memory" captured (`dialog-load.png`), naming `zm_backrooms` and DS4C
+      Patched v0.85. map-check then presses OK, and the game should end by
+      itself within a second with exit code 0xFFFFFFFF (`exit_code` in
+      `results.jsonl`; the launcher logs `launcher.game.exited` with
+      4294967295). The game log should have `xerces.signatures.resolved` (10 of
+      10), `xerces.feature.on` for `oom_report`, and `loader.out_of_memory` with
+      `zone` `zm_backrooms`, the mods, `phase` `loading_map`, a `caller` and the
+      console lines; no `loader.exit.unexpected` and no new `crash-*.dmp` (the
+      run's `dumps` stays empty); the journal stays at `loading_map`, and the
+      next launcher start offers safe mode. `zm_supermario64` should do the
+      same. Then a map that fits with DS4C (`zm_log_overunder`) to see that
+      nothing else changed.
 - [x] (2026-11-05, 3a7266c6) `xerces_cli plan apply` (no `--dry-launch`), from
       the build with `boiii.exe` next to `xerces_cli.exe`, with the D3 stack as
       the Zombies profile and `XERCES_HOME` outside AppData: the game started

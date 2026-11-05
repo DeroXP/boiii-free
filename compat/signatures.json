@@ -1,6 +1,6 @@
 {
   "schema": "xerces.signatures/1",
-  "note": "Day-one entries: everything mod_stack.cpp hooks (docs/DESIGN.md 4.3). Made with tools/dev/re/sigmaker.py from a dump of build 0x6531394 (Steam 24784313) taken on 2026-11-04; check with `xerces_cli sig check --dump <dump>`.",
+  "note": "Day-one entries: everything mod_stack.cpp hooks (docs/DESIGN.md 4.3), plus the engine's out-of-memory handler for oom_report (2026-11-05). Made with tools/dev/re/sigmaker.py from a dump of build 0x6531394 (Steam 24784313) taken on 2026-11-04; check with `xerces_cli sig check --dump <dump>`.",
   "signatures": [
     {
       "id": "db.load_xassets.expand_zone_list_call",
@@ -119,6 +119,20 @@
         "0x6531394": "0x2230395"
       },
       "features": ["multi_mod"]
+    },
+    {
+      "id": "sys.out_of_mem_error_internal",
+      "symbol": "Sys_OutOfMemErrorInternal",
+      "kind": "function",
+      "section": ".text",
+      "patterns": [
+        "40 57 48 83 EC 40 48 C7 44 24 20 FE FF FF FF 48 89 5C 24 50 B9 01 00 00 00 FF 15 ?? ?? ?? ?? C7 44 24 28 32 00 00 00"
+      ],
+      "offset": 0,
+      "known": {
+        "0x6531394": "0x22881B0"
+      },
+      "features": ["oom_report"]
     }
   ]
 }
