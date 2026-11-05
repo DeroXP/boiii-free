@@ -2,6 +2,7 @@
 
 #include "runtime.hpp"
 
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -135,10 +136,39 @@ std::string flag_value(std::string_view flag) {
 namespace {
 // Plain values only: pre_destroy can run again during static destruction.
 std::mutex journal_mutex;
-bool journal_decided = false; // the first call looked at XERCES_LAUNCH_ID
+bool journal_decided = false; // the first call looked at the launch id
 bool journal_owned = false;
 xerces_core::launch_phase journal_current =
     xerces_core::launch_phase::launching;
+
+// XERCES_LAUNCH_ID as this process started with it; empty when it had none.
+// A fixed buffer rather than a std::string, for the same reason as above: the
+// journal can still be decided during static destruction.
+char start_launch_id[64] = {};
+
+// The id is taken out of the environment while the C runtime starts this
+// program, before main(). The crash dialog's "Restart game" starts a copy of
+// this process with its environment, and that copy must never take over the
+// record of this launch. The dialog exists from the exception component's
+// constructor on, which runs inside main(); waiting for the first journal
+// call instead (the signature lookup in post_unpack) left the id in place
+// through every post_load and the post_unpacks before it, so a crash there
+// restarted a copy that still held it. Any other copy (the updater's
+// relaunch) goes without it too: only the process the launcher started owns
+// the record.
+[[maybe_unused]] const bool launch_id_taken = [] {
+  const auto id = env(L"XERCES_LAUNCH_ID");
+  SetEnvironmentVariableW(L"XERCES_LAUNCH_ID", nullptr);
+  if (id) {
+    // The launcher's ids are 32 hex digits. One that does not fit could
+    // never match a journal, so it is treated as no id at all.
+    const std::string text = utf8(*id);
+    if (text.size() < sizeof(start_launch_id)) {
+      std::memcpy(start_launch_id, text.data(), text.size());
+    }
+  }
+  return true;
+}();
 
 std::filesystem::path journal_path() {
   return home() / "logs" / "journal.json";
@@ -151,19 +181,15 @@ void decide_journal() {
     return;
   }
   journal_decided = true;
-  const auto id = env(L"XERCES_LAUNCH_ID");
-  if (!id) {
+  const std::string_view id(start_launch_id);
+  if (id.empty()) {
     return; // not started by the launcher, or restarted from a crash
   }
-  // The id is spent now: the crash dialog's "Restart game" starts a copy of
-  // this process with its environment, and that copy must not take over the
-  // record of this launch.
-  SetEnvironmentVariableW(L"XERCES_LAUNCH_ID", nullptr);
   if (!game::is_client() || !game::is_new_client()) {
     return; // only the client role walks through the phases
   }
   auto journal = xerces_core::parse_journal(read_file(journal_path()));
-  if (!xerces_core::journal_claimable(journal, utf8(*id))) {
+  if (!xerces_core::journal_claimable(journal, id)) {
     log_warn("loader.journal.skipped",
              "The journal is not this launch's; leaving it alone");
     return;

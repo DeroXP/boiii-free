@@ -45,12 +45,14 @@ std::string flag_value(std::string_view flag);
 
 // ----------------------------------------------------------- the journal
 // The launcher writes the journal as "launching" with a one-time launch id
-// and passes the same id in XERCES_LAUNCH_ID. The first journal call here
-// takes the journal over only if both match (xerces_core::journal_claimable),
-// then clears the id from the journal (which tells the launcher the game took
-// over) and from this process's environment, so a game restarted from the
-// crash dialog never inherits it. After that a phase is written only while
-// the journal is still this launch's: a newer launch or clean_exit ends it.
+// and passes the same id in XERCES_LAUNCH_ID. This process takes the id out
+// of its environment as it starts, before main() and so before the crash
+// dialog exists, so a game restarted from that dialog never inherits it. The
+// first journal call here takes the journal over only if the id matches
+// (xerces_core::journal_claimable), then clears the id from the journal,
+// which tells the launcher the game took over. After that a phase is written
+// only while the journal is still this launch's: a newer launch or
+// clean_exit ends it.
 bool journal_active();
 xerces_core::launch_phase journal_phase();
 void set_journal_phase(xerces_core::launch_phase phase);
