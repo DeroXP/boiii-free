@@ -135,7 +135,9 @@ Work without the game:
   mod new <id> [--dir <parent>] [--name <name>] [--mode zm|mp|cp]
   mods list --mods-dir <dir> [--json]
   plan resolve --mods-dir <dir> [--mode zm] --mod <id>... [--map <id>]
-               [--stock-zones <n>] [--game-build <0x...>] [--json]
+               [--stock-zones <n>] [--game-build <0x...>]
+               [--game-dir <folder>] [--json]      asset pool defaults from the
+                                                   game's launcher_settings.json
   plan explain  (same options)                     why the order is what it is
   conflicts check --mods-dir <dir> (--mod <id>... | --pack <file|code>)
                   [--stock <dir>] [--map-last] [--json]
@@ -191,6 +193,13 @@ plan_request request_from(const arguments &args) {
     request.stock_zones = count;
   }
   request.game_build = args.get("--game-build").value_or("unknown");
+  // The pool report's defaults: the game folder's launcher_settings.json, or
+  // the client's own defaults without --game-dir (or without the file).
+  if (const auto game_dir = args.get("--game-dir")) {
+    request.launcher_settings =
+        read_text(fs::path(*game_dir) / "boiii_players" / "user" /
+                  "launcher_settings.json");
+  }
   request.xerces_version =
       version::parse(xerces_version_text).value_or(version{});
   request.protocol_version = protocol_version;
@@ -203,7 +212,9 @@ std::optional<catalog_scan> scan_from(const arguments &args) {
     std::cerr << "--mods-dir is required.\n";
     return std::nullopt;
   }
-  catalog_scan scan = scan_mods_directory(fs::path(*dir));
+  scan_options options;
+  options.layout = layout_of_directory(fs::path(*dir));
+  catalog_scan scan = scan_mods_directory(fs::path(*dir), options);
   if (scan.diags.has_errors() && !args.has("--json")) {
     print_diagnostics(scan.diags);
   }
@@ -373,6 +384,54 @@ int cmd_mods_list(const arguments &args) {
   return scan->diags.has_errors() ? exit_failed : exit_ok;
 }
 
+// The asset pools the stack's pool files raise above the client's default
+// (DESIGN.md 5.4 step 4), and the ones they ask for that cannot grow.
+void print_pools(const plan &p) {
+  const auto default_text = [](const pool_need &need) {
+    return need.default_size ? std::to_string(*need.default_size)
+                             : std::string("the game's own size");
+  };
+  std::vector<const pool_need *> raised, fixed;
+  for (const auto &need : p.pools.stack) {
+    if (need.raises) {
+      raised.push_back(&need);
+    } else if (need.fixed) {
+      fixed.push_back(&need);
+    }
+  }
+  if (raised.empty()) {
+    std::cout << "  asset pools: the stack raises none\n";
+  } else {
+    std::cout << "  asset pools the stack raises"
+              << (p.pools.enabled
+                      ? ""
+                      : " (launcher_settings.json turns the client's own "
+                        "pool sizes off)")
+              << ":\n";
+  }
+  for (const pool_need *need : raised) {
+    const asset_pool_info *pool = find_asset_pool(need->type);
+    std::cout << "    " << pool->label << " (" << pool->setting_key
+              << "): " << need->size << ", default " << default_text(*need)
+              << "  [" << need->mod << "]\n";
+  }
+  for (const pool_need *need : fixed) {
+    std::cout << "  " << find_asset_pool(need->type)->label << ": " << need->mod
+              << " asks for " << need->size
+              << ", but the engine sizes this pool itself; the client "
+                 "cannot grow it\n";
+  }
+  std::size_t installed = 0;
+  for (const auto &need : p.pools.installed) {
+    installed += need.raises ? 1 : 0;
+  }
+  if (installed > 0) {
+    std::cout << "  every installed mod together raises " << installed
+              << " asset pool" << (installed == 1 ? "" : "s")
+              << " (asset_pools.installed in --json)\n";
+  }
+}
+
 void print_plan(const plan &p, bool explain) {
   std::cout << "Plan for " << p.mode << ": " << p.stack.size() << " mod"
             << (p.stack.size() == 1 ? "" : "s") << "\n";
@@ -397,6 +456,7 @@ void print_plan(const plan &p, bool explain) {
     std::cout << " (" << *p.zones_total << " of " << zone_slot_limit << ")";
   }
   std::cout << "\n";
+  print_pools(p);
   if (explain) {
     for (const auto &item : p.explanations) {
       std::cout << "  - " << item.message << "\n";
