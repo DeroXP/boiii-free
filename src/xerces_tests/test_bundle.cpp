@@ -262,6 +262,40 @@ TEST_CASE("bundle: favourite names in old logs are scrubbed too") {
   fs::remove_all(home);
 }
 
+TEST_CASE("bundle: a bundle that cannot be written is not reported ready") {
+  const fs::path home = fs::temp_directory_path() / "xerces_bundle_unwritable";
+  fs::remove_all(home);
+  write(home / "logs" / "20261105-050000-launcher-6.jsonl",
+        "{\"msg\":\"ok\"}\n");
+
+  // Where the zip should go is an (empty) folder: refused, and the folder
+  // stays; only a bundle this call began is removed. (A disk that fills
+  // while the last block is written fails at close, which is checked too,
+  // but cannot be staged here.)
+  const fs::path folder = home / "crash" / "taken.zip";
+  fs::create_directories(folder);
+  const bundle_result into_folder = make_bundle(home, folder, "", "{}");
+  CHECK(!into_folder.ok);
+  CHECK(!into_folder.error.empty());
+  CHECK(fs::is_directory(folder));
+
+  // Its folder cannot be made (a file has that name).
+  write(home / "blocked", "file");
+  const bundle_result blocked =
+      make_bundle(home, home / "blocked" / "bundle.zip", "", "{}");
+  CHECK(!blocked.ok);
+  CHECK(!fs::exists(home / "blocked" / "bundle.zip"));
+
+  // Written: the whole zip is on disk, down to its end record.
+  const fs::path out = home / "crash" / "bundle.zip";
+  REQUIRE(make_bundle(home, out, "", "{}").ok);
+  const std::string bytes = xerces_tests::read_file(out);
+  REQUIRE(bytes.size() >= 22);
+  CHECK_EQ(get32(bytes, bytes.size() - 22), std::uint32_t{0x06054b50});
+  CHECK(unzip(bytes).contains("logs/20261105-050000-launcher-6.jsonl"));
+  fs::remove_all(home);
+}
+
 TEST_CASE("bundle: system information is JSON") {
   const auto parsed = json::parse(system_info_json());
   REQUIRE(parsed.ok);

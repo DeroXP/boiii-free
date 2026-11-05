@@ -349,10 +349,19 @@ bundle_result make_bundle(const std::filesystem::path &home,
   result.contents.push_back("FILES.txt");
 
   std::filesystem::create_directories(out.parent_path(), ec);
-  std::ofstream file(out, std::ios::binary | std::ios::trunc);
   const std::string bytes = zip.finish();
-  file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  std::ofstream file(out, std::ios::binary | std::ios::trunc);
   if (!file) {
+    result.error = "could not write the bundle";
+    return result;
+  }
+  file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  // The last few kilobytes, which hold the zip's directory and end record,
+  // sit in the stream's buffer until it closes, and a full disk only shows
+  // then. A zip without them opens nowhere, so it is not left behind either.
+  file.close();
+  if (!file) {
+    std::filesystem::remove(out, ec);
     result.error = "could not write the bundle";
     return result;
   }
