@@ -1,0 +1,340 @@
+/* Mods (DESIGN.md 7.3) in C / Signal: 1 dp rules between rows, mono for
+   data, one accent for "on" and for problems. The list and the details pane
+   scroll on their own so the details stay in view while the list moves. */
+
+#mods-main
+{
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	padding: 20dp 32dp 0dp 32dp;
+	box-sizing: border-box;
+}
+.mods-top { flex: 0 0 auto; }
+
+/* In RmlUi every element can take focus (the property is inherited), so a
+   click on a button's label would focus the label. Labels pass focus to
+   their button; the view moves a click on a row's text to that row's
+   button. (Not on divs: spatial navigation skips everything inside an
+   element with focus: none.) */
+#mods-main span { focus: none; }
+
+/* ------------------------------------------------------- mode and scan */
+.modes
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+	column-gap: 32dp;
+	row-gap: 8dp;
+	border-bottom: 1dp var(--line);
+}
+.mode-group { display: flex; flex-direction: row; column-gap: 28dp; }
+.mode
+{
+	gap: 8dp;
+	min-height: 44dp;
+	padding: 0dp 2dp;
+	margin-bottom: -1dp;
+	border-bottom: 2dp transparent;
+	color: var(--text2);
+	font-size: 15dp;
+	font-weight: 600;
+	letter-spacing: -0.15dp;
+}
+.mode .mark-dot { display: block; width: 8dp; height: 8dp; }
+.mode.on { color: var(--text); border-bottom-color: var(--text); }
+.mode.on .mark-dot { background-color: var(--accent); }
+.mode:hover { color: var(--text); }
+
+.scan { display: flex; flex-direction: row; align-items: center; gap: 16dp; margin-left: auto; padding: 4dp 0dp; }
+.scan-text { text-align: right; }
+.scan-main { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.scan-main.busy { color: var(--accent-text); }
+.scan-detail
+{
+	width: 280dp;
+	font-family: "IBM Plex Mono";
+	font-size: 11dp;
+	line-height: 14dp;
+	color: var(--text2);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* --------------------------------------------------- search and filters */
+.mods-toolbar { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 16dp; margin-top: 16dp; }
+input.search { width: 340dp; }
+input.search:placeholder-shown { color: var(--text2); }
+.chips { display: flex; flex-direction: row; border: 1dp var(--line); border-radius: 2dp; }
+.chip
+{
+	gap: 8dp;
+	min-height: 38dp;
+	padding: 0dp 14dp;
+	border-right: 1dp var(--line);
+	color: var(--text2);
+	font-size: 13dp;
+	font-weight: 600;
+}
+.chip:hover { color: var(--text); }
+.chip.on { background-color: var(--text); color: var(--bg); }
+.chip-n { font-family: "IBM Plex Mono"; font-size: 11dp; font-weight: 500; }
+.undo { gap: 6dp; min-height: 38dp; margin-left: auto; font-size: 13dp; text-decoration: none; }
+.undo span { text-decoration: underline; }
+.undo .kbd { text-decoration: none; }
+
+/* ---------------------------------------------------- the two columns */
+.mods-body
+{
+	display: flex;
+	flex-direction: row;
+	flex: 1 1 0dp;
+	gap: 24dp;
+	margin-top: 16dp;
+	min-height: 0dp;
+}
+/* Padding inside the scroll areas leaves room for the focus ring. */
+.mods-list
+{
+	flex: 1 1 520dp;
+	overflow-y: auto;
+	margin-left: -6dp;
+	padding: 6dp 14dp 32dp 6dp;
+	box-sizing: border-box;
+}
+.mods-details
+{
+	flex: 0 0 360dp;
+	overflow-y: auto;
+	padding: 6dp 14dp 32dp 24dp;
+	border-left: 1dp var(--line);
+	box-sizing: border-box;
+}
+.block { margin-bottom: 32dp; }
+
+.order-help
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6dp;
+	padding: 10dp 0dp;
+	border-bottom: 1dp var(--line);
+	font-family: "IBM Plex Mono";
+	font-size: 11dp;
+	line-height: 16dp;
+	color: var(--text2);
+}
+.pack-note, .general
+{
+	padding: 10dp 0dp;
+	border-bottom: 1dp var(--line);
+	font-size: 13dp;
+	line-height: 18dp;
+	color: var(--text2);
+}
+.pack-note .label, .general .label { margin-right: 10dp; }
+.pack-name { margin-right: 8dp; color: var(--text); font-weight: 600; }
+.general.error { color: var(--accent-text); }
+.general.error .label { color: var(--accent-text); }
+.plan-line { padding-top: 10dp; font-family: "IBM Plex Mono"; font-size: 11dp; line-height: 16dp; color: var(--text2); }
+
+/* ---------------------------------------------------------------- rows */
+.orow, .mrow, .drow, .mprow { border-bottom: 1dp var(--line); }
+.row-line { display: flex; flex-direction: row; align-items: center; gap: 10dp; min-height: 44dp; }
+.selected .row-line, .drow.selected, .mprow.selected { background-color: var(--surface2); }
+
+/* Load-order rows drag with the mouse; the switch and the arrows do not. */
+.orow { drag: drag-drop; }
+.orow .toggle, .orow .move { drag: block; }
+.orow.dragging { opacity: 0.35; }
+.orow.drop-above .row-line { border-top: 2dp var(--accent); }
+.orow.drop-below { border-bottom: 2dp var(--accent); }
+.grip
+{
+	display: block;
+	width: 3dp;
+	height: 14dp;
+	margin-left: 4dp;
+	border-left: 1dp var(--text2);
+	border-right: 1dp var(--text2);
+	cursor: move;
+}
+.orow-n { width: 22dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.selected .orow-n { color: var(--text); }
+
+.row-main
+{
+	flex: 1 1 auto;
+	gap: 12dp;
+	min-height: 40dp;
+	padding: 0dp 8dp;
+}
+.row-name
+{
+	flex: 1 1 auto;
+	font-size: 14dp;
+	font-weight: 500;
+	line-height: 18dp;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.selected .row-name { font-weight: 600; }
+.orow.missing .row-name { color: var(--text2); }
+.row-ver, .row-src, .row-ws, .row-state, .row-loads
+{
+	font-family: "IBM Plex Mono";
+	font-size: 12dp;
+	line-height: 16dp;
+	color: var(--text2);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.row-ver { width: 104dp; }
+.row-src { width: 72dp; }
+.row-ws { width: 96dp; }
+.row-state { width: 112dp; text-align: right; }
+.orow .row-state { width: 104dp; }
+.row-loads { color: var(--accent-text); }
+.problem .row-state { color: var(--accent-text); }
+.warn .row-state { color: var(--text); }
+.tag
+{
+	padding: 1dp 5dp;
+	border: 1dp var(--accent);
+	border-radius: 2dp;
+	font-family: "IBM Plex Mono";
+	font-size: 10dp;
+	line-height: 14dp;
+	letter-spacing: 0.8dp;
+	text-transform: uppercase;
+	color: var(--accent-text);
+}
+
+/* The enable switch: square, the knob on the right when on. */
+.toggle
+{
+	flex: 0 0 36dp;
+	width: 36dp;
+	height: 20dp;
+	padding: 2dp;
+	border: 1dp var(--text2);
+	border-radius: 2dp;
+}
+.toggle .knob { display: block; width: 14dp; height: 14dp; background-color: var(--text2); }
+.toggle:hover { border-color: var(--text); }
+.toggle.on { justify-content: flex-end; background-color: var(--accent); border-color: var(--accent); }
+.toggle.on .knob { background-color: var(--on-accent); }
+
+.move
+{
+	justify-content: center;
+	flex: 0 0 28dp;
+	width: 28dp;
+	height: 28dp;
+	border: 1dp var(--line);
+	border-radius: 2dp;
+	font-size: 14dp;
+	color: var(--text2);
+}
+.move:hover { border-color: var(--text); color: var(--text); }
+.selected .move { border-color: var(--text2); color: var(--text); }
+.move.disabled { opacity: 0.3; }
+
+/* A diagnostic under the row it names. */
+.row-note { padding: 0dp 8dp 10dp 54dp; font-size: 12dp; line-height: 16dp; color: var(--text); }
+.orow .row-note { padding-left: 106dp; }
+.row-note.error { color: var(--accent-text); }
+
+.deps { margin-top: 16dp; }
+.deps-label { padding-bottom: 8dp; border-bottom: 1dp var(--line); }
+.drow .row-main { width: 100%; padding-left: 106dp; }
+
+.list-head
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 10dp;
+	padding: 10dp 0dp 8dp 0dp;
+	border-bottom: 1dp var(--line);
+}
+.h-toggle { width: 36dp; }
+.h-main { display: flex; flex-direction: row; flex: 1 1 auto; gap: 12dp; padding: 0dp 8dp; }
+.list-head span
+{
+	font-family: "IBM Plex Mono";
+	font-size: 11dp;
+	line-height: 16dp;
+	font-weight: 400;
+	letter-spacing: 0.88dp;
+	text-transform: uppercase;
+	color: var(--text2);
+}
+.list-empty { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 16dp; }
+
+/* Maps: one or none. */
+.map-main { width: 100%; padding-left: 12dp; }
+.radio { display: block; width: 12dp; height: 12dp; border: 1dp var(--text2); border-radius: 2dp; }
+.map-main.on .radio { background-color: var(--accent); border-color: var(--accent); }
+.map-main.on .row-name { font-weight: 600; }
+.map-main .row-src { width: 200dp; text-align: right; }
+
+/* --------------------------------------------------------- empty state */
+.empty-state { padding: 24dp 0dp 32dp 0dp; margin-bottom: 24dp; border-bottom: 1dp var(--line); }
+.empty-title { font-weight: 800; font-size: 28dp; line-height: 32dp; letter-spacing: -0.6dp; }
+.empty-text { margin-top: 8dp; max-width: 560dp; font-size: 14dp; line-height: 20dp; color: var(--text2); }
+.empty-actions { margin-top: 16dp; }
+
+/* ------------------------------------------------------------- details */
+.d-name { margin-top: 8dp; font-weight: 800; font-size: 28dp; line-height: 32dp; letter-spacing: -0.6dp; }
+.d-id { margin-top: 6dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); word-break: break-all; }
+.d-actions { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8dp; margin-top: 16dp; }
+.d-button { min-height: 32dp; padding: 0dp 14dp; font-size: 13dp; }
+.d-legacy
+{
+	margin-top: 16dp;
+	padding: 2dp 0dp 2dp 12dp;
+	border-left: 2dp var(--line);
+	font-size: 13dp;
+	line-height: 18dp;
+	color: var(--text2);
+}
+.d-legacy .label { margin-right: 6dp; }
+.d-section { margin-top: 24dp; }
+.d-section .section-label { padding-bottom: 8dp; }
+/* The section headings are focus stops, so a keyboard or a controller can
+   walk down a pane that is mostly text (the view pages between them). Enter
+   on one does nothing. The ring matches the buttons' in base.rcss. */
+.d-stop { nav: auto; tab-index: auto; focus: auto; }
+.d-stop:focus { box-shadow: #000000 0dp 0dp 0dp 3dp, #FF4A1C 0dp 0dp 0dp 5dp; }
+body.theme-light .d-stop:focus { box-shadow: #FFFFFF 0dp 0dp 0dp 3dp, #FF4A1C 0dp 0dp 0dp 5dp; }
+body.theme-contrast .d-stop:focus { box-shadow: #000000 0dp 0dp 0dp 3dp, #FFD400 0dp 0dp 0dp 5dp; }
+.d-field
+{
+	display: flex;
+	flex-direction: row;
+	gap: 12dp;
+	padding: 7dp 0dp;
+	border-bottom: 1dp var(--line);
+}
+.d-l { flex: 0 0 104dp; width: 104dp; font-family: "IBM Plex Mono"; font-size: 11dp; line-height: 16dp; color: var(--text2); }
+.d-v { flex: 1 1 auto; font-size: 13dp; line-height: 16dp; word-break: break-word; }
+.d-note, .d-why, .d-fix-text
+{
+	padding: 7dp 0dp;
+	border-bottom: 1dp var(--line);
+	font-size: 13dp;
+	line-height: 18dp;
+}
+.d-note { color: var(--text); }
+.d-note.error { color: var(--accent-text); }
+.d-why, .d-fix-text { color: var(--text2); }
+.d-fixes { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8dp; padding: 10dp 0dp; }
+.d-empty { padding: 7dp 0dp; font-size: 13dp; line-height: 18dp; color: var(--text2); }
