@@ -2,13 +2,217 @@
 <head>
 	<title>Welcome</title>
 	<link type="text/template" href="../shell.rml"/>
+	<link type="text/rcss" href="first_run.rcss"/>
 </head>
-<!-- Welcome (docs/DESIGN.md 7.3): placeholder. -->
-<body template="shell">
-<div class="page">
-	<div class="page-title">Welcome</div>
-	<div class="page-sub">Find the game, import BOIII settings, pick a look.</div>
-	<div class="section"><button class="outline default-focus" id="first_run-back"><span>Back to Home</span></button></div>
+<!-- First run (docs/DESIGN.md 7.3, 3.5, 4.7): find the game, the read-only
+     BOIII import, the look, the privacy statement. Data: the "first_run"
+     model in src/xerces_launcher/views/first_run.cpp. Each step keeps its
+     controls on the left and its background facts on the right, so a step
+     fits the default window and Next stays in view. -->
+<body template="shell" data-model="first_run">
+<div id="fr-main">
+	<div class="fr-top">
+		<div class="fr-steps">
+			<button id="fr-step-1" class="fr-step" data-class-on="step == 1" data-class-done="step > 1" data-event-click="go(1)"><span class="fr-dot"></span><span class="fr-num">01</span><span>Game</span></button>
+			<button id="fr-step-2" class="fr-step" data-class-on="step == 2" data-class-done="step > 2" data-event-click="go(2)"><span class="fr-dot"></span><span class="fr-num">02</span><span>Import</span></button>
+			<button id="fr-step-3" class="fr-step" data-class-on="step == 3" data-class-done="step > 3" data-event-click="go(3)"><span class="fr-dot"></span><span class="fr-num">03</span><span>Look</span></button>
+			<button id="fr-step-4" class="fr-step" data-class-on="step == 4" data-event-click="go(4)"><span class="fr-dot"></span><span class="fr-num">04</span><span>Privacy</span></button>
+		</div>
+		<button id="fr-skip" class="link fr-skip" data-event-click="act('skip')"><span>Skip setup</span></button>
+	</div>
+
+	<div class="fr-body">
+		<!-- 01 Game: detection (4.7) and the pre-flight verdict (4.2). -->
+		<div class="fr-panel" data-if="step == 1">
+			<div class="label">Welcome to Xerces</div>
+			<div class="fr-title">Find the game</div>
+			<div class="fr-sub">Xerces looks in the folder you saved and in every Steam library. It only reads the game folder; nothing in it is changed.</div>
+
+			<div class="fr-columns">
+				<div class="fr-col-main">
+					<div class="fr-verdict">
+						<span class="fr-sq" data-class-ok="game_ok" data-class-bad="game_bad"></span>
+						<span class="fr-verdict-text">{{game_title}}</span>
+					</div>
+					<div class="fr-path" data-if="game_path != ''">{{game_path}}</div>
+
+					<div class="fr-facts" data-if="game_found">
+						<div class="fr-fact">
+							<div class="label">Steam build</div>
+							<div class="fr-fact-value">{{game_build}}</div>
+						</div>
+						<div class="fr-fact">
+							<div class="label">Pre-flight</div>
+							<div class="fr-fact-value">{{game_verdict}}</div>
+						</div>
+						<div class="fr-fact">
+							<div class="label">Known as</div>
+							<div class="fr-fact-value">{{game_known_as}}</div>
+						</div>
+					</div>
+
+					<div class="notice-box fr-notice" data-if="game_message != ''">
+						<div class="label">Pre-flight</div>
+						<div class="fr-notice-text">{{game_message}}</div>
+					</div>
+					<div class="notice-box fr-notice" data-if="game_error != ''">
+						<div class="label">Problem</div>
+						<div class="fr-notice-text">{{game_error}}</div>
+					</div>
+
+					<div class="toolbar fr-actions">
+						<button id="fr-choose" class="outline" data-event-click="act('choose')"><span>Choose folder</span></button>
+						<button id="fr-detect" class="outline" data-class-disabled="looking" data-event-click="act('detect')"><span>Detect again</span></button>
+					</div>
+					<div data-if="!looking">
+						<div class="fr-help" data-if="!game_ok">Next still works without a playable game; Home then shows what to fix.</div>
+					</div>
+				</div>
+
+				<div class="fr-col-aside" data-if="!game_found">
+					<div data-if="tried.size > 0">
+						<div class="label section-label">Places tried</div>
+						<div class="row" data-for="t : tried">
+							<span class="fr-row-n">{{t.n}}</span>
+							<span class="fr-row-path">{{t.path}}</span>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- 02 Import: read-only, from %LOCALAPPDATA%\boiii and boiii_players (3.5). -->
+		<div class="fr-panel" data-if="step == 2">
+			<div class="label">BOIII import</div>
+			<div class="fr-title">Bring your BOIII settings</div>
+			<div class="fr-sub">Xerces can copy your player name and servers from BOIII. It only reads: your BOIII files stay exactly as they are.</div>
+
+			<div class="fr-columns">
+				<div class="fr-col-main">
+					<div class="label section-label">Found</div>
+					<button class="fr-pick" data-for="r : imports" data-attr-id="'fr-imp-' + r.key" data-class-on="r.on" data-class-done="r.done" data-event-click="toggle(r.key)">
+						<span class="fr-check"><span class="fr-check-in"></span></span>
+						<div class="fr-pick-text">
+							<div class="fr-pick-title">{{r.title}}</div>
+							<div class="fr-pick-detail">{{r.detail}}</div>
+						</div>
+						<span class="fr-pick-value">{{r.value}}</span>
+					</button>
+					<div class="empty-note" data-if="imports.size == 0">{{import_empty}}</div>
+					<div class="fr-note" data-for="note : import_notes">{{note}}</div>
+					<div class="toolbar fr-actions" data-if="imports.size > 0">
+						<button id="fr-import" class="primary-button" data-if="!import_done" data-class-disabled="!can_import" data-event-click="act('import')"><span>Import selected</span></button>
+						<div class="fr-done" data-if="import_done"><span class="fr-sq ok"></span><span>In Xerces now. Your BOIII files were not changed.</span></div>
+					</div>
+				</div>
+
+				<div class="fr-col-aside">
+					<div class="label section-label">Looked in</div>
+					<div class="fr-place" data-for="p : places">
+						<div class="fr-place-name">{{p.name}}</div>
+						<div class="fr-place-path">{{p.path}}</div>
+						<div class="fr-place-state">{{p.state}}</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- 03 Look (7.5): applied as soon as it is picked. -->
+		<div class="fr-panel" data-if="step == 3">
+			<div class="label">Look and feel</div>
+			<div class="fr-title">Pick a look</div>
+			<div class="fr-sub">Changes show at once. Settings has the same choices later.</div>
+
+			<div class="fr-columns">
+				<div class="fr-col-themes">
+					<div class="label section-label">Theme</div>
+					<div class="fr-themes">
+						<button id="fr-theme-dark" class="fr-theme" data-class-on="theme == 'dark'" data-event-click="set_theme('dark')">
+							<div class="fr-swatch sw-dark"><div class="sw-bar"></div><div class="sw-bar sw-short"></div><div class="sw-accent"></div></div>
+							<div class="fr-theme-name"><span class="fr-dot"></span><span>Dark</span></div>
+						</button>
+						<button id="fr-theme-light" class="fr-theme" data-class-on="theme == 'light'" data-event-click="set_theme('light')">
+							<div class="fr-swatch sw-light"><div class="sw-bar"></div><div class="sw-bar sw-short"></div><div class="sw-accent"></div></div>
+							<div class="fr-theme-name"><span class="fr-dot"></span><span>Light</span></div>
+						</button>
+						<button id="fr-theme-contrast" class="fr-theme" data-class-on="theme == 'contrast'" data-event-click="set_theme('contrast')">
+							<div class="fr-swatch sw-contrast"><div class="sw-bar"></div><div class="sw-bar sw-short"></div><div class="sw-accent"></div></div>
+							<div class="fr-theme-name"><span class="fr-dot"></span><span>High contrast</span></div>
+						</button>
+					</div>
+				</div>
+
+				<div class="fr-col-aside">
+					<div class="label section-label">Motion</div>
+					<button id="fr-motion" class="fr-toggle" data-class-on="reduced" data-event-click="act('motion')">
+						<div class="fr-toggle-text">
+							<div class="fr-toggle-name">Reduced motion</div>
+							<div class="fr-toggle-help">Turns off every transition and movement in the launcher.</div>
+						</div>
+						<span class="fr-switch"><span class="fr-knob"></span></span>
+					</button>
+				</div>
+			</div>
+
+			<div class="fr-group">
+				<div class="label section-label">UI scale</div>
+				<div class="fr-scales">
+					<button id="fr-scale-0" class="fr-chip" data-class-on="scale == 0" data-event-click="set_scale(0)"><span class="fr-dot"></span><span>Follow Windows</span></button>
+					<button id="fr-scale-75" class="fr-chip" data-class-on="scale == 75" data-event-click="set_scale(75)"><span class="fr-dot"></span><span>75 %</span></button>
+					<button id="fr-scale-90" class="fr-chip" data-class-on="scale == 90" data-event-click="set_scale(90)"><span class="fr-dot"></span><span>90 %</span></button>
+					<button id="fr-scale-110" class="fr-chip" data-class-on="scale == 110" data-event-click="set_scale(110)"><span class="fr-dot"></span><span>110 %</span></button>
+					<button id="fr-scale-125" class="fr-chip" data-class-on="scale == 125" data-event-click="set_scale(125)"><span class="fr-dot"></span><span>125 %</span></button>
+					<button id="fr-scale-150" class="fr-chip" data-class-on="scale == 150" data-event-click="set_scale(150)"><span class="fr-dot"></span><span>150 %</span></button>
+					<button id="fr-scale-175" class="fr-chip" data-class-on="scale == 175" data-event-click="set_scale(175)"><span class="fr-dot"></span><span>175 %</span></button>
+					<button id="fr-scale-200" class="fr-chip" data-class-on="scale == 200" data-event-click="set_scale(200)"><span class="fr-dot"></span><span>200 %</span></button>
+				</div>
+				<div class="fr-help">{{scale_help}}</div>
+			</div>
+		</div>
+
+		<!-- 04 Privacy (D21, 10.5): the plain statement. -->
+		<div class="fr-panel" data-if="step == 4">
+			<div class="label">Privacy</div>
+			<div class="fr-title">Your data stays here</div>
+
+			<div class="fr-points">
+				<div class="fr-point">
+					<span class="fr-point-n">01</span>
+					<div class="fr-point-text">
+						<div class="fr-point-title">No telemetry</div>
+						<div class="fr-point-body">Xerces collects no usage data. There is no analytics and no tracking of any kind.</div>
+					</div>
+				</div>
+				<div class="fr-point">
+					<span class="fr-point-n">02</span>
+					<div class="fr-point-text">
+						<div class="fr-point-title">Nothing leaves this PC</div>
+						<div class="fr-point-body">Your settings, packs, logs and crash bundles stay in your Xerces folder.</div>
+						<div class="fr-point-path">{{home_path}}</div>
+					</div>
+				</div>
+				<div class="fr-point">
+					<span class="fr-point-n">03</span>
+					<div class="fr-point-text">
+						<div class="fr-point-title">Accounts come later, and are optional</div>
+						<div class="fr-point-body">Xerces accounts, friends and invites arrive in a later version. You never need one to play with mods.</div>
+					</div>
+				</div>
+			</div>
+			<div class="fr-help">Playing online still connects you to the servers you join, as the game always has.</div>
+		</div>
+	</div>
+
+	<!-- Next sits on the left, under the step's controls: spatial navigation
+	     scores sideways distance heavily, so Up and Down then move between
+	     Next and the step instead of jumping to the top row. -->
+	<div class="fr-nav">
+		<div class="fr-nav-buttons">
+			<button id="fr-next" class="primary-button fr-next default-focus" data-event-click="act('next')"><span>{{next_label}}</span><span class="fr-arrow">&#8594;</span></button>
+			<button id="fr-back" class="outline fr-back" data-class-disabled="step == 1" data-event-click="act('back')"><span>Back</span></button>
+		</div>
+		<span class="fr-progress">{{progress}}</span>
+	</div>
 </div>
 </body>
 </rml>
