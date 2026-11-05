@@ -207,9 +207,72 @@ fonts, for comparison in a browser (Edge headless:
 
 ### Loader and manifest (M1)
 
-- [ ] A plan with two Workshop mods loads through the CLI (`xerces_cli load`).
-- [ ] A forced crash leads to safe mode on the next start.
-- [ ] Load, unload and reload work from the CLI in the front end.
+What the game role does since 389dff95 (`src/client/xerces`): it resolves
+`compat/signatures.json` against the running game before mod_stack hooks
+anything (multi-mod stays off on a miss), reports it in
+`<home>\cache\signatures-report.json`, checks `fs_game` and `fs_extramods`
+against the plan file named by `-xerces-plan`, and moves the journal
+(`<home>\logs\journal.json`) through `symbols`, `frontend`, `in_game` and
+`clean_exit`. Its log is `<home>\logs\<date>-<time>-game-<pid>.jsonl`. None of
+it has run in the game yet: these items need you (and your go-ahead to start
+the game).
+
+- [ ] Launch vanilla from `Xerces.exe` reaches the menu. The game log shows
+      `xerces.signatures.resolved` (9 of 9) and the journal reads `frontend`;
+      quitting from the menu leaves `clean_exit`.
+- [ ] Launch modded with the D3 stack (1944930083, then 3171632315 and
+      3656779213): `xerces.feature.on` and `loader.plan.applied` in the game
+      log, and the three mods load as they did in D3.
+- [ ] A forced crash (end `boiii.exe` in Task Manager during a match) leads to
+      safe mode on the next launcher start; "Launch with mods off" reaches the
+      menu without mods.
+- [ ] Find the culprit: one test launch per step, each result recorded when the
+      game exits (checked with written journals only, see Launcher below).
+- [ ] With the game in the menus: `xerces_cli status` shows the build, the
+      plan and the stack (it finds the game's pipe in `<home>\run`);
+      `xerces_cli load --extras 3171632315,3656779213` and
+      `xerces_cli unload` change the extra mods and reload them, as the mods
+      menu does; in a match they answer that the stack only changes in the
+      menus. The pipe itself is tested in `test_ipc.cpp` (a served pipe, a
+      forged run file refused).
+
+### Launcher (M3)
+
+`tools\build.ps1 -Launcher` builds `build\bin\x64\Release\Xerces.exe` from the
+third-party sources of the spike. Until the rename (DESIGN.md 7.7) it starts
+`boiii.exe` from the same folder as the game role.
+
+Checks without the game: always pass `--dry-launch` (the launch builds the
+plan file and the command line, logs them and starts nothing), and point
+`XERCES_HOME` at a folder outside AppData (files created under AppData by
+programs started from the Claude app land in a private copy):
+
+```
+$env:XERCES_HOME = 'C:\Users\Ginld\XercesHome'
+build\bin\x64\Release\Xerces.exe --dry-launch --skip-boot --view home --script steps.txt --seconds 20
+```
+
+A script plays timed steps, the first at 1 s: `+500 key down`, `+300 pad a`,
+`+200 view mods`, `+100 click launch-vanilla`, `+100 type text`,
+`+100 focus search`, `+100 shot C:\path\screen.png` (a PNG of the next frame),
+`+100 quit`. The log is `<home>\logs\<date>-<time>-launcher-<pid>.jsonl`.
+
+Run on 2026-11-05 by Claude on your PC while you were away (dry launches only):
+
+- [x] Native paint 24 to 38 ms, first RmlUi frame 211 to 260 ms warm.
+- [x] The game was found and its build called supported; the catalog read 17
+      Workshop items. The first scan of the 59 GB Workshop folder took 195 s;
+      with the hash cache (`<home>\cache\hashes.txt`) a rescan takes 0.09 s.
+- [x] Launch modded with the D3 stack builds
+      `-launch -nointro -xerces-plan <id> +set fs_game 1944930083 +set fs_extramods 3171632315,3656779213`,
+      the command D3 ran in the game, and writes the plan file.
+- [x] A journal that ends in `in_game` with mods makes Home offer safe mode; a
+      culprit search went from test 1 to test 2 across two launcher runs, the
+      result read from a journal written for the test.
+- [x] A second `Xerces.exe` on the same home brings the first forward and exits.
+- [ ] The window by hand: drag by the header, snap, resize from the edges,
+      minimize, maximize, close; at 150 percent.
+- [ ] A physical controller: A, B, Y, LB/RB and the D-pad on every screen.
 
 ### Conflict system (M2)
 

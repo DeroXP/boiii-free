@@ -48,6 +48,7 @@ needed. On this PC LLVM 23.1.5, Ninja 1.13.2 and premake 5.0.0 are portable in
 ```
 tools\build.ps1 -Tests -ToolsDir C:\Users\Ginld\XercesDev\tools
 tools\build.ps1 -Client -ToolsDir C:\Users\Ginld\XercesDev\tools
+tools\build.ps1 -Launcher -ToolsDir C:\Users\Ginld\XercesDev\tools
 ```
 
 `-Tests` builds the core, runs the unit tests and a CLI smoke test; `-Client`
@@ -127,12 +128,25 @@ the `pgserver` wheel in a throwaway venv.
   from here (DESIGN.md 3.6). Its join prompt names missing mods instead of
   downloading them. The proof of concept's "queue-add" function is
   `SL_GetStringOfSize` (verified on a dump in D3). Do not call it.
-- D4 (RmlUi, gated) and D5 (C / Signal) are decided. The RmlUi spike is
-  `src/xerces_launcher_spike/` with `data/xerces/ui/` and `data/xerces/fonts/`;
-  `tools\build.ps1 -Spike` builds it from RmlUi 6.3 and FreeType 2.14.3 kept in
-  `C:\Users\Ginld\XercesDev\third_party` (not in the repo). Its results and the
-  open first-frame question are in DESIGN.md 7.1. Moving an OpenGL context to
-  another thread crashes NVIDIA's driver here; warm the driver instead.
+- D4 (RmlUi) and D5 (C / Signal) are decided. The launcher is
+  `src/xerces_launcher/` (`Xerces.exe`, `tools\build.ps1 -Launcher`): views in
+  `views/` register with `XERCES_VIEW` and own one document in
+  `data/xerces/ui/views/`; every screen document uses the `shell` template;
+  `services.hpp` is all game, catalog, plan and launch logic, `app.hpp` the
+  screen API. RmlUi 6.3 and FreeType 2.14.3 are kept in
+  `C:\Users\Ginld\XercesDev\third_party` (not in the repo). The spike
+  (`src/xerces_launcher_spike/`, `-Spike`) stays for repeating DESIGN.md 7.1.
+  Moving an OpenGL context to another thread crashes NVIDIA's driver here;
+  warm the driver instead.
+- Run the launcher in checks only with `--dry-launch` and `XERCES_HOME` set
+  outside AppData; `--script` plays input and takes PNG captures
+  (docs/TESTING.md, Launcher). `tools/ci/check_contrast.py` checks the theme
+  tokens.
+- The game role's Xerces parts are `src/client/xerces/`: `signatures.cpp`
+  resolves `compat/signatures.json` in the running game (mod_stack takes its
+  hook targets from it on the client), `loader.cpp` checks the plan and keeps
+  the journal, `runtime.cpp` is `<home>` and the game log. The client links
+  `xerces_core` through `premake/xerces_projects.lua`.
 - D14 and D15 are build switches in `src/client/xerces/switches.hpp`, off by
   default: no friend presence, rendezvous, invites or Ezz Discord app, and
   upstream's downloaders are left out of the build
@@ -160,7 +174,7 @@ the `pgserver` wheel in a throwaway venv.
 - On this PC, files that processes started from the Claude app write under
   `%LOCALAPPDATA%` land in a private copy other programs cannot see. Point
   Claude-driven Xerces runs at `XERCES_HOME` (for example
-  `C:\Users\Ginld\XercesHome`) once that override exists.
+  `C:\Users\Ginld\XercesHome`); the launcher passes it on to the game.
 
 ## Working conventions
 

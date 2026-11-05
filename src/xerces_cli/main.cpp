@@ -20,6 +20,7 @@
 #include <xerces_core/conflicts.hpp>
 #include <xerces_core/detect.hpp>
 #include <xerces_core/hooks.hpp>
+#include <xerces_core/ipc.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/manifest.hpp>
 #include <xerces_core/pack.hpp>
@@ -149,10 +150,18 @@ Work without the game:
                                                    a memory dump (newest .bin in
                                                    a folder)
 
-Need a running Xerces (exit 3 until the game-side pipe exists):
-  status, mods enable/disable/order, plan apply, load, unload, reload,
-  index run, packs apply, sig check (without --dump), bench run, test run,
-  diag bundle, logs tail
+Talk to the running game (started from Xerces.exe, or with -xerces-ipc), over
+its pipe in <home>\run (--home <dir>, else XERCES_HOME, else
+%LOCALAPPDATA%\Xerces):
+  status                                           build, signatures, plan,
+                                                   journal phase and mods
+  load --extras <id,id,...>                        set the extra mods and reload
+  reload [--extras <id,id,...>]                    reload (in the menus only)
+  unload                                           no extra mods
+
+Not built yet (exit 3): mods enable/disable/order, plan apply, index run,
+  packs apply, sig check (without --dump), bench run, test run, diag bundle,
+  logs tail
 
 Exit codes: 0 ok, 1 error, 2 validation or conflict failures,
             3 Xerces not running, 4 signature failures.
@@ -697,6 +706,81 @@ int not_running(const std::string &command) {
   return exit_not_running;
 }
 
+// <home> as the launcher and the game find it (DESIGN.md 3.5).
+fs::path xerces_home(const arguments &args) {
+  if (const auto given = args.get("--home")) {
+    return fs::path(*given);
+  }
+  if (const char *set = std::getenv("XERCES_HOME"); set && *set) {
+    return fs::path(set);
+  }
+  if (const char *local = std::getenv("LOCALAPPDATA"); local && *local) {
+    return fs::path(local) / "Xerces";
+  }
+  return fs::path("xerces_home");
+}
+
+// The live commands (15.2): talk to the running game over its pipe.
+//   status [--json]                     build, signatures, plan, phase, mods
+//   load --extras a,b | reload [--extras a,b] | unload   front end only
+int cmd_live(const arguments &args, const std::string &command) {
+  const fs::path run = xerces_home(args) / "run";
+  const auto entries = ipc::live_run_entries(run);
+  const auto game = std::ranges::find_if(
+      entries, [](const ipc::run_entry &e) { return e.role == "game"; });
+  if (game == entries.end()) {
+    std::cerr << "No running game found in " << utf8(run)
+              << ". Start it from Xerces.exe (or with -xerces-ipc) first.\n";
+    return exit_not_running;
+  }
+  std::string method = command;
+  std::string params = "{}";
+  if (command == "load" || command == "reload") {
+    method = "reload";
+    if (const auto extras = args.get("--extras")) {
+      std::vector<std::string> list;
+      std::string item;
+      for (const char c : *extras + ",") {
+        if (c == ',') {
+          if (!item.empty()) {
+            list.push_back(item);
+          }
+          item.clear();
+        } else {
+          item.push_back(c);
+        }
+      }
+      rapidjson::Document doc(rapidjson::kObjectType);
+      json::set(doc, "extras", json::string_array(list, doc.GetAllocator()),
+                doc.GetAllocator());
+      params = json::canonical(doc);
+    } else if (command == "load") {
+      std::cerr << "load needs --extras <id,id,...> (the extra mods, highest "
+                   "priority first).\n";
+      return exit_error;
+    }
+  }
+  const ipc::call_result called = ipc::call(*game, method, params);
+  if (!called.ok) {
+    std::cerr << "The game did not answer: " << called.error << "\n";
+    return exit_not_running;
+  }
+  const auto response = ipc::parse_response(called.response);
+  if (!response) {
+    std::cerr << "The game sent a message that is not JSON-RPC.\n";
+    return exit_error;
+  }
+  if (!response->ok) {
+    std::cerr << "error " << response->code << ": " << response->message
+              << "\n";
+    return response->code == ipc::refused ? exit_failed : exit_error;
+  }
+  const auto parsed = json::parse(response->result);
+  std::cout << (parsed.ok ? json::pretty(parsed.document) : response->result)
+            << "\n";
+  return exit_ok;
+}
+
 std::string hex(std::uint64_t value) {
   char digits[17] = {};
   const auto result = std::to_chars(digits, digits + 16, value, 16);
@@ -896,6 +980,10 @@ int main(int argc, char **argv) {
     }
     if (group == "sig") {
       return cmd_sig(args, action);
+    }
+    if (group == "status" || group == "load" || group == "reload" ||
+        group == "unload") {
+      return cmd_live(args, group);
     }
     const std::set<std::string> live = {"status", "mods",   "plan",  "load",
                                         "unload", "reload", "index", "sig",

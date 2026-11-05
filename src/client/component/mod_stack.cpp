@@ -776,6 +776,10 @@ bool is_loaded() {
   return loaded == extras;
 }
 
+// Xerces' command pipe (src/client/xerces/ipc.cpp) asks for the same reload
+// as ModStack.Reload in the mods menu.
+void request_reload() { reload_pending = true; }
+
 class component final : public generic_component {
   DEFINE_COMPONENT_NAME("mod_stack");
 
