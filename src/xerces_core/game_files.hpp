@@ -42,6 +42,20 @@ std::vector<game_bind> parse_binds(std::string_view text);
 // (none of which parse_binds gives).
 std::string binds_to_text(const std::vector<game_bind> &binds);
 
+// A running client owns both files: it reads them when it starts, and it
+// writes binds.cfg from its own copy a few seconds after each bind change in
+// the game (component/binds.cpp, save_binds), which would undo an edit made
+// under it. Xerces sees a game it started itself, and one that announces
+// itself in <home>\run, but a client started directly or by upstream's
+// launcher does neither. So, as upstream's launcher does
+// (is_game_process_running): any process named boiii.exe or BlackOps3.exe
+// counts, and so does client_name (Xerces' game role) when given, whatever
+// folder it is in, since a client's game folder is not visible from outside.
+// Dedicated servers do not count; names in any case.
+bool is_game_client(std::string_view exe_name, std::string_view client_name);
+// The executable name of the first running client found; nullopt if none.
+std::optional<std::string> running_game_client(std::string_view client_name);
+
 // asset_limits_enabled as the client reads it: missing or "1" is on (unless
 // disable_asset_pools is "1"), anything else off.
 bool asset_pools_enabled(std::string_view launcher_settings_json);

@@ -6,6 +6,19 @@
 
 #include "json.hpp"
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+#include <tlhelp32.h>
+
+// wingdi.h's GetObject macro would rename rapidjson's GetObject().
+#undef GetObject
+
 namespace xerces_core {
 namespace {
 std::string trim(std::string_view text) {
@@ -87,6 +100,38 @@ std::string binds_to_text(const std::vector<game_bind> &binds) {
     out += "bind " + key + " \"" + command + "\"\n";
   }
   return out;
+}
+
+bool is_game_client(std::string_view exe_name, std::string_view client_name) {
+  const std::string name = lower(std::string(exe_name));
+  if (name.empty()) {
+    return false;
+  }
+  return name == "boiii.exe" || name == "blackops3.exe" ||
+         name == lower(std::string(client_name));
+}
+
+std::optional<std::string> running_game_client(std::string_view client_name) {
+  const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snapshot == INVALID_HANDLE_VALUE) {
+    return std::nullopt;
+  }
+  std::optional<std::string> found;
+  PROCESSENTRY32W entry{};
+  entry.dwSize = sizeof(entry);
+  for (BOOL more = Process32FirstW(snapshot, &entry); more && !found;
+       more = Process32NextW(snapshot, &entry)) {
+    // Executable names are ASCII here; anything else is not a client.
+    std::string name;
+    for (const wchar_t *c = entry.szExeFile; *c; ++c) {
+      name.push_back(*c < 0x80 ? static_cast<char>(*c) : '?');
+    }
+    if (is_game_client(name, client_name)) {
+      found = name;
+    }
+  }
+  CloseHandle(snapshot);
+  return found;
 }
 
 bool asset_pools_enabled(std::string_view launcher_settings_json) {

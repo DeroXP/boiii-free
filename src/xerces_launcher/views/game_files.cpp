@@ -6,7 +6,9 @@
 // DB_AssetPoolInit unless asset_limits_enabled is "0"). The rules for both
 // files are xerces_core/game_files, the same as upstream's launcher, so
 // either can edit them. Nothing is written while the game runs: it reads and
-// writes binds.cfg itself. Opened from Settings; not a tab.
+// writes binds.cfg itself. That includes a client Xerces did not start (run
+// directly or from upstream's launcher), found by its process name
+// (xerces_core::running_game_client). Opened from Settings; not a tab.
 
 #include <RmlUi/Core.h>
 
@@ -144,7 +146,7 @@ private:
       handle_.DirtyAllVariables();
       return;
     }
-    game_note_ = owner_->svc().game_running()
+    game_note_ = game_running()
                      ? owner_->tr("The game is running: close it to change "
                                   "these. It reads them when it starts.")
                      : std::string();
@@ -157,13 +159,29 @@ private:
     handle_.DirtyAllVariables();
   }
 
+  // A game Xerces started or that announces itself in <home>\run, or any
+  // running client by its process name (one started directly or by
+  // upstream's launcher announces nothing, and would write binds.cfg back
+  // from its own copy after the next bind change in the game).
+  bool game_running() {
+    if (owner_->svc().game_running()) {
+      return true;
+    }
+    const auto client = xerces_core::running_game_client(
+        owner_->svc().paths().client.filename().string());
+    if (client) {
+      log_info("launcher.game_files.client_running", *client);
+    }
+    return client.has_value();
+  }
+
   // Both files belong to the game while it runs.
   bool writable() {
     if (!folder()) {
       owner_->notify(game_note_, true);
       return false;
     }
-    if (owner_->svc().game_running()) {
+    if (game_running()) {
       owner_->notify(owner_->tr("Close the game first: it reads and writes "
                                 "these files while it runs."),
                      true);
