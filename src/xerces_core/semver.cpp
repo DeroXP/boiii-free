@@ -272,7 +272,10 @@ bool expand_simple(std::string_view token, std::vector<comparator> &out) {
     } else if (complete) {
       out.push_back({op::gt, p.floor()});
     } else {
-      out.push_back({op::ge, upper_past(p)->bound});
+      // npm: >1.2 is >=1.3.0; with -0 it would admit 1.3.0-alpha.
+      version bound = upper_past(p)->bound;
+      bound.prerelease.clear();
+      out.push_back({op::ge, bound});
     }
     return true;
   case op::le:
@@ -481,6 +484,13 @@ version_range version_range::any() {
   version_range out;
   out.sets_.push_back({});
   out.text_ = "*";
+  return out;
+}
+
+version_range version_range::none() {
+  version_range out;
+  out.sets_.push_back({{op::lt, make(0, 0, 0, true)}});
+  out.text_ = "<0.0.0-0";
   return out;
 }
 

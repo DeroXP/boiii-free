@@ -41,6 +41,7 @@ public:
   static std::optional<version_range> parse(std::string_view text,
                                             std::string *error = nullptr);
   static version_range any();
+  static version_range none(); // satisfied by nothing
 
   bool satisfied_by(const version &candidate) const;
   const std::string &text() const { return text_; }

@@ -61,10 +61,15 @@ void write_number(std::string &out, const rapidjson::Value &value) {
       out += "null";
       return;
     }
+    if (number == 0) {
+      out += "0"; // -0.0 too, like the integer -0
+      return;
+    }
     double whole = 0;
-    if (std::modf(number, &whole) == 0.0 && std::fabs(number) < 9.0e15) {
-      result = std::to_chars(buffer, buffer + sizeof(buffer),
-                             static_cast<std::int64_t>(number));
+    if (std::modf(number, &whole) == 0.0 && std::fabs(number) < 1e21) {
+      // In full, as the same value written as an integer prints.
+      result = std::to_chars(buffer, buffer + sizeof(buffer), number,
+                             std::chars_format::fixed);
     } else {
       result = std::to_chars(buffer, buffer + sizeof(buffer), number);
     }
@@ -156,19 +161,53 @@ void write(std::string &out, const rapidjson::Value &value, int indent,
   }
   }
 }
+
+// Where an array or object first opens level max_depth + 1, if one does.
+std::optional<std::size_t> too_deep(std::string_view text) {
+  int depth = 0;
+  bool in_string = false;
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    const char c = text[i];
+    if (in_string) {
+      if (c == '\\') {
+        ++i; // the escaped character cannot end the string
+      } else if (c == '"') {
+        in_string = false;
+      }
+    } else if (c == '"') {
+      in_string = true;
+    } else if (c == '[' || c == '{') {
+      if (++depth > max_depth) {
+        return i;
+      }
+    } else if (c == ']' || c == '}') {
+      --depth;
+    }
+  }
+  return std::nullopt;
+}
 } // namespace
 
 parse_result parse(std::string_view text) {
   parse_result result;
-  result.document.Parse<rapidjson::kParseValidateEncodingFlag |
-                        rapidjson::kParseFullPrecisionFlag>(text.data(),
-                                                            text.size());
-  if (!result.document.HasParseError()) {
-    result.ok = true;
-    return result;
+  std::size_t offset = 0;
+  if (const auto deep = too_deep(text)) {
+    offset = *deep;
+    result.error =
+        "Nesting is deeper than " + std::to_string(max_depth) + " levels.";
+  } else {
+    // Iterative, so rapidjson's own parsing does not recurse either.
+    result.document.Parse<rapidjson::kParseValidateEncodingFlag |
+                          rapidjson::kParseFullPrecisionFlag |
+                          rapidjson::kParseIterativeFlag>(text.data(),
+                                                          text.size());
+    if (!result.document.HasParseError()) {
+      result.ok = true;
+      return result;
+    }
+    offset = std::min(result.document.GetErrorOffset(), text.size());
+    result.error = rapidjson::GetParseError_En(result.document.GetParseError());
   }
-  const std::size_t offset =
-      std::min(result.document.GetErrorOffset(), text.size());
   result.line = 1;
   result.column = 1;
   for (std::size_t i = 0; i < offset; ++i) {
@@ -179,7 +218,6 @@ parse_result parse(std::string_view text) {
       ++result.column;
     }
   }
-  result.error = rapidjson::GetParseError_En(result.document.GetParseError());
   return result;
 }
 
@@ -199,6 +237,12 @@ std::string quote(std::string_view text) {
   std::string out;
   write_string(out, text);
   return out;
+}
+
+std::size_t length(std::string_view text) {
+  return static_cast<std::size_t>(std::ranges::count_if(text, [](char c) {
+    return (static_cast<unsigned char>(c) & 0xc0) != 0x80; // not a continuation
+  }));
 }
 
 std::string pointer(const std::string &base, std::string_view token) {

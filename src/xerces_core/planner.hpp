@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <optional>
 #include <set>
@@ -17,8 +18,10 @@ namespace xerces_core {
 struct installed_content {
   manifest info;      // parsed, or synthesized for legacy content
   std::string folder; // what mod-stack loads: Workshop id or folder name
+  std::filesystem::path path;     // absolute folder, set by the catalog
   std::vector<std::string> files; // relative paths, '/' separated
   std::string content_hash;       // "sha256:..." over the files
+  bool valid_manifest = true;     // false: its xerces.mod.json has errors
 };
 
 struct plan_request {
@@ -42,6 +45,7 @@ struct plan_entry {
   std::string name;
   version ver;
   std::string folder;
+  std::filesystem::path path; // the chosen version's files; in no hash
   std::string content_hash;
   bool requested = false; // false: pulled in as a dependency
   bool legacy = false;
@@ -59,7 +63,8 @@ struct explanation {
 
 // Something the player can do to fix a problem (9.4).
 struct fix_action {
-  std::string kind; // install, update, remove, allow_conflict, update_xerces
+  // install, update, unpin, remove, reorder, allow_conflict, update_xerces
+  std::string kind;
   std::string id;
   std::string detail;
 };

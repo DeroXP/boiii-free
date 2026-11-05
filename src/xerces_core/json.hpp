@@ -17,18 +17,27 @@ struct parse_result {
   std::string error;
 };
 
-// Strict UTF-8 JSON. On failure, `line` and `column` are 1-based.
+// Arrays and objects nested deeper than this are refused, so code that walks a
+// parsed document recursively cannot run out of stack.
+inline constexpr int max_depth = 64;
+
+// Strict UTF-8 JSON, at most max_depth levels deep. On failure, `line` and
+// `column` are 1-based.
 parse_result parse(std::string_view text);
 
 // Canonical form: object keys sorted by their UTF-8 bytes, no whitespace,
-// integers as integers, other numbers in their shortest round-trip form,
-// strings with only the escapes JSON requires. Hashes are taken over this.
+// integral numbers below 1e21 written out in full, other numbers in their
+// shortest round-trip form, strings with only the escapes JSON requires.
+// Hashes are taken over this.
 std::string canonical(const rapidjson::Value &value);
 
 // Indented, keys in canonical order, for people.
 std::string pretty(const rapidjson::Value &value);
 
 std::string quote(std::string_view text);
+
+// Characters (code points) in UTF-8 text, as a schema's maxLength counts them.
+std::size_t length(std::string_view text);
 
 // JSON pointer (RFC 6901) helpers for diagnostics.
 std::string pointer(const std::string &base, std::string_view token);

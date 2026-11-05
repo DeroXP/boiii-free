@@ -4,6 +4,7 @@
 #include <deque>
 #include <functional>
 #include <limits>
+#include <tuple>
 
 #include "json.hpp"
 #include "sha256.hpp"
@@ -14,12 +15,7 @@ using rapidjson::Value;
 using catalog_index =
     std::map<std::string, std::vector<const installed_content *>>;
 
-struct constraint {
-  std::string from;
-  const dependency_ref *dep = nullptr;
-};
-
-using constraint_map = std::map<std::string, std::vector<constraint>>;
+constexpr std::size_t search_step_budget = 100000;
 
 catalog_index index_catalog(const std::vector<installed_content> &catalog) {
   catalog_index index;
@@ -34,34 +30,309 @@ catalog_index index_catalog(const std::vector<installed_content> &catalog) {
       if (a->info.ver.build != b->info.ver.build) {
         return a->info.ver.build > b->info.ver.build;
       }
-      return a->content_hash < b->content_hash;
+      // The same version installed twice: still one fixed order (6.8).
+      return std::tie(a->content_hash, a->folder, a->path) <
+             std::tie(b->content_hash, b->folder, b->path);
     });
   }
   return index;
 }
 
-const installed_content *
-choose(const catalog_index &index, const std::string &id,
-       const std::vector<constraint> &constraints,
-       const std::map<std::string, std::string> &pins) {
-  const auto found = index.find(id);
-  if (found == index.end()) {
-    return nullptr;
-  }
-  const auto pin = pins.find(id);
-  for (const auto *candidate : found->second) {
-    if (pin != pins.end() && candidate->info.ver.to_string() != pin->second) {
+// Step 1 of 5.3: a version for every id the plan needs. A depth-first search
+// over the installed versions, highest first. Ids are decided dependents
+// first, so a mod's version is picked before its dependencies'. When the
+// versions chosen so far leave an id nothing that fits, it goes back to the
+// latest choice that caused that (conflict-directed backjumping), so mods that
+// have nothing to do with the clash are not tried in every combination.
+class version_search {
+public:
+  using choice = const installed_content *; // nullptr: left out
+
+  version_search(const catalog_index &index, const plan_request &request,
+                 const std::vector<std::string> &roots);
+
+  // A choice for every id that meets every range. False when there is none,
+  // or when the step budget ran out first (exhausted()).
+  bool solve();
+  // The same order without backtracking: what fits is kept and the rest left
+  // out, so the problems can be named.
+  void settle();
+
+  bool exhausted() const { return exhausted_; }
+  std::map<std::string, choice> selected() const;
+
+private:
+  enum class need { none, optional, required };
+  // Positions in order_ of choices that rule something out.
+  using culprits = std::set<std::size_t>;
+
+  need need_of(const std::string &id, culprits *requirers) const;
+  bool fits(const std::string &id, choice candidate, bool look_ahead,
+            culprits *why) const;
+  std::vector<choice> options(const std::string &id, culprits &why) const;
+
+  std::set<std::string> roots_;
+  std::map<std::string, std::vector<choice>> candidates_; // pins applied
+  std::vector<std::string> order_;
+  std::map<std::string, std::size_t> position_; // in order_
+  std::set<std::string> revisit_; // an id decided later may depend on these
+  std::map<std::string, choice> decided_;
+  bool exhausted_ = false;
+};
+
+version_search::version_search(const catalog_index &index,
+                               const plan_request &request,
+                               const std::vector<std::string> &roots)
+    : roots_(roots.begin(), roots.end()) {
+  // Every id any version of a root can reach, in the order first met.
+  std::vector<std::string> found;
+  std::deque<std::string> queue(roots.begin(), roots.end());
+  while (!queue.empty()) {
+    const std::string id = queue.front();
+    queue.pop_front();
+    if (candidates_.contains(id)) {
       continue;
     }
-    const bool fits =
-        std::ranges::all_of(constraints, [&](const constraint &c) {
-          return c.dep->range.satisfied_by(candidate->info.ver);
-        });
-    if (fits) {
-      return candidate;
+    auto &list = candidates_[id];
+    if (const auto it = index.find(id); it != index.end()) {
+      const auto pin = request.pins.find(id);
+      for (const auto *candidate : it->second) {
+        if (pin == request.pins.end() ||
+            candidate->info.ver.to_string() == pin->second) {
+          list.push_back(candidate);
+        }
+      }
+    }
+    found.push_back(id);
+    for (const auto *candidate : list) {
+      for (const auto &dep : candidate->info.dependencies) {
+        queue.push_back(dep.id);
+      }
     }
   }
-  return nullptr;
+
+  // Dependents first; ties and cycles go by the order found.
+  std::map<std::string, std::set<std::string>> uses;
+  std::map<std::string, std::size_t> users;
+  for (const auto &id : found) {
+    for (const auto *candidate : candidates_[id]) {
+      for (const auto &dep : candidate->info.dependencies) {
+        if (dep.id != id && uses[id].insert(dep.id).second) {
+          ++users[dep.id];
+        }
+      }
+    }
+  }
+  std::set<std::string> placed;
+  while (order_.size() < found.size()) {
+    auto next = std::ranges::find_if(found, [&](const std::string &id) {
+      return !placed.contains(id) && users[id] == 0;
+    });
+    if (next == found.end()) {
+      next = std::ranges::find_if(
+          found, [&](const std::string &id) { return !placed.contains(id); });
+    }
+    placed.insert(*next);
+    position_[*next] = order_.size();
+    order_.push_back(*next);
+    for (const auto &dep : uses[*next]) {
+      --users[dep];
+    }
+  }
+  for (std::size_t i = 0; i < order_.size(); ++i) {
+    for (std::size_t j = i + 1; j < order_.size(); ++j) {
+      if (uses[order_[j]].contains(order_[i])) {
+        revisit_.insert(order_[i]);
+        break;
+      }
+    }
+  }
+}
+
+// Roots are always required; other ids when a chosen mod needs them, and
+// `requirers` gets those mods.
+version_search::need version_search::need_of(const std::string &id,
+                                             culprits *requirers) const {
+  if (roots_.contains(id)) {
+    return need::required;
+  }
+  need out = need::none;
+  for (const auto &[other, chosen] : decided_) {
+    if (chosen == nullptr) {
+      continue;
+    }
+    for (const auto &dep : chosen->info.dependencies) {
+      if (dep.id != id) {
+        continue;
+      }
+      if (!dep.optional) {
+        out = need::required;
+        if (requirers != nullptr) {
+          requirers->insert(position_.at(other));
+        }
+      } else if (out == need::none) {
+        out = need::optional;
+      }
+    }
+  }
+  return out;
+}
+
+// Whether `candidate` agrees with every choice made so far, both ways. With
+// look_ahead, also whether each dependency it needs still has a version left.
+// When it does not fit, `why` gets the choices that rule it out (none when
+// no other choice would help).
+bool version_search::fits(const std::string &id, choice candidate,
+                          bool look_ahead, culprits *why) const {
+  culprits blame;
+  const auto against = [&](const std::string &target, choice version,
+                           culprits &out) {
+    for (const auto &[other, chosen] : decided_) {
+      if (chosen == nullptr) {
+        continue;
+      }
+      for (const auto &dep : chosen->info.dependencies) {
+        if (dep.id == target && !dep.range.satisfied_by(version->info.ver)) {
+          out.insert(position_.at(other));
+        }
+      }
+    }
+  };
+  against(id, candidate, blame);
+  bool ok = blame.empty();
+  for (const auto &dep : candidate->info.dependencies) {
+    if (const auto it = decided_.find(dep.id); it != decided_.end()) {
+      if (it->second == nullptr
+              ? !dep.optional
+              : !dep.range.satisfied_by(it->second->info.ver)) {
+        ok = false;
+        blame.insert(position_.at(dep.id));
+      }
+    } else if (look_ahead && !dep.optional) {
+      culprits blocking;
+      const bool open =
+          std::ranges::any_of(candidates_.at(dep.id), [&](choice next) {
+            if (!dep.range.satisfied_by(next->info.ver)) {
+              return false;
+            }
+            culprits against_next;
+            against(dep.id, next, against_next);
+            blocking.insert(against_next.begin(), against_next.end());
+            return against_next.empty();
+          });
+      if (!open) {
+        ok = false;
+        blame.insert(blocking.begin(), blocking.end());
+      }
+    }
+  }
+  if (!ok && why != nullptr) {
+    why->insert(blame.begin(), blame.end());
+  }
+  return ok;
+}
+
+std::vector<version_search::choice>
+version_search::options(const std::string &id, culprits &why) const {
+  culprits requirers;
+  const need wanted = need_of(id, &requirers);
+  std::vector<choice> out;
+  if (wanted == need::none) {
+    out.push_back(nullptr); // nothing chosen so far asks for it
+    if (!revisit_.contains(id)) {
+      return out;
+    }
+  }
+  for (const choice candidate : candidates_.at(id)) {
+    if (fits(id, candidate, true, &why)) {
+      out.push_back(candidate);
+    }
+  }
+  if (wanted == need::optional) {
+    out.push_back(nullptr);
+  } else if (wanted == need::required) {
+    why.insert(requirers.begin(), requirers.end()); // they rule out "left out"
+  }
+  return out;
+}
+
+bool version_search::solve() {
+  decided_.clear();
+  exhausted_ = false;
+  if (order_.empty()) {
+    return true;
+  }
+  // One level per id in order_: its options, the next one to try, and the
+  // earlier choices that have ruled options out.
+  struct level {
+    std::vector<choice> options;
+    std::size_t next = 0;
+    culprits why;
+  };
+  std::vector<level> levels;
+  levels.reserve(order_.size());
+  const auto enter = [&] {
+    level fresh;
+    fresh.options = options(order_[levels.size()], fresh.why);
+    levels.push_back(std::move(fresh));
+  };
+  enter();
+  std::size_t steps = 0;
+  while (true) {
+    const std::size_t at = levels.size() - 1;
+    if (level &top = levels.back(); top.next < top.options.size()) {
+      if (++steps > search_step_budget) {
+        exhausted_ = true;
+        return false;
+      }
+      decided_[order_[at]] = top.options[top.next++];
+      if (levels.size() == order_.size()) {
+        return true;
+      }
+      enter();
+      continue;
+    }
+    // Nothing left here: go back to the latest choice that caused it.
+    culprits why = std::move(levels.back().why);
+    decided_.erase(order_[at]);
+    levels.pop_back();
+    if (why.empty()) {
+      return false; // no earlier choice could change this
+    }
+    const std::size_t back_to = *why.rbegin();
+    while (levels.size() > back_to + 1) {
+      decided_.erase(order_[levels.size() - 1]);
+      levels.pop_back();
+    }
+    why.erase(back_to);
+    levels.back().why.insert(why.begin(), why.end());
+  }
+}
+
+void version_search::settle() {
+  decided_.clear();
+  for (const auto &id : order_) {
+    choice pick = nullptr;
+    if (need_of(id, nullptr) != need::none) {
+      for (const choice candidate : candidates_.at(id)) {
+        if (fits(id, candidate, false, nullptr)) {
+          pick = candidate;
+          break;
+        }
+      }
+    }
+    decided_[id] = pick;
+  }
+}
+
+std::map<std::string, version_search::choice> version_search::selected() const {
+  std::map<std::string, choice> out;
+  for (const auto &[id, chosen] : decided_) {
+    if (chosen != nullptr) {
+      out[id] = chosen;
+    }
+  }
+  return out;
 }
 
 std::string
@@ -238,6 +509,7 @@ plan_entry make_entry(const installed_content &content, bool requested,
   entry.name = content.info.name;
   entry.ver = content.info.ver;
   entry.folder = content.folder;
+  entry.path = content.path;
   entry.content_hash = content.content_hash;
   entry.requested = requested;
   entry.legacy = content.info.legacy;
@@ -317,70 +589,83 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
   }
   const catalog_index index = index_catalog(catalog);
 
-  // 1. Expand dependencies and pick versions, until the choice is stable.
+  // 1. Expand dependencies and pick versions.
   std::vector<std::string> roots = request.mods;
   if (request.map) {
     roots.push_back(*request.map);
   }
-  std::map<std::string, const installed_content *> selected;
-  constraint_map constraints;
-  bool stable = false;
-  for (int round = 0; round < 16 && !stable; ++round) {
-    constraints.clear();
-    for (const auto &[id, content] : selected) {
+  version_search search(index, request, roots);
+  if (!search.solve()) {
+    search.settle(); // keep what fits, so the problems below can be named
+  }
+  if (search.exhausted()) {
+    diags.error("plan.dependency.too_complex", "",
+                "Trying the installed versions took more than " +
+                    std::to_string(search_step_budget) +
+                    " steps without finding a set that fits; the problems "
+                    "below are from the first versions tried.");
+  }
+  const std::map<std::string, const installed_content *> selected =
+      search.selected();
+
+  // What the chosen mods ask of an id: "Name needs range, ...".
+  struct asks {
+    std::string text;
+    std::string range; // the first range that is not optional
+    bool optional_only = true;
+  };
+  const auto asks_of = [&](const std::string &id) {
+    asks out;
+    for (const auto &[other, content] : selected) {
       for (const auto &dep : content->info.dependencies) {
-        constraints[dep.id].push_back({id, &dep});
-      }
-    }
-    std::map<std::string, const installed_content *> next;
-    std::deque<std::string> queue(roots.begin(), roots.end());
-    std::set<std::string> visited;
-    while (!queue.empty()) {
-      const std::string id = queue.front();
-      queue.pop_front();
-      if (!visited.insert(id).second) {
-        continue;
-      }
-      const installed_content *chosen =
-          choose(index, id, constraints[id], request.pins);
-      if (chosen == nullptr) {
-        continue;
-      }
-      next[id] = chosen;
-      for (const auto &dep : chosen->info.dependencies) {
-        if (dep.optional && !index.contains(dep.id)) {
+        if (dep.id != id) {
           continue;
         }
-        auto &list = constraints[dep.id];
-        if (std::ranges::none_of(list, [&](const constraint &c) {
-              return c.from == id && c.dep == &dep;
-            })) {
-          list.push_back({id, &dep});
+        out.text += (out.text.empty() ? "" : ", ") +
+                    display_name(selected, other) + " needs " + dep.range_text;
+        if (!dep.optional && out.optional_only) {
+          out.range = dep.range_text;
+          out.optional_only = false;
         }
-        queue.push_back(dep.id);
       }
     }
-    stable = next == selected;
-    selected = std::move(next);
-  }
-  if (!stable) {
-    diags.error("plan.dependency.unstable", "",
-                "The dependency versions did not settle; check for ranges "
-                "that exclude each other.");
-  }
+    return out;
+  };
+  // The pinned version, when it is installed and the ranges left it out.
+  const auto pin_left_out =
+      [&](const std::string &id) -> std::optional<std::string> {
+    const auto pin = request.pins.find(id);
+    const auto found = index.find(id);
+    if (pin == request.pins.end() || found == index.end() ||
+        std::ranges::none_of(found->second, [&](const auto *candidate) {
+          return candidate->info.ver.to_string() == pin->second;
+        })) {
+      return std::nullopt;
+    }
+    return pin->second;
+  };
 
   const std::set<std::string> requested_ids(request.mods.begin(),
                                             request.mods.end());
+  const std::set<std::string> root_ids(roots.begin(), roots.end());
+  std::set<std::string> reported;
   for (const auto &id : roots) {
-    if (selected.contains(id)) {
+    if (selected.contains(id) || !reported.insert(id).second) {
       continue;
     }
+    const auto pin = request.pins.find(id);
     if (!index.contains(id)) {
       diags.error("plan.mod.missing", "/mods",
                   "\"" + id + "\" is not installed.");
       out.fixes.push_back({"install", id, ""});
+    } else if (const auto pinned = pin_left_out(id)) {
+      const std::string text = asks_of(id).text;
+      diags.error("plan.mod.version", "/mods",
+                  "Version " + *pinned + " of \"" + id + "\" is pinned, but " +
+                      (text.empty() ? "it does not fit the other mods" : text) +
+                      ".");
+      out.fixes.push_back({"unpin", id, *pinned});
     } else {
-      const auto pin = request.pins.find(id);
       diags.error("plan.mod.version", "/mods",
                   pin != request.pins.end()
                       ? "Version " + pin->second + " of \"" + id +
@@ -391,34 +676,36 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
           {"install", id, pin != request.pins.end() ? pin->second : ""});
     }
   }
-  for (const auto &[id, list] : constraints) {
-    if (selected.contains(id) || requested_ids.contains(id) ||
-        (request.map && *request.map == id)) {
+  std::set<std::string> asked;
+  for (const auto &[id, content] : selected) {
+    for (const auto &dep : content->info.dependencies) {
+      asked.insert(dep.id);
+    }
+  }
+  for (const auto &id : asked) {
+    if (selected.contains(id) || root_ids.contains(id)) {
       continue;
     }
-    std::string ranges;
-    bool all_optional = true;
-    for (const auto &c : list) {
-      if (!ranges.empty()) {
-        ranges += ", ";
-      }
-      ranges += display_name(selected, c.from) + " needs " + c.dep->range_text;
-      all_optional = all_optional && c.dep->optional;
-    }
-    if (all_optional) {
+    const asks need = asks_of(id);
+    if (need.optional_only) {
       diags.warning("plan.dependency.optional_skipped", "",
                     "Optional dependency \"" + id + "\" is left out (" +
-                        ranges + ").");
+                        need.text + ").");
     } else if (!index.contains(id)) {
       diags.error("plan.dependency.missing", "",
-                  "\"" + id + "\" is needed but not installed (" + ranges +
+                  "\"" + id + "\" is needed but not installed (" + need.text +
                       ").");
-      out.fixes.push_back({"install", id, list.front().dep->range_text});
+      out.fixes.push_back({"install", id, need.range});
+    } else if (const auto pinned = pin_left_out(id)) {
+      diags.error("plan.dependency.unsatisfiable", "",
+                  "Version " + *pinned + " of \"" + id + "\" is pinned, but " +
+                      need.text + ".");
+      out.fixes.push_back({"unpin", id, *pinned});
     } else {
       diags.error("plan.dependency.unsatisfiable", "",
-                  "No installed version of \"" + id + "\" fits (" + ranges +
+                  "No installed version of \"" + id + "\" fits (" + need.text +
                       ").");
-      out.fixes.push_back({"update", id, list.front().dep->range_text});
+      out.fixes.push_back({"update", id, need.range});
     }
   }
 
@@ -496,6 +783,13 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
                       request.xerces_version.to_string() + ".");
       out.fixes.push_back(
           {"update_xerces", id, content->info.requires_xerces_text});
+    }
+    if (!content->valid_manifest) {
+      diags.error("plan.mod.invalid_manifest", "",
+                  display_name(selected, id) +
+                      "'s xerces.mod.json has errors; xerces_cli mod "
+                      "validate lists them.");
+      out.fixes.push_back({"remove", id, ""});
     }
   }
 
