@@ -4,14 +4,18 @@
 
 namespace xerces_core {
 hook_plan plan_hooks(const plan &resolved,
-                     const std::map<std::string, manifest> &manifests) {
+                     const std::map<std::string, manifest> &manifests,
+                     bool map_first) {
   hook_plan out;
   std::vector<std::string> order;
-  if (resolved.map) {
+  if (resolved.map && map_first) {
     order.push_back(resolved.map->id); // maps rank first for scripts (6.3)
   }
   for (const auto &entry : resolved.stack) {
     order.push_back(entry.id);
+  }
+  if (resolved.map && !map_first) {
+    order.push_back(resolved.map->id);
   }
 
   std::map<std::string, hook_chain> chains;
@@ -64,9 +68,10 @@ std::vector<std::string> simulate_chain(const hook_chain &chain) {
   steps.push_back(replacement == chain.links.end()
                       ? "original"
                       : "replace:" + replacement->mod);
-  for (const auto &link : chain.links) {
-    if (link.kind == hook_kind::after) {
-      steps.push_back("after:" + link.mod);
+  // After hooks run as the links return: innermost first, the highest last.
+  for (auto link = chain.links.rbegin(); link != chain.links.rend(); ++link) {
+    if (link->kind == hook_kind::after) {
+      steps.push_back("after:" + link->mod);
     }
   }
   return steps;

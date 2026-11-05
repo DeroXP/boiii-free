@@ -144,7 +144,8 @@ TEST_CASE("conflicts: replacing the game's copy follows the same rules") {
   REQUIRE(find(report, "scripts/zm/_zm.gsc") != nullptr);
   CHECK(find(report, "scripts/zm/_zm.gsc")->outcome ==
         asset_outcome::override_blocked);
-  CHECK_EQ(find(report, "scripts/zm/_zm.gsc")->winner, "stock");
+  CHECK_EQ(find(report, "scripts/zm/_zm.gsc")->winner,
+           std::string(stock_owner));
 
   inputs.manifests["m.mod"].legacy = true; // legacy overrides are implicit
   report = check_conflicts(inputs);

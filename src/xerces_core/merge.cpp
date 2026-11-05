@@ -221,13 +221,37 @@ text_merge merge_lines(const std::optional<std::string> &base,
   return out;
 }
 
-void merge_json_value(
-    rapidjson::Value &result, const rapidjson::Value *base,
-    const rapidjson::Value &source, const std::string &path,
-    const std::string &mod,
-    std::map<std::string, std::pair<std::string, std::string>> &owners,
-    merge_stats &stats, std::size_t &added, std::size_t &changed,
-    json::allocator &alloc) {
+using json_owners = std::map<std::string, std::pair<std::string, std::string>>;
+
+// Another mod that set this path, a value it sits inside, or a value inside
+// it: a lower mod that added {"x":1} owns "/new/x" too.
+const json_owners::value_type *other_owner(const json_owners &owners,
+                                           const std::string &path,
+                                           const std::string &mod) {
+  for (std::string at = path;; at.erase(at.rfind('/'))) {
+    if (const auto it = owners.find(at);
+        it != owners.end() && it->second.first != mod) {
+      return &*it;
+    }
+    if (at.empty()) {
+      break;
+    }
+  }
+  const std::string inside = path + "/";
+  for (auto it = owners.lower_bound(inside);
+       it != owners.end() && it->first.starts_with(inside); ++it) {
+    if (it->second.first != mod) {
+      return &*it;
+    }
+  }
+  return nullptr;
+}
+
+void merge_json_value(rapidjson::Value &result, const rapidjson::Value *base,
+                      const rapidjson::Value &source, const std::string &path,
+                      const std::string &mod, json_owners &owners,
+                      merge_stats &stats, std::size_t &added,
+                      std::size_t &changed, json::allocator &alloc) {
   if (source.IsObject() && result.IsObject()) {
     for (auto it = source.MemberBegin(); it != source.MemberEnd(); ++it) {
       const std::string key(it->name.GetString(), it->name.GetStringLength());
@@ -252,17 +276,22 @@ void merge_json_value(
     return; // unchanged from the base
   }
   const std::string previous = json::canonical(result);
-  if (const auto prior = owners.find(path); prior != owners.end() &&
-                                            prior->second.first != mod &&
-                                            previous != value) {
+  if (previous == value) {
+    return;
+  }
+  if (const auto *prior = other_owner(owners, path, mod)) {
     stats.conflicts.push_back(
         {path, 0, mod, prior->second.first, value, previous});
   }
-  if (previous != value) {
-    result.CopyFrom(source, alloc);
-    owners[path] = {mod, value};
-    ++changed;
+  result.CopyFrom(source, alloc);
+  // This mod now owns everything under the path.
+  const std::string inside = path + "/";
+  for (auto it = owners.lower_bound(inside);
+       it != owners.end() && it->first.starts_with(inside);) {
+    it = owners.erase(it);
   }
+  owners[path] = {mod, value};
+  ++changed;
 }
 } // namespace
 
@@ -320,7 +349,9 @@ std::optional<table> parse_csv(std::string_view text, std::string *error) {
       continue;
     }
     if (c == '\r' || c == '\n') {
-      end_row();
+      if (!row.empty() || field_started) { // a blank line is not a row
+        end_row();
+      }
       i += (c == '\r' && i + 1 < text.size() && text[i + 1] == '\n') ? 2 : 1;
       continue;
     }
@@ -343,6 +374,10 @@ std::optional<table> parse_csv(std::string_view text, std::string *error) {
 std::string write_csv(const table &value) {
   std::string out;
   for (const auto &row : value.rows) {
+    if (row.size() == 1 && row[0].empty()) {
+      out += "\"\"\n"; // quoted, or it would read back as a blank line
+      continue;
+    }
     for (std::size_t i = 0; i < row.size(); ++i) {
       if (i > 0) {
         out.push_back(',');
@@ -518,7 +553,7 @@ text_merge merge_json_documents(const std::optional<std::string> &base,
   }
   result.CopyFrom(parsed_start.document, result.GetAllocator());
   base_doc.CopyFrom(parsed_start.document, base_doc.GetAllocator());
-  std::map<std::string, std::pair<std::string, std::string>> owners;
+  json_owners owners;
   for (std::size_t i = base ? 0 : 1; i < sources.size(); ++i) {
     const auto parsed = json::parse(sources[i].text);
     if (!parsed.ok) {

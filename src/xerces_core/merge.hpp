@@ -11,6 +11,7 @@
 
 namespace xerces_core {
 // A stringtable as BO3 CSV files hold it: comma separated, optional quotes.
+// Blank lines are not rows.
 struct table {
   std::vector<std::vector<std::string>> rows;
 };

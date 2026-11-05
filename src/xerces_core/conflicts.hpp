@@ -29,6 +29,10 @@ asset_strategy strategy_for(std::string_view type, std::string_view name);
 // Types whose content is hashed exactly, so identical copies are not conflicts.
 bool has_exact_hash(std::string_view type);
 
+// The winner when the game's own copy is used. Not a valid mod id, so no mod
+// can be taken for the game.
+inline constexpr std::string_view stock_owner = "@stock";
+
 struct asset_record {
   std::string type;
   std::string name; // normalized (normalize_asset_name)
@@ -58,12 +62,14 @@ enum class asset_outcome {
 
 const char *to_string(asset_outcome value);
 
+// One entry per asset; an asset with a blocked override can get a second
+// entry for what happens among the owners from the winner down.
 struct asset_ownership {
   std::string type;
   std::string name;
   asset_strategy strategy = asset_strategy::exclusive;
-  std::vector<std::string> owners; // effective order, highest first
-  std::string winner;
+  std::vector<std::string> owners;  // effective order, highest first
+  std::string winner;               // stock_owner: the game's copy
   std::vector<std::string> blocked; // owners whose override was blocked
   asset_outcome outcome = asset_outcome::added;
   int rule = 1;

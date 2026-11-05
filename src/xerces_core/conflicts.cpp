@@ -161,7 +161,7 @@ conflict_report check_conflicts(const conflict_inputs &inputs) {
   }
 
   const auto display = [&](const std::string &id) -> std::string {
-    if (id == "stock") {
+    if (id == stock_owner) {
       return "the game";
     }
     if (const auto it = inputs.manifests.find(id);
@@ -195,10 +195,10 @@ conflict_report check_conflicts(const conflict_inputs &inputs) {
                                "assets are not in this report.");
     }
   }
-  std::set<asset_key> stock_keys;
+  std::map<asset_key, const asset_record *> stock_records;
   if (inputs.stock) {
     for (const auto &record : inputs.stock->records) {
-      stock_keys.insert({record.type, record.name});
+      stock_records[{record.type, record.name}] = &record;
     }
   }
 
@@ -208,7 +208,10 @@ conflict_report check_conflicts(const conflict_inputs &inputs) {
     entry.type = type;
     entry.name = name;
     entry.strategy = strategy_for(type, name);
-    entry.in_stock = stock_keys.contains(key);
+    const auto stock_it = stock_records.find(key);
+    const asset_record *stock_record =
+        stock_it == stock_records.end() ? nullptr : stock_it->second;
+    entry.in_stock = stock_record != nullptr;
     for (const auto &id : order) {
       if (by_owner[id].contains(key)) {
         entry.owners.push_back(id);
@@ -255,12 +258,28 @@ conflict_report check_conflicts(const conflict_inputs &inputs) {
       continue;
     }
 
+    const auto hash_of = [&](const std::string &owner) -> const std::string & {
+      return by_owner[owner][key]->content_hash;
+    };
+    // Rule 5 before rule 3: a copy identical to everything below it, the
+    // other owners' and the game's, replaces nothing.
+    const auto replaces_something = [&](std::size_t i) {
+      if (!has_exact_hash(type)) {
+        return i + 1 < entry.owners.size() || entry.in_stock;
+      }
+      const std::string &hash = hash_of(entry.owners[i]);
+      for (std::size_t j = i + 1; j < entry.owners.size(); ++j) {
+        if (hash_of(entry.owners[j]) != hash) {
+          return true;
+        }
+      }
+      return entry.in_stock && stock_record->content_hash != hash;
+    };
+
     // Exclusive: find the first owner allowed to win.
     for (std::size_t i = 0; i < entry.owners.size(); ++i) {
       const std::string &owner = entry.owners[i];
-      const bool replaces_something =
-          i + 1 < entry.owners.size() || entry.in_stock;
-      if (!replaces_something) {
+      if (!replaces_something(i)) {
         entry.winner = owner;
         break;
       }
@@ -278,23 +297,28 @@ conflict_report check_conflicts(const conflict_inputs &inputs) {
       break;
     }
     if (entry.winner.empty()) {
-      entry.winner = "stock";
+      entry.winner = std::string(stock_owner);
     }
     const std::string winner = display(entry.winner);
 
     if (!entry.blocked.empty()) {
-      entry.outcome = asset_outcome::override_blocked;
-      entry.rule = 3;
+      asset_ownership blocked_entry = entry;
+      blocked_entry.outcome = asset_outcome::override_blocked;
+      blocked_entry.rule = 3;
       for (const auto &blocked : entry.blocked) {
-        entry.message += display(blocked) + " replaces " + name +
-                         " without declaring an override, so " + winner +
-                         "'s copy is used. ";
+        blocked_entry.message += display(blocked) + " replaces " + name +
+                                 " without declaring an override, so " +
+                                 winner + "'s copy is used. ";
         report.fixes.push_back({"allow_override", blocked, type + ":" + name});
       }
-      entry.message += "Allow it in the pack to change that.";
+      blocked_entry.message += "Allow it in the pack to change that.";
       ++report.blocked;
-      report.entries.push_back(std::move(entry));
-      continue;
+      report.entries.push_back(std::move(blocked_entry));
+      if (entry.winner == stock_owner) {
+        continue;
+      }
+      // The winner and the owners below it still get their own entry.
+      entry.blocked.clear();
     }
     if (map_moved && entry.winner == *map_id) {
       entry.outcome = asset_outcome::map_priority;
@@ -306,12 +330,23 @@ conflict_report check_conflicts(const conflict_inputs &inputs) {
       continue;
     }
 
-    const auto winner_it = std::ranges::find(entry.owners, entry.winner);
-    std::vector<std::string> lower_owners(winner_it == entry.owners.end()
-                                              ? entry.owners.begin()
-                                              : std::next(winner_it),
-                                          entry.owners.end());
+    const std::vector<std::string> lower_owners(
+        std::next(std::ranges::find(entry.owners, entry.winner)),
+        entry.owners.end());
     if (lower_owners.empty()) {
+      if (!entry.in_stock) {
+        continue; // the owners above it were blocked; nothing else to say
+      }
+      if (has_exact_hash(type) &&
+          stock_record->content_hash == hash_of(entry.winner)) {
+        entry.outcome = asset_outcome::identical;
+        entry.rule = 5;
+        entry.message =
+            winner + " ships an unchanged copy of the game's " + name + ".";
+        ++report.identical;
+        report.entries.push_back(std::move(entry));
+        continue;
+      }
       // One owner replacing the game's copy.
       entry.outcome = asset_outcome::override_allowed;
       entry.rule = 3;
@@ -335,12 +370,10 @@ conflict_report check_conflicts(const conflict_inputs &inputs) {
       continue;
     }
 
-    const std::string &winner_hash =
-        entry.winner == "stock" ? std::string{}
-                                : by_owner[entry.winner][key]->content_hash;
+    const std::string &winner_hash = hash_of(entry.winner);
     std::vector<std::string> differing;
     for (const auto &owner : lower_owners) {
-      if (by_owner[owner][key]->content_hash != winner_hash) {
+      if (hash_of(owner) != winner_hash) {
         differing.push_back(owner);
       }
     }

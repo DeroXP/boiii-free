@@ -27,8 +27,11 @@ struct hook_plan {
   diagnostics diags;
 };
 
+// `map_first` is rule 6 (the pack's map_scripts_first): false ranks the map's
+// hooks below every mod's.
 hook_plan plan_hooks(const plan &resolved,
-                     const std::map<std::string, manifest> &manifests);
+                     const std::map<std::string, manifest> &manifests,
+                     bool map_first = true);
 
 // What a call to the target does, step by step: "before:<mod>",
 // "enter:<mod>" for wraps, "replace:<mod>" or "original", "after:<mod>".
