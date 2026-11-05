@@ -281,6 +281,7 @@ private:
          "jump-language", "jump-privacy", "jump-updates"},
         {"game-change", "game-detect", "game-open"},
         {"player-name"},
+        {"game-files"},
         {"display-game", "display-windowed", "display-borderless"},
         {"fps-field", "fps-slider"},
         {"fov-field", "fov-slider"},

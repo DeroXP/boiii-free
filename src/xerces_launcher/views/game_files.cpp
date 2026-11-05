@@ -104,13 +104,22 @@ public:
     }
   }
 
-  // Enter in either field adds the bind.
+  // Enter in either field adds the bind. Esc (B on a controller) goes back
+  // to Settings, which opened this screen: it has no tab of its own for the
+  // app's Esc to go to. In a field, Esc first only leaves the field (the app
+  // does that).
   bool key(Rml::Input::KeyIdentifier key, int) override {
     Rml::Element *focus = owner_->context()->GetFocusElement();
-    if (focus && (key == Rml::Input::KI_RETURN ||
-                  key == Rml::Input::KI_NUMPADENTER) &&
-        (focus->GetId() == "bind-key" || focus->GetId() == "bind-command")) {
+    const bool in_field = focus && (focus->GetId() == "bind-key" ||
+                                    focus->GetId() == "bind-command");
+    if (in_field &&
+        (key == Rml::Input::KI_RETURN || key == Rml::Input::KI_NUMPADENTER)) {
       act("add");
+      return true;
+    }
+    if (key == Rml::Input::KI_ESCAPE && !in_field && focus && doc &&
+        focus->GetOwnerDocument() == doc) {
+      act("settings");
       return true;
     }
     return false;
