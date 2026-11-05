@@ -22,10 +22,11 @@
 namespace xerces_core {
 namespace fs = std::filesystem;
 
-plan_request profile_request(const launcher_config &config,
-                             const std::string &mode,
-                             const std::optional<std::uint64_t> &steam_build,
-                             const std::string &launcher_settings) {
+plan_request
+profile_request(const launcher_config &config, const std::string &mode,
+                const std::optional<std::uint64_t> &steam_build,
+                const std::string &launcher_settings,
+                const std::optional<zone_memory_build> &zone_memory) {
   plan_request request;
   request.mode = mode;
   request.launcher_settings = launcher_settings;
@@ -40,6 +41,9 @@ plan_request profile_request(const launcher_config &config,
   if (steam_build) {
     request.game_build = std::to_string(*steam_build);
   }
+  if (zone_memory) {
+    request.zone_budget = zone_budget_for(*zone_memory, mode);
+  }
   request.xerces_version =
       version::parse(xerces_version_text).value_or(version{});
   request.protocol_version = protocol_version;
@@ -50,9 +54,10 @@ plan resolve_profile(const std::vector<installed_content> &catalog,
                      const launcher_config &config, const std::string &mode,
                      const std::optional<std::uint64_t> &steam_build,
                      const std::vector<std::string> *mods,
-                     const std::string &launcher_settings) {
-  plan_request request =
-      profile_request(config, mode, steam_build, launcher_settings);
+                     const std::string &launcher_settings,
+                     const std::optional<zone_memory_build> &zone_memory) {
+  plan_request request = profile_request(config, mode, steam_build,
+                                         launcher_settings, zone_memory);
   if (mods) {
     request.mods = *mods;
   }
@@ -71,9 +76,9 @@ launch_outcome preview_launch(const launch_inputs &in) {
     options.dvars.emplace_back(name, value);
   }
   if (in.modded && !in.mods_off) {
-    out.resolved =
-        resolve_profile(*in.catalog, config, in.mode, in.game->steam_build,
-                        in.mods, read_launcher_settings(*in.game));
+    out.resolved = resolve_profile(
+        *in.catalog, config, in.mode, in.game->steam_build, in.mods,
+        read_launcher_settings(*in.game), in.game->zone_memory);
     out.plan_id = out.resolved->plan_id;
     if (!out.resolved->ok()) {
       out.diags.append(out.resolved->diags);

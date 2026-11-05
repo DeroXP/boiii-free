@@ -293,6 +293,30 @@ each one does not cover is said under its item.
       (upstream's parser never counts that line). Then load a custom map that
       ships a pool file, with the map in the plan: its pools should print the
       same lines when the map loads, as `asset_pools.stack` says.
+- [x] (2026-11-05, offline, dry launches only) Zone memory (DESIGN.md 5.3
+      step 5) on the real Workshop folder, read-only, with a copy home
+      (`C:\Users\Ginld\XercesHome-zonemem`, the warm hash cache of
+      `XercesHome-maps`; the cache was byte-identical afterwards, so nothing was
+      hashed) and the Zombies profile, through
+      `xerces_cli plan apply --dry-launch`: DS4C alone takes 451.3 MiB (1300.3
+      of 2048 MiB before a map) and the stack 1944930083 + 3171632315,3656779213
+      451.4 MiB (1300.4); both name exactly BACKROOMZ (2461.4 MiB, 413.4 over)
+      and Super Mario 64 (2112.8 MiB, 64.8 over). 1944930083 + 3656779213 takes
+      0.1 MiB (849.1) and every map fits. DS4C with Super Mario 64 as the
+      profile's map is refused (`plan.memory.over`, exit 2).
+      `xerces_cli plan resolve --mods-dir <Workshop> --game-build 0x6531394`
+      prints the same numbers; in Multiplayer it says the check is skipped. A
+      scripted capture of Mods (`check-screens.ps1 -Views mods`) shows the
+      warning as the plan note.
+- [ ] Zone memory in the game: with DS4C, Xerces warns about Super Mario 64 and
+      BACKROOMZ; load one of them anyway (`tools\dev\session\map-check.ps1`,
+      after asking) and confirm the game still exits while the map loads, then
+      load the largest map it calls fine (RETURN TO HOGWARTZ, 1909.8 MiB with
+      DS4C) and Super Mario 64 without DS4C (about 1661 MiB), and confirm both
+      load. Re-measure the Zombies baseline in another game language and on
+      another stock map's lobby, and measure Multiplayer and Campaign (a dump
+      before a custom map's main zone loads), then fill
+      `compat/zone_memory.json`.
 - [x] (2026-11-05, 3a7266c6) `xerces_cli plan apply` (no `--dry-launch`), from
       the build with `boiii.exe` next to `xerces_cli.exe`, with the D3 stack as
       the Zombies profile and `XERCES_HOME` outside AppData: the game started

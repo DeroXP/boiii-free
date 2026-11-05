@@ -628,6 +628,52 @@ All in `xerces_core`:
    zones of the plan's mode and map, against the engine's 64-slot table (63
    usable). Also check script and pool limits (500 linked script objects per VM;
    pool sizes from `assetlimits.txt`). Over budget is an error with the numbers.
+
+   Zone memory sits next to the slot budget (built 2026-11-05, headless). When a
+   custom map loads, the engine takes blocks 5 and 6 of every loaded zone from
+   one fixed pool, the DB stack's main pool (2048 MiB on the September 2026
+   build). A zone that does not fit reaches the engine's out-of-memory handler
+   (`0x1422881B0` in the 2026-11-04 dump image; strings `Out of Memory`,
+   `WIN_OUT_OF_MEM_TITLE`), which shows a message box only when a dvar asks for
+   it and otherwise calls `exit(-1)` on the DB thread: the CRT runs static
+   destructors while the main thread still draws loading frames, and the main
+   thread crashes on a destroyed object. Players see the game vanish while the
+   map loads. With DS4C (450.5 MiB of blocks 5 and 6) the pool held about 1299.3
+   MiB before a custom map's main zone, so the stock Zombies baseline is about
+   849 MiB; Super Mario 64 (813 MiB) and BACKROOMZ (1160 MiB) then overflow it,
+   and the other six installed maps fit.
+
+   - `xerces_core/fastfile_header` reads the ten block sizes from a `.ff`'s
+     first 0x100 bytes (`TAff0000`, version 0x251, u64 sizes at +0xA8). The
+     catalog reads the header of every zone file
+     (`installed_content::zone_headers`); it never hashes anything for this.
+   - `compat/zone_memory.json` holds, per build (named by `steam_build` and
+     `checksum` as in `compat/builds.json`), `db_main_pool_mib` and a per-mode
+     `baseline_mib`. Only Zombies is measured; Multiplayer and Campaign are
+     `null`, and their plans get the info `plan.memory.unknown` instead of a
+     check. Detection matches the installed game to an entry
+     (`game_state::zone_memory`) and the profile's request carries the mode's
+     budget; `xerces_cli plan resolve` takes `--game-build` and `--zone-memory`.
+   - The planner adds, per stacked mod, the zones that load in the mode
+     (core_mod, the mode's tier, their `_patch`, the largest language copy of
+     each), and every zone of the plan's map. Each installed custom map of the
+     mode (its zone names say which mode: `zm_backrooms`) is checked: baseline +
+     stack + map against the pool. The plan JSON's `zone_memory` (`checked`,
+     `pool_mib`, `baseline_mib`, `stack_mib`, `map_mib`, `total_mib`,
+     `maps_over` with `id`, `name`, `need_mib`, `over_by_mib` and
+     `over_without_mods`, most over first, and `unread` for ids with a header
+     Xerces could not read) is outside `plan_id` and `content_id`, as
+     `asset_pools` is: it depends on every installed map.
+   - A plan whose own map does not fit is an error (`plan.memory.over`, so
+     Launch refuses it); the other maps that do not fit are a warning
+     (`plan.memory.maps_over`) that names them, the MiB over and the mod that
+     takes the most, and says the game closes while loading them.
+     `xerces_cli plan` and `plan apply` print a zone memory line; Mods shows the
+     note as a plan note, in words the screen translates.
+   - Not known yet: whether the baseline moves with the player's language, the
+     stock zones a map pulls in, or settings; the in-game check is in
+     `docs/TESTING.md` (Loader and manifest).
+
 6. Hash: `plan_id` = SHA-256 over canonical JSON of everything in the plan,
    including client-only settings. `content_id` = SHA-256 over what must match
    between host and joiner: mod ids, versions, content hashes, order, map,
@@ -980,12 +1026,13 @@ server loads the map's zones first), and `asset_priority_stub` keeps the map's
 copy of any script a mod also ships (`xerces_core::decide_script_override`,
 logged once per script and map as `loader.script.map_first`). With DS4C alone,
 SANCTUM OBITUS and PROJECT: KABOOM then load and play (15 and 36 decisions, all
-perk scripts); the two load crashes are a separate problem (below). The dvar
-`xerces_map_scripts_first` (on by default; the pack decision `map_scripts_first`
-is not yet carried into the plan file) turns it off for the next map load. Stock
-maps are never affected, entry scripts keep the stack's own rule, and HUD Lua
-(`ui/` rawfiles) still follows the engine until it is decided (DS4C's HUD
-replaces RUST V5's and errors without stopping the match).
+perk scripts); the two load crashes are a separate problem: the maps do not fit
+in the zone memory DS4C leaves (5.3 step 5), which the planner now warns about.
+The dvar `xerces_map_scripts_first` (on by default; the pack decision
+`map_scripts_first` is not yet carried into the plan file) turns it off for the
+next map load. Stock maps are never affected, entry scripts keep the stack's own
+rule, and HUD Lua (`ui/` rawfiles) still follows the engine until it is decided
+(DS4C's HUD replaces RUST V5's and errors without stopping the match).
 
 A script's server and client halves (.gsc, .csc) must come from the same source,
 so map-first never splits them (`xerces_core::decide_map_half`): the map takes a

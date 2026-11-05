@@ -36,6 +36,17 @@ game_state detect_game_state(const std::optional<std::string> &saved_dir,
           steamapps / ("appmanifest_" + std::string(bo3_app_id) + ".acf"))) {
     next.steam_build = appmanifest_buildid(*acf);
   }
+  // The zone memory figures (5.3 step 5): by Steam's build number now, by
+  // the exe's checksum once the pre-flight has read it.
+  const zone_memory_table zone_table = parse_zone_memory(
+      read_text_file(compat_dir / "zone_memory.json").value_or(""));
+  const auto match_zone_memory = [&](std::optional<std::uint32_t> checksum) {
+    if (const zone_memory_build *build =
+            find_zone_memory_build(zone_table, next.steam_build, checksum)) {
+      next.zone_memory = *build;
+    }
+  };
+  match_zone_memory(std::nullopt);
   if (!preflight) {
     return next;
   }
@@ -51,6 +62,9 @@ game_state detect_game_state(const std::optional<std::string> &saved_dir,
       next.error = "compat/builds.json is missing or broken.";
     }
     next.preflight = preflight_check(*next.exe, next.steam_build, registry);
+    if (!next.zone_memory) {
+      match_zone_memory(next.exe->checksum);
+    }
   }
   return next;
 }

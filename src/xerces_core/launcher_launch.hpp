@@ -25,20 +25,24 @@
 namespace xerces_core {
 // The plan request for a mode's profile: its mods, map, pins, allowed
 // conflicts and settings, the planner's saved positions, the Steam build
-// (game_build), this Xerces version, and the game's launcher_settings.json
-// text (read_launcher_settings) for the asset pool report.
-plan_request profile_request(const launcher_config &config,
-                             const std::string &mode,
-                             const std::optional<std::uint64_t> &steam_build,
-                             const std::string &launcher_settings = {});
+// (game_build), this Xerces version, the game's launcher_settings.json text
+// (read_launcher_settings) for the asset pool report, and the mode's zone
+// memory budget from the build's figures (game_state::zone_memory).
+plan_request
+profile_request(const launcher_config &config, const std::string &mode,
+                const std::optional<std::uint64_t> &steam_build,
+                const std::string &launcher_settings = {},
+                const std::optional<zone_memory_build> &zone_memory = {});
 
-// The profile resolved against the catalog; mods, when given, replace the
-// profile's list (a culprit-search test launch).
+// The profile resolved against the catalog, every installed map included
+// (the zone memory check names the maps that do not fit); mods, when given,
+// replace the profile's list (a culprit-search test launch).
 plan resolve_profile(const std::vector<installed_content> &catalog,
                      const launcher_config &config, const std::string &mode,
                      const std::optional<std::uint64_t> &steam_build,
                      const std::vector<std::string> *mods = nullptr,
-                     const std::string &launcher_settings = {});
+                     const std::string &launcher_settings = {},
+                     const std::optional<zone_memory_build> &zone_memory = {});
 
 // What stopped a launch, so callers can tell the player's plan from the PC.
 enum class launch_refusal {

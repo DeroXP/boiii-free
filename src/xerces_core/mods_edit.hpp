@@ -113,7 +113,8 @@ struct mods_note {
 
 struct mods_notes {
   std::map<std::string, std::vector<mods_note>> by_id;
-  // Plan-wide notes that name no mod (the zone budget, ...).
+  // Plan-wide notes: those that name no mod (the zone budget, ...), and
+  // zone memory (plan.memory.*), which is about the whole stack.
   std::vector<mods_note> general;
   bool has_error(const std::string &id) const;
   bool has_warning(const std::string &id) const;

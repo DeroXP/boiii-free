@@ -7,8 +7,10 @@
 #include <iterator>
 #include <sstream>
 
+#include "fastfile_header.hpp"
 #include "manifest.hpp"
 #include "sha256.hpp"
+#include "zone_memory.hpp"
 
 namespace xerces_core {
 namespace {
@@ -380,6 +382,27 @@ void read_pool_file(installed_content &content,
   }
   content.pool_limits = parse_pool_limits(std::move(*text));
 }
+
+// The header of every zone file, for the zone memory check (5.3 step 5):
+// 0x100 bytes each, never the zone, never hashed. A header that cannot be
+// read is kept as unknown; the plan names the mod or map when one of its
+// zones that load is.
+void read_zone_headers(installed_content &content,
+                       const std::filesystem::path &folder) {
+  const std::filesystem::path base =
+      content.path.empty() ? folder : content.path;
+  for (const std::string &file : content.files) {
+    if (!is_zone_file(file)) {
+      continue;
+    }
+    const std::u8string name(reinterpret_cast<const char8_t *>(file.data()),
+                             file.size());
+    const auto header =
+        read_fastfile_header(base / std::filesystem::path(name));
+    content.zone_headers[file] =
+        header ? std::optional(header->db_main_pool_bytes()) : std::nullopt;
+  }
+}
 } // namespace
 
 installed_content load_mod_folder(const std::filesystem::path &folder,
@@ -389,6 +412,7 @@ installed_content load_mod_folder(const std::filesystem::path &folder,
   installed_content content = load_content(folder, taken_ids, diags, cache);
   // Mods and maps alike: the client reads a map's file when the map loads.
   read_pool_file(content, folder, layout, diags);
+  read_zone_headers(content, folder);
   return content;
 }
 

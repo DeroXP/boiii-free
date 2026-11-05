@@ -66,6 +66,8 @@ std::string utf8(const fs::path &path);
 void print_diagnostics(const xerces_core::diagnostics &diags);
 std::string diagnostics_json(const xerces_core::diagnostics &diags);
 void print_plan(const xerces_core::plan &p, bool explain);
+// The plan's zone memory line, and the installed maps that do not fit.
+void print_zone_memory(const xerces_core::plan &p);
 // A share code (XRC1.) or a pack file.
 xerces_core::pack_result load_pack(const std::string &source);
 

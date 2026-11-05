@@ -13,6 +13,7 @@
 #include "diagnostics.hpp"
 #include "manifest.hpp"
 #include "semver.hpp"
+#include "zone_memory.hpp"
 
 namespace xerces_core {
 // One installed mod or map version, as the catalog sees it.
@@ -32,6 +33,10 @@ struct installed_content {
   std::string pool_file;
   std::vector<pool_limit> pool_limits;
   bool pool_file_unread = false;
+  // Every zone file (is_zone_file) and what its header asks of the DB
+  // stack's main pool, read by the catalog (0x100 bytes a file, never
+  // hashed), for the zone memory check (5.3 step 5). In no hash.
+  zone_header_map zone_headers;
 };
 
 struct plan_request {
@@ -51,6 +56,10 @@ struct plan_request {
   // <game>\boiii_players\user\launcher_settings.json, for the pool report's
   // defaults; empty when there is none (the client's defaults). In no hash.
   std::string launcher_settings;
+  // The zone memory figures of the game build and mode
+  // (compat/zone_memory.json, find_zone_budget); nullopt when there are
+  // none, and then whether maps fit is not checked. In no hash.
+  std::optional<zone_budget> zone_budget;
 };
 
 struct plan_entry {
@@ -63,6 +72,9 @@ struct plan_entry {
   bool requested = false; // false: pulled in as a dependency
   bool legacy = false;
   std::size_t zones = 0;
+  // What its zones take from the DB stack's main pool in the plan's mode
+  // (zone_memory_of); in no hash.
+  std::uint64_t zone_memory = 0;
   std::map<std::string, std::string> settings; // key -> canonical JSON
 };
 
@@ -98,6 +110,38 @@ struct pool_report {
   std::vector<std::string> installed_unread;
 };
 
+// A custom map that does not fit in the zone memory a plan leaves.
+struct zone_memory_map {
+  std::string id;
+  std::string name;
+  double need_mib = 0;    // baseline + the plan's mods + the map
+  double over_by_mib = 0; // need_mib - the pool
+  // It does not fit even with no mods, so removing mods does not help.
+  bool over_without_mods = false;
+};
+
+// Zone memory (5.3 step 5): when a custom map loads, blocks 5 and 6 of every
+// loaded zone come from one fixed pool, the DB stack's main pool, and a map
+// that does not fit makes the engine exit the game while it loads. What the
+// plan's mods and map take, and which installed maps of the mode would not
+// fit with these mods. Not part of plan_id or content_id: it depends on
+// every installed map and on compat/zone_memory.json, not only on the plan.
+struct zone_memory_report {
+  // From the request; nullopt: no figures for the build and mode, so maps
+  // are not checked and maps_over is empty.
+  std::optional<zone_budget> budget;
+  std::uint64_t stack_bytes = 0;          // every mod in the stack
+  std::optional<std::uint64_t> map_bytes; // the plan's map, when it has one
+  // Every installed custom map of the mode (the plan's own included) whose
+  // zones do not fit on top of the baseline and the stack: the most over
+  // first, then by id. Each map's highest installed version, or the one the
+  // plan picked for its map.
+  std::vector<zone_memory_map> maps_over;
+  // Ids in the stack, then the map, with a zone whose header was not read
+  // (zone_memory_use::unread): what those zones take is missing above.
+  std::vector<std::string> unread;
+};
+
 // Something the player can do to fix a problem (9.4).
 struct fix_action {
   // install, update, unpin, remove, reorder, allow_conflict (detail: the
@@ -125,6 +169,7 @@ struct plan {
   std::string content_id;
   std::string canonical; // the JSON plan_id is taken over
   pool_report pools;
+  zone_memory_report zone_memory;
 
   bool ok() const { return !diags.has_errors(); }
   std::string fs_game() const;

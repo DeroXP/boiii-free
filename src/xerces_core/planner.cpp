@@ -1,6 +1,7 @@
 #include "planner.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <deque>
 #include <functional>
 #include <limits>
@@ -519,8 +520,153 @@ plan_entry make_entry(const installed_content &content, bool requested,
   entry.requested = requested;
   entry.legacy = content.info.legacy;
   entry.zones = count_zone_files(content.files, request.mode);
+  entry.zone_memory = zone_memory_of(content.zone_headers, request.mode,
+                                     content.info.kind != content_kind::map)
+                          .bytes;
   entry.settings = resolve_settings(content, request, diags, fixes);
   return entry;
+}
+
+// A custom map the mode loads: its manifest allows the mode and, when its
+// zones' names say which mode it is for ("zm_backrooms"), it is this one.
+// Workshop maps have no manifest, so their names decide.
+bool map_for_mode(const installed_content &content, const std::string &mode) {
+  if (content.info.kind != content_kind::map ||
+      !content.info.supports_mode(mode)) {
+    return false;
+  }
+  const std::set<std::string> modes = map_zone_modes(content.zone_headers);
+  return modes.empty() || modes.contains(mode);
+}
+
+// Whole MiB for players, never "0 MiB over".
+std::string whole_mib(double mib) {
+  return std::to_string(static_cast<long long>(std::ceil(mib))) + " MiB";
+}
+
+// "A", "A and B", "A, B and C".
+std::string join_and(const std::vector<std::string> &items) {
+  std::string out;
+  for (std::size_t i = 0; i < items.size(); ++i) {
+    if (i > 0) {
+      out += i + 1 == items.size() ? " and " : ", ";
+    }
+    out += items[i];
+  }
+  return out;
+}
+
+// Step 5's second half: zone memory, reported in no hash, with a warning for
+// the installed maps that do not fit with the plan's mods and an error when
+// the plan's own map does not.
+void check_zone_memory(
+    plan &out, const catalog_index &index,
+    const std::map<std::string, const installed_content *> &selected,
+    const plan_request &request) {
+  zone_memory_report &memory = out.zone_memory;
+  diagnostics &diags = out.diags;
+  memory.budget = request.zone_budget;
+  const auto note_unread = [&](const plan_entry &entry, bool mod) {
+    if (const auto it = selected.find(entry.id); it != selected.end()) {
+      if (!zone_memory_of(it->second->zone_headers, request.mode, mod)
+               .unread.empty()) {
+        memory.unread.push_back(entry.id);
+      }
+    }
+  };
+  const plan_entry *biggest = nullptr;
+  for (const auto &entry : out.stack) {
+    memory.stack_bytes += entry.zone_memory;
+    note_unread(entry, true);
+    if (entry.zone_memory > 0 &&
+        (!biggest || entry.zone_memory > biggest->zone_memory)) {
+      biggest = &entry;
+    }
+  }
+  if (out.map) {
+    memory.map_bytes = out.map->zone_memory;
+    note_unread(*out.map, false);
+  }
+  if (!request.zone_budget) {
+    diags.info("plan.memory.unknown", "",
+               "Xerces has no zone memory figures for this game build and "
+               "mode (" +
+                   request.mode +
+                   "), so it cannot tell whether custom maps fit with these "
+                   "mods.");
+    return;
+  }
+  const zone_budget &budget = *request.zone_budget;
+  const double stack_mib = to_mib(memory.stack_bytes);
+  for (const auto &[id, items] : index) {
+    // The plan's map in the version it picked, and checked whatever its
+    // names say: it is the one that loads.
+    const bool own = out.map && out.map->id == id;
+    const installed_content *content =
+        own && selected.contains(id) ? selected.at(id) : items.front();
+    if (!own && !map_for_mode(*content, request.mode)) {
+      continue;
+    }
+    const double map_mib = to_mib(
+        own ? out.map->zone_memory
+            : zone_memory_of(content->zone_headers, request.mode, false).bytes);
+    const double need = budget.baseline_mib + stack_mib + map_mib;
+    if (need <= budget.pool_mib) {
+      continue;
+    }
+    memory.maps_over.push_back(
+        {id, content->info.name.empty() ? id : content->info.name, need,
+         need - budget.pool_mib,
+         budget.baseline_mib + map_mib > budget.pool_mib});
+  }
+  std::ranges::sort(memory.maps_over, [](const auto &a, const auto &b) {
+    if (a.over_by_mib != b.over_by_mib) {
+      return a.over_by_mib > b.over_by_mib;
+    }
+    return a.id < b.id;
+  });
+
+  const std::string most =
+      biggest ? " The mod that takes the most is " + biggest->name + " (" +
+                    whole_mib(to_mib(biggest->zone_memory)) + ")."
+              : "";
+  std::vector<std::string> others;
+  for (const auto &map : memory.maps_over) {
+    const std::string over = whole_mib(map.over_by_mib) + " over";
+    if (out.map && map.id == out.map->id) {
+      diags.error("plan.memory.over", "/map",
+                  map.name + " does not fit in the game's memory" +
+                      (map.over_without_mods
+                           ? ", even with no mods (" + over +
+                                 "): the game would close while loading it. "
+                                 "Pick another map."
+                           : " with these mods (" + over +
+                                 "): the game would close while loading it. "
+                                 "Remove a mod, or pick another map." +
+                                 most));
+      continue;
+    }
+    others.push_back(map.name + " (" + over +
+                     (map.over_without_mods ? ", even with no mods" : "") +
+                     ")");
+  }
+  if (others.size() == 1) {
+    diags.warning("plan.memory.maps_over", "",
+                  "The map " + others.front() +
+                      " does not fit in the game's memory with these mods: "
+                      "the game closes while loading it. Remove a mod to "
+                      "play it, or play another map." +
+                      most);
+  } else if (!others.empty()) {
+    diags.warning("plan.memory.maps_over", "",
+                  std::to_string(others.size()) +
+                      " maps do not fit in the game's memory with these "
+                      "mods: " +
+                      join_and(others) +
+                      ". The game closes while loading them. Remove a mod "
+                      "to play them, or play another map." +
+                      most);
+  }
 }
 
 Value settings_value(const std::map<std::string, std::string> &settings,
@@ -1001,6 +1147,9 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
                    "yet, so the 63-slot budget is not checked.");
   }
 
+  // Zone memory: reported, in no hash.
+  check_zone_memory(out, index, selected, request);
+
   // Asset pools (5.4 step 4): reported, in no hash. The client reads the pool
   // files of the main mod and the stacked ones when the mod loads
   // (UGC_LoadModByPublisherId_Impl), and the map's when the map loads
@@ -1123,6 +1272,8 @@ std::string plan_to_json(const plan &value, bool pretty) {
     json::set(object, "requested", entry.requested, alloc);
     json::set(object, "legacy", entry.legacy, alloc);
     json::set(object, "zones", static_cast<std::int64_t>(entry.zones), alloc);
+    json::set(object, "zone_mib", Value(round_mib(to_mib(entry.zone_memory))),
+              alloc);
     Value settings(rapidjson::kObjectType);
     for (const auto &[key, raw] : entry.settings) {
       auto parsed = json::parse(raw);
@@ -1186,6 +1337,49 @@ std::string plan_to_json(const plan &value, bool pretty) {
   json::set(pools, "installed_unread",
             json::string_array(value.pools.installed_unread, alloc), alloc);
   json::set(doc, "asset_pools", std::move(pools), alloc);
+
+  // Not in plan_id or content_id either: it depends on every installed map
+  // and on compat/zone_memory.json. MiB to one decimal.
+  const zone_memory_report &memory = value.zone_memory;
+  const auto mib_value = [](std::optional<double> mib) {
+    return mib ? Value(round_mib(*mib)) : Value();
+  };
+  const double stack_mib = to_mib(memory.stack_bytes);
+  const std::optional<double> map_mib =
+      memory.map_bytes ? std::optional(to_mib(*memory.map_bytes))
+                       : std::nullopt;
+  Value zone_memory(rapidjson::kObjectType);
+  json::set(zone_memory, "checked", memory.budget.has_value(), alloc);
+  json::set(zone_memory, "pool_mib",
+            mib_value(memory.budget ? std::optional(memory.budget->pool_mib)
+                                    : std::nullopt),
+            alloc);
+  json::set(zone_memory, "baseline_mib",
+            mib_value(memory.budget ? std::optional(memory.budget->baseline_mib)
+                                    : std::nullopt),
+            alloc);
+  json::set(zone_memory, "stack_mib", mib_value(stack_mib), alloc);
+  json::set(zone_memory, "map_mib", mib_value(map_mib), alloc);
+  json::set(zone_memory, "total_mib",
+            mib_value(memory.budget
+                          ? std::optional(memory.budget->baseline_mib +
+                                          stack_mib + map_mib.value_or(0))
+                          : std::nullopt),
+            alloc);
+  Value maps_over(rapidjson::kArrayType);
+  for (const auto &map : memory.maps_over) {
+    Value object(rapidjson::kObjectType);
+    json::set(object, "id", map.id, alloc);
+    json::set(object, "name", map.name, alloc);
+    json::set(object, "need_mib", mib_value(map.need_mib), alloc);
+    json::set(object, "over_by_mib", mib_value(map.over_by_mib), alloc);
+    json::set(object, "over_without_mods", map.over_without_mods, alloc);
+    maps_over.PushBack(std::move(object), alloc);
+  }
+  json::set(zone_memory, "maps_over", std::move(maps_over), alloc);
+  json::set(zone_memory, "unread", json::string_array(memory.unread, alloc),
+            alloc);
+  json::set(doc, "zone_memory", std::move(zone_memory), alloc);
 
   Value explanations(rapidjson::kArrayType);
   for (const auto &item : value.explanations) {

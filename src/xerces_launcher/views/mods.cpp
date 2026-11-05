@@ -534,6 +534,70 @@ private:
     return text;
   }
 
+  // The zone memory notes (DESIGN.md 5.3 step 5) in words the screen can
+  // translate, from the plan's numbers; the planner's own text is English,
+  // for xerces_cli and the logs.
+  std::string memory_note(const xc::mods_note &note) const {
+    const auto whole_mib = [](double mib) {
+      return std::to_string(static_cast<long long>(std::ceil(mib))) + " MiB";
+    };
+    const auto over = [&](const xc::zone_memory_map &map) {
+      return xc::mods_plain_name(map.name) + " (" + whole_mib(map.over_by_mib) +
+             " " + owner_->tr("over") +
+             (map.over_without_mods ? ", " + owner_->tr("even with no mods")
+                                    : std::string()) +
+             ")";
+    };
+    const xc::plan_entry *biggest = nullptr;
+    for (const auto &entry : plan_.stack) {
+      if (entry.zone_memory > 0 &&
+          (!biggest || entry.zone_memory > biggest->zone_memory)) {
+        biggest = &entry;
+      }
+    }
+    const std::string most =
+        biggest
+            ? " " + owner_->tr("The mod that takes the most:") + " " +
+                  (biggest->name.empty() ? biggest->id
+                                         : xc::mods_plain_name(biggest->name)) +
+                  " (" + whole_mib(xc::to_mib(biggest->zone_memory)) + ")."
+            : std::string();
+    const auto &maps = plan_.zone_memory.maps_over;
+    if (note.code == "plan.memory.over" && plan_.map) {
+      for (const auto &map : maps) {
+        if (map.id != plan_.map->id) {
+          continue;
+        }
+        if (map.over_without_mods) {
+          return owner_->tr("The map does not fit in the game's memory, even "
+                            "with no mods: the game would close while "
+                            "loading it. Pick another map.") +
+                 " " + over(map) + ".";
+        }
+        return owner_->tr("The map does not fit in the game's memory with "
+                          "these mods: the game would close while loading "
+                          "it. Remove a mod, or pick another map.") +
+               " " + over(map) + "." + most;
+      }
+    }
+    if (note.code == "plan.memory.maps_over") {
+      std::string list;
+      for (const auto &map : maps) {
+        if (plan_.map && map.id == plan_.map->id) {
+          continue;
+        }
+        list += (list.empty() ? "" : ", ") + over(map);
+      }
+      if (!list.empty()) {
+        return owner_->tr("Some maps do not fit in the game's memory with "
+                          "these mods: the game closes while loading them. "
+                          "Remove a mod to play them, or play another map.") +
+               " " + list + "." + most;
+      }
+    }
+    return tidy(note.message);
+  }
+
   std::string name_of(const std::string &id) const {
     const xc::installed_content *item = chosen(id);
     return item ? plain(item->info, id) : id;
@@ -748,8 +812,10 @@ private:
     general_.clear();
     for (const auto &note : notes_.general) {
       if (note.level != xc::severity::info) {
-        general_.push_back(
-            {tidy(note.message), note.level == xc::severity::error});
+        general_.push_back({note.code.starts_with("plan.memory.")
+                                ? memory_note(note)
+                                : tidy(note.message),
+                            note.level == xc::severity::error});
       }
     }
     for (const auto &item : catalog.diags.items()) {
