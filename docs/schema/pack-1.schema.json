@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DeroXP/boiii-free/blob/xerces-main/docs/schema/pack-1.schema.json",
+  "title": "Xerces pack (<name>.xerces-pack.json), schema 1",
+  "description": "A named, version-pinned plan template (docs/DESIGN.md 8.1). Packs reference mods and never contain them: no files, no local paths, no user names. Stored as canonical JSON; offline share codes are \"XRC1.\" + base64url of the zstd-compressed canonical JSON.",
+  "type": "object",
+  "required": ["schema", "id", "name", "mode", "mods", "order"],
+  "properties": {
+    "schema": { "const": 1 },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "mode": { "enum": ["zm", "mp", "cp"] },
+    "map": {
+      "type": "object",
+      "required": ["id", "content_hash"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "content_hash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "mods": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "version", "content_hash"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "version": {
+            "type": "string",
+            "description": "Exact SemVer version."
+          },
+          "source": {
+            "type": "object",
+            "properties": { "workshop": { "type": "integer", "minimum": 1 } }
+          },
+          "content_hash": { "$ref": "#/$defs/hash" },
+          "settings": { "type": "object" }
+        }
+      }
+    },
+    "order": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/id" },
+      "description": "Every mod id exactly once, highest priority first."
+    },
+    "requires": {
+      "type": "object",
+      "properties": {
+        "xerces": { "type": "string" },
+        "game_build": { "type": "string", "pattern": "^0x[0-9a-fA-F]+$" }
+      }
+    },
+    "decisions": {
+      "type": "object",
+      "description": "Choices made once and remembered (docs/DESIGN.md 6.3).",
+      "properties": {
+        "allow_conflicts": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/id" },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "allow_overrides": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "keep_order": {
+          "type": "array",
+          "items": { "type": "string", "description": "\"type:name\"" }
+        },
+        "map_scripts_first": { "type": "boolean", "default": true }
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$" },
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  }
+}

@@ -1,0 +1,40 @@
+name: Xerces core
+
+on: [push, pull_request]
+
+jobs:
+  core:
+    name: Core tests
+    runs-on: windows-2025
+    steps:
+      - name: Check out files
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: false
+
+      - name: Setup LLVM
+        uses: ZhongRuoyu/setup-llvm@v0
+        with:
+          llvm-version: 23
+
+      - name: Install premake5
+        uses: Jarod42/install-premake5@v7
+        with:
+          msdev: vs2026
+          ref: v5.0.0
+
+      - name: Generate project files
+        run: premake5 ninja
+
+      - name: Build the core, tests and CLI
+        run: ninja -C build bin/x64/Release/xerces_tests.exe bin/x64/Release/xerces_cli.exe
+
+      - name: Unit tests
+        run: build/bin/x64/Release/xerces_tests.exe
+
+      - name: CLI smoke test
+        run: >-
+          build/bin/x64/Release/xerces_cli.exe conflicts check
+          --mods-dir tests/fixtures/mods --mod fixture.alpha --mod fixture.beta
+          --stock tests/fixtures/stock

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DeroXP/boiii-free/blob/xerces-main/docs/schema/log-1.schema.json",
+  "title": "Xerces log line, schema 1",
+  "description": "One JSON object per line in logs\\<date>-<time>-<role>-<session>.jsonl (docs/DESIGN.md 15.1). Profile paths are written as %USERPROFILE%; network addresses never appear.",
+  "type": "object",
+  "required": ["ts", "level", "role", "component", "event", "msg", "session"],
+  "properties": {
+    "ts": {
+      "type": "string",
+      "description": "UTC, millisecond precision: 2026-11-04T21:58:55.392Z"
+    },
+    "level": { "enum": ["trace", "debug", "info", "warn", "error"] },
+    "role": { "enum": ["launcher", "game", "server", "cli"] },
+    "component": { "type": "string" },
+    "event": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)+$",
+      "description": "Stable dotted name such as loader.zone.loaded."
+    },
+    "msg": { "type": "string" },
+    "plan_id": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "session": { "type": "string" },
+    "data": { "type": "object" }
+  },
+  "additionalProperties": false
+}

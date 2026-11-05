@@ -11,33 +11,54 @@ III. Self-hosted and offline play only.
 
 ## Current state (2026-11-04)
 
-- Design phase for the client. The upstream base is not chosen yet (DESIGN.md
-  D1; recommended: `upstream/beta` plus the two `upstream/mod-stack` commits).
+- M0 is under way on `xerces-main`: upstream `beta` f8f7b735 plus `mod-stack`'s
+  two commits (conflicts resolved in 6bc02cb4), with the design docs and
+  `backend/` merged in (D1). Upstream's updater and the `-beta` self-download
+  are disabled (62e28935). The client has not compiled yet: this PC's Build
+  Tools lack the ATL headers (see Build), so the merge is unverified by a
+  compiler.
+- The headless core builds and its tests pass: manifests, the planner, merges,
+  conflict rules, hook chains, packs and share codes, logs, and the CLI's
+  offline commands (`src/xerces_core`, `src/xerces_tests`, `src/xerces_cli`).
 - Branches: `main` is the user's fork (upstream 2026-04-09 plus a 17-commit
-  multi-mod proof of concept); `xerces-design` is upstream `main` 5aa7fac plus
-  the design docs and `backend/`. Remotes: `origin` = DeroXP/boiii-free,
-  `upstream` = Ezz-lol/boiii-free (branches `main`, `beta`, `mod-stack`).
+  multi-mod proof of concept); `xerces-main` is the Xerces line; `xerces-design`
+  (upstream `main` 5aa7fac plus docs and `backend/`) is what Railway deploys, so
+  every push to it redeploys production: ask first. Remotes: `origin` =
+  DeroXP/boiii-free, `upstream` = Ezz-lol/boiii-free (branches `main`, `beta`,
+  `mod-stack`).
 - A tag named `main` exists, so always write `refs/heads/main` for the fork
   branch.
-- `backend/` is backend slice M5a (FastAPI + Postgres), which the user deploys
-  on Railway. The game client does not talk to it yet.
+- `backend/` is backend slice M5a (FastAPI + Postgres), live on Railway. The
+  game client does not talk to it yet.
+- Work on `xerces-main` happens in the worktree
+  `C:\Users\Ginld\XercesDev\xerces-main`, outside OneDrive, so build output and
+  `node_modules` are not synced. The OneDrive checkout stays on `xerces-design`.
 
-## Build (client)
+## Build
 
-Requirements: Visual Studio 2022 or its Build Tools with the C++ workload
-**and** the "C++ Clang tools for Windows" plus "MSBuild support for LLVM
-(clang-cl) toolset" components. Upstream `main` builds only with clang-cl; MSVC
-`v143` rejects its flags. Upstream `beta` moved to premake 5.0.0 + ninja + LLVM,
-so these steps change once the base is chosen.
+Requirements: LLVM 23 (clang and LLD; upstream's CI uses 23.x), Ninja, premake
+5.0.0, and Visual Studio 2022 Build Tools with the C++ workload and the "C++ ATL
+for latest v143 build tools (x86 & x64)" component, because the client's
+precompiled header includes `atlbase.h`. The VS clang-cl components are not
+needed. On this PC LLVM 23.1.5, Ninja 1.13.2 and premake 5.0.0 are portable in
+`C:\Users\Ginld\XercesDev\tools`; ATL is not installed yet.
 
 ```
-git submodule update --init --recursive
-premake5 vs2022
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe" build\boiii.sln -m -p:Configuration=Release -p:Platform=x64
+tools\build.ps1 -Tests -ToolsDir C:\Users\Ginld\XercesDev\tools
+tools\build.ps1 -Client -ToolsDir C:\Users\Ginld\XercesDev\tools
 ```
 
-Do not use `build.bat` in automation (it ends with `pause`). Output:
-`build\bin\x64\Release\`.
+`-Tests` builds the core, runs the unit tests and a CLI smoke test; `-Client`
+also builds `boiii.exe` (needs ATL). By hand: `premake5 ninja`, then
+`ninja -C build <target>` (`bin/x64/Release/xerces_tests.exe`, or `Release_x64`
+for everything). Do not use `build.bat` in automation (it ends with `pause`).
+Running premake5 in a folder with a `premake5.lua`, even `--version`, writes
+`build\version.txt` and `build\src\version.hpp` there.
+
+Headless code must not include `std_include.hpp` or `game/` headers (DESIGN.md
+3.2). Formatting: `npx yarn@1.22.22 install --frozen-lockfile` once, then
+`yarn run check` for prettier; plain `yarn check` is Yarn 1's dependency check,
+which is all upstream's CI step runs.
 
 ## Backend
 
@@ -99,9 +120,11 @@ the `pgserver` wheel in a throwaway venv.
   the whole client until upstream ships new tables.
 - MinHook allows one detour per address and upstream's `detour::create` throws
   on a second; shared targets go through the Xerces hook bus (DESIGN.md 3.4).
-- `upstream/mod-stack` implements additive multi-mod loading
-  (`docs/mod-stack.md` on that branch). The proof of concept's "queue-add"
-  function is most likely a script-string routine. Do not call it.
+- Additive multi-mod loading is `src/client/component/mod_stack.cpp`
+  (`docs/mod-stack.md`), taken from `upstream/mod-stack`; Xerces maintains it
+  from here (DESIGN.md 3.6). Its join prompt names missing mods instead of
+  downloading them. The proof of concept's "queue-add" function is most likely a
+  script-string routine. Do not call it.
 - Process tweaks (priority, timer resolution) and early console prints crashed
   the game during startup in earlier tests; apply them only after the main menu.
 - On this PC, files that processes started from the Claude app write under
