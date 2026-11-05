@@ -701,6 +701,20 @@ All in `xerces_core`:
      `plan.memory.maps_unread` names the maps in `maps_unread` as not checked.
      `xerces_cli plan` and `plan apply` print a zone memory line; Mods shows the
      notes as plan notes, in words the screen translates.
+   - The larger zone memory (5.4) moves the pool, not the baseline. When the
+     settings pass `-xerces-db-pool`, the profile's request is checked against
+     4096 MiB (`zone_budget::larger_pool`; the notes then say "the larger zone
+     memory"); safe mode and the culprit search's tests launch without it, so
+     their plans are checked against the stock pool. Without it, a map over
+     the stock pool that fits 4096 MiB with the plan's mods is marked
+     `fits_larger_pool` and the notes add "Turn on Larger zone memory
+     (experimental) in Settings" (never when a counted zone's header was not
+     read). Only a build whose pool is the stock 2048 MiB the client raises
+     gets that figure (`larger_pool_mib`, 0 otherwise). The plan JSON carries
+     `larger_pool`, `larger_pool_mib` and each map's `fits_larger_pool`;
+     `xerces_cli plan resolve --db-pool` checks against the larger pool. If the
+     client's `db_pool` signatures miss, the game keeps the stock pool and a
+     map past it ends in the out-of-memory report (5.6), not a silent exit.
    - Not known yet: whether the baseline moves with the player's language, the
      stock zones a map pulls in, or settings; the in-game check is in
      `docs/TESTING.md` (Loader and manifest).

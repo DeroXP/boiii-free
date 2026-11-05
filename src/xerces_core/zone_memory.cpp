@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cmath>
 
+#include "db_pool.hpp"
 #include "json.hpp"
 #include "manifest.hpp"
 #include "zone_names.hpp"
@@ -242,17 +243,29 @@ find_zone_memory_build(const zone_memory_table &table,
 }
 
 std::optional<zone_budget> zone_budget_for(const zone_memory_build &build,
-                                           std::string_view mode) {
+                                           std::string_view mode,
+                                           bool larger_pool) {
   const auto it = build.baseline_mib.find(std::string(mode));
   if (it == build.baseline_mib.end() || !(build.db_main_pool_mib > 0)) {
     return std::nullopt;
   }
-  return zone_budget{build.db_main_pool_mib, it->second};
+  zone_budget budget{build.db_main_pool_mib, it->second};
+  // The client raises the DB main pool only when the engine creates it at
+  // exactly the stock size (db_pool::pool_size).
+  if (build.db_main_pool_mib == to_mib(db_pool::stock_pool_size)) {
+    budget.larger_pool_mib = to_mib(db_pool::raised_pool_size);
+    if (larger_pool) {
+      budget.pool_mib = budget.larger_pool_mib;
+      budget.larger_pool = true;
+    }
+  }
+  return budget;
 }
 
 std::optional<zone_budget> find_zone_budget(const zone_memory_table &table,
                                             std::string_view game_build,
-                                            std::string_view mode) {
+                                            std::string_view mode,
+                                            bool larger_pool) {
   const zone_memory_build *build =
       game_build.starts_with("0x")
           ? find_zone_memory_build(table, std::nullopt, hex32(game_build))
@@ -260,7 +273,7 @@ std::optional<zone_budget> find_zone_budget(const zone_memory_table &table,
   if (build == nullptr) {
     return std::nullopt;
   }
-  return zone_budget_for(*build, mode);
+  return zone_budget_for(*build, mode, larger_pool);
 }
 
 bool is_zone_file(std::string_view relative) {

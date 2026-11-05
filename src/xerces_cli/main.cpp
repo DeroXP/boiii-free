@@ -49,9 +49,9 @@ namespace fs = std::filesystem;
 namespace xerces_cli {
 namespace {
 const std::set<std::string> flag_names = {
-    "--json",        "--code",       "--help",  "-h",     "--version",
-    "--api-version", "--map-last",   "--up",    "--down", "--vanilla",
-    "--mods-off",    "--dry-launch", "--follow"};
+    "--json",        "--code",       "--help",   "-h",       "--version",
+    "--api-version", "--map-last",   "--up",     "--down",   "--vanilla",
+    "--mods-off",    "--dry-launch", "--follow", "--db-pool"};
 } // namespace
 
 arguments parse_arguments(int argc, char **argv) {
@@ -175,6 +175,8 @@ Work without the game:
                [--zone-memory <file>]              zone memory figures for
                                                    --game-build (default
                                                    compat/zone_memory.json)
+               [--db-pool]                         check against the larger
+                                                   zone memory (-xerces-db-pool)
   plan explain  (same options)                     why the order is what it is
   conflicts check --mods-dir <dir> (--mod <id>... | --pack <file|code>)
                   [--stock <dir>] [--map-last] [--game-build <0x...>]
@@ -269,8 +271,9 @@ Exit codes: 0 ok, 1 error, 2 validation or conflict failures,
 
 // The zone memory budget (DESIGN.md 5.3 step 5) of a game build (an exe
 // checksum or Steam's build number) and mode, from --zone-memory, else the
-// repository's compat/zone_memory.json when there is one. nullopt when there
-// is no file or no figures for the build and mode.
+// repository's compat/zone_memory.json when there is one; with --db-pool, the
+// larger zone memory's (5.4). nullopt when there is no file or no figures for
+// the build and mode.
 std::optional<zone_budget> zone_budget_from(const arguments &args,
                                             const std::string &game_build,
                                             const std::string &mode) {
@@ -289,7 +292,7 @@ std::optional<zone_budget> zone_budget_from(const arguments &args,
     std::cerr << to_string(item.level) << ": " << utf8(zone_path) << ": "
               << item.message << " [" << item.path << "]\n";
   }
-  return find_zone_budget(table, game_build, mode);
+  return find_zone_budget(table, game_build, mode, args.has("--db-pool"));
 }
 
 plan_request request_from(const arguments &args) {
@@ -591,6 +594,7 @@ void print_zone_memory(const plan &p) {
                          (memory.map_bytes ? to_mib(*memory.map_bytes) : 0.0);
     std::cout << "  zone memory: " << mib_text(total) << " of "
               << mib_text(budget.pool_mib) << " MiB "
+              << (budget.larger_pool ? "(larger zone memory) " : "")
               << (memory.map_bytes ? "with the map" : "before a map")
               << " (game " << mib_text(budget.baseline_mib) << ", mods "
               << mib_text(stack)
@@ -617,7 +621,11 @@ void print_zone_memory(const plan &p) {
       std::cout << "    " << map.name << " (" << map.id << "): needs "
                 << mib_text(map.need_mib) << " MiB, "
                 << mib_text(map.over_by_mib) << " over"
-                << (map.over_without_mods ? ", even with no mods" : "") << "\n";
+                << (map.over_without_mods ? ", even with no mods" : "")
+                << (map.fits_larger_pool ? "; fits the larger zone memory ("
+                                           "-xerces-db-pool)"
+                                         : "")
+                << "\n";
     }
     for (const auto &map : memory.maps_unread) {
       std::cout << "    " << map.name << " (" << map.id

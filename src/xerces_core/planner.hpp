@@ -118,6 +118,9 @@ struct zone_memory_map {
   double over_by_mib = 0; // need_mib - the pool
   // It does not fit even with no mods, so removing mods does not help.
   bool over_without_mods = false;
+  // The launch does not have the larger zone memory, and with it this map
+  // would fit with these mods (zone_budget::larger_pool_mib).
+  bool fits_larger_pool = false;
 };
 
 // An installed custom map whose fit is unknown: a zone's header was not read.

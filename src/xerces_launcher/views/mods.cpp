@@ -561,16 +561,47 @@ private:
                   " (" + whole_mib(xc::to_mib(biggest->zone_memory)) + ")."
             : std::string();
     const auto &maps = plan_.zone_memory.maps_over;
+    // The launch has the larger zone memory (DESIGN.md 5.4): what is over is
+    // over that.
+    const bool larger =
+        plan_.zone_memory.budget && plan_.zone_memory.budget->larger_pool;
     if (note.code == "plan.memory.over" && plan_.map) {
       for (const auto &map : maps) {
         if (map.id != plan_.map->id) {
           continue;
+        }
+        if (map.over_without_mods && map.fits_larger_pool) {
+          return owner_->tr("The map does not fit in the game's memory, even "
+                            "with no mods: the game would close while "
+                            "loading it. Turn on Larger zone memory "
+                            "(experimental) in Settings to play it, or pick "
+                            "another map.") +
+                 " " + over(map) + ".";
+        }
+        if (map.over_without_mods && larger) {
+          return owner_->tr("The map does not fit in the larger zone memory, "
+                            "even with no mods: the game would close while "
+                            "loading it. Pick another map.") +
+                 " " + over(map) + ".";
         }
         if (map.over_without_mods) {
           return owner_->tr("The map does not fit in the game's memory, even "
                             "with no mods: the game would close while "
                             "loading it. Pick another map.") +
                  " " + over(map) + ".";
+        }
+        if (map.fits_larger_pool) {
+          return owner_->tr("The map does not fit in the game's memory with "
+                            "these mods: the game would close while loading "
+                            "it. Turn on Larger zone memory (experimental) in "
+                            "Settings, remove a mod, or pick another map.") +
+                 " " + over(map) + "." + most;
+        }
+        if (larger) {
+          return owner_->tr("The map does not fit in the larger zone memory "
+                            "with these mods: the game would close while "
+                            "loading it. Remove a mod, or pick another map.") +
+                 " " + over(map) + "." + most;
         }
         return owner_->tr("The map does not fit in the game's memory with "
                           "these mods: the game would close while loading "
@@ -583,24 +614,47 @@ private:
     const bool too_big = note.code == "plan.memory.maps_too_big";
     if (note.code == "plan.memory.maps_over" || too_big) {
       std::string list;
+      std::string room; // those the larger zone memory makes room for
       for (const auto &map : maps) {
         if ((plan_.map && map.id == plan_.map->id) ||
             map.over_without_mods != too_big) {
           continue;
         }
         list += (list.empty() ? "" : ", ") + over(map);
+        if (map.fits_larger_pool) {
+          room += (room.empty() ? "" : ", ") + xc::mods_plain_name(map.name);
+        }
+      }
+      const std::string larger_note =
+          room.empty() ? std::string()
+                       : " " +
+                             owner_->tr("Larger zone memory (experimental) in "
+                                        "Settings makes room for:") +
+                             " " + room + ".";
+      if (!list.empty() && too_big && larger) {
+        return owner_->tr("Some maps do not fit in the larger zone memory "
+                          "even with no mods: the game closes while loading "
+                          "them. Play another map.") +
+               " " + list + ".";
       }
       if (!list.empty() && too_big) {
         return owner_->tr("Some maps do not fit in the game's memory even "
                           "with no mods: the game closes while loading them. "
                           "Play another map.") +
-               " " + list + ".";
+               " " + list + "." + larger_note;
+      }
+      if (!list.empty() && larger) {
+        return owner_->tr("Some maps do not fit in the larger zone memory "
+                          "with these mods: the game closes while loading "
+                          "them. Remove a mod to play them, or play another "
+                          "map.") +
+               " " + list + "." + most;
       }
       if (!list.empty()) {
         return owner_->tr("Some maps do not fit in the game's memory with "
                           "these mods: the game closes while loading them. "
                           "Remove a mod to play them, or play another map.") +
-               " " + list + "." + most;
+               " " + list + "." + most + larger_note;
       }
     }
     if (note.code == "plan.memory.maps_unread") {

@@ -44,7 +44,10 @@ profile_request(const launcher_config &config, const std::string &mode,
     request.game_build = std::to_string(*steam_build);
   }
   if (zone_memory) {
-    request.zone_budget = zone_budget_for(*zone_memory, mode);
+    // Checked against the pool the launch will have: the larger zone memory
+    // when the settings pass its flag (DESIGN.md 5.4).
+    request.zone_budget = zone_budget_for(
+        *zone_memory, mode, has_flag(config.extra_flags, db_pool::flag_name));
   }
   request.xerces_version =
       version::parse(xerces_version_text).value_or(version{});
@@ -68,20 +71,23 @@ plan resolve_profile(const std::vector<installed_content> &catalog,
 
 launch_outcome preview_launch(const launch_inputs &in) {
   launch_outcome out;
-  const launcher_config &config = *in.config;
+  std::optional<launcher_config> followup;
+  if (in.mods_off || in.crash_followup) {
+    // Safe mode and the culprit search's tests follow a crash. The
+    // experimental larger zone memory is a suspect of its own (the journal
+    // says whether the crashed launch had it), so none of them has it,
+    // whatever the settings say: the tests then compare like with like. The
+    // plan is checked against the stock pool too.
+    followup = *in.config;
+    followup->extra_flags =
+        with_flag(std::move(followup->extra_flags), db_pool::flag_name, false);
+  }
+  const launcher_config &config = followup ? *followup : *in.config;
   launch_options options;
   options.connect = in.connect;
   options.nointro = config.nointro;
   options.mods_off = in.mods_off;
   options.extra_flags = config.extra_flags;
-  if (in.mods_off || in.crash_followup) {
-    // Safe mode and the culprit search's tests follow a crash. The
-    // experimental larger zone memory is a suspect of its own (the journal
-    // says whether the crashed launch had it), so none of them has it,
-    // whatever the settings say: the tests then compare like with like.
-    options.extra_flags =
-        with_flag(std::move(options.extra_flags), db_pool::flag_name, false);
-  }
   for (const auto &[name, value] : config.dvars) {
     options.dvars.emplace_back(name, value);
   }

@@ -52,6 +52,12 @@ zone_memory_table parse_zone_memory(std::string_view text);
 struct zone_budget {
   double pool_mib = 0;
   double baseline_mib = 0;
+  // pool_mib is the larger zone memory (the launch passes -xerces-db-pool,
+  // db_pool.hpp), not the build's own pool.
+  bool larger_pool = false;
+  // The pool the larger zone memory gives on this build (4096); 0 when it
+  // does not apply: the client raises only the stock 2 GiB pool.
+  double larger_pool_mib = 0;
 };
 
 // The entry for a game, by Steam's build number or else the exe's checksum;
@@ -62,8 +68,12 @@ find_zone_memory_build(const zone_memory_table &table,
                        std::optional<std::uint32_t> checksum = std::nullopt);
 
 // The budget of a mode on a build; nullopt when the mode is not measured.
+// larger_pool: the launch has the larger zone memory, so the pool is the
+// raised one when the build's pool is the stock one it raises (the baseline
+// stays: the game's own zones take the same either way).
 std::optional<zone_budget> zone_budget_for(const zone_memory_build &build,
-                                           std::string_view mode);
+                                           std::string_view mode,
+                                           bool larger_pool = false);
 
 // The same from a plan request's game_build: Steam's build number as the
 // launcher writes it ("24784313"), or an exe checksum as `xerces_cli plan
@@ -71,7 +81,8 @@ std::optional<zone_budget> zone_budget_for(const zone_memory_build &build,
 // an unknown build or an unmeasured mode.
 std::optional<zone_budget> find_zone_budget(const zone_memory_table &table,
                                             std::string_view game_build,
-                                            std::string_view mode);
+                                            std::string_view mode,
+                                            bool larger_pool = false);
 
 // --------------------------------------------------- a mod's or map's zones
 // The zone files of a folder: *.ff at its root (Steam's Workshop layout) or

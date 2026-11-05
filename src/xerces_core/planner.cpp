@@ -619,7 +619,12 @@ void check_zone_memory(
       // Over without the zones not read, so over with them too.
       memory.maps_over.push_back(
           {id, name, need, need - budget.pool_mib,
-           budget.baseline_mib + map_mib > budget.pool_mib});
+           budget.baseline_mib + map_mib > budget.pool_mib,
+           // Said only when every zone counted was read: a zone not read
+           // could take the rest.
+           !budget.larger_pool && budget.larger_pool_mib > 0 &&
+               need <= budget.larger_pool_mib && use.unread.empty() &&
+               memory.unread.empty()});
     } else if (!use.unread.empty()) {
       // It takes more than map_mib, by how much is unknown.
       memory.maps_unread.push_back({id, name});
@@ -636,60 +641,88 @@ void check_zone_memory(
       biggest ? " The mod that takes the most is " + biggest->name + " (" +
                     whole_mib(to_mib(biggest->zone_memory)) + ")."
               : "";
+  // The pool the launch has (DESIGN.md 5.4), and the setting that would make
+  // room for a map that fits the larger one.
+  const std::string memory_name =
+      budget.larger_pool ? "the larger zone memory" : "the game's memory";
+  const std::string turn_on =
+      "Turn on Larger zone memory (experimental) in Settings";
   // Maps that removing a mod would make fit, and maps too big even with no
   // mods, for which that advice would be wrong (and with no mods, every map
-  // over is one of these).
+  // over is one of these). Either kind may fit the larger zone memory.
   std::vector<std::string> with_mods;
+  std::vector<std::string> with_mods_larger;
   std::vector<std::string> too_big;
+  std::vector<std::string> too_big_larger;
   for (const auto &map : memory.maps_over) {
     const std::string over = whole_mib(map.over_by_mib) + " over";
     if (out.map && map.id == out.map->id) {
+      std::string advice;
+      if (map.over_without_mods) {
+        advice = map.fits_larger_pool ? turn_on + " to play it, or pick "
+                                                  "another map."
+                                      : "Pick another map.";
+      } else {
+        advice = (map.fits_larger_pool
+                      ? turn_on + ", remove a mod, or pick another map."
+                      : std::string("Remove a mod, or pick another map.")) +
+                 most;
+      }
       diags.error("plan.memory.over", "/map",
-                  map.name + " does not fit in the game's memory" +
-                      (map.over_without_mods
-                           ? ", even with no mods (" + over +
-                                 "): the game would close while loading it. "
-                                 "Pick another map."
-                           : " with these mods (" + over +
-                                 "): the game would close while loading it. "
-                                 "Remove a mod, or pick another map." +
-                                 most));
+                  map.name + " does not fit in " + memory_name +
+                      (map.over_without_mods ? ", even with no mods ("
+                                             : " with these mods (") +
+                      over + "): the game would close while loading it. " +
+                      advice);
       continue;
     }
     (map.over_without_mods ? too_big : with_mods)
         .push_back(map.name + " (" + over + ")");
+    if (map.fits_larger_pool) {
+      (map.over_without_mods ? too_big_larger : with_mods_larger)
+          .push_back(map.name);
+    }
   }
+  // The maps of a warning that the larger zone memory makes room for.
+  const auto larger_note = [&](const std::vector<std::string> &all,
+                               const std::vector<std::string> &fit) {
+    if (fit.empty()) {
+      return std::string();
+    }
+    return " " + turn_on + " to make room for " +
+           (fit.size() == all.size() ? (all.size() == 1 ? "it" : "them")
+                                     : join_and(fit)) +
+           ".";
+  };
   if (with_mods.size() == 1) {
     diags.warning("plan.memory.maps_over", "",
-                  "The map " + with_mods.front() +
-                      " does not fit in the game's memory with these mods: "
-                      "the game closes while loading it. Remove a mod to "
-                      "play it, or play another map." +
-                      most);
+                  "The map " + with_mods.front() + " does not fit in " +
+                      memory_name +
+                      " with these mods: the game closes while loading it. "
+                      "Remove a mod to play it, or play another map." +
+                      most + larger_note(with_mods, with_mods_larger));
   } else if (!with_mods.empty()) {
     diags.warning("plan.memory.maps_over", "",
-                  std::to_string(with_mods.size()) +
-                      " maps do not fit in the game's memory with these "
-                      "mods: " +
-                      join_and(with_mods) +
+                  std::to_string(with_mods.size()) + " maps do not fit in " +
+                      memory_name + " with these mods: " + join_and(with_mods) +
                       ". The game closes while loading them. Remove a mod "
                       "to play them, or play another map." +
-                      most);
+                      most + larger_note(with_mods, with_mods_larger));
   }
   if (too_big.size() == 1) {
     diags.warning("plan.memory.maps_too_big", "",
-                  "The map " + too_big.front() +
-                      " does not fit in the game's memory even with no "
-                      "mods: the game closes while loading it. Play another "
-                      "map.");
+                  "The map " + too_big.front() + " does not fit in " +
+                      memory_name +
+                      " even with no mods: the game closes while loading "
+                      "it. Play another map." +
+                      larger_note(too_big, too_big_larger));
   } else if (!too_big.empty()) {
     diags.warning("plan.memory.maps_too_big", "",
-                  std::to_string(too_big.size()) +
-                      " maps do not fit in the game's memory even with no "
-                      "mods: " +
-                      join_and(too_big) +
+                  std::to_string(too_big.size()) + " maps do not fit in " +
+                      memory_name + " even with no mods: " + join_and(too_big) +
                       ". The game closes while loading them. Play another "
-                      "map.");
+                      "map." +
+                      larger_note(too_big, too_big_larger));
   }
   if (!memory.maps_unread.empty()) {
     std::vector<std::string> names;
@@ -758,8 +791,8 @@ std::size_t count_zone_files(const std::vector<std::string> &files,
     name.resize(name.size() - 3);
     // "en_core_mod": the engine loads one language's copy, not all of them.
     // The mode tiers ("zm_mod", "mp_mod_patch") look the same and are not.
-    const bool tier = name.starts_with("zm_mod") || name.starts_with("mp_mod") ||
-                      name.starts_with("cp_mod");
+    const bool tier = name.starts_with("zm_mod") ||
+                      name.starts_with("mp_mod") || name.starts_with("cp_mod");
     const bool language = !tier && name.size() > 3 && name[2] == '_' &&
                           std::islower(static_cast<unsigned char>(name[0])) &&
                           std::islower(static_cast<unsigned char>(name[1]));
@@ -769,7 +802,8 @@ std::size_t count_zone_files(const std::vector<std::string> &files,
       bool other_mode = false;
       for (const std::string_view tier : {"zm_mod", "mp_mod", "cp_mod"}) {
         const std::string own = std::string(mode) + "_mod";
-        if (tier != own && (base == tier || base == std::string(tier) + "_patch")) {
+        if (tier != own &&
+            (base == tier || base == std::string(tier) + "_patch")) {
           other_mode = true;
         }
       }
@@ -1393,6 +1427,13 @@ std::string plan_to_json(const plan &value, bool pretty) {
             mib_value(memory.budget ? std::optional(memory.budget->pool_mib)
                                     : std::nullopt),
             alloc);
+  json::set(zone_memory, "larger_pool",
+            memory.budget && memory.budget->larger_pool, alloc);
+  json::set(zone_memory, "larger_pool_mib",
+            mib_value(memory.budget && memory.budget->larger_pool_mib > 0
+                          ? std::optional(memory.budget->larger_pool_mib)
+                          : std::nullopt),
+            alloc);
   json::set(zone_memory, "baseline_mib",
             mib_value(memory.budget ? std::optional(memory.budget->baseline_mib)
                                     : std::nullopt),
@@ -1413,6 +1454,7 @@ std::string plan_to_json(const plan &value, bool pretty) {
     json::set(object, "need_mib", mib_value(map.need_mib), alloc);
     json::set(object, "over_by_mib", mib_value(map.over_by_mib), alloc);
     json::set(object, "over_without_mods", map.over_without_mods, alloc);
+    json::set(object, "fits_larger_pool", map.fits_larger_pool, alloc);
     maps_over.PushBack(std::move(object), alloc);
   }
   json::set(zone_memory, "maps_over", std::move(maps_over), alloc);

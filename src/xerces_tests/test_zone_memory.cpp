@@ -476,7 +476,9 @@ TEST_CASE(
   // The plan JSON carries the numbers; MiB to one decimal.
   const std::string text = plan_to_json(p);
   CHECK(contains(text, R"("zone_memory":{"baseline_mib":849,"checked":true,)"
-                       R"("map_mib":null,"maps_over":[{"id":"ws.204",)"
+                       R"("larger_pool":false,"larger_pool_mib":null,)"
+                       R"("map_mib":null,"maps_over":[{"fits_larger_pool":)"
+                       R"(false,"id":"ws.204",)"
                        R"("name":"Map E","need_mib":2552,"over_by_mib":504,)"
                        R"("over_without_mods":true},)"));
   CHECK(contains(text, R"("pool_mib":2048,"stack_mib":453,"total_mib":1302,)"
@@ -557,6 +559,103 @@ TEST_CASE("zone memory: the plan's own map over the pool is an error") {
   fs::remove_all(root, ec);
 }
 
+TEST_CASE("zone memory: the larger zone memory's budget") {
+  zone_memory_build build;
+  build.name = "test";
+  build.db_main_pool_mib = 2048;
+  build.baseline_mib = {{"zm", 849}};
+  const auto stock = zone_budget_for(build, "zm");
+  REQUIRE(stock.has_value());
+  CHECK_EQ(stock->pool_mib, 2048.0);
+  CHECK(!stock->larger_pool);
+  CHECK_EQ(stock->larger_pool_mib, 4096.0);
+  const auto larger = zone_budget_for(build, "zm", true);
+  REQUIRE(larger.has_value());
+  CHECK_EQ(larger->pool_mib, 4096.0);
+  CHECK(larger->larger_pool);
+  CHECK_EQ(larger->baseline_mib, 849.0); // the game's own zones are the same
+  // The client raises only the stock 2 GiB pool: another build's pool stays.
+  build.db_main_pool_mib = 3072;
+  const auto other = zone_budget_for(build, "zm", true);
+  REQUIRE(other.has_value());
+  CHECK_EQ(other->pool_mib, 3072.0);
+  CHECK(!other->larger_pool);
+  CHECK_EQ(other->larger_pool_mib, 0.0);
+}
+
+TEST_CASE("zone memory: maps the larger zone memory makes room for") {
+  const fs::path root = write_catalog("larger");
+  workshop_item(
+      root, "102", "mod", "Broken Mod",
+      {{"core_mod.ff", "TAff0000 too short"}, {"zm_mod.ff", ff(0, 10 * MiB)}});
+  const catalog_scan scan = scan_mods_directory(root);
+  // The stock pool, on a build the larger zone memory applies to.
+  const auto stock = [](std::vector<std::string> mods,
+                        std::optional<std::string> map = std::nullopt) {
+    plan_request request = zombies(std::move(mods), std::move(map));
+    request.zone_budget = zone_budget{2048, 849, false, 4096};
+    return request;
+  };
+  const plan p =
+      resolve_plan(scan.catalog, stock({"ws.100", "ws.101"}, "ws.200"));
+  CHECK(!p.ok());
+  for (const auto &map : p.zone_memory.maps_over) {
+    CHECK(map.fits_larger_pool); // 2552 MiB at most
+  }
+  const diagnostic *error = find_diag(p, "plan.memory.over");
+  REQUIRE(error != nullptr);
+  CHECK(contains(error->message,
+                 "Map A does not fit in the game's memory with these mods (55 "
+                 "MiB over): the game would close while loading it. Turn on "
+                 "Larger zone memory (experimental) in Settings, remove a mod, "
+                 "or pick another map."));
+  const diagnostic *warning = find_diag(p, "plan.memory.maps_over");
+  REQUIRE(warning != nullptr);
+  CHECK(contains(warning->message, "Turn on Larger zone memory (experimental) "
+                                   "in Settings to make room for them."));
+  const diagnostic *too_big = find_diag(p, "plan.memory.maps_too_big");
+  REQUIRE(too_big != nullptr);
+  CHECK(contains(too_big->message, "Play another map. Turn on Larger zone "
+                                   "memory (experimental) in Settings to make "
+                                   "room for it."));
+  CHECK(contains(plan_to_json(p), R"("larger_pool":false,"larger_pool_mib":)"
+                                  R"(4096,)"));
+
+  // Too big even alone, but not for the larger pool.
+  const plan alone = resolve_plan(scan.catalog, stock({"ws.101"}, "ws.204"));
+  const diagnostic *own = find_diag(alone, "plan.memory.over");
+  REQUIRE(own != nullptr);
+  CHECK(contains(own->message, "even with no mods (52 MiB over): the game "
+                               "would close while loading it. Turn on Larger "
+                               "zone memory (experimental) in Settings to "
+                               "play it, or pick another map."));
+
+  // A mod with a zone not read: nothing is promised.
+  const plan unread = resolve_plan(scan.catalog, stock({"ws.102"}, "ws.204"));
+  REQUIRE(!unread.zone_memory.maps_over.empty());
+  for (const auto &map : unread.zone_memory.maps_over) {
+    CHECK(!map.fits_larger_pool);
+  }
+  for (const auto &item : unread.diags.items()) {
+    CHECK(!contains(item.message, "Larger zone memory"));
+  }
+
+  // The launch has the larger zone memory: what is still over is over that,
+  // and the setting is not offered (a small pool here, to have maps over).
+  plan_request on = zombies({"ws.100", "ws.101"}, "ws.204");
+  on.zone_budget = zone_budget{2400, 849, true, 2400};
+  const plan larger = resolve_plan(scan.catalog, on);
+  CHECK(over_ids(larger) == (std::vector<std::string>{"ws.204", "ws.201"}));
+  const diagnostic *over = find_diag(larger, "plan.memory.over");
+  REQUIRE(over != nullptr);
+  CHECK(contains(over->message, "Map E does not fit in the larger zone memory "
+                                "with these mods (152 MiB over)"));
+  CHECK(!contains(over->message, "Turn on"));
+  CHECK(contains(plan_to_json(larger), R"("larger_pool":true,)"));
+  std::error_code ec;
+  fs::remove_all(root, ec);
+}
+
 TEST_CASE("zone memory: without figures the check is skipped with a note") {
   const fs::path root = write_catalog("nobudget");
   const catalog_scan scan = scan_mods_directory(root);
@@ -573,6 +672,7 @@ TEST_CASE("zone memory: without figures the check is skipped with a note") {
   CHECK(find_diag(p, "plan.memory.maps_over") == nullptr);
   const std::string text = plan_to_json(p);
   CHECK(contains(text, R"("zone_memory":{"baseline_mib":null,"checked":false,)"
+                       R"("larger_pool":false,"larger_pool_mib":null,)"
                        R"("map_mib":801,"maps_over":[],"maps_unread":[],)"
                        R"("pool_mib":null,)"
                        R"("stack_mib":452,"total_mib":null,"unread":[]})"));
@@ -722,6 +822,14 @@ TEST_CASE("zone memory: a profile's request takes the build's figures") {
              .zone_budget.has_value());
   CHECK(!profile_request(config, "zm", std::uint64_t(24784313))
              .zone_budget.has_value());
+  // With the larger zone memory in the settings, the plan is checked against
+  // it.
+  config.extra_flags = {"-console", "--xerces-db-pool"};
+  const plan_request larger =
+      profile_request(config, "zm", std::uint64_t(24784313), "", build);
+  REQUIRE(larger.zone_budget.has_value());
+  CHECK_EQ(larger.zone_budget->pool_mib, 4096.0);
+  CHECK(larger.zone_budget->larger_pool);
 }
 
 TEST_CASE("zone memory: the launcher's game finds its figures and refuses") {
@@ -781,6 +889,19 @@ TEST_CASE("zone memory: the launcher's game finds its figures and refuses") {
   CHECK(std::ranges::any_of(out.diags.items(), [](const diagnostic &item) {
     return item.code == "plan.memory.over";
   }));
+  // With the larger zone memory the big one fits (849 + 450 + 900 MiB) and
+  // launches, with the flag; a culprit-search test launches without it, so
+  // it is checked against the stock pool and refused.
+  config.extra_flags = {"-xerces-db-pool"};
+  const launch_outcome larger = preview_launch(in);
+  CHECK(larger.refusal == launch_refusal::none);
+  CHECK(larger.db_pool);
+  in.crash_followup = true;
+  const launch_outcome followup = preview_launch(in);
+  CHECK(followup.refusal == launch_refusal::plan);
+  CHECK(!followup.db_pool);
+  in.crash_followup = false;
+  config.extra_flags.clear();
   // The small one launches.
   zm.map = "local.zm_small";
   CHECK(preview_launch(in).refusal == launch_refusal::none);
