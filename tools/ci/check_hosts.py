@@ -18,9 +18,14 @@ URL = re.compile(r"\b[a-z][a-z0-9+.-]*://([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
 QUOTED = re.compile(r"[\"']([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|lol|gg|io|dev|app|cloud|co|me|tv))(?::\d+)?[\"']")
 
 
+# Names reserved for documentation and tests (RFC 2606, RFC 6761): nothing
+# answers on them, so tests may use them freely.
+RESERVED = ["example.com", "example.net", "example.org", "example", "test", "invalid", "localhost"]
+
+
 def allowed(host: str, hosts: list[str]) -> bool:
     host = host.lower().rstrip(".")
-    return any(host == h or host.endswith("." + h) for h in hosts)
+    return any(host == h or host.endswith("." + h) for h in hosts + RESERVED)
 
 
 def main() -> int:
