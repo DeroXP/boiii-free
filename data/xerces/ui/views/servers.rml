@@ -2,13 +2,126 @@
 <head>
 	<title>Servers</title>
 	<link type="text/template" href="../shell.rml"/>
+	<link type="text/rcss" href="servers.rcss"/>
 </head>
-<!-- Servers (docs/DESIGN.md 7.3): placeholder. -->
-<body template="shell">
-<div class="page">
-	<div class="page-title">Servers</div>
-	<div class="page-sub">Direct connect, favourites and the public list.</div>
-	<div class="section"><button class="outline default-focus" id="servers-back"><span>Back to Home</span></button></div>
+<!-- Servers (docs/DESIGN.md 7.3, 11.1; D14): direct connect by address,
+     favourites, recent servers, and where the public list is for now. Data:
+     the "servers" model in src/xerces_launcher/views/servers.cpp. Nothing here
+     talks to the network; a join hands "+connect host:port" to the game. -->
+<body template="shell" data-model="servers">
+<div id="servers-main">
+	<div class="servers-primary">
+		<div class="page-title">Servers</div>
+		<div class="page-sub">Join a self-hosted or LAN server by its address. Xerces has no matchmaking; solo and offline games start from Home.</div>
+
+		<div class="notice-box game-box" data-if="game_problem != ''">
+			<div class="label">Game</div>
+			<div class="game-text">{{game_problem}}</div>
+			<button id="servers-settings" class="small-button game-action" data-event-click="act('settings')"><span>Open Settings</span></button>
+		</div>
+
+		<div class="section">
+			<div class="panel-head">
+				<span class="panel-title">Direct connect</span>
+				<span class="panel-count">Self-hosted and LAN</span>
+			</div>
+
+			<div class="join-modes">
+				<span class="label">Join in</span>
+				<div class="mode-group">
+					<button id="servers-mode-zm" class="mode" data-class-on="mode == 'zm'" data-event-click="pick('zm')"><span class="mark-dot"></span><span>Zombies</span></button>
+					<button id="servers-mode-mp" class="mode" data-class-on="mode == 'mp'" data-event-click="pick('mp')"><span class="mark-dot"></span><span>Multiplayer</span></button>
+					<button id="servers-mode-cp" class="mode" data-class-on="mode == 'cp'" data-event-click="pick('cp')"><span class="mark-dot"></span><span>Campaign</span></button>
+				</div>
+			</div>
+
+			<div class="label field-label">Server address</div>
+			<input id="address" type="text" class="text mono-field address" maxlength="260" placeholder="host:port" data-value="address" data-event-change="typed()" data-class-invalid="address_problem != ''"/>
+			<div class="field-problem" data-if="address_problem != ''">{{address_problem}}</div>
+			<div class="field-note" data-if="address_problem == ''">For example 192.168.1.20:27017, my-server.lan:27017 or [::1]:27017. Press / or Y to type here.</div>
+
+			<div class="toolbar join-row">
+				<button id="join-modded" class="primary-button join default-focus" data-event-click="act('join modded')"><span>Join modded</span><span class="key" data-if="enter_modded">Enter</span></button>
+				<button id="join-vanilla" class="outline join" data-event-click="act('join vanilla')"><span>Join vanilla</span><span class="key" data-if="!enter_modded">Enter</span></button>
+				<button id="save-address" class="link" data-event-click="act('save address')"><span>Save to favourites</span></button>
+			</div>
+			<div class="join-note">{{join_note}}</div>
+
+			<div class="result" data-if="has_result" data-class-failed="!result_ok">
+				<div class="label result-label">{{result_label}}</div>
+				<div class="result-target">{{result_target}}</div>
+				<div class="result-message">{{result_message}}</div>
+				<div class="result-line" data-for="line : result_lines">{{line}}</div>
+				<div class="result-command" data-if="result_command != ''">{{result_command}}</div>
+				<button id="result-mods" class="small-button result-action" data-if="result_mods" data-event-click="act('mods')"><span>Open Mods</span></button>
+			</div>
+		</div>
+
+		<div class="section">
+			<div class="panel-head">
+				<span class="panel-title">Favourites</span>
+				<span class="panel-count">{{fav_count}}</span>
+			</div>
+			<div class="server-row" data-for="f, i : favorites">
+				<div class="server-text">
+					<div class="server-name">{{f.name}}</div>
+					<div class="server-address" data-if="f.name != f.address">{{f.address}}</div>
+				</div>
+				<div class="row-actions">
+					<button class="small-button" data-attr-id="'fav-join-' + i" data-event-click="fav('join', i)"><span>Join</span></button>
+					<button class="small-button" data-attr-id="'fav-edit-' + i" data-event-click="fav('edit', i)"><span>Edit</span></button>
+					<button class="small-button" data-attr-id="'fav-remove-' + i" data-event-click="fav('remove', i)"><span>Remove</span></button>
+				</div>
+			</div>
+			<div class="empty-note" data-if="favorites.size == 0">No favourites yet. Add one here, or save a server from Recent.</div>
+
+			<div id="fav-form" class="fav-form" data-class-editing="editing">
+				<div class="label field-label">{{form_label}}</div>
+				<div class="fav-fields">
+					<input id="fav-name" type="text" class="text fav-name" maxlength="64" data-attr-placeholder="name_placeholder" data-value="fav_name" data-event-change="fav_typed()"/>
+					<input id="fav-address" type="text" class="text mono-field fav-address" maxlength="260" placeholder="host:port" data-value="fav_address" data-event-change="fav_typed()"/>
+					<button id="fav-save" class="outline fav-save" data-event-click="act('save favorite')"><span>{{form_button}}</span></button>
+					<button id="fav-cancel" class="link" data-if="editing" data-event-click="act('cancel edit')"><span>Cancel</span></button>
+				</div>
+				<div class="field-problem" data-if="fav_problem != ''">{{fav_problem}}</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="servers-aside">
+		<div>
+			<div class="panel-head">
+				<span class="panel-title">Recent</span>
+				<span class="panel-count">{{recent_count}}</span>
+			</div>
+			<div class="recent-row" data-for="r, i : recents">
+				<div class="recent-address">{{r.address}}</div>
+				<div class="recent-actions">
+					<button class="small-button" data-attr-id="'recent-join-' + i" data-event-click="recent('join', i)"><span>Join</span></button>
+					<button class="small-button" data-if="!r.saved" data-attr-id="'recent-save-' + i" data-event-click="recent('save', i)"><span>Save</span></button>
+					<button class="small-button" data-attr-id="'recent-remove-' + i" data-event-click="recent('remove', i)"><span>Remove</span></button>
+					<span class="recent-tag" data-if="r.saved">In favourites</span>
+				</div>
+			</div>
+			<div class="empty-note" data-if="recents.size == 0">Servers you join show up here, newest first.</div>
+			<button id="clear-recent" class="link clear-recent" data-if="recents.size > 0" data-event-click="act('clear recent')"><span>Clear recent</span></button>
+		</div>
+
+		<div>
+			<div class="panel-head">
+				<span class="panel-title">Public servers</span>
+				<span class="panel-count">In the game</span>
+			</div>
+			<div class="aside-note">The public server list stays in the game's own server browser for now. Xerces' own list arrives with its backend (M6).</div>
+			<div class="aside-note quiet">The launcher never fetches a list or pings a server. Joining passes the address to the game, nothing more.</div>
+		</div>
+
+		<div>
+			<div class="panel-head"><span class="panel-title">Offline</span></div>
+			<div class="aside-note">Solo games and offline play start from Home with Launch modded or Launch vanilla.</div>
+			<button id="servers-home" class="small-button" data-event-click="act('home')"><span>Go to Home</span></button>
+		</div>
+	</div>
 </div>
 </body>
 </rml>
