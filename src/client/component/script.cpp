@@ -26,6 +26,8 @@
 #include <utils/memory.hpp>
 #include <utils/string.hpp>
 
+#include <xerces/perf.hpp>
+
 extern "C" {
 #include <hksclib.h>
 }
@@ -1310,7 +1312,9 @@ static std::once_flag hash_table_load_flag;
 
 void load_global_hash_table() {
   std::call_once(hash_table_load_flag, [] {
-    const auto try_load = [](const std::filesystem::path &path) {
+    // Xerces: timed for perf.load_step (docs/DESIGN.md 12.2).
+    xerces_perf::timed timing(xerces_perf::step_kind::load, "hash_names");
+    const auto try_load = [&timing](const std::filesystem::path &path) {
       std::string data;
       if (!utils::io::read_file(path.string(), &data))
         return false;
@@ -1329,6 +1333,8 @@ void load_global_hash_table() {
           count++;
         }
       }
+      timing.set_bytes(data.size());
+      timing.set_items(count);
       const char *log = utils::string::va("Loaded %zu hash names from '%s'",
                                           count, path.string().c_str());
       print_script_log(log);

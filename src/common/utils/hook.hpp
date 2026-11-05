@@ -93,6 +93,31 @@ alwaysinline std::vector<uint8_t> move_hook(const uintptr_t pointer) {
   return move_hook(reinterpret_cast<void *>(pointer));
 }
 
+// Xerces (docs/DESIGN.md 12.2): how long detours take to set up, counted
+// always (about four QueryPerformanceCounter calls per detour) and read by
+// the game role's perf component. Times are QPC ticks.
+struct detour_stats {
+  uint32_t created{};         // detours created (MH_CreateHook succeeded)
+  uint32_t enables{};         // enable() calls, including create's own
+  int64_t create_ticks{};     // inside MH_CreateHook
+  int64_t enable_ticks{};     // inside enable(): MH_EnableHook and move
+  int64_t max_enable_ticks{}; // the slowest single enable()
+  int64_t first_qpc{};        // when the first create started
+  int64_t last_qpc{};         // when the latest create ended
+};
+
+// The first detour_timeline_capacity creates, in the order they started.
+struct detour_timeline_entry {
+  int64_t qpc{}; // when the create started
+  uint32_t create_ticks{};
+  uint32_t enable_ticks{};
+};
+inline constexpr size_t detour_timeline_capacity = 512;
+
+detour_stats get_detour_stats();
+// Copies up to `capacity` finished entries; returns how many.
+size_t get_detour_timeline(detour_timeline_entry *out, size_t capacity);
+
 class detour {
 public:
   detour();
@@ -187,6 +212,7 @@ private:
   void *original_{};
 
   void un_move();
+  int64_t enable_timed(); // enable(), returning the QPC ticks it took
 };
 
 std::optional<std::pair<void *, void *>> iat(const nt::library &library,
