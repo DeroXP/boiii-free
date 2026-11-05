@@ -6,9 +6,10 @@
 // feature installs any hook. A feature whose signatures do not all resolve
 // is turned off and says so; nothing falls back to fixed addresses.
 //
-// The result is cached in <home>\cache\signatures-<build>.json (re-validated
-// by bytes on the next start) and reported to the launcher in
-// <home>\cache\signatures-report.json.
+// The result is cached in <home>\cache\signatures-<build>-<registry>.json,
+// keyed by the game build and a hash of the registry text, and re-validated on
+// the next start by bytes and by the registry's known addresses. It is
+// reported to the launcher in <home>\cache\signatures-report.json.
 
 #include <cstdint>
 #include <optional>
