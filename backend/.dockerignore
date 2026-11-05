@@ -1,0 +1,9 @@
+# Only what the image needs goes into the build context.
+*
+!requirements.txt
+!alembic.ini
+!start.sh
+!app/
+!migrations/
+**/__pycache__
+**/*.py[cod]
