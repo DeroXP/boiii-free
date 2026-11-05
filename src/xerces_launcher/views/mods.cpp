@@ -535,6 +535,19 @@ private:
     return item ? plain(item->info, id) : id;
   }
 
+  // A setting's label in the version the plan uses, else its key.
+  std::string setting_label(const std::string &id,
+                            const std::string &key) const {
+    if (const xc::installed_content *item = chosen(id)) {
+      for (const auto &setting : item->info.settings) {
+        if (setting.key == key && !setting.label.empty()) {
+          return setting.label;
+        }
+      }
+    }
+    return key;
+  }
+
   std::vector<note_row> notes_for(const std::string &id,
                                   const xc::installed_content *item) const {
     std::vector<note_row> out;
@@ -1140,6 +1153,9 @@ private:
       // Named: a mod can conflict with more than one other.
       label = owner_->tr("Allow the conflict with") + " " +
               name_of(fix.id == sel_.id ? fix.detail : fix.id);
+    } else if (fix.kind == "reset_setting") {
+      label = owner_->tr("Use the default for") + " \"" +
+              setting_label(fix.id, fix.detail) + "\"";
     } else if (fix.kind == "unpin") {
       // A dependency's pin names the dependency; the mod's own does not.
       label =
@@ -1389,6 +1405,18 @@ private:
           [&] {
             return name + " " + owner_->tr("and") + " " + name_of(fix.detail) +
                    " " + owner_->tr("may load together");
+          });
+    } else if (fix.kind == "reset_setting") {
+      // A stored value (from a pack) that the version the plan uses no
+      // longer accepts: the mod's default takes its place.
+      const std::string label = setting_label(fix.id, fix.detail);
+      edit(
+          [&](xc::mode_profile &p) {
+            return xc::mods_reset_setting(p, fix.id, fix.detail);
+          },
+          [&] {
+            return name + ": \"" + label + "\" " +
+                   owner_->tr("uses its default again");
           });
     } else if (fix.kind == "install" || fix.kind == "update") {
       open_steam(fix.id.substr(3));

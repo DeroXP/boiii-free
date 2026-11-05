@@ -63,7 +63,8 @@ struct explanation {
 
 // Something the player can do to fix a problem (9.4).
 struct fix_action {
-  // install, update, unpin, remove, reorder, allow_conflict, update_xerces
+  // install, update, unpin, remove, reorder, allow_conflict (detail: the
+  // other mod), reset_setting (detail: the setting's key), update_xerces
   std::string kind;
   std::string id;
   std::string detail;

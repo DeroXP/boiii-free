@@ -47,6 +47,12 @@ bool mods_move_by(mode_profile &profile, const std::string &id, int delta);
 bool mods_set_map(mode_profile &profile, const std::optional<std::string> &map);
 // Drops one pinned version (a fix the planner offers).
 bool mods_unpin(mode_profile &profile, const std::string &id);
+// Drops one stored setting value, so the mod's default applies (the
+// planner's reset_setting fix for a value the installed version no longer
+// accepts). A mod left with no stored values loses its entry. False if
+// nothing was stored.
+bool mods_reset_setting(mode_profile &profile, const std::string &id,
+                        const std::string &key);
 
 // After an edit by hand the profile no longer matches a pack: its pins, name
 // and id go, and the saved positions follow the new order so the planner's
@@ -125,6 +131,7 @@ mods_attribute(const plan &resolved,
 // plan's order, without repeats:
 // - allow_conflict on both mods of the pair (the planner files it under the
 //   smaller id), also on one that is in the plan only as a dependency;
+// - reset_setting on the mod whose stored value it drops, a dependency too;
 // - the rest filed under the mod (remove, reorder, unpin, ...) only while it
 //   is enabled or is the plan's map, since they act on the load order;
 // - a missing, pinned or outdated dependency's install, update and unpin,

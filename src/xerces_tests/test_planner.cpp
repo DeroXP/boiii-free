@@ -266,6 +266,41 @@ TEST_CASE("planner: settings are resolved, validated and scoped") {
   CHECK(invalid.diags.has("plan.setting.unknown"));
 }
 
+TEST_CASE("planner: a stored setting the chosen version rejects can be reset") {
+  // A pack stored rounds=5 when x.mod took up to 10; 2.0.0 takes up to 3.
+  // Its dependency's enum lost the option the pack stored.
+  const std::vector<installed_content> catalog = {
+      make(mod("x.mod", "2.0.0",
+               R"(,"dependencies":[{"id":"y.dep","version":"^1"}],)"
+               R"("settings":[{"key":"rounds","type":"int","default":2,)"
+               R"("min":1,"max":3,"label":"Rounds"}])")),
+      make(mod("y.dep", "1.0.0",
+               R"(,"settings":[{"key":"style","type":"enum","default":"a",)"
+               R"("options":["a","b"]}])"))};
+  plan_request request = request_for({"x.mod"});
+  request.settings["x.mod"]["rounds"] = "5";
+  request.settings["x.mod"]["speed"] = "1"; // unknown: a warning, no fix
+  request.settings["y.dep"]["style"] = "\"c\"";
+  const plan bad = resolve_plan(catalog, request);
+  CHECK(bad.diags.has("plan.setting.invalid"));
+  const auto offers = [&](const std::string &id, const std::string &key) {
+    return std::ranges::any_of(bad.fixes, [&](const fix_action &f) {
+      return f.kind == "reset_setting" && f.id == id && f.detail == key;
+    });
+  };
+  CHECK(offers("x.mod", "rounds"));
+  CHECK(offers("y.dep", "style")); // a dependency's own value
+  CHECK(!offers("x.mod", "speed"));
+
+  // Dropping the two values (Mods' "Use the default") clears the errors.
+  request.settings["x.mod"].erase("rounds");
+  request.settings["y.dep"].erase("style");
+  const plan fixed = resolve_plan(catalog, request);
+  CHECK(fixed.ok());
+  CHECK(fixed.fixes.empty());
+  CHECK_EQ(fixed.stack[0].settings.at("rounds"), "2");
+}
+
 TEST_CASE("planner: maps sit outside the stack") {
   const std::vector<installed_content> catalog = {
       make(mod("ws.3735179543", "0.0.0", R"(,"kind":"map")"), "zm_test"),

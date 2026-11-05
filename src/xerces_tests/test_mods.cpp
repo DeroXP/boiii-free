@@ -114,17 +114,73 @@ TEST_CASE("mods: the map and pins") {
   CHECK(!mods_unpin(profile, "ws.1"));
 }
 
+TEST_CASE("mods: a stored setting goes back to the default") {
+  mode_profile profile;
+  profile.settings = {{"x.mod", {{"rounds", "5"}, {"hud", "false"}}}};
+  CHECK(mods_reset_setting(profile, "x.mod", "rounds"));
+  CHECK((profile.settings.at("x.mod") ==
+         std::map<std::string, std::string>{{"hud", "false"}}));
+  CHECK(!mods_reset_setting(profile, "x.mod", "rounds")); // already gone
+  CHECK(!mods_reset_setting(profile, "y.mod", "hud"));
+  CHECK(mods_reset_setting(profile, "x.mod", "hud"));
+  CHECK(profile.settings.empty()); // no empty entry left in launcher.json
+}
+
+TEST_CASE("mods: a pack's setting the new version rejects has a way out") {
+  // A pack pinned x.mod 1.0.0 (rounds 1 to 10) and stored rounds=5. Only
+  // 2.0.0 (rounds 1 to 3) is installed now.
+  const std::vector<installed_content> catalog = {
+      declared(R"("id":"x.mod","version":"2.0.0","settings":[{"key":)"
+               R"("rounds","type":"int","default":2,"min":1,"max":3}])"),
+      declared(R"("id":"y.mod","version":"1.0.0")")};
+  launcher_config config;
+  mode_profile &zm = profile_for(config, "zm");
+  zm.mods = {"x.mod", "y.mod"};
+  zm.settings["x.mod"]["rounds"] = "5";
+
+  // Switching it off and on again (hand edits) keeps the value.
+  mods_set_enabled(zm, "x.mod", false);
+  mods_hand_edit(config, "zm");
+  mods_set_enabled(zm, "x.mod", true);
+  mods_hand_edit(config, "zm");
+  const plan bad = resolve_plan(catalog, request_of(zm));
+  CHECK(bad.diags.has("plan.setting.invalid"));
+  const auto offered = mods_fixes_for(bad, "x.mod", true, &catalog[0]);
+  REQUIRE(has_fix(offered, "reset_setting", "x.mod", "rounds"));
+
+  // The screen's edit(): the fix, a hand edit, a history entry.
+  mods_history history;
+  const mods_snapshot before = mods_take(config, "zm");
+  CHECK(mods_reset_setting(zm, "x.mod", "rounds"));
+  mods_hand_edit(config, "zm");
+  history.record("zm", before, mods_take(config, "zm"));
+  const plan fixed = resolve_plan(catalog, request_of(zm));
+  CHECK(fixed.ok());
+  const auto x = std::ranges::find_if(
+      fixed.stack, [](const plan_entry &e) { return e.id == "x.mod"; });
+  REQUIRE(x != fixed.stack.end());
+  CHECK_EQ(x->settings.at("rounds"), std::string("2"));
+
+  // Ctrl+Z brings the stored value back.
+  CHECK(history.undo(config, "zm") == mods_history::undo_result::done);
+  CHECK_EQ(config.profiles.at("zm").settings.at("x.mod").at("rounds"),
+           std::string("5"));
+}
+
 TEST_CASE("mods: which mod offers which fix") {
   // mm.perks and zz.hud are on; mm.perks needs aa.core, which zz.hud says
-  // it does not work with, and zz.hud says the same of mm.perks.
+  // it does not work with, and zz.hud says the same of mm.perks. aa.core
+  // also has a stored value its declaration rejects.
   const std::vector<installed_content> catalog = {
       declared(R"("id":"mm.perks","version":"1.0.0",)"
                R"("dependencies":[{"id":"aa.core","version":"^1"}])"),
       declared(R"("id":"zz.hud","version":"1.0.0",)"
                R"("conflicts":[{"id":"aa.core"},{"id":"mm.perks"}])"),
-      declared(R"("id":"aa.core","version":"1.0.0")")};
+      declared(R"("id":"aa.core","version":"1.0.0","settings":[{"key":)"
+               R"("mode","type":"enum","default":"a","options":["a"]}])")};
   mode_profile profile;
   profile.mods = {"mm.perks", "zz.hud"};
+  profile.settings["aa.core"]["mode"] = "\"b\"";
   const plan p = resolve_plan(catalog, request_of(profile));
   REQUIRE(has_fix(p.fixes, "allow_conflict", "aa.core", "zz.hud"));
   REQUIRE(has_fix(p.fixes, "allow_conflict", "mm.perks", "zz.hud"));
@@ -135,17 +191,19 @@ TEST_CASE("mods: which mod offers which fix") {
   CHECK(has_fix(hud, "allow_conflict", "mm.perks", "zz.hud"));
   CHECK(has_fix(hud, "remove", "zz.hud", ""));
 
-  // aa.core is only a dependency: its conflict, but no remove, which would
-  // switch it on.
+  // aa.core is only a dependency: its conflict and its setting, but no
+  // remove, which would switch it on.
   const auto core = mods_fixes_for(p, "aa.core", false, &catalog[2]);
   CHECK(has_fix(core, "allow_conflict", "aa.core", "zz.hud"));
+  CHECK(has_fix(core, "reset_setting", "aa.core", "mode"));
   CHECK(!has_fix(core, "remove", "aa.core", ""));
 
-  // mm.perks: its own conflict, not aa.core's.
+  // mm.perks: its own conflict, not aa.core's conflict or setting.
   const auto perks = mods_fixes_for(p, "mm.perks", true, &catalog[0]);
   CHECK(has_fix(perks, "allow_conflict", "mm.perks", "zz.hud"));
   CHECK(has_fix(perks, "remove", "mm.perks", ""));
   CHECK(!has_fix(perks, "allow_conflict", "aa.core", "zz.hud"));
+  CHECK(!has_fix(perks, "reset_setting", "aa.core", "mode"));
   // No repeats.
   for (const auto &fix : perks) {
     CHECK_EQ(std::ranges::count_if(perks,
