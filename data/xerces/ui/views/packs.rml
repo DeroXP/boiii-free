@@ -2,13 +2,113 @@
 <head>
 	<title>Packs</title>
 	<link type="text/template" href="../shell.rml"/>
+	<link type="text/rcss" href="packs.rcss"/>
 </head>
-<!-- Packs (docs/DESIGN.md 7.3): placeholder. -->
-<body template="shell">
-<div class="page">
-	<div class="page-title">Packs</div>
-	<div class="page-sub">Named, version-pinned sets of mods: apply, import and export.</div>
-	<div class="section"><button class="outline default-focus" id="packs-back"><span>Back to Home</span></button></div>
+<!-- Packs (docs/DESIGN.md 7.3, 8.1 to 8.3): the pack library with the selected
+     pack's pinned mods, Apply, Export and Delete; saving the current plan as a
+     pack; importing a share code or a file. Data: the "packs" model in
+     src/xerces_launcher/views/packs.cpp. -->
+<body template="shell" data-model="packs">
+<div id="packs-main">
+	<div class="packs-primary">
+		<div class="page-title">Packs</div>
+		<div class="page-sub">Named sets of mods with their exact versions. A pack lists mods; it never contains them, so sharing one shares no files.</div>
+
+		<div class="library">
+			<div class="panel-head">
+				<span class="panel-title">Your packs</span>
+				<span class="panel-count">{{count_text}}</span>
+			</div>
+			<button class="pack-row" data-for="p, i : packs" data-attr-id="'pack-' + i" data-class-selected="p.selected" data-event-focus="hover(p.id)" data-event-click="select(p.id)">
+				<span class="mark-dot"></span>
+				<div class="pack-text">
+					<div class="pack-name">{{p.name}}</div>
+					<div class="pack-meta">{{p.meta}}</div>
+				</div>
+				<span class="pack-state" data-class-bad="p.bad">{{p.state}}</span>
+			</button>
+			<div class="empty-note" data-if="packs.size == 0">{{empty_text}}</div>
+			<div class="library-note" data-if="library_note != ''">{{library_note}}</div>
+		</div>
+
+		<div class="detail" data-if="has_sel">
+			<div class="label">Selected pack</div>
+			<div class="detail-title">{{sel_name}}</div>
+			<div class="detail-meta">{{sel_meta}}</div>
+
+			<div class="toolbar detail-actions">
+				<button id="pack-apply" class="primary-button" data-event-click="act('apply')"><span>Apply</span></button>
+				<button id="pack-export" class="outline" data-event-click="act('export')"><span>Export to file</span></button>
+				<button id="pack-code" class="outline" data-event-click="act('copy code')"><span>Copy share code</span></button>
+				<button id="pack-delete" class="link" data-event-click="act('delete')"><span>Delete</span></button>
+			</div>
+
+			<div class="result-box" data-if="result_show" data-class-ok="result_ok">
+				<div class="label">{{result_label}}</div>
+				<div class="result-title">{{result_title}}</div>
+				<div class="result-line" data-for="line : result_lines">{{line}}</div>
+				<div class="toolbar result-actions">
+					<button id="result-home" class="small-button" data-if="result_ok" data-event-click="act('home')"><span>Go to Home</span></button>
+					<button id="result-mods" class="small-button" data-if="!result_ok" data-event-click="act('mods')"><span>Open Mods</span></button>
+					<button id="result-recheck" class="small-button" data-if="!result_ok" data-event-click="act('recheck')"><span>Check again</span></button>
+				</div>
+			</div>
+
+			<div class="items-head">
+				<span class="label">Pinned mods</span>
+				<span class="items-count">{{sel_state}}</span>
+				<button id="pack-recheck" class="small-button" data-if="show_recheck" data-event-click="act('recheck')"><span>Check again</span></button>
+			</div>
+			<!-- A row without a Steam button is a focus stop itself, so the arrows
+			     (and the scroll that follows focus) reach every pinned mod; a row with
+			     one is reached through its button. -->
+			<div class="row item-row" data-for="m, j : items" data-attr-id="'item-' + j" data-class-focusable="m.ws == ''">
+				<span class="row-n">{{m.n}}</span>
+				<div class="item-text">
+					<div class="item-name">{{m.name}}</div>
+					<div class="item-sub" data-if="m.sub != ''">{{m.sub}}</div>
+				</div>
+				<span class="item-ver">{{m.ver}}</span>
+				<span class="item-state" data-class-bad="m.bad">{{m.state}}</span>
+				<div class="item-action">
+					<button class="small-button" data-if="m.ws != ''" data-attr-id="'steam-' + j" data-event-click="steam(m.ws)"><span>Open in Steam</span></button>
+				</div>
+			</div>
+			<div class="empty-note" data-if="items.size == 0">This pack pins no mods: applying it runs the mode vanilla.</div>
+		</div>
+	</div>
+
+	<div class="packs-aside">
+		<div class="panel">
+			<div class="panel-head"><span class="panel-title">Save the current plan</span></div>
+			<div class="mode-row">
+				<button id="save-zm" class="seg" data-class-on="mode == 'zm'" data-event-click="mode('zm')"><span class="mark-dot"></span><span>Zombies</span></button>
+				<button id="save-mp" class="seg" data-class-on="mode == 'mp'" data-event-click="mode('mp')"><span class="mark-dot"></span><span>Multiplayer</span></button>
+				<button id="save-cp" class="seg" data-class-on="mode == 'cp'" data-event-click="mode('cp')"><span class="mark-dot"></span><span>Campaign</span></button>
+			</div>
+			<div class="plan-text" data-class-bad="!plan_ok">{{plan_text}}</div>
+			<div class="label field-label">Name</div>
+			<input id="pack-name" type="text" class="text wide-field" maxlength="80" data-value="new_name" data-event-change="field('name')"/>
+			<div class="field-error" data-if="name_error != ''">{{name_error}}</div>
+			<button id="pack-save" class="primary-button wide-button" data-event-click="act('save')"><span>Save as pack</span></button>
+		</div>
+
+		<div class="panel">
+			<div class="panel-head"><span class="panel-title">Import</span></div>
+			<div class="label field-label first-label">Share code</div>
+			<input id="share-code" type="text" class="text mono-field wide-field" data-value="code" data-event-change="field('code')"/>
+			<div class="toolbar import-actions">
+				<button id="import-code" class="outline" data-event-click="act('import code')"><span>Import code</span></button>
+				<button id="import-file" class="outline" data-event-click="act('import file')"><span>From a file</span></button>
+			</div>
+			<div class="import-box" data-if="import_show" data-class-ok="import_ok">
+				<div class="label">{{import_label}}</div>
+				<div class="import-title">{{import_title}}</div>
+				<div class="import-line" data-for="line : import_lines">{{line}}</div>
+			</div>
+			<div class="aside-note">Share codes start with XRC1. Files end in .xpack.json. Importing adds the pack to your list; nothing changes until you apply it.</div>
+		</div>
+	</div>
 </div>
 </body>
 </rml>
