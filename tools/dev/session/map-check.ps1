@@ -159,7 +159,15 @@ function Close-OutOfMemoryBox($dialog) {
   $game = Get-Process -Id $gamePid -ErrorAction SilentlyContinue
   if (-not $game) { return }
   $null = $game.Handle
-  [void][XercesWin]::PostMessage($dialog.Handle, 0x0111, [IntPtr]1, [IntPtr]::Zero)  # WM_COMMAND, IDOK
+  # Click the box's own button (BM_CLICK, as a mouse click does); a posted
+  # WM_COMMAND did not close it. WM_CLOSE is the fallback.
+  $button = [XercesWin]::Children($dialog.Handle) | Where-Object { [XercesWin]::ClassOf($_) -eq 'Button' } | Select-Object -First 1
+  $result = [IntPtr]::Zero
+  if ($button) {
+    [void][XercesWin]::SendMessageTimeoutPtr($button, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero, 2, 3000, [ref]$result)  # BM_CLICK
+  } else {
+    [void][XercesWin]::PostMessage($dialog.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)  # WM_CLOSE
+  }
   if ($game.WaitForExit(15000)) {
     $record.exit_code = '0x{0:X8}' -f $game.ExitCode
     Say "OK pressed: the game ended by itself, exit code $($record.exit_code)"

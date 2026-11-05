@@ -320,7 +320,9 @@ each one does not cover is said under its item.
       Super Mario 64 pack (`plan.memory.over`, exit 2).
 - [ ] Zone memory in the game: with DS4C, Xerces warns about Super Mario 64 and
       BACKROOMZ; load one of them anyway (`tools\dev\session\map-check.ps1`,
-      after asking) and confirm the game still exits while the map loads, then
+      after asking) and confirm the game still exits while the map loads (done
+      2026-11-05: BACKROOMZ ran out of memory at the zone allocator's check, as
+      predicted; the other maps loaded with DS4C earlier the same day), then
       load the largest map it calls fine, SANCTUM OBITUS (`zm_log_overunder`:
       Xerces prints 1994.2 MiB with DS4C, game 849 + mods 451.3 + map 693.9,
       about 54 MiB to spare; it loaded with DS4C alone before this check
@@ -330,8 +332,19 @@ each one does not cover is said under its item.
       baseline in another game language and on another stock map's lobby, and
       measure Multiplayer and Campaign (a dump before a custom map's main zone
       loads), then fill `compat/zone_memory.json`.
-- [ ] Out of memory (DESIGN.md 5.6, feature `oom_report`; built 2026-11-05, not
-      run in the game): DS4C alone, then `map zm_backrooms`, through
+- [x] (2026-11-05, 24bd2f9b) Out of memory in the game, as described below:
+      BACKROOMZ with DS4C alone showed "Black Ops III ran out of memory" naming
+      `zm_backrooms` and DS4C Patched v0.85, the remove-a-mod advice and the
+      Mods screen pointer; after a click on OK (BM_CLICK on the box's button)
+      the game ended by itself with 0xFFFFFFFF, no crash dump, no
+      `loader.exit.unexpected`; `loader.out_of_memory` had zone and map
+      `zm_backrooms`, phase `loading_map`, the mod, caller 0x20C5A3D (the zone
+      allocator's bounds check), and the journal stayed at `loading_map`. (A
+      first run posted WM_COMMAND to the box, which did not close it; map-check
+      now clicks the button.) Not run yet: Super Mario 64 and a fitting map on
+      this build.
+- [ ] Out of memory (DESIGN.md 5.6, feature `oom_report`; built 2026-11-05):
+      DS4C alone, then `map zm_backrooms`, through
       `tools\dev\session\map-check.ps1 -Map zm_backrooms -Stack 3171632315 -Live`.
       The run should end `crash_load` with the dialog "Black Ops III ran out of
       memory" captured (`dialog-load.png`), naming `zm_backrooms` and DS4C
