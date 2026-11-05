@@ -98,6 +98,35 @@ launcher_config_result parse_launcher_config(std::string_view text) {
       }
       profile.pack_name = json::get_string(member.value, "pack_name").value_or("");
       profile.pack_id = json::get_string(member.value, "pack_id").value_or("");
+      if (const auto *pairs = json::member(member.value, "allowed_conflicts");
+          pairs != nullptr && pairs->IsArray()) {
+        for (const auto &pair : pairs->GetArray()) {
+          if (pair.IsArray() && pair.Size() == 2 && pair[0].IsString() &&
+              pair[1].IsString()) {
+            std::string a(pair[0].GetString(), pair[0].GetStringLength());
+            std::string b(pair[1].GetString(), pair[1].GetStringLength());
+            if (b < a) {
+              std::swap(a, b);
+            }
+            profile.allowed_conflicts.emplace(std::move(a), std::move(b));
+          }
+        }
+      }
+      if (const auto *settings = json::member(member.value, "settings");
+          settings != nullptr && settings->IsObject()) {
+        for (const auto &mod : settings->GetObject()) {
+          if (!mod.value.IsObject()) {
+            continue;
+          }
+          auto &values = profile.settings[std::string(
+              mod.name.GetString(), mod.name.GetStringLength())];
+          for (const auto &setting : mod.value.GetObject()) {
+            values[std::string(setting.name.GetString(),
+                               setting.name.GetStringLength())] =
+                json::canonical(setting.value);
+          }
+        }
+      }
       c.profiles[mode] = std::move(profile);
     }
   }
@@ -195,6 +224,27 @@ std::string launcher_config_to_json(const launcher_config &c) {
     }
     if (!profile.pack_id.empty()) {
       json::set(item, "pack_id", profile.pack_id, alloc);
+    }
+    if (!profile.allowed_conflicts.empty()) {
+      rapidjson::Value pairs(rapidjson::kArrayType);
+      for (const auto &[a, b] : profile.allowed_conflicts) {
+        pairs.PushBack(json::string_array({a, b}, alloc), alloc);
+      }
+      json::set(item, "allowed_conflicts", std::move(pairs), alloc);
+    }
+    if (!profile.settings.empty()) {
+      rapidjson::Value settings(rapidjson::kObjectType);
+      for (const auto &[id, values] : profile.settings) {
+        rapidjson::Value object(rapidjson::kObjectType);
+        for (const auto &[key, canonical] : values) {
+          auto parsed = json::parse(canonical);
+          if (parsed.ok) {
+            json::set(object, key, json::copy(parsed.document, alloc), alloc);
+          }
+        }
+        json::set(settings, id, std::move(object), alloc);
+      }
+      json::set(item, "settings", std::move(settings), alloc);
     }
     json::set(profiles, mode, std::move(item), alloc);
   }

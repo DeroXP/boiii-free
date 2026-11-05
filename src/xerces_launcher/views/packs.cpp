@@ -889,6 +889,15 @@ private:
     profile.map = p.map ? std::optional<std::string>(p.map->id) : std::nullopt;
     profile.pack_name = p.name;
     profile.pack_id = p.id;
+    // The pack's decisions go with it: conflicts it allows and per-mod
+    // settings (pack_to_request does the same for the CLI).
+    profile.allowed_conflicts = p.decisions.allow_conflicts;
+    profile.settings.clear();
+    for (const auto &mod : p.mods) {
+      if (!mod.settings.empty()) {
+        profile.settings[mod.id] = mod.settings;
+      }
+    }
     result_saved_ = svc.save_config();
     owner_->set_mode(p.mode);
     result_pack_ = p.id;

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -25,6 +26,12 @@ struct mode_profile {
   std::map<std::string, std::string> pins;
   std::string pack_name;
   std::string pack_id;
+  // The applied pack's decisions (8.1, 8.3): declared conflicts it allows, as
+  // sorted id pairs, and per-mod settings (id -> key -> canonical JSON).
+  // Kept on a hand edit (Mods can allow a conflict too); only the pins and
+  // the pack's name and id detach.
+  std::set<std::pair<std::string, std::string>> allowed_conflicts;
+  std::map<std::string, std::map<std::string, std::string>> settings;
 };
 
 struct favorite_server {

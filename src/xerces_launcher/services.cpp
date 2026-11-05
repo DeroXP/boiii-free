@@ -413,6 +413,8 @@ xerces_core::plan_request services::request_for(const std::string &mode) const {
     request.mods = it->second.mods;
     request.map = it->second.map;
     request.pins = it->second.pins;
+    request.allowed_conflicts = it->second.allowed_conflicts;
+    request.settings = it->second.settings;
   }
   request.saved_positions = config_.saved_positions;
   if (game_.steam_build) {

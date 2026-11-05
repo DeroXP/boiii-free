@@ -1162,6 +1162,8 @@ private:
       label = owner_->tr("Remove from the load order");
     } else if (fix.kind == "reorder" && enabled(fix.detail)) {
       label = owner_->tr("Move below") + " " + name_of(fix.detail);
+    } else if (fix.kind == "allow_conflict") {
+      label = owner_->tr("Allow this conflict");
     } else if (fix.kind == "unpin") {
       // A dependency's pin names the dependency; the mod's own does not.
       label =
@@ -1186,9 +1188,7 @@ private:
       return;
     }
     std::string text;
-    if (fix.kind == "allow_conflict") {
-      text = owner_->tr("A pack can allow this conflict (Packs).");
-    } else if (fix.kind == "update_xerces") {
+    if (fix.kind == "update_xerces") {
       text = owner_->tr("Needs Xerces") + " " + fix.detail;
     } else if (fix.kind == "install" || fix.kind == "update") {
       text = fix.id.starts_with("ws.")
@@ -1400,6 +1400,20 @@ private:
     } else if (fix.kind == "unpin") {
       edit([&](xc::mode_profile &p) { return xc::mods_unpin(p, fix.id); },
            [&] { return name + " " + owner_->tr("is no longer pinned"); });
+    } else if (fix.kind == "allow_conflict") {
+      // Both mods declared they do not work together; the player says load
+      // them anyway (5.3 step 2). The planner then warns instead of failing.
+      edit(
+          [&](xc::mode_profile &p) {
+            auto pair = std::minmax(fix.id, fix.detail);
+            return p.allowed_conflicts
+                .emplace(std::string(pair.first), std::string(pair.second))
+                .second;
+          },
+          [&] {
+            return name + " " + owner_->tr("and") + " " + name_of(fix.detail) +
+                   " " + owner_->tr("may load together");
+          });
     } else if (fix.kind == "install" || fix.kind == "update") {
       open_steam(fix.id.substr(3));
     }

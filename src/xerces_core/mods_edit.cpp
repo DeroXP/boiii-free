@@ -31,7 +31,8 @@ std::string joined(const std::vector<std::string> &items) {
 bool mods_same(const mode_profile &a, const mode_profile &b) {
   return a.mods == b.mods && a.map == b.map && a.modded == b.modded &&
          a.pins == b.pins && a.pack_name == b.pack_name &&
-         a.pack_id == b.pack_id;
+         a.pack_id == b.pack_id && a.allowed_conflicts == b.allowed_conflicts &&
+         a.settings == b.settings;
 }
 
 mods_snapshot mods_take(const launcher_config &config,
@@ -106,6 +107,8 @@ std::string mods_hand_edit(launcher_config &config, const std::string &mode) {
   profile.pins.clear();
   profile.pack_name.clear();
   profile.pack_id.clear();
+  // Allowed conflicts and per-mod settings stay: they are decisions about
+  // these mods, which a hand edit of the order does not undo.
   for (std::size_t i = 0; i < profile.mods.size(); ++i) {
     config.saved_positions[profile.mods[i]] = static_cast<std::int64_t>(i);
   }

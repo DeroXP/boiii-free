@@ -270,6 +270,8 @@ TEST_CASE("config: round trip keeps known and unknown keys") {
   profile_for(c, "zm").pins = {{"ws.1", "1.2.0"}};
   profile_for(c, "zm").pack_name = "Weekend";
   profile_for(c, "zm").pack_id = "id-1";
+  profile_for(c, "zm").allowed_conflicts = {{"a.mod", "b.mod"}};
+  profile_for(c, "zm").settings["a.mod"]["mult"] = "1.5";
   c.saved_positions = {{"ws.1", 3}};
   c.player_name = "Dero";
   c.extra_flags = {"-windowed"};
@@ -295,6 +297,10 @@ TEST_CASE("config: round trip keeps known and unknown keys") {
   CHECK_EQ(b.profiles.at("zm").pins.at("ws.1"), std::string("1.2.0"));
   CHECK_EQ(b.profiles.at("zm").pack_name, std::string("Weekend"));
   CHECK_EQ(b.profiles.at("zm").pack_id, std::string("id-1"));
+  CHECK((b.profiles.at("zm").allowed_conflicts ==
+         std::set<std::pair<std::string, std::string>>{{"a.mod", "b.mod"}}));
+  CHECK_EQ(b.profiles.at("zm").settings.at("a.mod").at("mult"),
+           std::string("1.5"));
   CHECK_EQ(b.saved_positions.at("ws.1"), std::int64_t{3});
   CHECK_EQ(b.player_name, std::string("Dero"));
   CHECK(b.extra_flags == c.extra_flags);
