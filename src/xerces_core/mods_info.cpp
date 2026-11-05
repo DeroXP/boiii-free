@@ -84,7 +84,12 @@ std::optional<mod_details> describe_mod(const catalog_state &catalog,
     if (index < catalog.sources.size()) {
       out.source = catalog.sources[index];
     }
-    out.folder = item->path.generic_string();
+    // UTF-8, as the catalog's folder names are: generic_string() is the ANSI
+    // code page, which mangles an accented name and throws on one it cannot
+    // hold (Japanese on a Western PC).
+    const std::u8string folder = item->path.generic_u8string();
+    out.folder.assign(reinterpret_cast<const char *>(folder.data()),
+                      folder.size());
     out.folder_name = item->folder;
     if (info.workshop_id) {
       out.workshop_id = std::to_string(*info.workshop_id);

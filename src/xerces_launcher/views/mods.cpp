@@ -1008,7 +1008,11 @@ private:
       }
       d_name_ = plain(info, id);
       d_ws_ = workshop_of(*item);
-      d_path_ = item->path.generic_string();
+      // UTF-8 for RmlUi; generic_string() is the ANSI code page and throws
+      // on a folder name it cannot hold.
+      const std::u8string folder = item->path.generic_u8string();
+      d_path_.assign(reinterpret_cast<const char *>(folder.data()),
+                     folder.size());
       d_legacy_ = info.legacy;
       if (is_map) {
         const xc::mode_profile *p = profile();

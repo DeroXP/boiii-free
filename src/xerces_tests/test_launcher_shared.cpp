@@ -511,3 +511,26 @@ TEST_CASE("mods info: the details pane's facts") {
   CHECK_EQ(beta->position, std::size_t(0));
   CHECK(!beta->supports_mode);
 }
+
+TEST_CASE("mods info: a folder name outside the code page") {
+  // An accented and a Japanese name: the ANSI code page mangles the first and
+  // cannot hold the second. The folder comes back as UTF-8.
+  fake_setup setup("info_unicode");
+  const fs::path folder = fs::path(*setup.game.dir) / "mods" /
+                          fs::path(u8"zm_caf\u00e9_\u65e5\u672c");
+  write(folder / "xerces.mod.json",
+        R"({"schema":1,"id":"fixture.unicode","name":"Unicode Folder",)"
+        R"("version":"1.0.0","license":"MIT"})");
+  write(folder / "zone" / "core_mod.ff", "x");
+  setup.catalog = scan_catalog(setup.game, setup.paths.cache / "hashes.txt");
+  const plan p = resolve_profile(setup.catalog.items, setup.config, "zm",
+                                 setup.game.steam_build);
+  const auto info =
+      describe_mod(setup.catalog, nullptr, p, "zm", "fixture.unicode");
+  REQUIRE(info.has_value());
+  CHECK(
+      info->folder.ends_with("/mods/zm_caf\xc3\xa9_\xe6\x97\xa5\xe6\x9c\xac"));
+  CHECK(info->folder.find('\\') == std::string::npos);
+  CHECK_EQ(info->folder_name,
+           std::string("zm_caf\xc3\xa9_\xe6\x97\xa5\xe6\x9c\xac"));
+}
