@@ -19,6 +19,7 @@
 #include "compat.hpp"
 #include "diagnostics.hpp"
 #include "planner.hpp"
+#include "zone_memory.hpp"
 
 namespace xerces_core {
 struct game_state {
@@ -33,13 +34,18 @@ struct game_state {
       workshop_dir;               // <library>\steamapps\workshop\content\311210
   std::filesystem::path mods_dir; // <game>\mods
   std::filesystem::path usermaps_dir; // <game>\usermaps
+  // <compat_dir>\zone_memory.json's figures for this build (DESIGN.md 5.3
+  // step 5), matched by Steam's build number or, after the pre-flight, the
+  // exe's checksum; nullopt when it lists none (or the file is missing).
+  std::optional<zone_memory_build> zone_memory;
   bool can_launch() const {
     return dir && preflight && preflight->can_launch();
   }
 };
 
 // Detection (4.7): the saved path, then Steam's libraries; then Steam's build
-// number from the appmanifest and, when preflight is true, the pre-flight
+// number from the appmanifest, the build's zone memory figures from
+// <compat_dir>\zone_memory.json and, when preflight is true, the pre-flight
 // check (4.2) of BlackOps3.exe against <compat_dir>\builds.json. The
 // pre-flight hashes BlackOps3.exe (about 100 MB); without it can_launch() is
 // false.

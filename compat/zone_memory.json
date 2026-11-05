@@ -1,0 +1,13 @@
+{
+  "schema": "xerces.zone_memory/1",
+  "_comment": "Zone memory per game build (docs/DESIGN.md 5.3 step 5), named by the keys compat/builds.json uses. When a custom map loads, the engine takes blocks 5 and 6 of every loaded zone (u64 block sizes at +0xA8 in a .ff header) from one fixed pool, the DB stack's main pool: db_main_pool_mib. A map that does not fit makes the engine's out-of-memory handler exit the game while the map loads. baseline_mib is what the pool holds when a custom map's own zones start loading with no mods. Measured on 2026-11-05 from memory dumps of the September 2026 build: with DS4C (Workshop 3171632315, core_mod + zm_mod, 450.5 MiB of blocks 5 and 6) the pool was at about 1299.3 MiB before a custom map's main zone loaded, so the stock Zombies baseline is about 849 MiB. Only Zombies is measured; mp and cp are null, and Xerces skips the check for them until someone measures them.",
+  "builds": [
+    {
+      "name": "September 2026 Steam client",
+      "steam_build": 24784313,
+      "checksum": "0x6531394",
+      "db_main_pool_mib": 2048,
+      "baseline_mib": { "zm": 849, "mp": null, "cp": null }
+    }
+  ]
+}

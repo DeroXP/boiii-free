@@ -363,9 +363,9 @@ int cmd_mods_info(const arguments &args) {
   const home_view home = open_home(args, true, false, true);
   const std::string mode = mode_of(args, home.config);
   const mode_profile *profile = profile_of(home.config, mode);
-  const plan resolved = resolve_profile(home.catalog.items, home.config, mode,
-                                        home.game.steam_build, nullptr,
-                                        read_launcher_settings(home.game));
+  const plan resolved = resolve_profile(
+      home.catalog.items, home.config, mode, home.game.steam_build, nullptr,
+      read_launcher_settings(home.game), home.game.zone_memory);
   const std::string id = resolve_id(given, home.catalog, profile);
   const auto info = describe_mod(home.catalog, profile, resolved, mode, id);
   if (!info) {
@@ -695,9 +695,9 @@ int cmd_mods_edit(const arguments &args, const std::string &action) {
   }
   std::cout << "\n";
   if (scan) {
-    print_problems(resolve_profile(home.catalog.items, config, mode,
-                                   home.game.steam_build, nullptr,
-                                   read_launcher_settings(home.game)));
+    print_problems(resolve_profile(
+        home.catalog.items, config, mode, home.game.steam_build, nullptr,
+        read_launcher_settings(home.game), home.game.zone_memory));
   }
   return exit_ok;
 }
@@ -815,6 +815,16 @@ int cmd_plan_apply(const arguments &args) {
         if (p.map) {
           std::cout << "  map: " << p.map->name << " (" << p.map->id << ")\n";
         }
+        // A plan with warnings still launches; the zone memory one says
+        // which maps close the game while they load.
+        print_zone_memory(p);
+        diagnostics memory;
+        for (const auto &item : p.diags.items()) {
+          if (item.code.starts_with("plan.memory.")) {
+            memory.add(item.level, item.code, item.path, item.message);
+          }
+        }
+        print_diagnostics(memory);
       } else {
         std::cout << (mods_off ? "Mods off (safe mode)" : "Vanilla") << ", "
                   << mode_name(mode) << "\n";
@@ -974,9 +984,9 @@ int cmd_packs_apply(const arguments &args) {
   }
 
   // The check the Packs screen shows after applying (fill_result).
-  const plan resolved = resolve_profile(home.catalog.items, home.config, mode,
-                                        home.game.steam_build, nullptr,
-                                        read_launcher_settings(home.game));
+  const plan resolved = resolve_profile(
+      home.catalog.items, home.config, mode, home.game.steam_build, nullptr,
+      read_launcher_settings(home.game), home.game.zone_memory);
   const diagnostics content = verify_pack_content(p, resolved);
   const pack_check check = check_pack(p, home.catalog.items);
   const bool ok = resolved.ok() && !content.has_errors() && check.ready();

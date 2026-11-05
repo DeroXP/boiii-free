@@ -279,6 +279,13 @@ mods_attribute(const plan &resolved,
   mods_notes out;
   for (const diagnostic &item : resolved.diags.items()) {
     const mods_note note{item.level, item.code, item.message};
+    // Zone memory is about the whole stack: it names maps (which have no
+    // notes of their own on the screen) and the mod that takes the most,
+    // and belongs to none of them.
+    if (item.code.starts_with("plan.memory.")) {
+      out.general.push_back(note);
+      continue;
+    }
     std::set<std::string> ids;
     // Settings name their mod in the path: /settings/<id>/<key>.
     if (item.path.starts_with("/settings/")) {

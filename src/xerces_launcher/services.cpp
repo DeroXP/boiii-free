@@ -224,7 +224,8 @@ void services::cancel_scan() {
 // --------------------------------------------------------------------- plan
 xerces_core::plan_request services::request_for(const std::string &mode) const {
   return xerces_core::profile_request(config_, mode, game_.steam_build,
-                                      launcher_settings_text());
+                                      launcher_settings_text(),
+                                      game_.zone_memory);
 }
 
 std::string services::launcher_settings_text() const {
@@ -237,9 +238,9 @@ xerces_core::pool_settings services::pool_settings() const {
 
 xerces_core::plan services::resolve(const std::string &mode,
                                    const std::vector<std::string> *mods) const {
-  return xerces_core::resolve_profile(catalog_.items, config_, mode,
-                                      game_.steam_build, mods,
-                                      launcher_settings_text());
+  return xerces_core::resolve_profile(
+      catalog_.items, config_, mode, game_.steam_build, mods,
+      launcher_settings_text(), game_.zone_memory);
 }
 
 std::vector<const xerces_core::installed_content *>

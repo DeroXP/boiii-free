@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -37,6 +38,7 @@
 #include <xerces_core/sigregistry.hpp>
 #include <xerces_core/sigscan.hpp>
 #include <xerces_core/version.hpp>
+#include <xerces_core/zone_memory.hpp>
 
 #include "cli.hpp"
 
@@ -169,12 +171,17 @@ Work without the game:
                [--stock-zones <n>] [--game-build <0x...>]
                [--game-dir <folder>] [--json]      asset pool defaults from the
                                                    game's launcher_settings.json
+               [--zone-memory <file>]              zone memory figures for
+                                                   --game-build (default
+                                                   compat/zone_memory.json)
   plan explain  (same options)                     why the order is what it is
   conflicts check --mods-dir <dir> (--mod <id>... | --pack <file|code>)
-                  [--stock <dir>] [--map-last] [--json]
+                  [--stock <dir>] [--map-last] [--game-build <0x...>]
+                  [--zone-memory <file>] [--json]
   packs export --mods-dir <dir> --name <name> --mod <id>... [--mode zm]
                [--out <file>] [--code]
   packs import <file|XRC1.code> [--mods-dir <dir>] [--json]   validate + dry run
+               [--game-build <0x...>] [--zone-memory <file>]
   packs validate <file|XRC1.code> [--json]
   game detect [--saved <folder>] [--json]          find the game install (reads only)
   game check [--game-dir <folder>] [--builds <file>] [--json]
@@ -240,6 +247,31 @@ Exit codes: 0 ok, 1 error, 2 validation or conflict failures,
   return exit_ok;
 }
 
+// The zone memory budget (DESIGN.md 5.3 step 5) of a game build (an exe
+// checksum or Steam's build number) and mode, from --zone-memory, else the
+// repository's compat/zone_memory.json when there is one. nullopt when there
+// is no file or no figures for the build and mode.
+std::optional<zone_budget> zone_budget_from(const arguments &args,
+                                            const std::string &game_build,
+                                            const std::string &mode) {
+  const auto zone_file = args.get("--zone-memory");
+  const fs::path zone_path = zone_file.value_or("compat/zone_memory.json");
+  std::error_code ec;
+  if (!fs::is_regular_file(zone_path, ec)) {
+    if (zone_file) {
+      throw std::invalid_argument("--zone-memory: " + *zone_file +
+                                  " is not a file.");
+    }
+    return std::nullopt;
+  }
+  const zone_memory_table table = parse_zone_memory(read_text(zone_path));
+  for (const auto &item : table.diags.items()) {
+    std::cerr << to_string(item.level) << ": " << utf8(zone_path) << ": "
+              << item.message << " [" << item.path << "]\n";
+  }
+  return find_zone_budget(table, game_build, mode);
+}
+
 plan_request request_from(const arguments &args) {
   plan_request request;
   request.mode = args.get("--mode").value_or("zm");
@@ -264,6 +296,8 @@ plan_request request_from(const arguments &args) {
         read_text(fs::path(*game_dir) / "boiii_players" / "user" /
                   "launcher_settings.json");
   }
+  request.zone_budget =
+      zone_budget_from(args, request.game_build, request.mode);
   request.xerces_version =
       version::parse(xerces_version_text).value_or(version{});
   request.protocol_version = protocol_version;
@@ -511,6 +545,71 @@ void print_pools(const plan &p) {
   }
 }
 
+std::string mib_text(double mib) {
+  const double rounded = round_mib(mib);
+  char text[32];
+  std::snprintf(text, sizeof(text),
+                rounded == static_cast<double>(static_cast<long long>(rounded))
+                    ? "%.0f"
+                    : "%.1f",
+                rounded);
+  return text;
+}
+
+void print_zone_memory(const plan &p) {
+  const zone_memory_report &memory = p.zone_memory;
+  const double stack = to_mib(memory.stack_bytes);
+  if (!memory.budget) {
+    std::cout << "  zone memory: mods " << mib_text(stack) << " MiB"
+              << (memory.map_bytes
+                      ? ", map " + mib_text(to_mib(*memory.map_bytes)) + " MiB"
+                      : "")
+              << "; not checked (no figures for this game build and mode)\n";
+  } else {
+    const zone_budget &budget = *memory.budget;
+    const double total = budget.baseline_mib + stack +
+                         (memory.map_bytes ? to_mib(*memory.map_bytes) : 0.0);
+    std::cout << "  zone memory: " << mib_text(total) << " of "
+              << mib_text(budget.pool_mib) << " MiB "
+              << (memory.map_bytes ? "with the map" : "before a map")
+              << " (game " << mib_text(budget.baseline_mib) << ", mods "
+              << mib_text(stack)
+              << (memory.map_bytes
+                      ? ", map " + mib_text(to_mib(*memory.map_bytes))
+                      : "")
+              << ")";
+    const std::size_t unread = memory.maps_unread.size();
+    const std::string not_checked = std::to_string(unread) +
+                                    (unread == 1 ? " was" : " were") +
+                                    " not checked";
+    if (memory.maps_over.empty() && unread == 0) {
+      std::cout << "; every installed map of the mode fits\n";
+    } else if (memory.maps_over.empty()) {
+      std::cout << "; the installed maps of the mode fit, but " << not_checked
+                << ":\n";
+    } else {
+      std::cout << "; " << memory.maps_over.size() << " installed map"
+                << (memory.maps_over.size() == 1 ? " does" : "s do")
+                << " not fit" << (unread > 0 ? " and " + not_checked : "")
+                << ":\n";
+    }
+    for (const auto &map : memory.maps_over) {
+      std::cout << "    " << map.name << " (" << map.id << "): needs "
+                << mib_text(map.need_mib) << " MiB, "
+                << mib_text(map.over_by_mib) << " over"
+                << (map.over_without_mods ? ", even with no mods" : "") << "\n";
+    }
+    for (const auto &map : memory.maps_unread) {
+      std::cout << "    " << map.name << " (" << map.id
+                << "): not checked, a zone's header could not be read\n";
+    }
+  }
+  for (const std::string &id : memory.unread) {
+    std::cout << "  zone memory of " << id
+              << " partly unknown: a zone's header could not be read\n";
+  }
+}
+
 void print_plan(const plan &p, bool explain) {
   std::cout << "Plan for " << p.mode << ": " << p.stack.size() << " mod"
             << (p.stack.size() == 1 ? "" : "s") << "\n";
@@ -535,6 +634,7 @@ void print_plan(const plan &p, bool explain) {
     std::cout << " (" << *p.zones_total << " of " << zone_slot_limit << ")";
   }
   std::cout << "\n";
+  print_zone_memory(p);
   print_pools(p);
   if (explain) {
     for (const auto &item : p.explanations) {
@@ -635,7 +735,7 @@ int cmd_conflicts(const arguments &args) {
   if (!scan) {
     return exit_error;
   }
-  plan_request request = request_from(args);
+  plan_request request;
   std::optional<pack> loaded;
   if (const auto source = args.get("--pack")) {
     pack_result result = load_pack(*source);
@@ -644,8 +744,14 @@ int cmd_conflicts(const arguments &args) {
       return exit_failed;
     }
     loaded = result.value;
-    request =
-        pack_to_request(*loaded, request.game_build, request.xerces_version);
+    request = pack_to_request(
+        *loaded, args.get("--game-build").value_or("unknown"),
+        version::parse(xerces_version_text).value_or(version{}));
+    // The budget of the pack's own mode, which --mode does not change.
+    request.zone_budget =
+        zone_budget_from(args, request.game_build, request.mode);
+  } else {
+    request = request_from(args);
   }
   const checked result =
       check(*scan, request, loaded ? &loaded->decisions : nullptr,
@@ -717,9 +823,11 @@ int cmd_packs(const arguments &args) {
     }
     // Import is a dry run (8.6): the plan, the content check and conflicts.
     const auto scan = scan_from(args);
-    const plan_request request = pack_to_request(
+    plan_request request = pack_to_request(
         result.value, args.get("--game-build").value_or("unknown"),
         version::parse(xerces_version_text).value_or(version{}));
+    request.zone_budget =
+        zone_budget_from(args, request.game_build, request.mode);
     const checked dry = check(*scan, request, &result.value.decisions,
                               args.get("--stock"), args.has("--map-last"));
     const diagnostics content = verify_pack_content(result.value, dry.resolved);

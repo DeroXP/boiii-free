@@ -5,7 +5,9 @@
 #include "harness.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <string>
@@ -15,6 +17,7 @@
 
 #include <xerces_core/catalog.hpp>
 #include <xerces_core/conflicts.hpp>
+#include <xerces_core/fastfile_header.hpp>
 #include <xerces_core/hooks.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/log.hpp>
@@ -773,6 +776,65 @@ TEST_CASE("review: cli refuses a negative --stock-zones") {
                L"b.mod", L"--stock-zones", L"-1"});
   CHECK_EQ(result.exit_code, 1ul);
   CHECK(result.out.find("4294967295") == std::string::npos);
+  fs::remove_all(dir);
+}
+
+TEST_CASE("review: cli packs import and conflicts --pack check zone memory") {
+  // Both rebuild the request with pack_to_request, which never set
+  // zone_budget: a pack whose map does not fit passed its dry run, and the
+  // zone memory line said there were no figures for the build.
+  const fs::path dir = fresh_dir("cli_pack_zone_memory");
+  const fs::path mods = dir / "workshop";
+  // A fastfile header asking `mib` MiB of the DB stack's main pool.
+  const auto ff = [](std::uint64_t mib) {
+    std::string out(fastfile_header_bytes, '\0');
+    std::memcpy(out.data(), fastfile_magic.data(), fastfile_magic.size());
+    for (std::size_t i = 0; i < 4; ++i) {
+      out[8 + i] = static_cast<char>((fastfile_version >> (8 * i)) & 0xFF);
+    }
+    const std::uint64_t bytes = mib * 1024 * 1024;
+    for (std::size_t i = 0; i < 8; ++i) {
+      out[fastfile_blocks_offset + 8 * 6 + i] =
+          static_cast<char>((bytes >> (8 * i)) & 0xFF);
+    }
+    return out;
+  };
+  write_text(mods / "500" / "workshop.json",
+             R"({"PublisherID":"500","Type":"mod","Title":"Heavy Mod"})");
+  write_text(mods / "500" / "core_mod.ff", ff(500));
+  write_text(mods / "600" / "workshop.json",
+             R"({"PublisherID":"600","Type":"map","Title":"Huge Map"})");
+  write_text(mods / "600" / "zm_huge.ff", ff(800));
+  const fs::path figures = dir / "zone_memory.json";
+  write_text(figures,
+             R"({"schema":"xerces.zone_memory/1","builds":[{"name":"Test",)"
+             R"("checksum":"0x7E570002","db_main_pool_mib":2048,)"
+             R"("baseline_mib":{"zm":849}}]})");
+  // Exported without a build, so nothing is checked and the export works.
+  const fs::path pack_file = dir / "pack.json";
+  const cli_result exported =
+      run_cli({L"packs", L"export", L"--mods-dir", mods.wstring(), L"--name",
+               L"Big", L"--mod", L"ws.500", L"--map", L"ws.600", L"--out",
+               pack_file.wstring()});
+  REQUIRE_EQ(exported.exit_code, 0ul);
+
+  // 849 + 500 + 800 = 2149 MiB, 101 over.
+  const cli_result imported = run_cli(
+      {L"packs", L"import", pack_file.wstring(), L"--mods-dir", mods.wstring(),
+       L"--game-build", L"0x7E570002", L"--zone-memory", figures.wstring()});
+  CHECK_EQ(imported.exit_code, 2ul);
+  CHECK(imported.out.find("zone memory: 2149 of 2048 MiB with the map") !=
+        std::string::npos);
+  CHECK(imported.out.find("(plan.memory.over)") != std::string::npos);
+  CHECK(imported.out.find("no figures") == std::string::npos);
+
+  // The pack's own mode counts: --mode mp (no figures) does not skip it.
+  const cli_result conflicts =
+      run_cli({L"conflicts", L"check", L"--mods-dir", mods.wstring(), L"--pack",
+               pack_file.wstring(), L"--mode", L"mp", L"--game-build",
+               L"0x7E570002", L"--zone-memory", figures.wstring()});
+  CHECK_EQ(conflicts.exit_code, 2ul);
+  CHECK(conflicts.out.find("(plan.memory.over)") != std::string::npos);
   fs::remove_all(dir);
 }
 
