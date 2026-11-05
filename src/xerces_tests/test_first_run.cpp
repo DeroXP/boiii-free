@@ -5,6 +5,7 @@
 
 #include "harness.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -386,9 +387,9 @@ TEST_CASE("first run: applying the import to the config") {
   CHECK(!again.changed());
   CHECK_EQ(new_boiii_favorites(config, found), std::size_t(0));
 
-  // The recent list stops at upstream's limit.
+  // The recent list stops at the Servers screen's limit.
   launcher_config full;
-  for (std::size_t i = 0; i < boiii_recent_limit; ++i) {
+  for (std::size_t i = 0; i < max_recent_servers; ++i) {
     full.recent_servers.push_back("10.0.0." + std::to_string(i) + ":1");
   }
   // A full list has nothing new to offer: the screen must not show servers
@@ -398,7 +399,7 @@ TEST_CASE("first run: applying the import to the config") {
   CHECK_EQ(no_room, std::size_t(2));
   CHECK_EQ(apply_boiii_import(full, found, boiii_import_choice{}).recent_servers,
            std::size_t(0));
-  CHECK_EQ(full.recent_servers.size(), boiii_recent_limit);
+  CHECK_EQ(full.recent_servers.size(), max_recent_servers);
 
   // One place left: one is new, one does not fit, and after the import
   // nothing is new.
@@ -409,6 +410,70 @@ TEST_CASE("first run: applying the import to the config") {
            std::size_t(1));
   CHECK_EQ(new_boiii_recent_servers(full, found, &no_room), std::size_t(0));
   CHECK_EQ(no_room, std::size_t(1));
+}
+
+TEST_CASE("first run: the import fills Xerces' lists only as far as they go") {
+  // BOIII keeps 50 recent servers; the Servers screen keeps 10 and the next
+  // join cuts the list back to that. 30 of them on an empty list: 10 arrive,
+  // the screen says 20 do not fit, and a join loses none of the 10.
+  boiii_import found;
+  for (int i = 0; i < 30; ++i) {
+    found.recent_servers.push_back("10.1.0." + std::to_string(i) + ":27017");
+  }
+  launcher_config config;
+  std::size_t no_room = 0;
+  CHECK_EQ(new_boiii_recent_servers(config, found, &no_room),
+           max_recent_servers);
+  CHECK_EQ(no_room, std::size_t(30) - max_recent_servers);
+  boiii_import_choice recent_only;
+  recent_only.player_name = false;
+  recent_only.favorites = false;
+  CHECK_EQ(apply_boiii_import(config, found, recent_only).recent_servers,
+           max_recent_servers);
+  REQUIRE_EQ(config.recent_servers.size(), max_recent_servers);
+  CHECK_EQ(config.recent_servers.front(), std::string("10.1.0.0:27017"));
+  // A join keeps every imported server but the oldest, as with any join.
+  const std::vector<std::string> imported = config.recent_servers;
+  CHECK(remember_recent_server(config.recent_servers, "192.0.2.1:27017"));
+  REQUIRE_EQ(config.recent_servers.size(), max_recent_servers);
+  CHECK(std::equal(imported.begin(), imported.end() - 1,
+                   config.recent_servers.begin() + 1));
+
+  // Favourites: the Servers screen refuses every add past 100. With 95
+  // saved, 5 of BOIII's 8 new ones fit (the first 5, in its order), and an
+  // address already saved is not counted against the room.
+  launcher_config saved;
+  for (std::size_t i = 0; i < max_favorite_servers - 5; ++i) {
+    saved.favorites.push_back({"", "10.2.0." + std::to_string(i) + ":1"});
+  }
+  boiii_import offered;
+  offered.favorites.push_back("10.2.0.0:1"); // already saved
+  for (int i = 0; i < 8; ++i) {
+    offered.favorites.push_back("10.3.0." + std::to_string(i) + ":1");
+  }
+  CHECK_EQ(new_boiii_favorites(saved, offered, &no_room), std::size_t(5));
+  CHECK_EQ(no_room, std::size_t(3));
+  boiii_import_choice favorites_only;
+  favorites_only.player_name = false;
+  favorites_only.recent_servers = false;
+  CHECK_EQ(apply_boiii_import(saved, offered, favorites_only).favorites,
+           std::size_t(5));
+  REQUIRE_EQ(saved.favorites.size(), max_favorite_servers);
+  CHECK_EQ(saved.favorites.back().address, std::string("10.3.0.4:1"));
+  CHECK_EQ(new_boiii_favorites(saved, offered, &no_room), std::size_t(0));
+  CHECK_EQ(no_room, std::size_t(3));
+  // The Servers screen agrees: the list is full, not over full.
+  CHECK((save_favorite(saved.favorites, "", "10.9.9.9:1").status ==
+         favorite_status::full));
+
+  // A list already over the limit (an older import, a hand-edited config)
+  // has no room at all.
+  for (int i = 0; i < 5; ++i) {
+    saved.favorites.push_back({"", "10.4.0." + std::to_string(i) + ":1"});
+  }
+  CHECK_EQ(new_boiii_favorites(saved, offered, &no_room), std::size_t(0));
+  CHECK_EQ(apply_boiii_import(saved, offered, favorites_only).favorites,
+           std::size_t(0));
 }
 
 namespace {

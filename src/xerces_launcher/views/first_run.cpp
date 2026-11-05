@@ -554,47 +554,60 @@ private:
       }
       imports_.push_back(std::move(row));
     }
-    if (!found_.favorites.empty()) {
-      const std::size_t fresh = xerces_core::new_boiii_favorites(config, found_);
+    // Only what fits in Xerces' lists counts: the import stops where the
+    // Servers screen's lists are full (xerces_core::max_favorite_servers,
+    // max_recent_servers), and says how many are left out. Texts come in
+    // translated (tr() needs the literals for the string template).
+    const auto server_row = [&](const char *key, bool chosen, std::string title,
+                                std::size_t count, std::size_t fresh,
+                                std::size_t no_room, const fs::path &file,
+                                std::string full, std::string full_note) {
       import_row row;
-      row.key = "favorites";
-      row.title = owner_->tr("Favourite servers");
-      row.value = std::to_string(found_.favorites.size());
+      row.key = key;
+      row.title = std::move(title);
+      row.value = std::to_string(count);
       row.done = fresh == 0;
-      row.on = choice_.favorites && !row.done;
-      row.detail = row.done ? owner_->tr("All already in Xerces")
-                            : relative(found_.favorites_file);
-      if (!row.done && fresh != found_.favorites.size()) {
-        row.detail += " \xC2\xB7 " + std::to_string(fresh) + " " + owner_->tr("new");
-      }
-      imports_.push_back(std::move(row));
-    }
-    if (!found_.recent_servers.empty()) {
-      // Only what fits in Xerces' recent list counts: the import stops there.
-      std::size_t no_room = 0;
-      const std::size_t fresh =
-          xerces_core::new_boiii_recent_servers(config, found_, &no_room);
-      import_row row;
-      row.key = "recent";
-      row.title = owner_->tr("Recently joined servers");
-      row.value = std::to_string(found_.recent_servers.size());
-      row.done = fresh == 0;
-      row.on = choice_.recent_servers && !row.done;
+      row.on = chosen && !row.done;
       if (row.done) {
-        row.detail = owner_->tr(no_room > 0 ? "Xerces' recent list is full"
-                                            : "All already in Xerces");
+        row.detail =
+            no_room > 0 ? std::move(full) : owner_->tr("All already in Xerces");
         if (no_room > 0) {
-          row.done_note = owner_->tr("Xerces' recent list is full: there is "
-                                     "no room for more servers.");
+          row.done_note = std::move(full_note);
         }
       } else {
-        row.detail = relative(found_.recent_file);
-        if (fresh != found_.recent_servers.size()) {
+        row.detail = relative(file);
+        if (fresh != count) {
           row.detail +=
               " \xC2\xB7 " + std::to_string(fresh) + " " + owner_->tr("new");
         }
+        if (no_room > 0) {
+          row.detail += " \xC2\xB7 " + std::to_string(no_room) + " " +
+                        owner_->tr("do not fit");
+        }
       }
       imports_.push_back(std::move(row));
+    };
+    if (!found_.favorites.empty()) {
+      std::size_t no_room = 0;
+      const std::size_t fresh =
+          xerces_core::new_boiii_favorites(config, found_, &no_room);
+      server_row("favorites", choice_.favorites,
+                 owner_->tr("Favourite servers"), found_.favorites.size(),
+                 fresh, no_room, found_.favorites_file,
+                 owner_->tr("Xerces' favourites are full"),
+                 owner_->tr("Xerces' favourites are full: remove some on the "
+                            "Servers screen to make room."));
+    }
+    if (!found_.recent_servers.empty()) {
+      std::size_t no_room = 0;
+      const std::size_t fresh =
+          xerces_core::new_boiii_recent_servers(config, found_, &no_room);
+      server_row("recent", choice_.recent_servers,
+                 owner_->tr("Recently joined servers"),
+                 found_.recent_servers.size(), fresh, no_room,
+                 found_.recent_file, owner_->tr("Xerces' recent list is full"),
+                 owner_->tr("Xerces' recent list is full: there is no room "
+                            "for more servers."));
     }
     can_import_ = std::ranges::any_of(
         imports_, [](const import_row &row) { return row.on && !row.done; });

@@ -48,6 +48,20 @@ bool contains_address(const std::vector<std::string> &list,
       list, [&](const std::string &item) { return lower(item) == key; });
 }
 
+bool has_favorite(const launcher_config &config, std::string_view address) {
+  const std::string key = lower(address);
+  return std::ranges::any_of(config.favorites,
+                             [&](const favorite_server &server) {
+                               return lower(server.address) == key;
+                             });
+}
+
+// Places left in a list that holds at most `limit` (none when a hand-edited
+// or older config already holds more).
+std::size_t room(std::size_t size, std::size_t limit) {
+  return limit - std::min(size, limit);
+}
+
 // True (with a warning) when path is, or may be, in an identity folder.
 bool refused(const fs::path &path, const std::vector<fs::path> &appdata,
              diagnostics &diags) {
@@ -281,16 +295,20 @@ boiii_import find_boiii_import(const std::vector<fs::path> &boiii_appdata,
 }
 
 std::size_t new_boiii_favorites(const launcher_config &config,
-                                const boiii_import &found) {
-  std::size_t count = 0;
+                                const boiii_import &found,
+                                std::size_t *no_room) {
+  std::size_t fresh = 0;
   for (const std::string &address : found.favorites) {
-    const bool known = std::ranges::any_of(
-        config.favorites, [&](const favorite_server &server) {
-          return lower(server.address) == lower(address);
-        });
-    count += known ? 0 : 1;
+    fresh += has_favorite(config, address) ? 0 : 1;
   }
-  return count;
+  // apply_boiii_import stops once the list is full, so only what fits counts
+  // as new; otherwise the screen would offer servers that never arrive.
+  const std::size_t fits =
+      std::min(fresh, room(config.favorites.size(), max_favorite_servers));
+  if (no_room) {
+    *no_room = fresh - fits;
+  }
+  return fits;
 }
 
 std::size_t new_boiii_recent_servers(const launcher_config &config,
@@ -300,12 +318,8 @@ std::size_t new_boiii_recent_servers(const launcher_config &config,
   for (const std::string &address : found.recent_servers) {
     fresh += contains_address(config.recent_servers, address) ? 0 : 1;
   }
-  // apply_boiii_import stops once the list is full, so only what fits counts
-  // as new; otherwise the screen would offer servers that never arrive.
-  const std::size_t room =
-      boiii_recent_limit -
-      std::min(config.recent_servers.size(), boiii_recent_limit);
-  const std::size_t fits = std::min(fresh, room);
+  const std::size_t fits =
+      std::min(fresh, room(config.recent_servers.size(), max_recent_servers));
   if (no_room) {
     *no_room = fresh - fits;
   }
@@ -323,11 +337,10 @@ boiii_import_result apply_boiii_import(launcher_config &config,
   }
   if (choice.favorites) {
     for (const std::string &address : found.favorites) {
-      const bool known = std::ranges::any_of(
-          config.favorites, [&](const favorite_server &server) {
-            return lower(server.address) == lower(address);
-          });
-      if (!known) {
+      if (config.favorites.size() >= max_favorite_servers) {
+        break; // the Servers screen would refuse every add past this
+      }
+      if (!has_favorite(config, address)) {
         // BOIII's list has addresses only; the name stays empty until the
         // player names the server.
         config.favorites.push_back({"", address});
@@ -337,8 +350,8 @@ boiii_import_result apply_boiii_import(launcher_config &config,
   }
   if (choice.recent_servers) {
     for (const std::string &address : found.recent_servers) {
-      if (config.recent_servers.size() >= boiii_recent_limit) {
-        break;
+      if (config.recent_servers.size() >= max_recent_servers) {
+        break; // the next join would cut the list back to this
       }
       if (!contains_address(config.recent_servers, address)) {
         config.recent_servers.push_back(address);

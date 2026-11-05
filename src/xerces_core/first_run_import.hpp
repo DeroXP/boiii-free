@@ -21,9 +21,13 @@
 
 #include "diagnostics.hpp"
 #include "launcher_config.hpp"
+#include "servers_book.hpp"
 
 namespace xerces_core {
-// Upstream keeps at most this many recent servers; the import does the same.
+// The most the import reads from upstream's files: upstream keeps at most 50
+// recent servers, and no favourites file it writes is longer than this. What
+// the import adds to Xerces stops at the Servers screen's own limits
+// (max_recent_servers, max_favorite_servers), which Xerces' lists keep.
 inline constexpr std::size_t boiii_recent_limit = 50;
 inline constexpr std::size_t boiii_favorite_limit = 500;
 
@@ -135,18 +139,22 @@ struct boiii_import_result {
 };
 
 // What applying would add to config: favourites and recent servers it does
-// not already have (addresses compared ignoring case). Recent servers stop at
-// boiii_recent_limit, as apply_boiii_import does; *no_room (when given)
+// not already have (addresses compared ignoring case). Like
+// apply_boiii_import, they stop where the Servers screen's lists are full
+// (max_favorite_servers, max_recent_servers): a server past that would be
+// refused there, or dropped at the next join. *no_room (when given)
 // receives how many more are new but do not fit.
 std::size_t new_boiii_favorites(const launcher_config &config,
-                                const boiii_import &found);
+                                const boiii_import &found,
+                                std::size_t *no_room = nullptr);
 std::size_t new_boiii_recent_servers(const launcher_config &config,
                                      const boiii_import &found,
                                      std::size_t *no_room = nullptr);
 
 // Copies the chosen values into config (the caller saves it). Favourites are
-// appended without duplicates; recent servers go after the ones Xerces
-// already has (those are newer), up to boiii_recent_limit.
+// appended without duplicates, in BOIII's order, up to max_favorite_servers;
+// recent servers go after the ones Xerces already has (those are newer), up
+// to max_recent_servers.
 boiii_import_result apply_boiii_import(launcher_config &config,
                                        const boiii_import &found,
                                        const boiii_import_choice &choice);
