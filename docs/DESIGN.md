@@ -1705,6 +1705,28 @@ hypothesis. The M0 session records a baseline on upstream with the cap removed,
 - Load times from the launch journal.
 - Tracy (BSD-3) zones in Xerces hooks in dev builds; ETW and WPA for deep dives.
 
+Status (2026-11-05, perf plan H1 and H2, offline only):
+
+- `src/xerces_core/perf_import` reads what the benchmark measures: the probe's
+  frames CSV (`i,t_ms,dt_ms,present_ms,overlay_us,cpu,flags`), PresentMon CSVs
+  (1.x, 2.0 and 2.3+ column names, found by name; the game's process and swap
+  chain kept), the console's `FastFileLoad ... XZONE_LOADED in N ms`,
+  `ModLoad start/done` and `Supplemented N usermaps/mods` lines, and the JSON
+  log events (`loader.phase`, `loader.map.ready`, `launcher.launch.started`,
+  `launcher.startup.step`, `launcher.catalog.scanned`).
+- `src/xerces_core/perf_stats` summarizes a run: mean frame time (total /
+  frames), median, p95, p99, p99.9, max; 1 and 0.1 percent lows both as 1000 /
+  the mean of the worst frames and as 1000 / the percentile, labelled; hitches
+  (over 2x the rolling median of 31 frames and over that median + 4 ms) and
+  frames over 50 and 100 ms; stutter time; drift between the halves (a warning
+  above 2%).
+- `xerces_cli bench loads`, `bench launcher`, `bench analyze` and
+  `bench compare` work on files that already exist (docs/TESTING.md,
+  Performance). Not built yet: the swap-chain probe, the other in-game timing
+  (H3), and the launcher and game drivers (H4, H5). No frame times have been
+  recorded yet. Load times come from the journal and the console, and the map
+  command itself is not timestamped yet.
+
 ### 12.3 The benchmark
 
 `xerces_cli bench run <scenario>` runs each scenario 5 times after a warm-up and
@@ -1722,6 +1744,17 @@ a map with the simulation frozen. Variants:
 M7 passes when xerces-on's mean frame time and 1 percent low are within the 95
 percent confidence interval of upstream on every scenario, and load times are no
 worse.
+
+Status (2026-11-05): the comparison exists offline.
+`xerces_cli bench compare --a <runs> --b <runs>` treats each run as one sample.
+It gives t-based 95 percent intervals, Welch's difference with its interval and
+p, and TOST equivalence with margins in percent of A's mean. The defaults are
+the proposed M7 margins, 1% on mean frame time and 3% on p99, and they are yours
+to confirm. It also pools each side's 1 and 0.1 percent lows with a cluster
+bootstrap (whole runs resampled, fixed seed), which is descriptive only.
+`bench run` (scenarios, warm-up, the variants) needs the game and is not built.
+The first load and launcher baseline from existing logs is in
+`C:\Users\Ginld\XercesDev\bench\baseline-20261105\`.
 
 ### 12.4 Candidate optimizations, in order
 
@@ -1911,6 +1944,7 @@ are not on the pipe.
 | `xerces_cli mod validate / lint / new`                   | author tools                    |
 | `xerces_cli sig check [--dump dir]`                      | signature report                |
 | `xerces_cli bench run <scenario>`                        | benchmark                       |
+| `xerces_cli bench loads / launcher / analyze / compare`  | offline benchmark (12.2)        |
 | `xerces_cli test run <scenario>`                         | in-game integration tests       |
 | `xerces_cli diag bundle`                                 | diagnostics bundle (5.10)       |
 | `xerces_cli logs tail [--follow]`                        | live log stream                 |

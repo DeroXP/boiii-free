@@ -2,7 +2,9 @@
 .SYNOPSIS
   CLI smoke test for the commands that work on <home> as Xerces.exe does
   (docs/DESIGN.md 15.2): mods list, info, enable, disable and order, plan
-  apply --dry-launch, packs apply, logs tail and sig check.
+  apply --dry-launch, packs apply, logs tail and sig check; and the offline
+  benchmark (bench loads, launcher, analyze and compare) on small logs and
+  frame CSVs written here.
 
 .DESCRIPTION
   Runs xerces_cli against a fresh home and a copy of a fake game folder (two
@@ -297,6 +299,106 @@ try {
   [IO.File]::WriteAllText("$homeDir\cache\signatures-report.json", $report.Replace('"resolved":false', '"resolved":true').Replace('"multi_mod":["b"]', ''))
   Invoke-Xcli 0 sig check | Out-Null
   Invoke-Xcli 1 sig check --registry compat/signatures.json | Out-Null # --registry goes with --dump
+
+  # ------------------------------------------------- bench (offline only)
+  # A launcher log, a map-check folder (game log, console, results.jsonl) and
+  # frame CSVs written here; bench only reads them. No --home on these calls.
+  function Invoke-Bench {
+    $expect = [int]$args[0]
+    $rest = @($args | Select-Object -Skip 1)
+    $ErrorActionPreference = 'Continue'
+    $out = & $script:exe @rest 2>$null
+    $code = $LASTEXITCODE
+    if ($code -ne $expect) {
+      $script:failures += "xerces_cli $($rest -join ' '): exit $code, expected $expect"
+    }
+    return ($out -join "`n")
+  }
+  $bench = Join-Path $WorkDir 'bench'
+  $benchLogs = Join-Path $bench 'logs'
+  $checks = Join-Path $bench 'map-checks'
+  $runDir = Join-Path $checks '20261105-120000-zm_test-vanilla'
+  New-Item -ItemType Directory -Force $benchLogs, $runDir | Out-Null
+  [IO.File]::WriteAllText("$benchLogs\20261105-120000-launcher-100.jsonl", (@(
+        '{"event":"launcher.start","level":"info","msg":"Xerces","role":"launcher","session":"100","ts":"2026-11-05T12:00:00.000Z","data":{"dry_launch":false}}'
+        '{"event":"launcher.startup.step","level":"info","msg":"window created at 15.0 ms","role":"launcher","session":"100","ts":"2026-11-05T12:00:00.015Z","data":{"ms":15.0}}'
+        '{"event":"launcher.startup.step","level":"info","msg":"first frame presented at 220.0 ms","role":"launcher","session":"100","ts":"2026-11-05T12:00:00.220Z","data":{"ms":220.0}}'
+        '{"event":"launcher.catalog.scanned","level":"info","msg":"17 items","role":"launcher","session":"100","ts":"2026-11-05T12:00:00.400Z","data":{"bytes_hashed":0,"cache_hits":686,"cache_misses":0,"items":17,"seconds":0.08}}'
+        '{"event":"launcher.launch.started","level":"info","msg":"-launch","role":"launcher","session":"100","ts":"2026-11-05T12:00:05.000Z","data":{"pid":4242,"plan_id":""}}'
+      ) -join "`n") + "`n")
+  [IO.File]::WriteAllText("$runDir\20261105-120019-game-4242.jsonl", (@(
+        '{"event":"loader.phase","level":"info","msg":"symbols","role":"game","session":"4242","ts":"2026-11-05T12:00:19.000Z","data":{"phase":"symbols","plan_id":""}}'
+        '{"event":"loader.phase","level":"info","msg":"frontend","role":"game","session":"4242","ts":"2026-11-05T12:00:39.000Z","data":{"phase":"frontend","plan_id":""}}'
+        '{"event":"loader.phase","level":"info","msg":"loading_map","role":"game","session":"4242","ts":"2026-11-05T12:00:50.000Z","data":{"phase":"loading_map","plan_id":""}}'
+        '{"event":"loader.phase","level":"info","msg":"in_game","role":"game","session":"4242","ts":"2026-11-05T12:01:10.000Z","data":{"phase":"in_game","plan_id":""}}'
+        '{"event":"loader.map.ready","level":"info","msg":"zm_test","role":"game","session":"4242","ts":"2026-11-05T12:01:10.000Z","data":{"map":"zm_test"}}'
+      ) -join "`n") + "`n")
+  [IO.File]::WriteAllText("$runDir\console.txt", (@(
+        'Command line: -launch -nointro'
+        'FastFileLoad: Setting core_frontend to XZONE_LOADED in 2000ms.'
+        ']map zm_test'
+        'ModLoad start: usermaps'
+        'FastFileLoad: Setting core_frontend to XZONE_LOADED in 2300ms.'
+        'ModLoad done: usermaps'
+        'FastFileLoad: Setting zm_test to XZONE_LOADED in 900ms.'
+        'FastFileLoad: Setting core_frontend to XZONE_LOADED in 2400ms.'
+      ) -join "`r`n") + "`r`n")
+  [IO.File]::WriteAllText("$checks\results.jsonl",
+    '{"time":"2026-11-05T06:00:00","map":"zm_test","mode":"zm","stack":[],"result":"in_game","detail":"","menu_seconds":38.0,"load_seconds":26.0,"pid":4242,"console":"X:\\map-checks\\20261105-120000-zm_test-vanilla\\console.txt"}' + "`n")
+
+  $loads = (Invoke-Bench 0 bench loads --logs $benchLogs --console $checks --json) | ConvertFrom-Json
+  $launch = @($loads.launches)[0]
+  $mapLoad = @($loads.map_loads)[0]
+  Check ($launch.game_start_to_frontend_s -eq 34 -and $launch.first_log_to_frontend_s -eq 20 -and $launch.variant -eq 'vanilla') `
+    "bench loads: launch $($launch | ConvertTo-Json -Compress -Depth 3)"
+  Check ($mapLoad.journal -eq 'new' -and $mapLoad.map -eq 'zm_test' -and $mapLoad.map_command_to_ready_s -eq 26 -and
+         $mapLoad.loading_map_to_ready_s -eq 20 -and $mapLoad.map_command_to_level_s -eq 6) `
+    "bench loads: map load times $($mapLoad | ConvertTo-Json -Compress -Depth 4)"
+  Check ($mapLoad.zones.total_ms -eq 3200 -and $mapLoad.frontend_reload_ms -eq 2300 -and $mapLoad.after_map_zone.ms -eq 2400) `
+    "bench loads: zones up to the map's own zone $($mapLoad | ConvertTo-Json -Compress -Depth 4)"
+  $loadsText = Invoke-Bench 0 bench loads --logs $benchLogs --console $checks
+  Check ($loadsText -match 'zm_test' -and $loadsText -match 'Front-end zones reloaded') "bench loads text`n$loadsText"
+  $launcher = (Invoke-Bench 0 bench launcher --logs $benchLogs --json) | ConvertFrom-Json
+  $window = @($launcher.marks_ms | Where-Object { $_.mark -eq 'window created' })
+  Check ($launcher.sessions -eq 1 -and $window.Count -eq 1 -and $window[0].median -eq 15 -and $launcher.scans.warm_s.n -eq 1) `
+    "bench launcher $($launcher | ConvertTo-Json -Compress -Depth 4)"
+
+  # Frame CSVs as the probe writes them: three runs a side, B 0.002 ms slower.
+  $inv = [Globalization.CultureInfo]::InvariantCulture
+  foreach ($side in 'a', 'b') {
+    New-Item -ItemType Directory -Force "$bench\$side" | Out-Null
+    for ($run = 0; $run -lt 3; $run++) {
+      $sb = New-Object Text.StringBuilder
+      [void]$sb.Append("i,t_ms,dt_ms,present_ms,overlay_us,cpu,flags`n")
+      $t = 0.0
+      for ($i = 0; $i -lt 200; $i++) {
+        $dt = 4.0 + ($i % 5) * 0.01 + $run * 0.001
+        if ($side -eq 'b') { $dt += 0.002 }
+        if ($i -eq 100) { $dt = 30.0 }
+        $t += $dt
+        [void]$sb.Append([string]::Format($inv, "{0},{1:0.000},{2:0.0000},0.2,15,2,0`n", $i, $t, $dt))
+      }
+      [IO.File]::WriteAllText("$bench\$side\run$run.frames.csv", $sb.ToString())
+    }
+  }
+  $analyzed = (Invoke-Bench 0 bench analyze "$bench\a\run0.frames.csv" --json) | ConvertFrom-Json
+  $first = @($analyzed.runs)[0]
+  Check ($first.frames -eq 200 -and $first.mean_ms -eq 4.15 -and $first.hitches.count -eq 1 -and $first.low_1.worst_frames -eq 2) `
+    "bench analyze $($first | ConvertTo-Json -Compress -Depth 2)"
+  $compared = (Invoke-Bench 0 bench compare --a "$bench\a" --b "$bench\b" --json) | ConvertFrom-Json
+  Check ($compared.verdict.mean_ms -match '^equivalent' -and $compared.pooled_lows.descriptive_only -eq $true -and
+         @($compared.metrics).Count -ge 10) "bench compare $($compared.verdict | ConvertTo-Json -Compress)"
+  $comparedText = Invoke-Bench 0 bench compare --a "$bench\a" --b "$bench\b"
+  Check ($comparedText -match 'mean_ms\s+equivalent within \+-1\.0%') "bench compare text`n$comparedText"
+
+  Invoke-Bench 3 bench run | Out-Null # needs the game: not built
+  Invoke-Bench 1 bench | Out-Null
+  Invoke-Bench 1 bench analyze | Out-Null
+  Invoke-Bench 1 bench analyze "$runDir\console.txt" | Out-Null # not a frames CSV
+  Invoke-Bench 1 bench compare --a "$bench\a" | Out-Null
+  Invoke-Bench 1 bench compare --a "$bench\a" --b "$bench\b" --margin-mean x | Out-Null
+  Invoke-Bench 1 bench loads --logs $benchLogs --bogus 1 | Out-Null
+  Invoke-Bench 1 bench launcher --logs (Join-Path $bench 'missing') | Out-Null
 } finally {
   $env:XERCES_HOME = $savedHome
   $env:XERCES_DRY_LAUNCH = $savedDry
