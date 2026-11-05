@@ -91,7 +91,7 @@ answer.
 | D1  | decided       | Upstream line Xerces starts from                                                                                            | `upstream/beta` f8f7b735 (2026-11-04, has the lobby security patches) plus `mod-stack`'s two commits, on branch `xerces-main`. The six conflicts are resolved (commit 6bc02cb4 says how); `check_valid_mod_stack` names missing mods instead of offering a download (D15). Provisional until the M0 session confirms stacking works. Costs: AGPL-3.0 `sqlite_orm` comes with it (16.5), and `beta` builds with premake 5.0.0 + ninja + LLVM (D2) | `mod-stack` as is (misses the security patches); `main` (no stacking)                         |
 | D2  | decided       | Toolchain                                                                                                                   | What upstream's CI uses for `beta`: LLVM 23 (clang and LLD), Ninja and premake 5.0.0, portable outside the repo, no admin; the VS Build Tools supply the Windows SDK, the MSVC libraries and ATL (the ATL component still has to be added on your PC). The VS clang-cl components are not needed. Upstream does not build with MSVC (verified)                                                                                                   | Port the build to MSVC (diverges from upstream)                                               |
 | D3  | M0            | One supervised game session for runtime checks                                                                              | Yes, with you nearby, using a build whose updater is already disabled (2.2)                                                                                                                                                                                                                                                                                                                                                                      | You run a checklist yourself                                                                  |
-| D4  | decided       | Launcher UI technology                                                                                                      | Decided 2026-11-05: RmlUi, gated by a one-week spike. The spike ran the same day (7.1): everything passes except a first RmlUi frame under 150 ms, which GPU driver start-up alone rules out on this PC; the gate waits on your call there                                                                                                                                                                                                       | WebView2 (what upstream uses)                                                                 |
+| D4  | decided       | Launcher UI technology                                                                                                      | Decided 2026-11-05: RmlUi. The spike gate passed (7.1) once you restated its first-frame criterion as a native paint under 100 ms and a first RmlUi frame under 250 ms from a warm start; GPU driver start-up alone rules out 150 ms on this PC                                                                                                                                                                                                  | WebView2 (what upstream uses)                                                                 |
 | D5  | decided       | Visual direction                                                                                                            | Decided 2026-11-05: C / Signal, which you picked from the logos and confirmed                                                                                                                                                                                                                                                                                                                                                                    | A / Monolith, B / Vector                                                                      |
 | D6  | decided       | Backend language                                                                                                            | Python 3.12 + FastAPI + Postgres (slice M5a built, 10.9)                                                                                                                                                                                                                                                                                                                                                                                         |                                                                                               |
 | D7  | M6            | Relay                                                                                                                       | Cloudflare Realtime TURN, coturn on Fly.io or Hetzner as fallback. Your brief asked for a relay on Railway; Railway cannot accept UDP, and a TCP or WebSocket relay there would share the spend limit that also stops the API and database, so I recommend dropping it                                                                                                                                                                           | A WebSocket relay in a separate Railway project with its own spend limit                      |
@@ -921,9 +921,11 @@ mod that override the same script.
 
 Spike (first week of M3), on the C / Signal home screen: typography against the
 mockup at 100, 150 and 200 percent scale; transitions at 144 Hz; first frame
-under 150 ms; controller navigation; GL3 and DX11 backends. Failing any of these
-on Windows switches M3 to WebView2 with a native splash and the same tokens. The
-Proton check is recorded but does not decide the fallback.
+under 150 ms (restated on 2026-11-05, see below: a native paint under 100 ms and
+a first RmlUi frame under 250 ms from a warm start); controller navigation; GL3
+and DX11 backends. Failing any of these on Windows switches M3 to WebView2 with
+a native splash and the same tokens. The Proton check is recorded but does not
+decide the fallback.
 
 **Spike results (2026-11-05).** RmlUi 6.3 with FreeType 2.14.3, built with the
 project's LLVM toolchain as `xerces_spike_dx11` and `xerces_spike_gl3`
@@ -932,22 +934,23 @@ this PC (RTX 5070 Ti, driver 621.14, 2560×1440 display at 150 percent, 240 Hz)
 while you were away; numbers are medians of warm runs. How to repeat them is in
 docs/TESTING.md.
 
-| Criterion                     | Result                                                                                                                                                                                                                                                                                                             | Verdict         |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
-| Typography at 100, 150, 200 % | Matches the mockup rendered by Edge with the same font files: same layout to within a few pixels, sharp at every scale (glyphs are rasterized at the real size). Display text runs about 2 % wider: RmlUi's FreeType engine reads only legacy `kern`, and Inter Tight kerns in OpenType GPOS                       | Pass, one fix   |
-| Transitions at 144 Hz         | Mode switches with 200 ms transitions: worst frame 5.0 ms (DX11) and 5.3 ms (GL3), p99 0.57 ms, inside the 6.9 ms budget. Vsync pacing on a live display was not observable (the display was asleep)                                                                                                               | Pass (cost)     |
-| First frame under 150 ms      | GPU driver start-up alone takes 115 to 145 ms per process (D3D11 device or OpenGL context). RmlUi's own work (document, layout, first render) is about 50 ms. First RmlUi frame: DX11 216 ms with the GPU on a worker thread, GL3 about 190 ms. A native window paint (black, the token background) shows at 21 ms | Fail as written |
-| Controller navigation         | XInput mapped to the keyboard action map; RmlUi's spatial navigation (`nav: auto`) and Enter/A activation moved focus and clicked as expected on both renderers (scripted pad; no physical press)                                                                                                                  | Pass            |
-| GL3 and DX11                  | Both run. RmlUi ships no Win32 + GL3 backend, so the spike pairs its Win32 platform with the GL3 renderer. Moving a GL context to another thread crashed NVIDIA's driver; warming the driver on a worker instead is stable                                                                                         | Pass            |
-| Proton                        | Not run                                                                                                                                                                                                                                                                                                            | Recorded        |
+| Criterion                     | Result                                                                                                                                                                                                                                                                                                                                                                                       | Verdict                    |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| Typography at 100, 150, 200 % | Matches the mockup rendered by Edge with the same font files: same layout to within a few pixels, sharp at every scale (glyphs are rasterized at the real size). Display text runs about 2 % wider: RmlUi's FreeType engine reads only legacy `kern`, and Inter Tight kerns in OpenType GPOS                                                                                                 | Pass, one fix              |
+| Transitions at 144 Hz         | Mode switches with 200 ms transitions: worst frame 5.0 ms (DX11) and 5.3 ms (GL3), p99 0.57 ms, inside the 6.9 ms budget. Vsync pacing on a live display was not observable (the display was asleep)                                                                                                                                                                                         | Pass (cost)                |
+| First frame (restated)        | GPU driver start-up alone takes 115 to 145 ms per process (D3D11 device or OpenGL context). RmlUi's own work (document, layout, first render) is about 50 ms. First RmlUi frame: DX11 216 ms with the GPU on a worker thread, GL3 about 190 ms. A native window paint (black, the token background) shows at 21 ms. Cold first launches measured 262 to 415 ms; the native paint covers them | Pass (warm); 150 ms failed |
+| Controller navigation         | XInput mapped to the keyboard action map; RmlUi's spatial navigation (`nav: auto`) and Enter/A activation moved focus and clicked as expected on both renderers (scripted pad; no physical press)                                                                                                                                                                                            | Pass                       |
+| GL3 and DX11                  | Both run. RmlUi ships no Win32 + GL3 backend, so the spike pairs its Win32 platform with the GL3 renderer. Moving a GL context to another thread crashed NVIDIA's driver; warming the driver on a worker instead is stable                                                                                                                                                                   | Pass                       |
+| Proton                        | Not run                                                                                                                                                                                                                                                                                                                                                                                      | Recorded                   |
 
-The first-frame criterion cannot be met by any GPU-drawn UI on this PC, WebView2
-included (it starts a browser and a GPU process on top). Two ways forward, your
-call: keep RmlUi and restate the criterion as "native paint under 100 ms (the
-boot splash in 7.3), first RmlUi frame under 250 ms", or treat the miss as a
-failed gate and switch M3 to WebView2. If RmlUi stays, M3 adds RmlUi's HarfBuzz
-font engine for kerning (HarfBuzz is MIT), precompiled DX11 shaders (about 30
-ms) and the overlapped GPU start.
+The original 150 ms cannot be met by any GPU-drawn UI on this PC, WebView2
+included (it starts a browser and a GPU process on top). Decided 2026-11-05:
+RmlUi stays, and the criterion is a native paint under 100 ms (the boot splash
+in 7.3) plus a first RmlUi frame under 250 ms from a warm start. M3 therefore
+adds RmlUi's HarfBuzz font engine for kerning (HarfBuzz is MIT; its download
+needs your approval first), precompiled DX11 shaders (about 30 ms), the
+overlapped GPU start (on a worker for D3D11; for OpenGL a driver warm-up, never
+a context moved between threads) and the native boot paint.
 
 ### 7.2 Design language
 
@@ -2008,10 +2011,11 @@ M5a, which you asked for now.
   offline share codes, import as a dry run, the content check. Open: profiles,
   backup and rollback, Workshop subscriptions, the installer and the release
   pipeline.
-- M3: D4 (RmlUi, gated) and D5 (C / Signal) are decided. The RmlUi spike ran on
-  2026-11-05 (7.1): all gate criteria pass except "first frame under 150 ms",
-  which GPU driver start-up rules out on this PC; the gate waits on your call
-  between restating that criterion and switching to WebView2.
+- M3: D4 (RmlUi) and D5 (C / Signal) are decided, and the RmlUi spike gate
+  passed on 2026-11-05 once the first-frame criterion was restated (7.1): the
+  original 150 ms is ruled out on this PC by GPU driver start-up alone. M3 can
+  start on RmlUi; still unchecked from the spike: a physical controller press,
+  vsync pacing on a live display, and Proton.
 
 ---
 

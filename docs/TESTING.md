@@ -181,9 +181,10 @@ fonts, for comparison in a browser (Edge headless:
       OpenType (GPOS) kerning with RmlUi's default font engine.
 - [x] Transitions: worst frame 5.0 ms (DX11) and 5.3 ms (GL3) while switching
       modes, inside the 144 Hz budget.
-- [ ] First frame under 150 ms: not met. GPU driver start-up takes 115 to 145
-      ms; first RmlUi frame 190 to 216 ms; native paint at 21 ms. Your call
-      (DESIGN.md 7.1).
+- [x] First frame, as restated on 2026-11-05 (DESIGN.md 7.1): native paint under
+      100 ms (21 ms) and first RmlUi frame under 250 ms from a warm start (190
+      to 216 ms). The original 150 ms is not reachable: GPU driver start-up
+      takes 115 to 145 ms. Cold first launches measured 262 to 415 ms.
 - [x] Controller navigation through the scripted pad on both renderers.
 - [ ] A physical controller press (the Tarantula) and vsync pacing on a live
       display: need you at the PC.
