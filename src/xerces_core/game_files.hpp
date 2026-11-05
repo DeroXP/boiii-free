@@ -23,6 +23,7 @@ struct game_bind {
   std::string command; // without the quotes
 };
 
+// The checks for a bind the player adds, as upstream's saveBind makes them.
 // A key: 1 to 32 characters, no spaces, quotes or ';'.
 bool valid_bind_key(std::string_view key);
 // A command: 1 to 512 characters, no quotes or line breaks (it is written
@@ -32,7 +33,13 @@ bool valid_bind_command(std::string_view command);
 // Lines that are not "bind <key> <command>" are skipped; a later bind of the
 // same key replaces an earlier one; sorted by key.
 std::vector<game_bind> parse_binds(std::string_view text);
-// Invalid entries are left out.
+// One line per entry. Entries are written as they are, not checked like a
+// new bind: the game saves any bind the engine took (component/binds.cpp, no
+// length limit) and upstream's launcher writes back every bind it read, so a
+// bind the file already had is kept when another is added or removed. Only
+// an entry that would not read back as itself is left out: an empty key or
+// command, a key with a space or blanks around it, or a line break in either
+// (none of which parse_binds gives).
 std::string binds_to_text(const std::vector<game_bind> &binds);
 
 // asset_limits_enabled as the client reads it: missing or "1" is on (unless

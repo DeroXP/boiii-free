@@ -72,7 +72,13 @@ std::string binds_to_text(const std::vector<game_bind> &binds) {
   std::map<std::string, std::string> sorted;
   for (const auto &bind : binds) {
     const std::string key = lower(bind.key);
-    if (valid_bind_key(key) && valid_bind_command(bind.command)) {
+    // What parse_binds reads back from the line written below.
+    const bool reads_back =
+        !key.empty() && key == trim(key) &&
+        key.find_first_of(" \r\n") == std::string::npos &&
+        !bind.command.empty() &&
+        bind.command.find_first_of("\r\n") == std::string::npos;
+    if (reads_back) {
       sorted[key] = bind.command;
     }
   }
