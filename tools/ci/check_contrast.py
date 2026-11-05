@@ -1,45 +1,22 @@
 #!/usr/bin/env python3
 """Checks the launcher's colour tokens for contrast (docs/DESIGN.md 7.2, 7.5).
 
-Reads the token blocks of data/xerces/ui/base.rcss (body for dark,
-body.theme-light, body.theme-contrast) and checks every pair of text and
-background tokens the screens use against WCAG 2's 4.5:1 for text. Exits 1
-and names the pair when one falls short.
+Reads the themes in data/xerces/ui/tokens.json (the source of base.rcss's
+token block) and checks every pair of text and background tokens the screens
+use (contrast_pairs) against WCAG 2's 4.5:1 for text. Exits 1 and names the
+pair when one falls short.
 
     python tools/ci/check_contrast.py
 """
 
-import re
+import json
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-RCSS = ROOT / "data" / "xerces" / "ui" / "base.rcss"
+TOKENS = ROOT / "data" / "xerces" / "ui" / "tokens.json"
 
-# (text token, background token): what the screens actually put together.
-PAIRS = [
-    ("text", "bg"),
-    ("text", "surface"),
-    ("text", "surface2"),
-    ("text2", "bg"),
-    ("text2", "surface"),
-    ("text2", "surface2"),
-    ("accent-text", "bg"),
-    ("accent-text", "surface"),
-    ("on-accent", "accent"),
-    ("bg", "text"),  # hover inverts outline buttons
-]
 MINIMUM = 4.5
-
-
-def blocks(text):
-    """Selector -> {token: #RRGGBB} for the theme blocks."""
-    out = {}
-    for match in re.finditer(r"(body(?:\.theme-[a-z]+)?)\s*\{([^}]*)\}", text):
-        tokens = dict(re.findall(r"--([a-z0-9-]+)\s*:\s*(#[0-9A-Fa-f]{6})\s*;", match.group(2)))
-        if tokens:
-            out.setdefault(match.group(1), {}).update(tokens)
-    return out
 
 
 def luminance(colour):
@@ -54,16 +31,11 @@ def ratio(a, b):
 
 
 def main():
-    themes = blocks(RCSS.read_text(encoding="utf-8"))
-    dark = themes.get("body")
-    if not dark:
-        print(f"{RCSS}: no token block on body")
-        return 1
+    data = json.loads(TOKENS.read_text(encoding="utf-8"))
+    pairs = data["contrast_pairs"]
     failures = 0
-    for name, selector in (("dark", "body"), ("light", "body.theme-light"), ("contrast", "body.theme-contrast")):
-        tokens = dict(dark)
-        tokens.update(themes.get(selector, {}))
-        for fore, back in PAIRS:
+    for name, tokens in data["themes"].items():
+        for fore, back in pairs:
             if fore not in tokens or back not in tokens:
                 print(f"{name}: token --{fore} or --{back} is missing")
                 failures += 1
@@ -74,7 +46,7 @@ def main():
                 failures += 1
     if failures:
         return 1
-    print(f"contrast: ok ({len(PAIRS)} pairs in 3 themes)")
+    print(f"contrast: ok ({len(pairs)} pairs in {len(data['themes'])} themes)")
     return 0
 
 

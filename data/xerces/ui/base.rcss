@@ -2,8 +2,10 @@
    base elements, the header and footer of the shell template, and the controls
    every screen shares. Sizes are in dp so the UI follows the window's dp ratio
    and the UI scale setting. Screens add their own views/<id>.rcss.
-   Generated once from signal.rcss (the D4 spike's styles); edit this file. */
+   The colour tokens come from tokens.json (tools/ui/tokens.py); edit the
+   rest here. */
 
+/* tokens:begin - generated from tokens.json by tools/ui/tokens.py; do not edit */
 body
 {
 	--bg: #000000;
@@ -15,20 +17,6 @@ body
 	--accent: #FF4A1C;
 	--on-accent: #000000;
 	--accent-text: #FF6A42;
-
-	display: flex;
-	flex-direction: column;
-	width: 100%;
-	height: 100%;
-	margin: 0;
-	padding: 0;
-	box-sizing: border-box;
-	background-color: var(--bg);
-	color: var(--text);
-	font-family: "Inter Tight";
-	font-size: 14dp;
-	font-weight: 400;
-	line-height: 1.2;
 }
 body.theme-light
 {
@@ -53,6 +41,24 @@ body.theme-contrast
 	--accent: #FFD400;
 	--on-accent: #000000;
 	--accent-text: #FFD400;
+}
+/* tokens:end */
+
+body
+{
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+	background-color: var(--bg);
+	color: var(--text);
+	font-family: "Inter Tight";
+	font-size: 14dp;
+	font-weight: 400;
+	line-height: 1.2;
 }
 
 div, p, h1, h2, h3, section, header, footer, nav, main, aside, ul, ol, li, form { display: block; }

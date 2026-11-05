@@ -23,6 +23,12 @@ jobs:
       - name: Launcher colour contrast
         run: python tools/ci/check_contrast.py
 
+      - name: Launcher tokens generated
+        run: python tools/ui/tokens.py --check
+
+      - name: Launcher string template current
+        run: python tools/i18n/extract_strings.py --check
+
       - name: Setup LLVM
         uses: ZhongRuoyu/setup-llvm@v0
         with:

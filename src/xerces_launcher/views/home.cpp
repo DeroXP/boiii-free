@@ -340,6 +340,21 @@ private:
         owner_->notify(sub_, true);
         return;
       }
+      const auto &sigs = owner_->svc().signatures();
+      if (sigs.multi_mod_off() && owner_->svc().resolve(owner_->mode()).stack.size() > 1) {
+        // The game turned multi-mod off at its last start (a signature did
+        // not resolve on this build, DESIGN.md 4.4): only fs_game loads.
+        owner_->dialog("Multi-mod was off last time",
+                       "At the last launch this game build was missing a "
+                       "signature Xerces needs for extra mods, so only the main "
+                       "mod loaded. Diagnostics shows which one. Launch anyway?",
+                       {"Launch anyway", "Cancel"}, [this](int choice) {
+                         if (choice == 0) {
+                           launch(true, false);
+                         }
+                       });
+        return;
+      }
       if (safe_) {
         owner_->dialog("The last modded launch crashed",
                        safe_text_,

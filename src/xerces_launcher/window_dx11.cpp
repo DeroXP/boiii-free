@@ -312,6 +312,36 @@ LRESULT CALLBACK window_procedure(HWND handle, UINT message, WPARAM w_param,
   case WM_NCACTIVATE:
     // Keeps DWM from drawing the inactive frame over the client area.
     return DefWindowProcW(handle, message, w_param, -1);
+  case WM_PAINT:
+    // The native boot paint (DESIGN.md 7.3): until the swap chain shows the
+    // first RmlUi frame, GDI draws the mark where boot.rml puts it (a 64 dp
+    // mark above 112 dp of word and status, centred).
+    if (!s->gpu.swap_chain) {
+      PAINTSTRUCT paint{};
+      HDC dc = BeginPaint(handle, &paint);
+      RECT client{};
+      GetClientRect(handle, &client);
+      FillRect(dc, &client, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+      const int dpi = int(window_dpi(handle));
+      const int unit = MulDiv(28, dpi, 96);
+      const int gap = MulDiv(8, dpi, 96);
+      const int mark = 2 * unit + gap;
+      const int left = (client.right - mark) / 2;
+      const int top = (client.bottom - MulDiv(176, dpi, 96)) / 2;
+      HBRUSH white = CreateSolidBrush(RGB(0xFF, 0xFF, 0xFF));
+      HBRUSH accent = CreateSolidBrush(RGB(0xFF, 0x4A, 0x1C));
+      for (int i = 0; i < 4; ++i) {
+        const int x = left + (i % 2) * (unit + gap);
+        const int y = top + (i / 2) * (unit + gap);
+        const RECT square{x, y, x + unit, y + unit};
+        FillRect(dc, &square, i == 1 ? accent : white);
+      }
+      DeleteObject(white);
+      DeleteObject(accent);
+      EndPaint(handle, &paint);
+      return 0;
+    }
+    break;
   case WM_CLOSE:
     s->running = false;
     return 0;
@@ -460,7 +490,19 @@ bool window::open(const std::string &title, int width_dp, int height_dp,
   });
   s->deferred.emplace([]() -> Rml::RenderInterface * {
     ensure_gpu();
-    return s->render_interface ? &*s->render_interface : nullptr;
+    if (!s->render_interface || !s->gpu.swap_chain) {
+      // Nothing can be drawn (no Direct3D 11 device, not even WARP): say so
+      // and stop, rather than hand RmlUi a null renderer.
+      Rml::Log::Message(Rml::Log::LT_ERROR,
+                        "Direct3D 11 could not start; the launcher stops.");
+      MessageBoxW(s->handle,
+                  L"Xerces could not start Direct3D 11 on this PC, so it cannot "
+                  L"draw its window.\n\nUpdating the graphics driver usually "
+                  L"fixes this. The log is in the Xerces logs folder.",
+                  L"Xerces", MB_OK | MB_ICONERROR);
+      ExitProcess(1);
+    }
+    return &*s->render_interface;
   });
   Rml::SetTextInputHandler(&s->ime);
   return true;

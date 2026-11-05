@@ -1,6 +1,7 @@
 {
   "An invite carries the pack, so Xerces can tell you which Workshop items to get in Steam first.": "",
   "At the last launch": "",
+  "At the last launch this game build was missing a signature Xerces needs for extra mods, so only the main mod loaded. Diagnostics shows which one. Launch anyway?": "",
   "BOIII sent your friend code to its masters every few seconds. Xerces builds leave that out.": "",
   "Back": "",
   "Back to Home": "",
@@ -41,6 +42,7 @@
   "Invites that bring the right mods": "",
   "It crashes the game on its own. Turn it off in this profile?": "",
   "Last joined": "",
+  "Launch anyway": "",
   "Launch modded": "",
   "Launch the test": "",
   "Launch vanilla": "",
@@ -53,6 +55,7 @@
   "Mods": "",
   "Mods found": "",
   "Multi-mod": "",
+  "Multi-mod was off last time": "",
   "Multi-mod was off: only the main mod loaded": "",
   "Multiplayer": "",
   "Named, version-pinned sets of mods: apply, import and export.": "",

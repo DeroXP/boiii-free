@@ -1,5 +1,6 @@
-// Boot (docs/DESIGN.md 7.3): the mark builds up (at most 900 ms) while the
-// game is found and its build checked on the worker thread; then First run
+// Boot (docs/DESIGN.md 7.3): the mark (already drawn by the window's native
+// paint) with the word and the status fading in, while the game is found and
+// its build checked on the worker thread; then First run
 // (no game folder yet, or never finished) or Home. It never waits on the
 // network, and gives up waiting after three seconds.
 
@@ -34,14 +35,12 @@ public:
       return;
     }
     const double elapsed = now - shown_at_;
-    // One square every 150 ms: the mark is whole at 600 ms.
-    const int lit = std::min(4, int(elapsed / 0.15) + 1);
-    for (int i = lit_; i < lit; ++i) {
-      if (Rml::Element *square = doc->GetElementById("m" + std::to_string(i))) {
-        square->SetClass("on", true);
-      }
+    // The mark is already there (the native paint); the word and the status
+    // fade in once frames are on screen (the first one waits for the GPU).
+    if (!faded_ && ++frames_ > 2) {
+      doc->SetClass("shown", true);
+      faded_ = true;
     }
-    lit_ = lit;
 
     const services &svc = owner_->svc();
     Rml::String step;
@@ -76,7 +75,8 @@ private:
   Rml::DataModelHandle handle_;
   Rml::String step_;
   double shown_at_ = 0;
-  int lit_ = 0;
+  bool faded_ = false;
+  int frames_ = 0;
 };
 } // namespace
 

@@ -3,15 +3,17 @@
 	<title>Xerces</title>
 	<link type="text/rcss" href="base.rcss"/>
 	<style>
-		/* Boot (DESIGN.md 7.3): the mark builds up in at most 900 ms while the
-		   game is found and checked; it never waits on the network. */
+		/* Boot (DESIGN.md 7.3): the window's native paint already shows the mark
+		   (window_dx11.cpp, at the same place); here the word and the status
+		   fade in while the game is found and checked. It never waits on the
+		   network. */
 		body.boot { display: flex; flex-direction: column; justify-content: center; align-items: center; }
 		#boot-mark { display: flex; flex-direction: row; flex-wrap: wrap; width: 64dp; height: 64dp; gap: 8dp; }
-		#boot-mark div { width: 28dp; height: 28dp; background-color: var(--text); opacity: 0; transition: opacity 0.18s cubic-out; }
-		#boot-mark div.on { opacity: 1; }
+		#boot-mark div { width: 28dp; height: 28dp; background-color: var(--text); }
 		#boot-mark div.accent { background-color: var(--accent); }
-		#boot-word { margin-top: 28dp; font-weight: 800; font-size: 40dp; line-height: 40dp; letter-spacing: -1.6dp; }
-		#boot-steps { margin-top: 24dp; min-width: 320dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 20dp; color: var(--text2); text-align: center; }
+		#boot-word { margin-top: 28dp; font-weight: 800; font-size: 40dp; line-height: 40dp; letter-spacing: -1.6dp; opacity: 0; transition: opacity 0.3s cubic-out; }
+		#boot-steps { margin-top: 24dp; min-width: 320dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 20dp; color: var(--text2); text-align: center; opacity: 0; transition: opacity 0.3s cubic-out; }
+		body.shown #boot-word, body.shown #boot-steps { opacity: 1; }
 	</style>
 </head>
 <body class="boot" data-model="boot">
