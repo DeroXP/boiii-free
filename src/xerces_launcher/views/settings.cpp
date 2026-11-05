@@ -135,6 +135,8 @@ public:
     model.Bind("cinematics_note", &cinematics_note_);
     model.Bind("close_on_launch", &close_on_launch_);
     model.Bind("flags", &flags_);
+    model.Bind("flags_hint", &flags_hint_);
+    model.Bind("game_hint", &game_hint_);
     model.Bind("flags_error", &flags_error_);
     model.Bind("command", &command_);
     model.Bind("command_bad", &command_bad_);
@@ -193,6 +195,10 @@ public:
         });
     handle_ = model.GetModelHandle();
     fps_max_ = core::fps_slider_max();
+    // RmlUi translates text nodes only, never a placeholder attribute, so
+    // the fields' placeholders come from the model.
+    game_hint_ = owner_->tr("Game");
+    flags_hint_ = owner_->tr("No extra flags");
     return true;
   }
 
@@ -1315,6 +1321,7 @@ private:
   bool game_skips_intro_ = false, game_skips_cinematics_ = false;
   Rml::String intro_note_, cinematics_note_;
   Rml::String flags_, flags_error_, command_;
+  Rml::String game_hint_, flags_hint_; // placeholders, translated
   bool command_bad_ = false;
 
   Rml::String theme_ = "dark";

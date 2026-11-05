@@ -14,6 +14,10 @@ It finds: text between tags in data/xerces/ui/**/*.rml (not data bindings
 {{...}}), string literals passed to tr( and to app::dialog( (title, body and
 button labels), and adjacent literals joined in those calls. Strings built at
 run time cannot be found; keep them out of translatable text.
+
+Both modes also fail on a placeholder="..." attribute with text to
+translate: RmlUi never translates attributes, so such placeholders are bound
+from tr() through the screen's model (data-attr-placeholder).
 """
 
 import argparse
@@ -57,6 +61,38 @@ def from_rml(text):
             continue
         found.add(value)
     return found
+
+
+# RmlUi translates text nodes only: a placeholder attribute is shown as
+# written in every language (the pseudo-locale included, which hides it from
+# the 7.5 check). Translatable placeholders are bound from tr() through the
+# model (data-attr-placeholder) instead; a lower-case format token such as
+# host:port may stay.
+PLACEHOLDER = re.compile(r'\splaceholder="([^"]*)"')
+FORMAT_TOKEN = re.compile(r"^[a-z0-9_.:/\-]+$")
+
+
+def static_placeholders(text):
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    found = []
+    for match in PLACEHOLDER.finditer(text):
+        value = " ".join(html.unescape(match.group(1)).split())
+        if keep(value) and not FORMAT_TOKEN.match(value):
+            found.append(value)
+    return found
+
+
+def placeholder_problems():
+    problems = []
+    for path in sorted(UI.rglob("*.rml")):
+        if path in SKIP_FILES:
+            continue
+        for value in static_placeholders(path.read_text(encoding="utf-8")):
+            problems.append(
+                f'{path.relative_to(ROOT).as_posix()}: placeholder="{value}" is never '
+                "translated; bind it with data-attr-placeholder from tr()"
+            )
+    return problems
 
 
 def call_arguments(text, name):
@@ -118,17 +154,22 @@ def main():
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     template = json.dumps(collect(), ensure_ascii=False, indent=2) + "\n"
+    problems = placeholder_problems()
+    for problem in problems:
+        print(problem)
     if args.check:
         current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
         if current != template:
             print(f"{OUT.relative_to(ROOT)} is stale: run tools/i18n/extract_strings.py")
+            return 1
+        if problems:
             return 1
         print("i18n template: ok")
         return 0
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(template, encoding="utf-8", newline="\n")
     print(f"wrote {OUT.relative_to(ROOT)}: {template.count(chr(10)) - 2} strings")
-    return 0
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":

@@ -49,8 +49,8 @@
 			</div>
 			<div class="empty-note" data-if="binds.size == 0">No custom binds.</div>
 			<div class="bind-add">
-				<input id="bind-key" type="text" class="text mono-field" maxlength="32" placeholder="Key" data-value="new_key"/>
-				<input id="bind-command" type="text" class="text mono-field" maxlength="512" placeholder="Command, for example toggle cg_drawFPS" data-value="new_command"/>
+				<input id="bind-key" type="text" class="text mono-field" maxlength="32" data-attr-placeholder="key_hint" data-value="new_key"/>
+				<input id="bind-command" type="text" class="text mono-field" maxlength="512" data-attr-placeholder="command_hint" data-value="new_command"/>
 				<button id="bind-add" class="outline" data-event-click="act('add')"><span>Add bind</span></button>
 			</div>
 			<div class="bind-error" data-if="bind_error != ''">{{bind_error}}</div>

@@ -76,6 +76,8 @@ public:
     model.Bind("binds", &binds_);
     model.Bind("new_key", &new_key_);
     model.Bind("new_command", &new_command_);
+    model.Bind("key_hint", &key_hint_);
+    model.Bind("command_hint", &command_hint_);
     model.Bind("bind_error", &bind_error_);
     model.BindEventCallback(
         "act", [this](Rml::DataModelHandle, Rml::Event &,
@@ -92,6 +94,10 @@ public:
           }
         });
     handle_ = model.GetModelHandle();
+    // RmlUi translates text nodes only, never a placeholder attribute, so
+    // the fields' placeholders come from the model.
+    key_hint_ = owner_->tr("Key");
+    command_hint_ = owner_->tr("Command, for example toggle cg_drawFPS");
     return true;
   }
 
@@ -284,6 +290,7 @@ private:
   bool pools_on_ = true;
   Rml::Vector<bind_row> binds_;
   Rml::String new_key_, new_command_, bind_error_;
+  Rml::String key_hint_, command_hint_; // placeholders, translated
 };
 } // namespace
 
