@@ -24,6 +24,8 @@
 #include <xerces_core/pack.hpp>
 #include <xerces_core/planner.hpp>
 #include <xerces_core/sha256.hpp>
+#include <xerces_core/sigregistry.hpp>
+#include <xerces_core/sigscan.hpp>
 #include <xerces_core/version.hpp>
 
 using namespace xerces_core;
@@ -138,11 +140,15 @@ Work without the game:
   packs import <file|XRC1.code> [--mods-dir <dir>] [--json]   validate + dry run
   packs validate <file|XRC1.code> [--json]
   game detect [--saved <folder>] [--json]          find the game install (reads only)
+  sig check --dump <file|folder> [--registry <file>] [--build <0x...>] [--json]
+                                                   the signature registry against
+                                                   a memory dump (newest .bin in
+                                                   a folder)
 
 Need a running Xerces (exit 3 until the game-side pipe exists):
   status, mods enable/disable/order, plan apply, load, unload, reload,
-  index run, packs apply, sig check, bench run, test run, diag bundle,
-  logs tail
+  index run, packs apply, sig check (without --dump), bench run, test run,
+  diag bundle, logs tail
 
 Exit codes: 0 ok, 1 error, 2 validation or conflict failures,
             3 Xerces not running, 4 signature failures.
@@ -610,6 +616,162 @@ int not_running(const std::string &command) {
                "with the client build.\n";
   return exit_not_running;
 }
+
+std::string hex(std::uint64_t value) {
+  char digits[17] = {};
+  const auto result = std::to_chars(digits, digits + 16, value, 16);
+  std::string out = "0x" + std::string(digits, result.ptr);
+  std::transform(out.begin() + 2, out.end(), out.begin() + 2,
+                 [](char c) { return c >= 'a' && c <= 'f' ? c - 32 : c; });
+  return out;
+}
+
+std::optional<std::vector<std::uint8_t>> read_binary(const fs::path &path) {
+  std::ifstream in(path, std::ios::binary | std::ios::ate);
+  if (!in) {
+    return std::nullopt;
+  }
+  const std::streamoff size = in.tellg();
+  if (size < 0) {
+    return std::nullopt;
+  }
+  std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+  in.seekg(0);
+  in.read(reinterpret_cast<char *>(bytes.data()), size);
+  if (!in) {
+    return std::nullopt;
+  }
+  return bytes;
+}
+
+// A dump file, or the newest .bin dump in a folder.
+std::optional<fs::path> dump_file(const fs::path &given) {
+  std::error_code ec;
+  if (!fs::is_directory(given, ec)) {
+    return fs::exists(given, ec) ? std::optional<fs::path>(given)
+                                 : std::nullopt;
+  }
+  std::optional<fs::path> newest;
+  fs::file_time_type newest_time{};
+  for (const auto &entry : fs::directory_iterator(given, ec)) {
+    if (entry.path().extension() != ".bin" || !entry.is_regular_file(ec)) {
+      continue;
+    }
+    const auto time = entry.last_write_time(ec);
+    if (!newest || time > newest_time) {
+      newest = entry.path();
+      newest_time = time;
+    }
+  }
+  return newest;
+}
+
+// Runs the signature registry against a memory dump (DESIGN.md 4.5): what a
+// new game build breaks shows up here before anyone starts the game.
+int cmd_sig(const arguments &args, const std::string &action) {
+  if (action != "check") {
+    return usage();
+  }
+  const auto given = args.get("--dump");
+  if (!given) {
+    return not_running("sig check");
+  }
+  const auto dump = dump_file(fs::path(*given));
+  if (!dump) {
+    std::cerr << *given << " is not a dump file or a folder with one.\n";
+    return exit_error;
+  }
+  const fs::path registry_path =
+      args.get("--registry").value_or("compat/signatures.json");
+  if (!fs::exists(registry_path)) {
+    std::cerr << utf8(registry_path)
+              << " does not exist. Run from the repository root or give "
+                 "--registry.\n";
+    return exit_error;
+  }
+  const signature_registry registry =
+      parse_signature_registry(read_text(registry_path));
+  if (!registry.ok()) {
+    print_diagnostics(registry.diags);
+    return exit_failed;
+  }
+  const auto image = read_binary(*dump);
+  if (!image) {
+    std::cerr << "Cannot read " << utf8(*dump) << ".\n";
+    return exit_error;
+  }
+  std::string error;
+  const auto layout = read_image_layout(*image, &error);
+  if (!layout) {
+    std::cerr << utf8(*dump) << ": " << error << "\n";
+    return exit_error;
+  }
+  std::uint32_t build = layout->checksum;
+  if (const auto forced = args.get("--build")) {
+    std::uint32_t value = 0;
+    const std::string_view text = *forced;
+    const char *end = text.data() + text.size();
+    if (text.size() <= 2 || !text.starts_with("0x") ||
+        std::from_chars(text.data() + 2, end, value, 16).ptr != end) {
+      throw std::invalid_argument(
+          "--build takes a checksum such as 0x6531394.");
+    }
+    build = value;
+  }
+
+  const signature_report report =
+      resolve_signatures(registry.signatures, layout->sections, build);
+  const bool all_ok = std::ranges::all_of(
+      report.results, [](const signature_result &r) { return r.ok; });
+
+  if (args.has("--json")) {
+    rapidjson::Document doc(rapidjson::kObjectType);
+    auto &alloc = doc.GetAllocator();
+    json::set(doc, "dump", utf8(*dump), alloc);
+    json::set(doc, "build", hex(build), alloc);
+    json::set(doc, "ok", all_ok, alloc);
+    rapidjson::Value results(rapidjson::kArrayType);
+    for (const auto &result : report.results) {
+      rapidjson::Value item(rapidjson::kObjectType);
+      json::set(item, "id", result.id, alloc);
+      json::set(item, "symbol", result.symbol, alloc);
+      json::set(item, "ok", result.ok, alloc);
+      json::set(item, "rva", result.ok ? hex(result.rva) : "", alloc);
+      json::set(item, "matches", static_cast<std::int64_t>(result.matches),
+                alloc);
+      json::set(item, "error", result.error, alloc);
+      results.PushBack(std::move(item), alloc);
+    }
+    json::set(doc, "results", std::move(results), alloc);
+    rapidjson::Value disabled(rapidjson::kObjectType);
+    for (const auto &[feature, ids] : report.disabled) {
+      json::set(disabled, feature, json::string_array(ids, alloc), alloc);
+    }
+    json::set(doc, "features_off", std::move(disabled), alloc);
+    std::cout << json::pretty(doc) << "\n";
+  } else {
+    std::cout << "Build " << hex(build) << ", " << report.results.size()
+              << " signatures from " << utf8(registry_path) << ", dump "
+              << utf8(dump->filename()) << "\n";
+    for (const auto &result : report.results) {
+      if (result.ok) {
+        std::cout << "  ok    " << result.id << "  " << result.symbol << "  "
+                  << hex(result.rva) << "\n";
+      } else {
+        std::cout << "  MISS  " << result.id << "  " << result.symbol << ": "
+                  << result.error << "\n";
+      }
+    }
+    for (const auto &[feature, ids] : report.disabled) {
+      std::cout << "Off on this build: " << feature << " (";
+      for (std::size_t i = 0; i < ids.size(); ++i) {
+        std::cout << (i ? ", " : "") << ids[i];
+      }
+      std::cout << ")\n";
+    }
+  }
+  return all_ok ? exit_ok : exit_signatures;
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -648,6 +810,9 @@ int main(int argc, char **argv) {
     }
     if (group == "game" && action == "detect") {
       return cmd_game_detect(args);
+    }
+    if (group == "sig") {
+      return cmd_sig(args, action);
     }
     const std::set<std::string> live = {"status", "mods",   "plan",  "load",
                                         "unload", "reload", "index", "sig",

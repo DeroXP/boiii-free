@@ -9,6 +9,7 @@ can show (docs/DESIGN.md 15.3 and 15.4). The checklist grows every milestone.
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------- |
 | Core unit tests: manifests, SemVer, the planner and its determinism, merges, conflict rules, hook chains, packs and share codes, logs, the loose both-apply pair | `tools\build.ps1 -Tests`                                       | LLVM 23, Ninja, premake 5.0.0 |
 | CLI smoke: plan, conflicts and pack round trip on the fixtures                                                                                                   | `tools\build.ps1 -Tests`                                       | the same                      |
+| Signature registry against a stored dump (`compat/signatures.json`)                                                                                              | `xerces_cli sig check --dump C:\Users\Ginld\XercesDev\dumps`   | a dump on this PC             |
 | Backend: auth, rate limits, privacy, migrations                                                                                                                  | `cd backend` then `pytest -q`                                  | Python 3.12+                  |
 | Formatting: prettier, clang-format, stylua                                                                                                                       | `yarn run check`, `clang-format --dry-run`, `stylua --check .` | Node, LLVM, StyLua            |
 
@@ -122,8 +123,10 @@ too.
 - [x] A memory dump:
       `C:\Users\Ginld\XercesDev\dumps\BlackOps3-20261104-223001.bin` (the 471 MB
       in-memory image of `BlackOps3.exe`), with a `.json` sidecar and a `.pe`
-      copy for `llvm-objdump`. The first signatures for mod-stack's targets come
-      from it in M1.
+      copy for `llvm-objdump`. The first signatures for mod-stack's targets were
+      made from it: `compat/signatures.json` has nine entries, and
+      `xerces_cli sig check --dump C:\Users\Ginld\XercesDev\dumps` resolves all
+      nine at upstream's addresses.
 
 Also seen:
 

@@ -127,6 +127,12 @@ the `pgserver` wheel in a throwaway venv.
   from here (DESIGN.md 3.6). Its join prompt names missing mods instead of
   downloading them. The proof of concept's "queue-add" function is
   `SL_GetStringOfSize` (verified on a dump in D3). Do not call it.
+- Signatures live in `compat/signatures.json`. Make one with
+  `tools\dev\re\sigmaker.py` from a dump (`tools\dev\re\dump-module.ps1`, then
+  `dump-xrefs.ps1 -Fix`), and check the registry with
+  `xerces_cli sig check --dump C:\Users\Ginld\XercesDev\dumps` from the repo
+  root. Dumps come from a running client, so its hooks are in them; sigmaker
+  wildcards them.
 - Start the game for tests with `tools\dev\session\start-game.ps1` (after
   asking): development builds need `XERCES_DATA_PATH` pointing at `data\`
   because no updater installs it, and flags must come before `+set` commands or

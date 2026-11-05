@@ -297,7 +297,7 @@ flowchart LR
 | `src/xerces_dev/`      | plugin DLL, dev builds only | RE tooling moved out of the production path (5.9)                                                                                                                               | yes                              |
 | `data/xerces/`         | assets                      | UI documents and styles, tokens, fonts (OFL), translations, in-game Lua scripts                                                                                                 |                                  |
 | `tests/`               | fixtures                    | loose fixture mods, scenario definitions, expected outputs                                                                                                                      |                                  |
-| `compat/`              | data                        | `builds.json` (4.6)                                                                                                                                                             |                                  |
+| `compat/`              | data                        | `signatures.json` (4.3), `builds.json` (4.6)                                                                                                                                    |                                  |
 | `backend/`             | separate service, MIT       | section 10                                                                                                                                                                      |                                  |
 | `tools/`               | scripts                     | rename, signature tooling, memory dump (dev), release, deploy, CI checks                                                                                                        |                                  |
 
@@ -422,10 +422,12 @@ This replaces upstream's archive.org patch prompt (D9).
 
 ### 4.3 Signature registry
 
-- A generated data file lists every symbol Xerces code needs: name, kind
-  (function, data reached through a RIP-relative operand, mid-function site),
-  one or more byte patterns with wildcards, an anchor and offset rule for data,
-  the expected section, and known addresses for builds already mapped.
+- A generated data file, `compat/signatures.json` (schema `xerces.signatures/1`,
+  parsed by `xerces_core/sigregistry`), lists every symbol Xerces code needs:
+  name, kind (function, data reached through a RIP-relative operand,
+  mid-function site), one or more byte patterns with wildcards, an anchor and
+  offset rule for data, the expected section, and known addresses for builds
+  already mapped.
 - Day-one entries include everything `mod_stack.cpp` uses: `DB_OverrideAsset`,
   `DB_LinkXAssetEntry`, the `DB_ExpandZoneList` and `DB_LoadXZone` call sites
   inside `DB_LoadXAssets`, `FS_BuildOSPathForThread`, `SND_StartHeaderRead`,
@@ -454,14 +456,19 @@ miss turns that feature off and the launcher says, for example:
 
 ### 4.5 Making and testing signatures
 
-- `tools/dev/dump_memory.py` (from your `dump_bo3_memory.py`, with a
-  process-name parameter, chunked reads and the protected sections skipped)
-  saves the decrypted image of a running game to the dev dump folder. It runs
-  out of process; Xerces has no in-process dump command.
-- `tools/dev/sigmaker.py` proposes the shortest unique pattern for an address,
-  wildcarding RIP-relative displacements and immediates.
-- `xerces_cli sig check --dump <dir>` runs the registry against a dump offline.
-  One dump of a new build shows exactly which signatures need work.
+- `tools/dev/re/dump-module.ps1` saves the decrypted in-memory image of
+  `BlackOps3.exe` from a running game to the dev dump folder, laid out by RVA,
+  with chunked reads, unreadable pages skipped and a JSON sidecar. It runs out
+  of process; Xerces has no in-process dump command. `dump-xrefs.ps1` lists call
+  sites in a dump and writes a copy `llvm-objdump` disassembles by address.
+- `tools/dev/re/sigmaker.py` proposes the shortest unique pattern for an
+  address, wildcarding rel32 targets and RIP-relative displacements. A dump
+  comes from a running client, so the client's own hooks are in it: a jmp whose
+  target lies outside the image is wildcarded too, which is why the detoured
+  functions' entries start with five `??`.
+- `xerces_cli sig check --dump <file|folder>` runs the registry against a dump
+  offline (exit 4 when a signature misses). One dump of a new build shows
+  exactly which signatures need work.
 
 ### 4.6 Supported-build matrix
 
@@ -1952,8 +1959,12 @@ M5a, which you asked for now.
 - M1, headless part done: the manifest and its validator with the schema
   (`docs/schema/mod-1.schema.json`), legacy manifests, the planner with
   `plan_id` and `content_id`, JSON logs (`docs/schema/log-1.schema.json`), and
-  the CLI's offline commands. Open: everything in the game process (signature
-  registry, hook bus, `xerces_loader`, pipe, safe mode, detection).
+  the CLI's offline commands. The signature registry file exists
+  (`compat/signatures.json`) with the nine day-one entries for mod-stack's
+  targets, made from the D3 dump; `xerces_cli sig check --dump` resolves all
+  nine at upstream's addresses for build `0x6531394`. Open: everything in the
+  game process (resolving the registry at startup, hook bus, `xerces_loader`,
+  pipe, safe mode, detection).
 - M2, headless part done: the ownership map and rules, the merges, GSC hook
   chain planning, reports, determinism tests and the loose both-apply pair as
   unit tests. Open: index runs, the in-game merges and chains, the GSC call-next
