@@ -54,3 +54,6 @@ jobs:
           build/bin/x64/Release/xerces_cli.exe conflicts check
           --mods-dir tests/fixtures/mods --mod fixture.alpha --mod fixture.beta
           --stock tests/fixtures/stock
+
+      - name: CLI smoke test (home commands, dry launches only)
+        run: ./tools/ci/cli_smoke.ps1 -Generate
