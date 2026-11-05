@@ -260,9 +260,9 @@ crash). Without `-Live` it only does a dry launch; that form passed on
       Zombies profile and `XERCES_HOME` outside AppData: the game starts as it
       does from Launch modded, takes the journal over, logs
       `loader.plan.applied`, and the three mods load. This is M1's "a plan with
-      two Workshop mods loads through the CLI". Afterwards `xerces_cli sig check`
-      reads the report the game wrote (9 of 9, exit 0) and
-      `xerces_cli logs tail --role game` shows its log.
+      two Workshop mods loads through the CLI". Afterwards
+      `xerces_cli sig check` reads the report the game wrote (9 of 9, exit 0)
+      and `xerces_cli logs tail --role game` shows its log.
 - [x] (2026-11-05, dry launches only) `xerces_cli plan apply --dry-launch` on a
       copy of the D3 profile (`C:\Users\Ginld\XercesHome-cli`) prints
       `-launch -nointro -xerces-plan <id> +set fs_game 1944930083 +set fs_extramods 3171632315,3656779213`
@@ -276,7 +276,8 @@ third-party sources of the spike. Until the rename (DESIGN.md 7.7) it starts
 `boiii.exe` from the same folder as the game role.
 
 Checks without the game: always pass `--dry-launch` (the launch builds the plan
-file and the command line, logs them and starts nothing), and point
+file and the command line, logs them and starts nothing; `XERCES_DRY_LAUNCH=1`
+does the same for `Xerces.exe` and `xerces_cli plan apply`), and point
 `XERCES_HOME` at a folder outside AppData (files created under AppData by
 programs started from the Claude app land in a private copy):
 

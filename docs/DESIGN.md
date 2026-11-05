@@ -2059,15 +2059,23 @@ M5a, which you asked for now.
   launcher itself calls, moved into `xerces_core` (`launcher_home`,
   `launcher_state`, `launcher_launch`, `pack_apply`): `mods info`, `enable`,
   `disable` and `order` (the Mods screen's edits, refused while `Xerces.exe`
-  holds the home), `plan apply` (Home's Launch: same plan id, plan file,
-  journal and child environment), `packs apply` (the Packs screen's Apply),
-  `logs tail [--follow]` and `sig check` from the game's own report. Checked
-  with dry launches only: on a copy of the D3 profile `plan apply --dry-launch`
-  builds the D3 command line, and `tools/ci/cli_smoke.ps1` runs them all on a
-  fake game folder. Open: the in-game checks in docs/TESTING.md (among them a
-  plan with two Workshop mods loaded through `plan apply`, M1's first "done
-  when"), the hook bus, the pool policy, ownership events, the dev module, and
-  `index run`, `bench run` and `test run`.
+  holds the home), `plan apply` (Home's Launch: same plan id, plan file, journal
+  and child environment), `packs apply` (the Packs screen's Apply),
+  `logs tail [--follow]` and `sig check` from the game's own report. After the
+  review: the home commands refuse an option or word they do not take (a
+  misspelled `--dry-launch` never becomes a real launch), `plan apply` honours
+  `XERCES_DRY_LAUNCH=1` as `Xerces.exe` does, a dry launch is refused on a game
+  the pre-flight does not accept in both programs (as `Xerces.exe` did before),
+  a real launch from either also looks for a running `boiii.exe` or
+  `BlackOps3.exe`, the edits hold the home's mutex from the read to the write,
+  and `packs apply` from a file or code places the pack's id as an import would.
+  Checked with dry launches only: on a copy of the D3 profile
+  `plan apply --dry-launch` builds the D3 command line, and
+  `tools/ci/cli_smoke.ps1` runs them all on a fake game folder whose build only
+  its own `compat\builds.json` knows. Open: the in-game checks in
+  docs/TESTING.md (among them a plan with two Workshop mods loaded through
+  `plan apply`, M1's first "done when"), the hook bus, the pool policy,
+  ownership events, the dev module, and `index run`, `bench run` and `test run`.
 - M2, headless part done: the ownership map and rules, the merges, GSC hook
   chain planning, reports, determinism tests and the loose both-apply pair as
   unit tests. Open: index runs, the in-game merges and chains, the GSC call-next
