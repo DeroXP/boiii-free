@@ -162,23 +162,30 @@ scrollbarhorizontal sliderbar { background-color: var(--line); }
 	border-radius: 2dp;
 }
 
-.tabs { display: flex; flex-direction: row; align-items: stretch; flex: 1 1 auto; }
+/* The brand and the window buttons keep their size; when the tab labels are
+   long (a translation), the tabs shrink and their labels end in an ellipsis
+   instead of running under the window buttons. */
+.brand { flex-shrink: 0; }
+.tabs { display: flex; flex-direction: row; align-items: stretch; flex: 1 1 auto; min-width: 0dp; }
 .tab
 {
 	gap: 8dp;
 	min-height: 48dp;
+	min-width: 0dp;
+	flex: 0 1 auto;
 	padding: 0dp 12dp;
 	color: var(--text2);
 	font-size: 13dp;
 	font-weight: 500;
 }
+.tab .tab-label { min-width: 0dp; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tab .dot { display: block; width: 6dp; height: 6dp; }
 .tab .num { font-family: "IBM Plex Mono"; font-size: 11dp; color: var(--text2); }
 .tab.current-tab { color: var(--text); font-weight: 600; }
 .tab.current-tab .dot { background-color: var(--accent); }
 .tab:hover { color: var(--text); }
 
-.window-buttons { display: flex; flex-direction: row; align-items: stretch; margin-left: auto; }
+.window-buttons { display: flex; flex-direction: row; align-items: stretch; margin-left: auto; flex-shrink: 0; }
 .win
 {
 	justify-content: center;
@@ -445,7 +452,6 @@ input.text:placeholder-shown { color: var(--text2); }
 {
 	.tab .num { display: none; }
 	.badge { display: none; }
-	.brand { flex-shrink: 0; }
 }
 @media (max-width: 1000dp)
 {

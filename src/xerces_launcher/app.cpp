@@ -461,22 +461,69 @@ std::string app::escape(const std::string &text) {
   return out;
 }
 
-std::string app::tr(const std::string &english) const {
-  if (language_ == "pseudo") {
-    return pseudo(english);
+namespace {
+// RmlUi hands a document's text nodes to the translation table as written,
+// line breaks and indentation included, while the template keys them with
+// every run of whitespace collapsed to one space (extract_strings.py).
+std::string collapse_spaces(const std::string &text) {
+  std::string out;
+  bool space = false;
+  for (const char c : text) {
+    if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+      space = !out.empty();
+      continue;
+    }
+    if (space) {
+      out.push_back(' ');
+      space = false;
+    }
+    out.push_back(c);
   }
-  const auto it = strings_.find(english);
-  return it == strings_.end() ? english : it->second;
+  return out;
+}
+
+bool is_space(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+} // namespace
+
+std::string app::tr(const std::string &english) const {
+  // C++ strings match exactly (a literal may hold a line break on purpose);
+  // document text matches once its whitespace is collapsed. Leading and
+  // trailing space survive as one space, since they separate the text from
+  // the inline elements around it.
+  auto it = strings_.find(english);
+  bool collapsed = false;
+  if (it == strings_.end()) {
+    it = strings_.find(collapse_spaces(english));
+    collapsed = true;
+  }
+  if (it == strings_.end()) {
+    return english;
+  }
+  std::string out = language_ == "pseudo" ? pseudo(collapsed ? it->first : english)
+                                          : it->second;
+  if (collapsed && !english.empty()) {
+    if (is_space(english.front())) {
+      out.insert(out.begin(), ' ');
+    }
+    if (is_space(english.back())) {
+      out.push_back(' ');
+    }
+  }
+  return out;
 }
 
 void app::load_language() {
   language_ = !opts_.language.empty() ? opts_.language
                                       : services_->config().language;
   strings_.clear();
-  if (language_ == "en" || language_ == "pseudo") {
+  if (language_ == "en") {
     return;
   }
-  std::ifstream in(services_->paths().data / "i18n" / (language_ + ".json"),
+  // The pseudo-locale marks exactly what a translator can change: the
+  // template's strings.
+  const std::string file =
+      language_ == "pseudo" ? std::string("template") : language_;
+  std::ifstream in(services_->paths().data / "i18n" / (file + ".json"),
                    std::ios::binary);
   const std::string text((std::istreambuf_iterator<char>(in)),
                          std::istreambuf_iterator<char>());
@@ -486,8 +533,12 @@ void app::load_language() {
     language_ = "en";
     return;
   }
+  const bool keys_only = language_ == "pseudo";
   for (const auto &member : parsed.document.GetObject()) {
-    if (member.value.IsString()) {
+    // A translator works from a copy of the template: a string still empty
+    // there is not translated yet and stays English.
+    if (member.value.IsString() &&
+        (keys_only || member.value.GetStringLength() > 0)) {
       strings_[std::string(member.name.GetString(), member.name.GetStringLength())] =
           std::string(member.value.GetString(), member.value.GetStringLength());
     }

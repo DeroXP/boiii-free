@@ -17,13 +17,13 @@
 			<span class="badge" id="shell-badge">DEV</span>
 		</div>
 		<div class="tabs">
-			<button id="tab-home" class="tab"><span class="dot"></span><span class="num">01</span><span>Home</span></button>
-			<button id="tab-mods" class="tab"><span class="dot"></span><span class="num">02</span><span>Mods</span></button>
-			<button id="tab-packs" class="tab"><span class="dot"></span><span class="num">03</span><span>Packs</span></button>
-			<button id="tab-servers" class="tab"><span class="dot"></span><span class="num">04</span><span>Servers</span></button>
-			<button id="tab-friends" class="tab"><span class="dot"></span><span class="num">05</span><span>Friends</span></button>
-			<button id="tab-settings" class="tab"><span class="dot"></span><span class="num">06</span><span>Settings</span></button>
-			<button id="tab-diagnostics" class="tab"><span class="dot"></span><span class="num">07</span><span>Diagnostics</span></button>
+			<button id="tab-home" class="tab"><span class="dot"></span><span class="num">01</span><span class="tab-label">Home</span></button>
+			<button id="tab-mods" class="tab"><span class="dot"></span><span class="num">02</span><span class="tab-label">Mods</span></button>
+			<button id="tab-packs" class="tab"><span class="dot"></span><span class="num">03</span><span class="tab-label">Packs</span></button>
+			<button id="tab-servers" class="tab"><span class="dot"></span><span class="num">04</span><span class="tab-label">Servers</span></button>
+			<button id="tab-friends" class="tab"><span class="dot"></span><span class="num">05</span><span class="tab-label">Friends</span></button>
+			<button id="tab-settings" class="tab"><span class="dot"></span><span class="num">06</span><span class="tab-label">Settings</span></button>
+			<button id="tab-diagnostics" class="tab"><span class="dot"></span><span class="num">07</span><span class="tab-label">Diagnostics</span></button>
 		</div>
 		<div class="window-buttons">
 			<button id="win-min" class="win" title="Minimize"><span class="min"></span></button>

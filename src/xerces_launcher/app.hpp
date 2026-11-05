@@ -79,7 +79,8 @@ public:
   // ------------------------------------------------------------- strings
   // English source text to the current language (data/xerces/i18n/<lang>.json
   // maps English to the translation; "pseudo" lengthens and marks every
-  // string to expose truncation).
+  // string the template lists, to expose truncation, and leaves the rest as
+  // it is, so text missing from the template shows as plain English).
   std::string tr(const std::string &english) const;
   const std::string &language() const { return language_; }
 
@@ -167,6 +168,7 @@ private:
   std::vector<std::unique_ptr<Rml::EventListener>> listeners_;
 
   std::string language_ = "en";
+  // English -> translation; for "pseudo", the template's keys (values empty).
   std::map<std::string, std::string> strings_;
 
   double started_ = 0;
