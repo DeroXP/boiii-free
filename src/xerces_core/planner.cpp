@@ -995,6 +995,36 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
                    "yet, so the 63-slot budget is not checked.");
   }
 
+  // Asset pools (5.4 step 4): reported, in no hash. The client reads the pool
+  // files of the main mod and the stacked ones, never a map's.
+  const pool_settings pool_config =
+      parse_pool_settings(request.launcher_settings);
+  out.pools.enabled = pool_config.enabled;
+  std::vector<mod_pool_limits> stack_pools;
+  for (const auto &entry : out.stack) {
+    if (const auto it = selected.find(entry.id); it != selected.end()) {
+      stack_pools.push_back({entry.id, it->second->pool_limits});
+    }
+  }
+  out.pools.stack = largest_limits(stack_pools, pool_config);
+  // Every installed mod, sorted by id so a tie names the same mod whatever
+  // order the catalog is in.
+  std::vector<const installed_content *> pool_mods;
+  for (const auto &content : catalog) {
+    if (content.info.kind == content_kind::mod &&
+        !content.pool_limits.empty()) {
+      pool_mods.push_back(&content);
+    }
+  }
+  std::ranges::sort(pool_mods, [](const auto *a, const auto *b) {
+    return a->info.id < b->info.id;
+  });
+  std::vector<mod_pool_limits> installed_pools;
+  for (const auto *content : pool_mods) {
+    installed_pools.push_back({content->info.id, content->pool_limits});
+  }
+  out.pools.installed = largest_limits(installed_pools, pool_config);
+
   // 6. Hashes over canonical JSON.
   rapidjson::Document doc(rapidjson::kObjectType);
   auto &alloc = doc.GetAllocator();
@@ -1097,6 +1127,37 @@ std::string plan_to_json(const plan &value, bool pretty) {
                 : Value(),
             alloc);
   json::set(doc, "zones", std::move(zones), alloc);
+
+  // Not in plan_id or content_id: the game's pool sizes depend on every
+  // installed mod and on launcher_settings.json, not only on the plan.
+  const auto pool_list = [&](const std::vector<pool_need> &needs) {
+    Value list(rapidjson::kArrayType);
+    for (const auto &need : needs) {
+      const asset_pool_info *pool = find_asset_pool(need.type);
+      Value object(rapidjson::kObjectType);
+      json::set(object, "type", std::int64_t{need.type}, alloc);
+      json::set(object, "name", pool ? pool->name : std::string_view(), alloc);
+      json::set(object, "label", pool ? pool->label : std::string_view(),
+                alloc);
+      json::set(object, "setting_key",
+                pool ? pool->setting_key : std::string_view(), alloc);
+      json::set(object, "size", std::int64_t{need.size}, alloc);
+      json::set(object, "mod", need.mod, alloc);
+      json::set(object, "default",
+                need.default_size ? Value(std::int64_t{*need.default_size})
+                                  : Value(),
+                alloc);
+      json::set(object, "fixed", need.fixed, alloc);
+      json::set(object, "raises", need.raises, alloc);
+      list.PushBack(std::move(object), alloc);
+    }
+    return list;
+  };
+  Value pools(rapidjson::kObjectType);
+  json::set(pools, "enabled", value.pools.enabled, alloc);
+  json::set(pools, "stack", pool_list(value.pools.stack), alloc);
+  json::set(pools, "installed", pool_list(value.pools.installed), alloc);
+  json::set(doc, "asset_pools", std::move(pools), alloc);
 
   Value explanations(rapidjson::kArrayType);
   for (const auto &item : value.explanations) {

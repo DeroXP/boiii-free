@@ -255,9 +255,11 @@ content_hash_of(const std::vector<std::pair<std::string, std::string>> &files) {
   return content_hash_of_digests(digests);
 }
 
-installed_content load_mod_folder(const std::filesystem::path &folder,
-                                  const std::set<std::string> &taken_ids,
-                                  diagnostics &diags, hash_cache *cache) {
+namespace {
+// The manifest (or a legacy one) and the files.
+installed_content load_content(const std::filesystem::path &folder,
+                               const std::set<std::string> &taken_ids,
+                               diagnostics &diags, hash_cache *cache) {
   installed_content content;
   content.folder = utf8(folder.filename().u8string());
   std::error_code ec;
@@ -315,6 +317,66 @@ installed_content load_mod_folder(const std::filesystem::path &folder,
   return content;
 }
 
+// The pool file the client reads when it loads this mod (UGC_LoadItem_
+// PrepareAssetPool, called for the main mod and each stacked one; never for
+// a map). It is small and read whole; its hash is in the content hash like
+// every other file's.
+void read_pool_file(installed_content &content,
+                    const std::filesystem::path &folder, content_layout layout,
+                    diagnostics &diags) {
+  // Most mods have none: only a folder holding one of the names somewhere is
+  // walked again, in the client's order.
+  const bool named = std::ranges::any_of(content.files, [](const auto &file) {
+    const std::string_view name =
+        std::string_view(file).substr(file.rfind('/') + 1);
+    return std::ranges::find(pool_file_names, name) !=
+           std::end(pool_file_names);
+  });
+  if (!named) {
+    return;
+  }
+  const std::filesystem::path base =
+      content.path.empty() ? folder : content.path;
+  const auto file = find_pool_file(pool_search_root(base, layout));
+  if (!file) {
+    return;
+  }
+  content.pool_file = relative_name(base, *file);
+  std::error_code ec;
+  const std::uintmax_t size = std::filesystem::file_size(*file, ec);
+  if (!ec && size > max_pool_file_bytes) {
+    diags.warning("catalog.pools.too_big",
+                  content.folder + "/" + content.pool_file,
+                  content.folder + ": " + content.pool_file + " holds " +
+                      std::to_string(size) +
+                      " bytes, more than a pool file needs, so Xerces did "
+                      "not read it; the game reads it whole.");
+    return;
+  }
+  content.pool_limits = parse_pool_limits(read_text(*file));
+}
+} // namespace
+
+installed_content load_mod_folder(const std::filesystem::path &folder,
+                                  const std::set<std::string> &taken_ids,
+                                  diagnostics &diags, hash_cache *cache,
+                                  content_layout layout) {
+  installed_content content = load_content(folder, taken_ids, diags, cache);
+  if (content.info.kind == content_kind::mod) {
+    read_pool_file(content, folder, layout, diags);
+  }
+  return content;
+}
+
+content_layout layout_of_directory(const std::filesystem::path &directory) {
+  // Steam keeps the game's Workshop items in workshop\content\311210.
+  const std::filesystem::path name = directory.filename().empty()
+                                         ? directory.parent_path().filename()
+                                         : directory.filename();
+  return name == "311210" ? content_layout::workshop
+                          : content_layout::game_folder;
+}
+
 catalog_scan scan_mods_directory(const std::filesystem::path &directory,
                                  const scan_options &options) {
   catalog_scan scan;
@@ -342,8 +404,8 @@ catalog_scan scan_mods_directory(const std::filesystem::path &directory,
       options.progress(index, folders.size(),
                        utf8(folder.filename().u8string()));
     }
-    installed_content content =
-        load_mod_folder(folder, taken, scan.diags, options.cache);
+    installed_content content = load_mod_folder(folder, taken, scan.diags,
+                                                options.cache, options.layout);
     if (content.info.id.empty()) {
       continue;
     }

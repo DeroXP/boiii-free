@@ -80,16 +80,28 @@ struct scan_options {
   // Checked between folders; a cancelled scan returns what it has so far and
   // reports scan.cancelled.
   const std::atomic<bool> *cancel = nullptr;
+  // Where the folders come from, which decides where the client looks for a
+  // mod's asset pool file (asset_limits.hpp).
+  content_layout layout = content_layout::game_folder;
 };
 
 catalog_scan scan_mods_directory(const std::filesystem::path &directory,
                                  const scan_options &options = {});
 
-// One mod folder: its xerces.mod.json, or a synthesized legacy manifest.
-installed_content load_mod_folder(const std::filesystem::path &folder,
-                                  const std::set<std::string> &taken_ids,
-                                  diagnostics &diags,
-                                  hash_cache *cache = nullptr);
+// The layout of a folder of mods: Steam's Workshop content folder for the
+// game (...\workshop\content\311210) holds Workshop items, anything else is
+// taken as a game's mods\ or usermaps\ folder.
+content_layout layout_of_directory(const std::filesystem::path &directory);
+
+// One mod folder: its xerces.mod.json, or a synthesized legacy manifest. For
+// a mod, also the asset pool file the client would read (pool_file,
+// pool_limits); one larger than max_pool_file_bytes is left unread with a
+// warning.
+installed_content
+load_mod_folder(const std::filesystem::path &folder,
+                const std::set<std::string> &taken_ids, diagnostics &diags,
+                hash_cache *cache = nullptr,
+                content_layout layout = content_layout::game_folder);
 
 // Every file under a folder as (relative '/' path, contents), sorted. This
 // holds every byte in memory: scans use hash_files, and only the conflict

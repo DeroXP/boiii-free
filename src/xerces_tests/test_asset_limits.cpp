@@ -9,11 +9,14 @@
 #include <filesystem>
 #include <fstream>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 #include <xerces_core/asset_limits.hpp>
+#include <xerces_core/catalog.hpp>
 #include <xerces_core/game_files.hpp>
+#include <xerces_core/planner.hpp>
 
 using namespace xerces_core;
 namespace fs = std::filesystem;
@@ -324,4 +327,183 @@ TEST_CASE("pools: the file is found where the client looks") {
   CHECK_EQ(find_pool_file(dir / "order").value_or(fs::path()),
            dir / "order" / "a" / "assetpools.txt");
   fs::remove_all(dir);
+}
+
+TEST_CASE("pools: the catalog reads each mod's pool file, maps' never") {
+  const fs::path dir = fresh_dir("catalog");
+  const fs::path mods = dir / "mods";
+  const std::string file = "// T7Recharged pools\r\n"
+                           "23 weapon 1536 4096\r\n"
+                           "38 fx 2000 8000\r\n";
+  write_bytes(mods / "big" / "zone" / "core_mod.ff", "ff");
+  write_bytes(mods / "big" / "zone" / "workshop.json",
+              R"({"Title":"Big","PublisherID":"111","Type":"mod"})");
+  write_bytes(mods / "big" / "zone" / "assetlimits.txt", file);
+  // Outside zone\: the client never sees it for a game mods\ folder.
+  write_bytes(mods / "big" / "assetpools.txt", header + "23 99999\n");
+  write_bytes(mods / "plain" / "zone" / "core_mod.ff", "ff");
+  write_bytes(mods / "plain" / "zone" / "workshop.json",
+              R"({"Title":"Plain","PublisherID":"222","Type":"mod"})");
+  write_bytes(mods / "map" / "zone" / "workshop.json",
+              R"({"Title":"Map","PublisherID":"333","Type":"map"})");
+  write_bytes(mods / "map" / "zone" / "assetlimits.txt", file);
+
+  const catalog_scan scan = scan_mods_directory(mods);
+  REQUIRE_EQ(scan.catalog.size(), std::size_t{3});
+  const auto find = [&](const std::string &id) -> const installed_content & {
+    for (const auto &item : scan.catalog) {
+      if (item.info.id == id) {
+        return item;
+      }
+    }
+    throw std::runtime_error("missing " + id);
+  };
+  const installed_content &big = find("ws.111");
+  CHECK_EQ(big.pool_file, std::string("zone/assetlimits.txt"));
+  CHECK_EQ(big.pool_limits, (limits{{23, 4096}, {38, 8000}}));
+  // The pool file is hashed like any other file, and only once.
+  CHECK_EQ(big.content_hash, content_hash_of(read_files(big.path)));
+  CHECK(find("ws.222").pool_file.empty());
+  CHECK(find("ws.222").pool_limits.empty());
+  // The client reads pool files only when it loads a mod.
+  CHECK(find("ws.333").pool_file.empty());
+  CHECK(find("ws.333").pool_limits.empty());
+
+  // A Workshop item: the client walks the item folder itself, and the
+  // root's assetpools.txt is listed before the zone folder.
+  scan_options workshop;
+  workshop.layout = content_layout::workshop;
+  const catalog_scan items = scan_mods_directory(mods, workshop);
+  for (const auto &item : items.catalog) {
+    if (item.info.id == "ws.111") {
+      CHECK_EQ(item.pool_file, std::string("assetpools.txt"));
+      CHECK_EQ(item.pool_limits, (limits{{23, 99999}}));
+    }
+  }
+  CHECK(layout_of_directory(fs::path("D:/Steam/steamapps/workshop/content/"
+                                     "311210")) == content_layout::workshop);
+  CHECK(layout_of_directory(fs::path("D:/Steam/steamapps/workshop/content/"
+                                     "311210/")) == content_layout::workshop);
+  CHECK(layout_of_directory(fs::path("D:/Games/BO3/mods")) ==
+        content_layout::game_folder);
+
+  // An oversized file is left unread, with a warning.
+  write_bytes(mods / "plain" / "zone" / "assetpools.txt",
+              header + std::string(max_pool_file_bytes, ' ') + "\n23 1\n");
+  const catalog_scan large = scan_mods_directory(mods);
+  bool warned = false;
+  for (const auto &item : large.diags.items()) {
+    warned = warned || item.code == "catalog.pools.too_big";
+  }
+  CHECK(warned);
+  for (const auto &item : large.catalog) {
+    if (item.info.id == "ws.222") {
+      CHECK_EQ(item.pool_file, std::string("zone/assetpools.txt"));
+      CHECK(item.pool_limits.empty());
+    }
+  }
+  fs::remove_all(dir);
+}
+
+namespace {
+installed_content pool_mod(const std::string &id, const std::string &ver,
+                           limits pools = {}) {
+  installed_content content;
+  content.info = parse_manifest(R"({"schema":1,"id":")" + id + R"(","name":")" +
+                                id + R"(","version":")" + ver + R"("})")
+                     .value;
+  content.folder = id;
+  content.files = {"zone/core_mod.ff"};
+  content.content_hash = "sha256:" + std::string(64, 'a');
+  content.pool_limits = std::move(pools);
+  return content;
+}
+
+plan_request pool_request(std::vector<std::string> mods) {
+  plan_request request;
+  request.mode = "zm";
+  request.mods = std::move(mods);
+  request.game_build = "24784313";
+  request.xerces_version = *version::parse("0.1.0");
+  return request;
+}
+} // namespace
+
+TEST_CASE("pools: the plan reports its stack's pools and every mod's") {
+  installed_content map = pool_mod("some.map", "1.0.0", {{23, 1 << 20}});
+  map.info.kind = content_kind::map;
+  const std::vector<installed_content> catalog = {
+      pool_mod("a.mod", "1.0.0", {{0x17, 4096}, {0x26, 1000}}),
+      pool_mod("b.mod", "2.1.0", {{0x17, 8192}, {0x4, 100}}),
+      pool_mod("c.mod", "1.0.0", {{0x17, 16384}, {0x6, 0x8000}}),
+      pool_mod("d.mod", "1.0.0", {{0x17, 16384}}), map};
+  plan_request request = pool_request({"b.mod", "a.mod"});
+  request.map = "some.map";
+  const plan p = resolve_plan(catalog, request);
+  REQUIRE(p.ok());
+  CHECK(p.pools.enabled);
+  // The stack: a.mod and b.mod only; the map's file is never read.
+  REQUIRE_EQ(p.pools.stack.size(), std::size_t{3});
+  CHECK_EQ(p.pools.stack[0].type, 0x4);
+  CHECK(!p.pools.stack[0].raises);
+  CHECK_EQ(p.pools.stack[1].type, 0x17);
+  CHECK_EQ(p.pools.stack[1].size, 8192u);
+  CHECK_EQ(p.pools.stack[1].mod, std::string("b.mod"));
+  CHECK_EQ(p.pools.stack[1].default_size.value_or(0), 0x600u);
+  CHECK(p.pools.stack[1].raises);
+  CHECK_EQ(p.pools.stack[2].type, 0x26);
+  CHECK(!p.pools.stack[2].raises); // 1000 is below FX's 0x7D0
+  // Every installed mod, the map left out; a tie names the lowest id.
+  REQUIRE_EQ(p.pools.installed.size(), std::size_t{4});
+  CHECK_EQ(p.pools.installed[2].type, 0x17);
+  CHECK_EQ(p.pools.installed[2].size, 16384u);
+  CHECK_EQ(p.pools.installed[2].mod, std::string("c.mod"));
+  CHECK_EQ(p.pools.installed[1].type, 0x6);
+  CHECK(p.pools.installed[1].raises);
+
+  const std::string text = plan_to_json(p);
+  CHECK(text.find(R"("asset_pools":{"enabled":true,"installed":[)") !=
+        std::string::npos);
+  CHECK(text.find(R"({"default":1536,"fixed":false,"label":"Weapon",)"
+                  R"("mod":"b.mod","name":"WEAPON","raises":true,)"
+                  R"("setting_key":"ap_weapon","size":8192,"type":23})") !=
+        std::string::npos);
+
+  // launcher_settings.json changes the defaults, never the ids.
+  plan_request off = request;
+  off.launcher_settings = R"({"asset_limits_enabled":"0"})";
+  const plan q = resolve_plan(catalog, off);
+  CHECK(!q.pools.enabled);
+  CHECK(!q.pools.stack[0].default_size.has_value());
+  CHECK(q.pools.stack[0].raises);
+  CHECK(plan_to_json(q).find(R"("default":null)") != std::string::npos);
+  CHECK_EQ(q.plan_id, p.plan_id);
+  CHECK_EQ(q.content_id, p.content_id);
+  CHECK_EQ(q.canonical, p.canonical);
+}
+
+TEST_CASE("pools: pool limits leave plan_id and content_id alone") {
+  // The literal ids come from the planner before pool limits existed: the
+  // same two mods, now with pool files, plus an installed mod outside the
+  // plan and a launcher_settings.json, must give the same ones.
+  const char *plan_id = "sha256:540c19dd5688eaf8e68a8492ddaea0bb"
+                        "c864682c1f0cfd1d7c9a13baea519dd3";
+  const char *content_id = "sha256:d32ba51e7348069db500fc921052a660"
+                           "261dc8df31dfd1af3558626210c057e5";
+  const std::vector<installed_content> catalog = {
+      pool_mod("a.mod", "1.0.0", {{0x17, 4096}}),
+      pool_mod("b.mod", "2.1.0", {{0x26, 9000}}),
+      pool_mod("other.mod", "1.0.0", {{0x4, 99999}})};
+  plan_request request = pool_request({"b.mod", "a.mod"});
+  request.launcher_settings = R"({"ap_weapon":"8000"})";
+  const plan p = resolve_plan(catalog, request);
+  CHECK_EQ(p.plan_id, std::string(plan_id));
+  CHECK_EQ(p.content_id, std::string(content_id));
+  CHECK_EQ(p.pools.installed.size(), std::size_t{3});
+  // And without any pool data: the same.
+  const plan bare =
+      resolve_plan({pool_mod("a.mod", "1.0.0"), pool_mod("b.mod", "2.1.0")},
+                   pool_request({"b.mod", "a.mod"}));
+  CHECK_EQ(bare.plan_id, std::string(plan_id));
+  CHECK_EQ(bare.content_id, std::string(content_id));
 }
