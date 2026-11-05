@@ -9,6 +9,7 @@ can show (docs/DESIGN.md 15.3 and 15.4). The checklist grows every milestone.
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------- |
 | Core unit tests: manifests, SemVer, the planner and its determinism, merges, conflict rules, hook chains, packs and share codes, logs, the loose both-apply pair | `tools\build.ps1 -Tests`                                       | LLVM 23, Ninja, premake 5.0.0 |
 | CLI smoke: plan, conflicts and pack round trip on the fixtures                                                                                                   | `tools\build.ps1 -Tests`                                       | the same                      |
+| CLI smoke on a home: mods enable, disable, order and info, `plan apply --dry-launch`, `packs apply`, `logs tail`, `sig check` on a fake game folder              | `tools\build.ps1 -Tests` (`tools\ci\cli_smoke.ps1`)            | the same                      |
 | Signature registry against a stored dump (`compat/signatures.json`)                                                                                              | `xerces_cli sig check --dump C:\Users\Ginld\XercesDev\dumps`   | a dump on this PC             |
 | Pre-flight check of the installed game against `compat/builds.json`                                                                                              | `xerces_cli game check`                                        | the game on this PC           |
 | Backend: auth, rate limits, privacy, migrations                                                                                                                  | `cd backend` then `pytest -q`                                  | Python 3.12+                  |
@@ -253,6 +254,20 @@ crash). Without `-Live` it only does a dry launch; that form passed on
       change the extra mods and reload them, as the mods menu does; in a match
       they answer that the stack only changes in the menus. The pipe itself is
       tested in `test_ipc.cpp` (a served pipe, a forged run file refused).
+- [ ] `xerces_cli plan apply` (no `--dry-launch`; it starts the game, so only
+      with your go-ahead), from a build with `boiii.exe` next to
+      `xerces_cli.exe` (`tools\build.ps1 -Client`), with the D3 stack as the
+      Zombies profile and `XERCES_HOME` outside AppData: the game starts as it
+      does from Launch modded, takes the journal over, logs
+      `loader.plan.applied`, and the three mods load. This is M1's "a plan with
+      two Workshop mods loads through the CLI". Afterwards `xerces_cli sig check`
+      reads the report the game wrote (9 of 9, exit 0) and
+      `xerces_cli logs tail --role game` shows its log.
+- [x] (2026-11-05, dry launches only) `xerces_cli plan apply --dry-launch` on a
+      copy of the D3 profile (`C:\Users\Ginld\XercesHome-cli`) prints
+      `-launch -nointro -xerces-plan <id> +set fs_game 1944930083 +set fs_extramods 3171632315,3656779213`
+      with the plan id `Xerces.exe`'s dry launch logged on the same home, writes
+      the plan file and no journal.
 
 ### Launcher (M3)
 

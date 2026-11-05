@@ -2055,8 +2055,19 @@ M5a, which you asked for now.
   libraries, picker) is enough because the launcher starts the game in its
   folder; loading DLLs by absolute path would mean editing the fenced loader, so
   it stays as upstream has it. Plugin loading is out of default builds (5.9).
-  Open: the in-game checks in docs/TESTING.md, the hook bus, the pool policy,
-  ownership events, and the dev module.
+  The CLI's M1 commands on `<home>` were built the same day on the code the
+  launcher itself calls, moved into `xerces_core` (`launcher_home`,
+  `launcher_state`, `launcher_launch`, `pack_apply`): `mods info`, `enable`,
+  `disable` and `order` (the Mods screen's edits, refused while `Xerces.exe`
+  holds the home), `plan apply` (Home's Launch: same plan id, plan file,
+  journal and child environment), `packs apply` (the Packs screen's Apply),
+  `logs tail [--follow]` and `sig check` from the game's own report. Checked
+  with dry launches only: on a copy of the D3 profile `plan apply --dry-launch`
+  builds the D3 command line, and `tools/ci/cli_smoke.ps1` runs them all on a
+  fake game folder. Open: the in-game checks in docs/TESTING.md (among them a
+  plan with two Workshop mods loaded through `plan apply`, M1's first "done
+  when"), the hook bus, the pool policy, ownership events, the dev module, and
+  `index run`, `bench run` and `test run`.
 - M2, headless part done: the ownership map and rules, the merges, GSC hook
   chain planning, reports, determinism tests and the loose both-apply pair as
   unit tests. Open: index runs, the in-game merges and chains, the GSC call-next
