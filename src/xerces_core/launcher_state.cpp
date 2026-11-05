@@ -115,9 +115,9 @@ catalog_state scan_catalog(const game_state &game, const fs::path &cache_file,
   result.cache_hits = cache.hits();
   result.cache_misses = cache.misses();
   result.bytes_hashed = cache.bytes_hashed();
-  result.seconds = std::chrono::duration<double>(
-                       std::chrono::steady_clock::now() - started)
-                       .count();
+  result.seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - started)
+          .count();
   result.scanned = !cancelled;
   return result;
 }

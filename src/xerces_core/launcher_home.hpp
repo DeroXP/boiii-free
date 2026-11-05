@@ -14,27 +14,28 @@
 
 namespace xerces_core {
 struct launcher_paths {
-  std::filesystem::path home;    // %LOCALAPPDATA%\Xerces, XERCES_HOME or --home
-  std::filesystem::path config;  // <home>\config
-  std::filesystem::path plans;   // <home>\config\plans
-  std::filesystem::path cache;   // <home>\cache
-  std::filesystem::path logs;    // <home>\logs
-  std::filesystem::path crash;   // <home>\crash
-  std::filesystem::path data;    // data\xerces: ui, fonts, i18n
-  std::filesystem::path compat;  // compat\: builds.json, signatures.json
+  std::filesystem::path home;   // %LOCALAPPDATA%\Xerces, XERCES_HOME or --home
+  std::filesystem::path config; // <home>\config
+  std::filesystem::path plans;  // <home>\config\plans
+  std::filesystem::path cache;  // <home>\cache
+  std::filesystem::path logs;   // <home>\logs
+  std::filesystem::path crash;  // <home>\crash
+  std::filesystem::path data;   // data\xerces: ui, fonts, i18n
+  std::filesystem::path compat; // compat\: builds.json, signatures.json
   // The game role's executable (boiii.exe until the rename), next to the
   // running program.
   std::filesystem::path client;
   std::filesystem::path program; // the running executable
-  std::optional<std::filesystem::path> dev_data; // repo data\ for XERCES_DATA_PATH
+  // A repository checkout's data\, for XERCES_DATA_PATH.
+  std::optional<std::filesystem::path> dev_data;
   std::filesystem::path config_file() const { return config / "launcher.json"; }
   std::filesystem::path journal_file() const { return logs / "journal.json"; }
 };
 
 // <home>: the override, else XERCES_HOME, else %LOCALAPPDATA%\Xerces, as an
 // absolute path.
-std::filesystem::path find_home(
-    const std::optional<std::filesystem::path> &home_override);
+std::filesystem::path
+find_home(const std::optional<std::filesystem::path> &home_override);
 
 // Finds the paths: <home> as find_home does; data and compat next to the
 // executable or, in a development build, in the repository the executable

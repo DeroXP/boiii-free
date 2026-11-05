@@ -82,8 +82,8 @@ launch_outcome preview_launch(const launch_inputs &in) {
       return out;
     }
   }
-  const launch_command command = build_launch_command(
-      out.resolved ? &*out.resolved : nullptr, options);
+  const launch_command command =
+      build_launch_command(out.resolved ? &*out.resolved : nullptr, options);
   out.diags.append(command.diags);
   out.command_line = command.command_line;
   if (!command.ok()) {
@@ -145,10 +145,10 @@ std::wstring child_environment(const wchar_t *block,
       entries.push_back(name + L"=" + *value);
     }
   }
-  std::ranges::stable_sort(entries, [](const std::wstring &a,
-                                       const std::wstring &b) {
-    return upper(entry_name(a)) < upper(entry_name(b));
-  });
+  std::ranges::stable_sort(entries,
+                           [](const std::wstring &a, const std::wstring &b) {
+                             return upper(entry_name(a)) < upper(entry_name(b));
+                           });
   std::wstring out;
   for (const auto &entry : drives) {
     out += entry;
@@ -192,8 +192,9 @@ launch_outcome launch_game(const launch_inputs &in,
         !game.dir ? "Black Ops III was not found. Set its folder in Settings."
         : game.preflight && !game.preflight->message.empty()
             ? game.preflight->message
-        : !game.error.empty() ? game.error
-                              : std::string("This game build is not supported.");
+        : !game.error.empty()
+            ? game.error
+            : std::string("This game build is not supported.");
     if (!in.dry_launch) {
       return refuse(launch_refusal::game, "launch.game", why);
     }
@@ -288,10 +289,10 @@ launch_outcome launch_game(const launch_inputs &in,
   startup.cb = sizeof(startup);
   PROCESS_INFORMATION started{};
   const std::wstring cwd = game.dir->wstring();
-  const BOOL created = CreateProcessW(
-      paths.client.wstring().c_str(), command.data(), nullptr, nullptr, FALSE,
-      CREATE_UNICODE_ENVIRONMENT, environment.data(), cwd.c_str(), &startup,
-      &started);
+  const BOOL created =
+      CreateProcessW(paths.client.wstring().c_str(), command.data(), nullptr,
+                     nullptr, FALSE, CREATE_UNICODE_ENVIRONMENT,
+                     environment.data(), cwd.c_str(), &startup, &started);
   const DWORD error = GetLastError();
   if (!created) {
     // Nothing ran, so nothing crashed: put the journal back as it was. Left

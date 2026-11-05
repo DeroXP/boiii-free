@@ -29,10 +29,13 @@ struct game_state {
   std::optional<exe_facts> exe;
   std::optional<preflight_result> preflight;
   std::string error; // why the exe or the registry could not be read
-  std::filesystem::path workshop_dir; // <library>\steamapps\workshop\content\311210
-  std::filesystem::path mods_dir;     // <game>\mods
+  std::filesystem::path
+      workshop_dir;               // <library>\steamapps\workshop\content\311210
+  std::filesystem::path mods_dir; // <game>\mods
   std::filesystem::path usermaps_dir; // <game>\usermaps
-  bool can_launch() const { return dir && preflight && preflight->can_launch(); }
+  bool can_launch() const {
+    return dir && preflight && preflight->can_launch();
+  }
 };
 
 // Detection (4.7): the saved path, then Steam's libraries; then Steam's build

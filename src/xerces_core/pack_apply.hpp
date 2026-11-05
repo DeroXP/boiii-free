@@ -28,8 +28,9 @@ std::optional<std::filesystem::path> backup_config(const launcher_paths &paths,
 
 // backup_config ("apply pack <id>"), then apply_pack_to_profile on the
 // profile of mode (the pack's own mode when empty). Returns the backup.
-std::optional<std::filesystem::path>
-apply_pack(const launcher_paths &paths, launcher_config &config,
-           const pack &value, const event_log &log,
-           const std::string &mode = {});
+std::optional<std::filesystem::path> apply_pack(const launcher_paths &paths,
+                                                launcher_config &config,
+                                                const pack &value,
+                                                const event_log &log,
+                                                const std::string &mode = {});
 } // namespace xerces_core

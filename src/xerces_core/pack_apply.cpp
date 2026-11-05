@@ -44,9 +44,9 @@ std::optional<std::filesystem::path> backup_config(const launcher_paths &paths,
                                                    const std::string &why,
                                                    const event_log &log) {
   diagnostics diags;
-  const auto made = create_backup(paths.home / "backups",
-                                  {{"config", paths.config}}, backup_stamp(),
-                                  {}, diags);
+  const auto made =
+      create_backup(paths.home / "backups", {{"config", paths.config}},
+                    backup_stamp(), {}, diags);
   if (made) {
     emit(log, log_level::info, "packs.backup", why);
   } else {
