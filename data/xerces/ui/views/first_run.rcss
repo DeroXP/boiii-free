@@ -1,0 +1,265 @@
+/* First run (DESIGN.md 7.3) in C / Signal: the step row works like Home's mode
+   row (a 2 dp rule under the current step, an accent square), 1 dp rules
+   between rows, the Next button in the accent. */
+
+#fr-main
+{
+	display: flex;
+	flex-direction: column;
+	min-height: 100%;
+	padding: 24dp 32dp 0dp 32dp;
+	box-sizing: border-box;
+}
+
+/* ------------------------------------------------------------ step row */
+.fr-top
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	column-gap: 32dp;
+	row-gap: 8dp;
+	border-bottom: 1dp var(--line);
+}
+.fr-steps { display: flex; flex-direction: row; flex-wrap: wrap; column-gap: 28dp; }
+.fr-step
+{
+	gap: 8dp;
+	min-height: 44dp;
+	padding: 0dp 2dp;
+	margin-bottom: -1dp;
+	border-bottom: 2dp transparent;
+	color: var(--text2);
+	font-size: 15dp;
+	font-weight: 600;
+	letter-spacing: -0.15dp;
+}
+.fr-num { font-family: "IBM Plex Mono"; font-size: 12dp; font-weight: 500; }
+.fr-dot { display: block; width: 8dp; height: 8dp; box-sizing: border-box; }
+.fr-step.done { color: var(--text); }
+.fr-step.done .fr-dot { border: 1dp var(--text); }
+.fr-step.on { color: var(--text); border-bottom-color: var(--text); }
+.fr-step.on .fr-dot { background-color: var(--accent); }
+.fr-step:hover { color: var(--text); }
+.fr-skip { min-height: 44dp; font-size: 13dp; color: var(--text2); }
+.fr-skip:hover { color: var(--text); }
+
+/* ---------------------------------------------------------------- body */
+.fr-body { flex: 1 1 auto; padding: 32dp 0dp 32dp 0dp; }
+.fr-panel { max-width: 1216dp; }
+.fr-title
+{
+	margin-top: 8dp;
+	font-weight: 800;
+	font-size: 64dp;
+	line-height: 64dp;
+	letter-spacing: -1.92dp;
+}
+.fr-sub { margin-top: 16dp; max-width: 640dp; font-size: 15dp; line-height: 22dp; color: var(--text2); }
+.fr-group { margin-top: 32dp; }
+
+/* Controls on the left, background facts on the right; they stack when the
+   window is narrow. */
+.fr-columns
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	column-gap: 48dp;
+	row-gap: 32dp;
+	margin-top: 32dp;
+}
+.fr-col-main { flex: 2 1 480dp; max-width: 760dp; }
+.fr-col-themes { flex: 0 1 auto; }
+.fr-col-aside { flex: 1 1 280dp; max-width: 440dp; }
+.fr-actions { margin-top: 24dp; }
+.fr-help { margin-top: 12dp; max-width: 640dp; font-size: 13dp; line-height: 18dp; color: var(--text2); }
+
+/* ---------------------------------------------------------- 01 Game */
+.fr-verdict { display: flex; flex-direction: row; align-items: center; gap: 12dp; }
+.fr-sq { display: block; width: 14dp; height: 14dp; border: 1dp var(--text2); box-sizing: border-box; }
+.fr-sq.ok { background-color: var(--text); border-color: var(--text); }
+.fr-sq.bad { background-color: var(--accent); border-color: var(--accent); }
+.fr-verdict-text { font-size: 28dp; line-height: 32dp; font-weight: 700; letter-spacing: -0.56dp; }
+/* Paths are long single words: let them break anywhere instead of running
+   out of their column. */
+.fr-path { margin-top: 8dp; font-family: "IBM Plex Mono"; font-size: 13dp; line-height: 18dp; color: var(--text2); word-break: break-word; }
+.fr-facts
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	column-gap: 32dp;
+	row-gap: 16dp;
+	margin-top: 24dp;
+	padding-top: 16dp;
+	border-top: 1dp var(--line);
+}
+.fr-fact { flex: 1 1 160dp; }
+.fr-fact-value { margin-top: 6dp; font-size: 15dp; font-weight: 600; line-height: 20dp; }
+.fr-notice { margin-top: 24dp; }
+.fr-notice-text { margin-top: 6dp; }
+.fr-row-n { width: 24dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.fr-row-path { flex: 1 1 auto; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; word-break: break-word; }
+
+/* -------------------------------------------------------- 02 Import */
+.fr-place { padding: 12dp 0dp; border-bottom: 1dp var(--line); }
+.fr-place-name { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; font-weight: 500; }
+.fr-place-path { margin-top: 2dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); word-break: break-word; }
+.fr-place-state { margin-top: 6dp; font-size: 13dp; line-height: 18dp; }
+
+.fr-pick
+{
+	display: flex;
+	gap: 16dp;
+	width: 100%;
+	min-height: 64dp;
+	padding: 12dp 12dp 12dp 4dp;
+	border-bottom: 1dp var(--line);
+}
+.fr-pick:hover { background-color: var(--surface2); }
+.fr-check
+{
+	display: block;
+	width: 18dp;
+	height: 18dp;
+	padding: 5dp;
+	border: 1dp var(--text2);
+	border-radius: 2dp;
+	box-sizing: border-box;
+}
+.fr-check-in { display: block; width: 6dp; height: 6dp; }
+.fr-pick.on .fr-check { background-color: var(--accent); border-color: var(--accent); }
+.fr-pick.on .fr-check-in { background-color: var(--on-accent); }
+.fr-pick.done .fr-check { border-color: var(--line); }
+.fr-pick.done .fr-check-in { background-color: var(--text2); }
+.fr-pick-text { display: flex; flex-direction: column; gap: 4dp; flex: 1 1 auto; }
+.fr-pick-title { font-size: 15dp; font-weight: 600; line-height: 20dp; }
+.fr-pick-detail { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.fr-pick-value { font-size: 20dp; line-height: 24dp; font-weight: 700; letter-spacing: -0.4dp; }
+.fr-pick.done .fr-pick-title, .fr-pick.done .fr-pick-value { color: var(--text2); }
+/* Nothing selected: an outline instead of a faded accent block. */
+#fr-import.disabled { opacity: 1; background-color: transparent; border-color: var(--line); color: var(--text2); }
+.fr-done { display: flex; flex-direction: row; align-items: center; gap: 12dp; min-height: 48dp; font-size: 14dp; line-height: 20dp; }
+.fr-note { margin-top: 8dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+
+/* ---------------------------------------------------------- 03 Look */
+.fr-themes { display: flex; flex-direction: row; flex-wrap: wrap; gap: 16dp; margin-top: 16dp; }
+.fr-theme
+{
+	flex-direction: column;
+	align-items: stretch;
+	gap: 12dp;
+	width: 184dp;
+	padding: 8dp 8dp 12dp 8dp;
+	border: 1dp var(--line);
+	border-radius: 2dp;
+}
+.fr-theme:hover { border-color: var(--text2); }
+.fr-theme.on { border-color: var(--text); }
+.fr-theme.on .fr-dot { background-color: var(--accent); }
+.fr-theme-name { display: flex; flex-direction: row; align-items: center; gap: 8dp; font-size: 14dp; line-height: 18dp; font-weight: 600; }
+
+/* The swatches show each theme's own colours, whatever theme is on. */
+.fr-swatch { height: 68dp; padding: 12dp 14dp; border: 1dp; box-sizing: border-box; }
+.sw-bar { width: 80%; height: 6dp; margin-bottom: 8dp; }
+.sw-short { width: 50%; }
+.sw-accent { width: 28dp; height: 10dp; }
+.sw-dark { background-color: #000000; border-color: #2B2B2B; }
+.sw-dark .sw-bar { background-color: #FFFFFF; }
+.sw-dark .sw-short { background-color: #A6A6A6; }
+.sw-dark .sw-accent { background-color: #FF4A1C; }
+.sw-light { background-color: #FFFFFF; border-color: #D4D4D4; }
+.sw-light .sw-bar { background-color: #000000; }
+.sw-light .sw-short { background-color: #595959; }
+.sw-light .sw-accent { background-color: #FF4A1C; }
+.sw-contrast { background-color: #000000; border-color: #FFFFFF; }
+.sw-contrast .sw-bar { background-color: #FFFFFF; }
+.sw-contrast .sw-short { background-color: #FFFFFF; }
+.sw-contrast .sw-accent { background-color: #FFD400; }
+
+.fr-scales { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8dp; margin-top: 16dp; }
+.fr-chip
+{
+	gap: 8dp;
+	justify-content: center;
+	min-width: 64dp;
+	min-height: 40dp;
+	padding: 0dp 14dp;
+	border: 1dp var(--line);
+	border-radius: 2dp;
+	font-family: "IBM Plex Mono";
+	font-size: 13dp;
+	font-weight: 500;
+	color: var(--text2);
+}
+.fr-chip:hover { color: var(--text); border-color: var(--text2); }
+.fr-chip.on { color: var(--text); border-color: var(--text); background-color: var(--surface2); }
+.fr-chip.on .fr-dot { background-color: var(--accent); }
+.fr-chip .fr-dot { width: 6dp; height: 6dp; }
+
+.fr-toggle
+{
+	display: flex;
+	gap: 24dp;
+	width: 100%;
+	margin-top: 16dp;
+	padding: 14dp 0dp;
+	border-bottom: 1dp var(--line);
+}
+.fr-toggle-text { flex: 1 1 auto; }
+.fr-toggle-name { font-size: 15dp; font-weight: 600; line-height: 20dp; }
+.fr-toggle-help { margin-top: 4dp; font-size: 13dp; line-height: 18dp; color: var(--text2); }
+.fr-switch
+{
+	display: block;
+	width: 40dp;
+	height: 22dp;
+	padding: 3dp;
+	border: 1dp var(--text2);
+	border-radius: 11dp;
+	box-sizing: border-box;
+}
+.fr-knob
+{
+	display: block;
+	width: 14dp;
+	height: 14dp;
+	border-radius: 7dp;
+	background-color: var(--text2);
+	transition: transform 0.2s cubic-out;
+}
+.fr-toggle.on .fr-switch { background-color: var(--accent); border-color: var(--accent); }
+.fr-toggle.on .fr-knob { background-color: var(--on-accent); transform: translateX(18dp); }
+body.reduced-motion .fr-knob { transition: none; }
+
+/* ------------------------------------------------------- 04 Privacy */
+.fr-points { margin-top: 32dp; max-width: 880dp; border-top: 1dp var(--text); }
+.fr-point { display: flex; flex-direction: row; gap: 24dp; padding: 20dp 0dp; border-bottom: 1dp var(--line); }
+.fr-point-n { width: 32dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 24dp; color: var(--text2); }
+.fr-point-text { flex: 1 1 auto; }
+.fr-point-title { font-size: 20dp; line-height: 24dp; font-weight: 700; letter-spacing: -0.4dp; }
+.fr-point-body { margin-top: 6dp; max-width: 640dp; font-size: 15dp; line-height: 22dp; color: var(--text2); }
+.fr-point-path { margin-top: 8dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; }
+
+/* ----------------------------------------------------------------- nav */
+.fr-nav
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	gap: 24dp;
+	padding: 16dp 0dp 20dp 0dp;
+	border-top: 1dp var(--line);
+}
+.fr-nav-buttons { display: flex; flex-direction: row; align-items: center; gap: 16dp; }
+.fr-back { min-height: 56dp; padding: 0dp 24dp; }
+.fr-progress { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.fr-next { gap: 24dp; min-width: 240dp; min-height: 56dp; justify-content: space-between; font-size: 17dp; }
+.fr-arrow { font-size: 20dp; line-height: 20dp; transition: transform 0.2s cubic-out; }
+.fr-next:hover .fr-arrow, .fr-next:focus .fr-arrow { transform: translateX(4dp); }
+body.reduced-motion .fr-arrow { transition: none; }
