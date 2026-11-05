@@ -138,8 +138,10 @@ the `pgserver` wheel in a throwaway venv.
   `src/xerces_launcher/` (`Xerces.exe`, `tools\build.ps1 -Launcher`): views in
   `views/` register with `XERCES_VIEW` and own one document in
   `data/xerces/ui/views/`; every screen document uses the `shell` template;
-  `services.hpp` is all game, catalog, plan and launch logic, `app.hpp` the
-  screen API. RmlUi 6.3 and FreeType 2.14.3 are kept in
+  `services.hpp` holds the launcher's state and calls the logic it shares with
+  `xerces_cli` in `src/xerces_core` (`launcher_home`, `launcher_state`,
+  `launcher_launch`, `pack_apply`), so the two never plan or launch differently;
+  `app.hpp` is the screen API. RmlUi 6.3 and FreeType 2.14.3 are kept in
   `C:\Users\Ginld\XercesDev\third_party` (not in the repo). The spike
   (`src/xerces_launcher_spike/`, `-Spike`) stays for repeating DESIGN.md 7.1.
   Moving an OpenGL context to another thread crashes NVIDIA's driver here; warm
