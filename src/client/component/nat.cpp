@@ -691,17 +691,16 @@ void receive_lobby_join(const game::net::netadr_t &sender,
   const std::optional<std::string_view> usermap_id =
       usermap_item.has_value() ? std::optional(usermap_item->get().publisherId)
                                : std::nullopt;
-  network::send(sender, "lobbyHost",
-                std::format("{} {:x} {} {} {} {} c:{}:{}:{}:{} {}", parts[0],
-                            host->xuid,
-                            to_hex(host->serializedAdr.addrBuff,
-                                   sizeof(host->serializedAdr.addrBuff)),
-                            to_hex(&host->secId, sizeof(host->secId)),
-                            to_hex(&host->secKey, sizeof(host->secKey)),
-                            game_lobby ? "game" : "party",
-                            mod == "usermaps" ? std::string{} : mod, map,
-                            usermap_id.value_or(""), mod_stack::serialize(),
-                            host->name));
+  network::send(
+      sender, "lobbyHost",
+      std::format("{} {:x} {} {} {} {} c:{}:{}:{}:{} {}", parts[0], host->xuid,
+                  to_hex(host->serializedAdr.addrBuff,
+                         sizeof(host->serializedAdr.addrBuff)),
+                  to_hex(&host->secId, sizeof(host->secId)),
+                  to_hex(&host->secKey, sizeof(host->secKey)),
+                  game_lobby ? "game" : "party",
+                  mod == "usermaps" ? std::string{} : mod, map,
+                  usermap_id.value_or(""), mod_stack::serialize(), host->name));
 }
 
 bool from_lobby_request(const game::net::netadr_t &sender,
