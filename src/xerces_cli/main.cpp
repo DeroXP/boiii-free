@@ -14,6 +14,7 @@
 
 #include <xerces_core/catalog.hpp>
 #include <xerces_core/conflicts.hpp>
+#include <xerces_core/detect.hpp>
 #include <xerces_core/hooks.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/manifest.hpp>
@@ -133,6 +134,7 @@ Work without the game:
                [--out <file>] [--code]
   packs import <file|XRC1.code> [--mods-dir <dir>] [--json]   validate + dry run
   packs validate <file|XRC1.code> [--json]
+  game detect [--saved <folder>] [--json]          find the game install (reads only)
 
 Need a running Xerces (exit 3 until the game-side pipe exists):
   status, mods enable/disable/order, plan apply, load, unload, reload,
@@ -552,6 +554,34 @@ int cmd_packs(const arguments &args) {
   return usage();
 }
 
+// Finds the game the way the launcher's first run does (DESIGN.md 4.7);
+// reads only.
+int cmd_game_detect(const arguments &args) {
+  std::optional<fs::path> saved;
+  if (const auto path = args.get("--saved")) {
+    saved = fs::path(*path);
+  }
+  const detection result =
+      detect_game(saved, steam_roots_from_registry(), real_filesystem());
+  if (args.has("--json")) {
+    rapidjson::Document doc(rapidjson::kObjectType);
+    auto &alloc = doc.GetAllocator();
+    json::set(doc, "found", result.game_dir.has_value(), alloc);
+    json::set(doc, "game_dir", result.game_dir ? utf8(*result.game_dir) : "",
+              alloc);
+    json::set(doc, "tried", json::string_array(result.tried, alloc), alloc);
+    std::cout << json::pretty(doc) << "\n";
+  } else if (result.game_dir) {
+    std::cout << "Black Ops III: " << utf8(*result.game_dir) << "\n";
+  } else {
+    std::cout << "Black Ops III was not found. Looked in:\n";
+    for (const auto &place : result.tried) {
+      std::cout << "  " << place << "\n";
+    }
+  }
+  return result.game_dir ? exit_ok : exit_failed;
+}
+
 int not_running(const std::string &command) {
   std::cerr << "Xerces is not running. \"" << command
             << "\" talks to a running Xerces over its named pipe, which comes "
@@ -593,6 +623,9 @@ int main(int argc, char **argv) {
     }
     if (group == "packs") {
       return cmd_packs(args);
+    }
+    if (group == "game" && action == "detect") {
+      return cmd_game_detect(args);
     }
     const std::set<std::string> live = {"status", "mods",   "plan",  "load",
                                         "unload", "reload", "index", "sig",
