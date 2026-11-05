@@ -1056,7 +1056,9 @@ private:
       field("Workshop id", d_ws_);
       field("Folder", d_path_);
       field("Files", std::to_string(item->files.size()));
-      field("Zones", std::to_string(xc::count_zone_files(item->files)));
+      // In this screen's mode, as the plan line counts them (no mp_mod in
+      // Zombies).
+      field("Zones", std::to_string(xc::count_zone_files(item->files, mode_)));
       field("Content hash", xc::mods_short_hash(item->content_hash));
       if (const xc::mode_profile *p = profile()) {
         if (const auto pin = p->pins.find(id); pin != p->pins.end()) {
