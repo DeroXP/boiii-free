@@ -36,6 +36,18 @@ std::filesystem::path player_properties_file(const std::filesystem::path &game_d
 // The "playerName" member of the properties text, when it is a string.
 std::optional<std::string> read_player_name(std::string_view properties_text);
 
+// Why the name could not go into the game's file. The launcher shows its own
+// (translated) sentence for each; the English message is for the log.
+enum class name_failure {
+  none,
+  busy,           // the client held its properties lock for 3 seconds
+  unreadable,     // the file could not be read
+  not_json,       // the file is not valid JSON
+  not_object,     // valid JSON, but not an object
+  write_failed,   // the new copy could not be written next to it
+  replace_failed, // the new copy could not take the file's place
+};
+
 // The properties text with "playerName" set to name, or removed when name is
 // empty (the client then falls back to the Steam name). Every other member is
 // kept as it was. Text that is not a JSON object is refused, so a file Xerces
@@ -44,6 +56,7 @@ struct properties_edit {
   bool ok = false;
   std::string text;
   std::string error;
+  name_failure failure = name_failure::none;
 };
 properties_edit with_player_name(std::string_view properties_text,
                                  std::string_view name);
@@ -56,7 +69,8 @@ enum class name_apply {
 };
 struct name_apply_result {
   name_apply status = name_apply::failed;
-  std::string message;
+  name_failure failure = name_failure::none; // set when status is failed
+  std::string message; // English, for the log
 };
 // Puts the name into the game folder's properties file while holding the
 // client's own lock (the named mutex "boiii-properties-lock"), so a running
@@ -97,6 +111,30 @@ std::vector<std::string> with_flag(std::vector<std::string> flags,
 std::string display_mode(const std::vector<std::string> &flags);
 std::vector<std::string> with_display_mode(std::vector<std::string> flags,
                                            std::string_view mode);
+
+// -nointro and -nocinematics are not only flags: the client turns its own
+// archived dvars boiii_skipIntro and boiii_skipCinematics on when it sees
+// them (src/client/component/settings.cpp) and never back off, and it saves
+// archived dvars into <game>\boiii_players\user\config.cfg
+// (src/client/component/dvars.cpp). So once the game has started with the
+// flag, it keeps skipping without it until the player turns the switch off
+// in the game's Quick Settings. The launcher reads that file (never writes
+// it) to say so.
+inline constexpr std::string_view dvar_skip_intro = "boiii_skipIntro";
+inline constexpr std::string_view dvar_skip_cinematics = "boiii_skipCinematics";
+
+// <game>\boiii_players\user\config.cfg
+std::filesystem::path game_config_file(const std::filesystem::path &game_dir);
+
+// The value config.cfg gives a dvar: the last "set <name> <value>" line (the
+// client writes set name "value"; seta and sets count too, names in any
+// case), or nullopt when no line sets it.
+std::optional<std::string> read_saved_dvar(std::string_view config_text,
+                                           std::string_view name);
+// A saved boolean dvar: true unless the value is 0 or false; nullopt when the
+// file does not set it.
+std::optional<bool> saved_dvar_on(std::string_view config_text,
+                                  std::string_view name);
 
 // -------------------------------------------------------------- game options
 // Options passed as "+set <dvar> <value>", each confirmed in the client:

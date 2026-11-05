@@ -11,7 +11,10 @@
 //   savePlayerName did, and keeps it in config.player_name too.
 // - Display mode and "skip all cinematics": the client's own flags
 //   (-windowed, -borderless, -nocinematics), which it applies after its saved
-//   config has loaded; they live in config.extra_flags.
+//   config has loaded; they live in config.extra_flags. -nointro and
+//   -nocinematics also turn the game's own saved skip switches on, which
+//   Xerces cannot turn off (xerces_core::dvar_skip_intro), so the screen
+//   says so instead of promising the videos play.
 // - FPS limit, FOV, V-Sync, FPS counter: dvars confirmed in the client
 //   (com_maxfps, cg_fov_default, r_vsync, com_drawFPS_PC), kept in
 //   config.dvars and passed as "+set <dvar> <value>".
@@ -102,6 +105,7 @@ public:
       row.RegisterMember("value", &dvar_row::value);
     }
     model.RegisterArray<Rml::Vector<dvar_row>>();
+    model.RegisterArray<Rml::Vector<Rml::String>>();
 
     model.Bind("game_path", &game_path_);
     model.Bind("game_detail", &game_detail_);
@@ -126,7 +130,9 @@ public:
     model.Bind("others", &others_);
 
     model.Bind("nointro", &nointro_);
+    model.Bind("intro_note", &intro_note_);
     model.Bind("nocinematics", &nocinematics_);
+    model.Bind("cinematics_note", &cinematics_note_);
     model.Bind("close_on_launch", &close_on_launch_);
     model.Bind("flags", &flags_);
     model.Bind("flags_error", &flags_error_);
@@ -217,6 +223,10 @@ public:
                                   Rml::Input::KM_ALT | Rml::Input::KM_META);
     if ((key == Rml::Input::KI_UP || key == Rml::Input::KI_DOWN) && held == 0 &&
         move_row(focus, key == Rml::Input::KI_DOWN ? 1 : -1)) {
+      return true;
+    }
+    if ((key == Rml::Input::KI_LEFT || key == Rml::Input::KI_RIGHT) &&
+        held == 0 && move_in_row(focus, key == Rml::Input::KI_RIGHT ? 1 : -1)) {
       return true;
     }
     const text_field field = field_of(focus->GetId());
@@ -411,6 +421,39 @@ private:
     return true;
   }
 
+  // Left and Right through a row of buttons (the section index, the game
+  // folder's buttons, a row of choices) go by the row's order, not by
+  // position: a row that wraps onto a second line (UI scale's seven choices
+  // at a large scale or in a longer language) puts its next button below and
+  // to the left, where spatial navigation never looks. Sliders and text
+  // fields keep their own Left and Right.
+  bool move_in_row(Rml::Element *focus, int delta) {
+    if (focus->GetTagName() != "button") {
+      return false;
+    }
+    const auto rows = nav_rows();
+    const std::string id = focus->GetId();
+    for (std::size_t r = 0; r < rows.size(); ++r) {
+      const std::vector<std::string> &row = rows[r];
+      const auto at = std::ranges::find(row, id);
+      if (at == row.end()) {
+        continue;
+      }
+      if (row.size() < 2) {
+        return false;
+      }
+      for (int c = int(at - row.begin()) + delta; c >= 0 && c < int(row.size());
+           c += delta) {
+        if (Rml::Element *target = visible(row[std::size_t(c)])) {
+          focus_on(target, r == 0);
+          return true;
+        }
+      }
+      return true; // the row's end: stay
+    }
+    return false;
+  }
+
   void remember_focus() {
     if (!doc || owner_->current() != id()) {
       return;
@@ -440,9 +483,12 @@ private:
                                ? owner_->tr("Steam build") + " " +
                                      std::to_string(*game.steam_build)
                                : owner_->tr("Steam build unknown");
+      // game.error also holds a failed Change folder pick, which leaves this
+      // (still good) game as it was; that one was said in the footer, so it
+      // is only shown here when this game cannot launch.
       if (game.preflight && !game.preflight->can_launch()) {
         detail += " \xC2\xB7 " + game.preflight->message;
-      } else if (!game.error.empty()) {
+      } else if (!game.error.empty() && !game.can_launch()) {
         detail += " \xC2\xB7 " + game.error;
       }
       game_detail_ = detail;
@@ -454,17 +500,17 @@ private:
       game_detail_ = game.error.empty()
                          ? owner_->tr("Pick the folder that has BlackOps3.exe in it.")
                          : game.error;
+      // One line each (the page's text runs newlines together).
       if (!game.tried.empty()) {
-        std::string tried = owner_->tr("Looked in:");
+        game_tried_.push_back(owner_->tr("Looked in:"));
         const std::size_t shown = std::min<std::size_t>(game.tried.size(), 4);
         for (std::size_t i = 0; i < shown; ++i) {
-          tried += "\n" + game.tried[i];
+          game_tried_.push_back(game.tried[i]);
         }
         if (game.tried.size() > shown) {
-          tried += "\n+" + std::to_string(game.tried.size() - shown) + " " +
-                   owner_->tr("more");
+          game_tried_.push_back("+" + std::to_string(game.tried.size() - shown) +
+                                " " + owner_->tr("more"));
         }
-        game_tried_ = tried;
       }
     }
 
@@ -484,7 +530,7 @@ private:
     }
     name_placeholder_ = in_game ? *in_game : owner_->tr("Your Steam name");
     if (!name_error_.empty()) {
-      name_note_ = owner_->tr("The game's file was not changed:") + " " +
+      name_note_ = owner_->tr("The game's file was not changed.") + " " +
                    name_error_;
     } else if (!game.dir) {
       name_note_ = owner_->tr("Set the game folder first: the game reads the "
@@ -539,9 +585,33 @@ private:
       }
     }
 
-    // Launch.
+    // Launch. The game remembers the two skip switches on its own once it
+    // has started with the flag (see core::dvar_skip_intro), so an Off here
+    // says when the game's saved config still has them on.
     nointro_ = c.nointro;
     nocinematics_ = core::has_flag(c.extra_flags, "nocinematics");
+    game_skips_intro_ = game_skips_cinematics_ = false;
+    if (game.dir) {
+      const std::string saved =
+          read_small(core::game_config_file(*game.dir), 1024 * 1024);
+      game_skips_intro_ =
+          core::saved_dvar_on(saved, core::dvar_skip_intro).value_or(false);
+      game_skips_cinematics_ =
+          core::saved_dvar_on(saved, core::dvar_skip_cinematics).value_or(false);
+    }
+    intro_note_ = !nointro_ && game_skips_intro_
+                      ? owner_->tr("The game still skips it: its own Skip Intro "
+                                   "switch is saved on (boiii_skipIntro 1 in "
+                                   "boiii_players\\user\\config.cfg). Turn it "
+                                   "off in the game's Quick Settings.")
+                      : std::string();
+    cinematics_note_ =
+        !nocinematics_ && game_skips_cinematics_
+            ? owner_->tr("The game still skips them: its own Skip All "
+                         "Cinematics switch is saved on (boiii_skipCinematics "
+                         "1 in boiii_players\\user\\config.cfg). Turn it off "
+                         "in the game's Quick Settings.")
+            : std::string();
     close_on_launch_ = c.close_on_launch;
     if (keep(text_field::flags)) {
       flags_ = core::join_flags(c.extra_flags);
@@ -595,9 +665,12 @@ private:
              field_of(focus->GetId()) == field);
   }
 
-  static std::string read_small(const fs::path &file) {
+  // The whole file, or nothing when it is missing or larger than limit (a
+  // file that big is not one the game wrote).
+  static std::string read_small(const fs::path &file,
+                                std::uintmax_t limit = 64 * 1024) {
     std::error_code ec;
-    if (fs::file_size(file, ec) > 64 * 1024 || ec) {
+    if (fs::file_size(file, ec) > limit || ec) {
       return {};
     }
     std::ifstream in(file, std::ios::binary);
@@ -806,17 +879,25 @@ private:
 
   void toggle(const std::string &key) {
     core::launcher_config &c = config();
+    // Off only stops passing the flag: a game that started with it keeps its
+    // own switch on (core::dvar_skip_intro), so Off never promises playback.
     if (key == "nointro") {
       c.nointro = !c.nointro;
       save(std::string("nointro ") + (c.nointro ? "on" : "off"),
-           c.nointro ? owner_->tr("The intro video is skipped.")
-                     : owner_->tr("The intro video plays."));
+           c.nointro ? owner_->tr("The intro video is skipped (-nointro).")
+           : game_skips_intro_
+               ? owner_->tr("Xerces no longer passes -nointro; the game's "
+                            "Quick Settings still skip the intro.")
+               : owner_->tr("Xerces no longer passes -nointro."));
     } else if (key == "nocinematics") {
       const bool on = !core::has_flag(c.extra_flags, "nocinematics");
       set_flags(core::with_flag(c.extra_flags, "nocinematics", on),
                 std::string("nocinematics ") + (on ? "on" : "off"),
                 on ? owner_->tr("Cinematics are skipped (-nocinematics).")
-                   : owner_->tr("Cinematics play."));
+                : game_skips_cinematics_
+                    ? owner_->tr("Xerces no longer passes -nocinematics; the "
+                                 "game's Quick Settings still skip cinematics.")
+                    : owner_->tr("Xerces no longer passes -nocinematics."));
     } else if (key == "close") {
       c.close_on_launch = !c.close_on_launch;
       save(std::string("close_on_launch ") + (c.close_on_launch ? "on" : "off"),
@@ -970,9 +1051,32 @@ private:
     case core::name_apply::failed:
     default:
       name_pending_ = true;
-      name_error_ = result.message;
+      name_error_ = name_failure_text(result.failure);
       log_warn("launcher.settings.player_name", result.message);
       return owner_->tr("Name saved, but the game's file was not changed.");
+    }
+  }
+
+  // The screen's own sentence for each failure (the core's English message
+  // only goes to the log), so every word on screen goes through tr().
+  std::string name_failure_text(core::name_failure failure) const {
+    switch (failure) {
+    case core::name_failure::busy:
+      return owner_->tr("The game was using it: press Enter in the field to "
+                        "try again.");
+    case core::name_failure::unreadable:
+      return owner_->tr("It could not be read.");
+    case core::name_failure::not_json:
+      return owner_->tr("It is not valid JSON, so Xerces leaves it alone.");
+    case core::name_failure::not_object:
+      return owner_->tr("It does not hold a JSON object, so Xerces leaves it "
+                        "alone.");
+    case core::name_failure::write_failed:
+      return owner_->tr("The new copy could not be written next to it.");
+    case core::name_failure::replace_failed:
+      return owner_->tr("The new copy could not take its place.");
+    default:
+      return owner_->tr("The log says why.");
     }
   }
 
@@ -1054,9 +1158,16 @@ private:
       return;
     }
     // The slider also reports changes made by the screen itself (loading,
-    // refresh); only a focused slider is being moved by the player.
+    // refresh); only a focused slider is being moved by the player. A mouse
+    // click focuses the element under the pointer, the slider's track or
+    // knob; settings.rcss stops them taking focus, and as a second guard
+    // focus inside the slider counts too.
     Rml::Context *context = owner_->context();
-    if (!context || context->GetFocusElement() != event.GetCurrentElement()) {
+    const Rml::Element *focus = context ? context->GetFocusElement() : nullptr;
+    while (focus && focus != event.GetCurrentElement()) {
+      focus = focus->GetParentNode();
+    }
+    if (!focus) {
       return;
     }
     const int stop = int(std::lround(std::atof(slider->GetValue().c_str())));
@@ -1152,9 +1263,10 @@ private:
   bool name_pending_ = false;
   std::string last_focus_;
   text_field escaping_from_ = text_field::none;
-  std::string name_error_; // why the game's file could not take the name
+  std::string name_error_; // why the game's file could not take the name (translated)
 
-  Rml::String game_path_, game_detail_, game_tried_;
+  Rml::String game_path_, game_detail_;
+  Rml::Vector<Rml::String> game_tried_; // "Looked in:", then the folders
   bool game_found_ = false, game_ok_ = false, game_busy_ = true;
   Rml::String name_, name_placeholder_, name_note_;
 
@@ -1165,6 +1277,9 @@ private:
   Rml::Vector<dvar_row> others_;
 
   bool nointro_ = true, nocinematics_ = false, close_on_launch_ = false;
+  // The game's own config.cfg has boiii_skipIntro / boiii_skipCinematics on.
+  bool game_skips_intro_ = false, game_skips_cinematics_ = false;
+  Rml::String intro_note_, cinematics_note_;
   Rml::String flags_, flags_error_, command_;
   bool command_bad_ = false;
 

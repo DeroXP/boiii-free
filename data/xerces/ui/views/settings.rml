@@ -36,7 +36,7 @@
 					<div class="field-name">Game folder</div>
 					<div class="set-value" data-class-missing="!game_found">{{game_path}}</div>
 					<div class="field-help">{{game_detail}}</div>
-					<div class="tried" data-if="game_tried != ''">{{game_tried}}</div>
+					<div class="tried" data-if="game_tried.size > 0"><div data-for="line : game_tried">{{line}}</div></div>
 					<div class="toolbar set-actions">
 						<button id="game-change" class="small-button default-focus" data-event-click="act('change folder')"><span>Change folder</span></button>
 						<button id="game-detect" class="small-button" data-class-disabled="game_busy" data-event-click="act('detect')"><span>Detect again</span></button>
@@ -149,7 +149,8 @@
 			<div class="field">
 				<div class="field-text">
 					<div class="field-name">Skip the intro video</div>
-					<div class="field-help">-nointro: no logo video when the game starts.</div>
+					<div class="field-help">-nointro: no logo video when the game starts. The game then saves its own Skip Intro switch on, so Off here stops passing the flag but does not turn that switch off: do that in the game's Quick Settings.</div>
+					<div class="field-note" data-if="intro_note != ''">{{intro_note}}</div>
 				</div>
 				<button id="nointro" class="toggle" data-class-on="nointro" data-event-click="toggle('nointro')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="nointro">On</span><span class="toggle-state" data-if="!nointro">Off</span></button>
 			</div>
@@ -157,7 +158,8 @@
 			<div class="field">
 				<div class="field-text">
 					<div class="field-name">Skip all cinematics</div>
-					<div class="field-help">-nocinematics: no cinematics or videos at all, campaign and Zombies included.</div>
+					<div class="field-help">-nocinematics: no cinematics or videos at all, campaign and Zombies included. The game then saves its own Skip All Cinematics switch on, so Off here stops passing the flag but does not turn that switch off: do that in the game's Quick Settings.</div>
+					<div class="field-note" data-if="cinematics_note != ''">{{cinematics_note}}</div>
 				</div>
 				<button id="nocinematics" class="toggle" data-class-on="nocinematics" data-event-click="toggle('nocinematics')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="nocinematics">On</span><span class="toggle-state" data-if="!nocinematics">Off</span></button>
 			</div>

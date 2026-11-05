@@ -146,10 +146,12 @@ properties_edit with_player_name(std::string_view properties_text,
     if (!parsed.ok) {
       out.error = "properties.json is not valid JSON (line " +
                   std::to_string(parsed.line) + "): " + parsed.error;
+      out.failure = name_failure::not_json;
       return out;
     }
     if (!parsed.document.IsObject()) {
       out.error = "properties.json does not hold a JSON object.";
+      out.failure = name_failure::not_object;
       return out;
     }
     doc.Swap(parsed.document);
@@ -191,11 +193,13 @@ name_apply_result apply_player_name(const fs::path &game_dir,
   }
   const properties_lock lock;
   if (!lock.usable()) {
+    out.failure = name_failure::busy;
     out.message = "The game is busy with its properties file; try again.";
     return out;
   }
   const std::optional<std::string> text = read_all(file);
   if (!text) {
+    out.failure = name_failure::unreadable;
     out.message = "boiii_players\\properties.json could not be read.";
     return out;
   }
@@ -206,6 +210,7 @@ name_apply_result apply_player_name(const fs::path &game_dir,
   }
   const properties_edit edit = with_player_name(*text, name);
   if (!edit.ok) {
+    out.failure = edit.failure;
     out.message = edit.error;
     return out;
   }
@@ -215,15 +220,20 @@ name_apply_result apply_player_name(const fs::path &game_dir,
   {
     std::ofstream write(temporary, std::ios::binary | std::ios::trunc);
     write.write(edit.text.data(), static_cast<std::streamsize>(edit.text.size()));
+    // The text sits in the stream's buffer until it closes, and a full disk
+    // only shows then: check after close, or a short file would replace the
+    // game's and lose its other settings.
+    write.close();
     if (!write) {
+      out.failure = name_failure::write_failed;
       out.message = "boiii_players\\properties.json could not be written.";
-      write.close();
       fs::remove(temporary, ec);
       return out;
     }
   }
   fs::rename(temporary, file, ec);
   if (ec) {
+    out.failure = name_failure::replace_failed;
     out.message = "boiii_players\\properties.json could not be replaced: " +
                   ec.message();
     fs::remove(temporary, ec);
@@ -328,6 +338,77 @@ std::vector<std::string> with_display_mode(std::vector<std::string> flags,
     flags = with_flag(std::move(flags), mode, true);
   }
   return flags;
+}
+
+fs::path game_config_file(const fs::path &game_dir) {
+  return game_dir / "boiii_players" / "user" / "config.cfg";
+}
+
+namespace {
+bool same_letters(std::string_view a, std::string_view b) {
+  return a.size() == b.size() &&
+         std::ranges::equal(a, b, [](char x, char y) {
+           const auto lower = [](char c) {
+             return c >= 'A' && c <= 'Z' ? char(c - 'A' + 'a') : c;
+           };
+           return lower(x) == lower(y);
+         });
+}
+
+// The next word of a config line: a "quoted" run (without its quotes) or a
+// run up to the next space.
+std::string_view next_word(std::string_view &line) {
+  while (!line.empty() && is_space(line.front())) {
+    line.remove_prefix(1);
+  }
+  if (line.empty()) {
+    return {};
+  }
+  if (line.front() == '"') {
+    line.remove_prefix(1);
+    const std::size_t end = line.find('"');
+    const std::string_view word = line.substr(0, end);
+    line.remove_prefix(end == std::string_view::npos ? line.size() : end + 1);
+    return word;
+  }
+  std::size_t end = 0;
+  while (end < line.size() && !is_space(line[end])) {
+    ++end;
+  }
+  const std::string_view word = line.substr(0, end);
+  line.remove_prefix(end);
+  return word;
+}
+} // namespace
+
+std::optional<std::string> read_saved_dvar(std::string_view config_text,
+                                           std::string_view name) {
+  std::optional<std::string> found;
+  while (!config_text.empty()) {
+    const std::size_t end = config_text.find('\n');
+    std::string_view line = config_text.substr(0, end);
+    config_text.remove_prefix(end == std::string_view::npos ? config_text.size()
+                                                            : end + 1);
+    const std::string_view command = next_word(line);
+    if (!same_letters(command, "set") && !same_letters(command, "seta") &&
+        !same_letters(command, "sets")) {
+      continue;
+    }
+    if (!same_letters(next_word(line), name) || trim(line).empty()) {
+      continue; // another dvar, or "set name" alone, which changes nothing
+    }
+    found = std::string(trim(next_word(line)));
+  }
+  return found;
+}
+
+std::optional<bool> saved_dvar_on(std::string_view config_text,
+                                  std::string_view name) {
+  const std::optional<std::string> value = read_saved_dvar(config_text, name);
+  if (!value) {
+    return std::nullopt;
+  }
+  return !(value->empty() || *value == "0" || same_letters(*value, "false"));
 }
 
 // -------------------------------------------------------------- game options

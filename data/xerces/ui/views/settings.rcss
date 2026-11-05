@@ -105,6 +105,13 @@
 }
 .tick { display: block; width: 10dp; height: 10dp; border: 1dp var(--text); }
 
+/* A click on a slider's track or knob focuses the slider itself (RmlUi gives
+   focus to the clicked element unless it has focus: none), so the screen
+   sees the change as the player's, the focus ring shows, and the arrow keys
+   and Up/Down carry on from it. */
+input.range slidertrack, input.range sliderprogress, input.range sliderbar,
+input.range sliderarrowdec, input.range sliderarrowinc { focus: none; }
+
 .name-field { width: 240dp; flex: 0 0 auto; }
 /* An empty field's hint reads as a hint, not as a value. */
 .settings-page input.text:placeholder-shown { color: var(--text2); }

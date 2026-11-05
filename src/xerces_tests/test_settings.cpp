@@ -96,13 +96,62 @@ TEST_CASE("settings: the name goes into an existing properties file only") {
   CHECK(!read_player_name(read_bytes(file)).has_value());
   CHECK_EQ(apply_player_name(game, "").status, name_apply::unchanged);
 
-  // A file Xerces cannot read is left alone.
+  // A file Xerces cannot read is left alone, and the screen learns why.
   write_bytes(file, "not json");
   const name_apply_result broken = apply_player_name(game, "Dero");
   CHECK_EQ(broken.status, name_apply::failed);
+  CHECK(broken.failure == name_failure::not_json);
   CHECK(!broken.message.empty());
   CHECK_EQ(read_bytes(file), std::string("not json"));
+
+  write_bytes(file, "[\"a\"]");
+  const name_apply_result list = apply_player_name(game, "Dero");
+  CHECK_EQ(list.status, name_apply::failed);
+  CHECK(list.failure == name_failure::not_object);
+  CHECK_EQ(read_bytes(file), std::string("[\"a\"]"));
+
+  // A file the new copy cannot be written next to (the temporary name is
+  // taken by a folder) is left alone too.
+  write_bytes(file, "{\"playerName\":\"Steam\",\"selectedVersion\":\"latest\"}");
+  fs::create_directories(fs::path(file).concat(".xerces-tmp"));
+  const name_apply_result blocked = apply_player_name(game, "Dero");
+  CHECK_EQ(blocked.status, name_apply::failed);
+  CHECK(blocked.failure == name_failure::write_failed);
+  CHECK_EQ(read_player_name(read_bytes(file)).value_or(""), std::string("Steam"));
+  CHECK(read_bytes(file).find("selectedVersion") != std::string::npos);
+  CHECK(apply_player_name(game, "Steam").failure == name_failure::none);
   fs::remove_all(game);
+}
+
+TEST_CASE("settings: the game's saved skip switches are read from config.cfg") {
+  CHECK_EQ(game_config_file("C:/Game"),
+           fs::path("C:/Game") / "boiii_players" / "user" / "config.cfg");
+  // As the client writes it: set name "value", one per line.
+  const std::string config =
+      "set r_vsync \"0\"\r\n"
+      "set boiii_skipIntro \"1\"\r\n"
+      "set boiii_skipCinematics \"0\"\r\n"
+      "set boiii_skipCinematicsX \"1\"\r\n";
+  CHECK_EQ(read_saved_dvar(config, dvar_skip_intro).value_or("?"), std::string("1"));
+  CHECK(saved_dvar_on(config, dvar_skip_intro).value_or(false));
+  CHECK(!saved_dvar_on(config, dvar_skip_cinematics).value_or(true));
+  CHECK(!saved_dvar_on(config, "boiii_skipForestCinematic").has_value());
+  CHECK(!saved_dvar_on("", dvar_skip_intro).has_value());
+
+  // The last line wins, names in any case, seta and unquoted values count,
+  // other commands and lines without a value do not.
+  const std::string edited =
+      "seta BOIII_SKIPCINEMATICS 1\n"
+      "bind F1 \"set boiii_skipCinematics 0\"\n"
+      "set boiii_skipIntro \"1\"\n"
+      "set boiii_skipIntro false\n"
+      "set\n"
+      "set boiii_skipCinematics  ";
+  CHECK_EQ(read_saved_dvar(edited, dvar_skip_cinematics).value_or("?"),
+           std::string("1"));
+  CHECK(saved_dvar_on(edited, dvar_skip_cinematics).value_or(false));
+  CHECK(!saved_dvar_on(edited, dvar_skip_intro).value_or(true));
+  CHECK(!saved_dvar_on("set boiii_skipIntro \"\"", dvar_skip_intro).value_or(true));
 }
 
 TEST_CASE("settings: launch flags are checked like the command line does") {
