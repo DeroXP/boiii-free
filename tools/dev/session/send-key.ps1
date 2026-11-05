@@ -4,7 +4,8 @@
 #
 #   send-key.ps1 Return      send-key.ps1 Down      send-key.ps1 Escape
 param(
-  [Parameter(Mandatory = $true, Position = 0)][string]$Key  # a System.Windows.Forms.Keys name
+  [Parameter(Mandatory = $true, Position = 0)][string]$Key,  # a System.Windows.Forms.Keys name
+  [int]$HoldMs = 80  # how long the key stays down (cinematics skip on a held key)
 )
 
 . "$PSScriptRoot\xerces-win32.ps1"
@@ -25,6 +26,6 @@ $extended = if ($extendedKeys -contains $Key) { 1 -shl 24 } else { 0 }
 $down = [IntPtr](1 -bor ($scan -shl 16) -bor $extended)
 $up = [IntPtr]([int64](1 -bor ($scan -shl 16) -bor $extended -bor (1 -shl 30)) -bor 0x80000000L)
 [void][XercesWin]::PostMessage($window, 0x100, [IntPtr]$vk, $down)  # WM_KEYDOWN
-Start-Sleep -Milliseconds 80
+Start-Sleep -Milliseconds $HoldMs
 [void][XercesWin]::PostMessage($window, 0x101, [IntPtr]$vk, $up)    # WM_KEYUP
 "posted $Key (vk 0x{0:X2}, scan 0x{1:X2}) to the game window" -f $vk, $scan

@@ -33,6 +33,10 @@ param(
   # Launch flags for the game, such as -log-script-errors (the launcher's
   # extra_flags; they go before the +set commands).
   [string[]]$ExtraFlags = @(),
+  # Skips a level's opening cinematic the way a player does (Space held, then
+  # Return, every few seconds while the level loads). Stock maps such as
+  # Shadows of Evil play a 3.5 minute intro otherwise.
+  [switch]$SkipCinematic,
   [switch]$Live
 )
 
@@ -283,7 +287,13 @@ $load_from = Get-Date
 # An error line alone does not end the run (some are harmless); it counts when
 # the match has not started 30 s after it (an error drop back to the menu).
 $script:errorSeenAt = $null
+$script:nextSkip = (Get-Date).AddSeconds(15)
 $loaded = Wait-For {
+  if ($SkipCinematic -and (Get-Date) -ge $script:nextSkip) {
+    $script:nextSkip = (Get-Date).AddSeconds(6)
+    & (Join-Path $session 'send-key.ps1') Space -HoldMs 1500 | Out-Null
+    & (Join-Path $session 'send-key.ps1') Return | Out-Null
+  }
   if (-not (Get-Process -Id $gamePid -ErrorAction SilentlyContinue)) { return 'gone' }
   if (Find-Dialog $gamePid) { return 'dialog' }
   $j = Read-Journal

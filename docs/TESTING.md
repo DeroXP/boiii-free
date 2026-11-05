@@ -308,6 +308,61 @@ each one does not cover is said under its item.
       with the plan id `Xerces.exe`'s dry launch logged on the same home, writes
       the plan file and no journal.
 
+### Mods on custom maps (2026-11-05)
+
+`tools\dev\session\map-check.ps1 -Map <map> [-Stack <ids>] -Live` starts the
+game through `Xerces.exe` (Launch modded or vanilla), runs `map <map>` from the
+console, waits for the journal's `in_game`, plays, disconnects and quits; it
+records crash dialogs, freezes, error drops and timeouts, keeps the console and
+the game log, and copies crash dumps to
+`C:\Users\Ginld\XercesDev\dumps\map-checks`. Results are in
+`C:\Users\Ginld\XercesDev\map-checks\results.jsonl`. `-SkipCinematic` skips a
+level's intro as a player would; `-ExtraFlags -log-script-errors` prints script
+runtime errors. Home `C:\Users\Ginld\XercesHome-maps`, Steam build 24784313, the
+user's eight installed Workshop maps; "the stack" is the D3 stack (Solo Easter
+Eggs 1944930083 main, DS4C 3171632315 and Classic Viewmodel FOV 3656779213
+extra).
+
+- [x] Before map-first (c57ba507): with the stack, Cheese Cube, RUST V5 and
+      PROJECT BLUNDEEZY played; SANCTUM OBITUS dropped with a GSC link error;
+      PROJECT: KABOOM and RETURN TO HOGWARTZ froze in level-init scripts; Super
+      Mario 64 and BACKROOMZ ended the game while loading. Every failure
+      reproduced with DS4C alone and none with Solo Easter Eggs + FOV: DS4C's
+      perk scripts replaced the maps' own (SANCTUM, KABOOM), and DS4C's zones
+      leave too little zone memory for the two biggest maps (below). With no
+      mods every map played.
+- [x] With map-first (17a929d2's code, the build before its review fixes and the
+      build after): SANCTUM and KABOOM play with DS4C alone (15 and 36
+      `loader.script.map_first` decisions, all perk scripts); with the stack,
+      Cheese Cube, SANCTUM, KABOOM, RUST, BLUNDEEZY and HOGWARTZ all load, play
+      30 s and return to the menu. Shadows of Evil (stock, no map-first
+      decision) plays with the stack when its intro is skipped
+      (`-SkipCinematic`, 30.9 s to the match).
+- [x] Super Mario 64 and BACKROOMZ with DS4C (alone or stacked): the engine runs
+      out of its 2 GiB zone-memory pool while the map's main zone loads (dumps
+      and the maps' .ff headers: DS4C's zones take about 450 MiB, the maps need
+      813 and 1160 MiB on a pool at about 1299 MiB), its out-of-memory handler
+      calls `exit(-1)` on the loading thread, and the main thread then crashes
+      on objects the exit already destroyed. The journal now records it
+      (`loader.exit.unexpected`, 0xFFFFFFFF while `loading_map`) and the crash
+      handler leaves a dump. Not fixed: these two maps cannot load with DS4C
+      unless the pool grows.
+- [ ] Shadows of Evil with DS4C when its 3.5 minute intro plays to the end:
+      DS4C's scripts error on every frame and the local server's reliable
+      commands cycle out (`EXE_ERR_RELIABLE_CYCLED_OUT`) before the client is in
+      the level. Skipping the intro avoids it. DS4C's own; not checked on plain
+      BOIII.
+- [ ] A map that ships only one half of a script a mod ships both halves of
+      (none among the installed content): the first load logs
+      `loader.script.mixed_halves`, the next keeps the mod's pair
+      (`loader.script.map_first_skipped`).
+- [ ] Joining another host on a custom map: the client follows the host's
+      `mapScriptsFirst` (getinfo, lobby content); needs a second machine.
+- [ ] A person playing these maps with the stack beyond 30 s, and DS4C's HUD on
+      maps that ship their own (RUST: DS4C's `t7hud_zm_custom.lua` replaces the
+      map's and errors without stopping the match; HUD Lua follows the engine
+      until decided).
+
 ### Launcher (M3)
 
 `tools\build.ps1 -Launcher` builds `build\bin\x64\Release\Xerces.exe` from the
