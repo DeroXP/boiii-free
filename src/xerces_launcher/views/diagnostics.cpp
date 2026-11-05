@@ -661,6 +661,12 @@ private:
     row("Updated", journal->updated.empty() ? "-" : journal->updated);
     row("Mods off", owner_->tr(journal->safe_mode ? "Yes (safe mode)" : "No"),
         false);
+    // The experimental setting is a suspect of its own when that launch
+    // crashed (5.4, 5.6).
+    row("Larger zone memory",
+        journal->db_pool ? owner_->tr("On (-xerces-db-pool)")
+                         : owner_->tr("Off"),
+        false, journal->db_pool && decision.safe_mode);
     row("Safe mode next",
         owner_->tr(decision.safe_mode ? "Suggested" : "Not needed"), false,
         decision.safe_mode);
@@ -885,11 +891,13 @@ private:
     report_section launch{"Last launch", {}, {}};
     if (const auto journal = svc.last_journal()) {
       launch.fields = {
-          {"Plan id", journal->plan_id.empty() ? "none (vanilla)" : journal->plan_id},
+          {"Plan id",
+           journal->plan_id.empty() ? "none (vanilla)" : journal->plan_id},
           {"Phase", xerces_core::to_string(journal->phase)},
           {"Started", journal->started},
           {"Updated", journal->updated},
           {"Mods off", journal->safe_mode ? "yes" : "no"},
+          {"Larger zone memory", journal->db_pool ? "on" : "off"},
       };
       for (std::size_t i = 0; i < journal->stack.size(); ++i) {
         launch.lines.push_back(two_digits(i + 1) + "  " + journal->stack[i]);

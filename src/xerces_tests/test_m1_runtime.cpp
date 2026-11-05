@@ -268,6 +268,7 @@ TEST_CASE("journal: mode and launch id round trip; older journals parse") {
   REQUIRE(old.has_value());
   CHECK(old->mode.empty());
   CHECK(old->launch_id.empty());
+  CHECK(!old->db_pool);
   CHECK(old->phase == launch_phase::in_game);
   const safe_mode_decision crash = decide_safe_mode(old);
   CHECK(crash.safe_mode);
@@ -375,4 +376,95 @@ TEST_CASE("safe mode: finding the culprit halves the stack") {
   }
   CHECK(pair.needs_combination());
   CHECK(!pair.culprit().has_value());
+}
+
+TEST_CASE(
+    "safe mode: a crash larger zone memory causes is not blamed on a mod") {
+  // Larger zone memory on with three mods, and the detours crash the game
+  // before the menu whatever the mods load.
+  launch_journal journal;
+  journal.plan_id = "sha256:abc";
+  journal.stack = {"a", "b", "c"};
+  journal.mode = "zm";
+  journal.db_pool = true;
+  const std::string text = journal_to_json(journal);
+  const auto back = parse_journal(text);
+  REQUIRE(back.has_value());
+  CHECK(back->db_pool);
+  CHECK_EQ(journal_to_json(*back), text);
+  const safe_mode_decision decision = decide_safe_mode(back);
+  REQUIRE(decision.safe_mode);
+  CHECK(decision.crashed_with_db_pool);
+  CHECK(decision.message.find("larger zone memory") != std::string::npos);
+  CHECK(culprit_search_possible(decision));
+
+  // Safe mode ran fine. Every test runs without the setting too
+  // (launch_inputs::crash_followup), so the first one, the whole stack
+  // without it, runs fine as well: the setting is the culprit, no mod is.
+  const auto crashes = [](const std::vector<std::string> &, bool db_pool) {
+    return db_pool;
+  };
+  culprit_search search(decision.crashed_stack, decision.crashed_with_db_pool);
+  CHECK(search.testing_db_pool());
+  CHECK(search.next_test() == decision.crashed_stack);
+  while (!search.done()) {
+    search.record(crashes(search.next_test(), false));
+  }
+  CHECK(search.db_pool_culprit());
+  CHECK(!search.culprit().has_value());
+  CHECK(!search.needs_combination());
+  CHECK_EQ(search.launches(), 1u);
+  CHECK(search.next_test().empty());
+
+  // Without the flag the decision and its message stay as before.
+  journal.db_pool = false;
+  const safe_mode_decision plain = decide_safe_mode(journal);
+  CHECK(!plain.crashed_with_db_pool);
+  CHECK(plain.message.find("zone memory") == std::string::npos);
+}
+
+TEST_CASE(
+    "safe mode: a crash that needs no larger zone memory bisects the mods") {
+  culprit_search search({"a", "b", "c"}, true);
+  const auto crashes = [](const std::vector<std::string> &mods) {
+    return std::ranges::find(mods, "c") != mods.end();
+  };
+  std::vector<std::vector<std::string>> tested;
+  while (!search.done()) {
+    tested.push_back(search.next_test());
+    search.record(crashes(tested.back()));
+  }
+  CHECK(search.db_pool() == db_pool_suspect::cleared);
+  REQUIRE(search.culprit().has_value());
+  CHECK_EQ(*search.culprit(), "c");
+  REQUIRE(!tested.empty());
+  CHECK((tested.front() == std::vector<std::string>{"a", "b", "c"}));
+  CHECK_EQ(search.launches(), tested.size());
+
+  // One mod and the setting are two suspects.
+  culprit_search one({"a"}, true);
+  CHECK(!one.done());
+  CHECK((one.next_test() == std::vector<std::string>{"a"}));
+  one.record(true); // the mod crashes without the setting too
+  CHECK(one.done());
+  REQUIRE(one.culprit().has_value());
+  CHECK_EQ(*one.culprit(), "a");
+  culprit_search fine({"a"}, true);
+  fine.record(false);
+  CHECK(fine.done());
+  CHECK(fine.db_pool_culprit());
+  CHECK(!fine.culprit().has_value());
+
+  safe_mode_decision decision;
+  decision.safe_mode = true;
+  decision.crashed_stack = {"a"};
+  CHECK(!culprit_search_possible(decision)); // one mod: nothing to tell apart
+  decision.crashed_with_db_pool = true;
+  CHECK(culprit_search_possible(decision));
+  decision.safe_mode = false;
+  CHECK(!culprit_search_possible(decision));
+  decision.safe_mode = true;
+  decision.crashed_with_db_pool = false;
+  decision.crashed_stack = {"a", "b"};
+  CHECK(culprit_search_possible(decision));
 }

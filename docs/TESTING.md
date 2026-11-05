@@ -370,7 +370,9 @@ extra).
     pool is still too small, 0x1420C5AB0 the page budget ran out, and a crash
     after the zone allocation an offset kept in 32 bits. Turn the setting off
     again afterwards either way (map-check writes its own launcher.json, so only
-    that home has the flag).
+    that home has the flag). The journal then has `"db_pool": true`, and Home's
+    "Find the culprit" first runs DS4C alone without the flag (checked in
+    `test_m1_runtime.cpp` and `test_launcher_shared.cpp` only).
 - [ ] Shadows of Evil with DS4C when its 3.5 minute intro plays to the end:
       DS4C's scripts error on every frame and the local server's reliable
       commands cycle out (`EXE_ERR_RELIABLE_CYCLED_OUT`) before the client is in

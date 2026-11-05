@@ -7,7 +7,9 @@
 #include <cstdio>
 
 #include <xerces_core/compat.hpp>
+#include <xerces_core/db_pool.hpp>
 #include <xerces_core/json.hpp>
+#include <xerces_core/settings_options.hpp>
 
 #include "../app.hpp"
 #include "../log.hpp"
@@ -299,11 +301,11 @@ private:
   }
 
   // The culprit search (5.6): one test launch at a time, the result read
-  // from the journal when the game exits.
+  // from the journal when the game exits. A crashed launch that had the
+  // larger zone memory is first run again without it.
   void refresh_culprit(const xerces_core::safe_mode_decision &decision) {
     const auto &culprit = owner_->svc().culprit();
-    can_bisect_ = decision.safe_mode && decision.crashed_stack.size() >= 2 &&
-                  !culprit;
+    can_bisect_ = xerces_core::culprit_search_possible(decision) && !culprit;
     culprit_on_ = culprit.has_value();
     culprit_done_ = culprit_found_ = false;
     culprit_mods_.clear();
@@ -311,7 +313,14 @@ private:
     if (!culprit) {
       return;
     }
-    if (culprit->search.culprit()) {
+    if (culprit->search.db_pool_culprit()) {
+      culprit_done_ = culprit_found_ = true;
+      culprit_text_ = owner_->tr("Found it:") + " " +
+                      owner_->tr("larger zone memory (experimental). The same "
+                                 "mods ran fine without it. Turn it off?");
+      culprit_mods_ = mod_list(culprit->crashed_stack);
+      culprit_stop_ = owner_->tr("Close");
+    } else if (culprit->search.culprit()) {
       culprit_done_ = culprit_found_ = true;
       culprit_text_ = owner_->tr("Found it:") + " " +
                       mod_label(*culprit->search.culprit()) + ". " +
@@ -322,8 +331,24 @@ private:
       culprit_done_ = true;
       culprit_text_ = owner_->tr("No single mod crashes alone: the crash needs "
                                  "these mods together.");
+      if (culprit->search.db_pool() == xerces_core::db_pool_suspect::cleared) {
+        // They crashed on the stock pool, where the crashed launch had the
+        // larger one: together they may simply not fit without it.
+        culprit_text_ += " " + owner_->tr("They also crashed without larger "
+                                          "zone memory: together they may "
+                                          "need more zone memory than the "
+                                          "game has without it.");
+      }
       culprit_mods_ = mod_list(culprit->search.suspects());
       culprit_stop_ = owner_->tr("Close");
+    } else if (culprit->search.testing_db_pool()) {
+      culprit_text_ =
+          owner_->tr("Test") + " " +
+          std::to_string(culprit->search.launches() + 1) + ": " +
+          owner_->tr("launch the crashed mods again without larger zone "
+                     "memory and play to where it crashed. Quit normally if "
+                     "it does not crash.");
+      culprit_mods_ = mod_list(culprit->search.next_test());
     } else {
       const auto next = culprit->search.next_test();
       culprit_text_ =
@@ -437,7 +462,16 @@ private:
       owner_->notify(outcome.message, !outcome.started && !outcome.dry_run);
     } else if (action == "culprit off") {
       const auto &culprit = owner_->svc().culprit();
-      if (culprit && culprit->search.culprit()) {
+      if (culprit && culprit->search.db_pool_culprit()) {
+        // The setting, not a mod: the profile keeps its mods.
+        auto &config = owner_->svc().config();
+        config.extra_flags =
+            xerces_core::with_flag(std::move(config.extra_flags),
+                                   xerces_core::db_pool::flag_name, false);
+        owner_->svc().save_config();
+        log_info("launcher.home.db_pool", "off after the culprit search");
+        owner_->notify(owner_->tr("Larger zone memory is off."));
+      } else if (culprit && culprit->search.culprit()) {
         auto &profile = xerces_core::profile_for(owner_->svc().config(),
                                                  culprit->mode);
         std::erase(profile.mods, *culprit->search.culprit());

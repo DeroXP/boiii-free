@@ -724,8 +724,10 @@ together.
   neither. The detours only record what they see. The first frame logs
   `xerces.db_pool` (every pool call, the budget, the size read back), and
   `xerces.db_pool.usage` gives the pool's committed size the first time it
-  passes 2 GiB and the first time the player is in a level. Safe mode leaves the
-  flag out.
+  passes 2 GiB and the first time the player is in a level. The journal records
+  whether a launch had the flag. Safe mode and every "find the culprit" test
+  leave it out, and a crash with it makes the setting a suspect of its own
+  (5.6).
 - Why opt-in: none of it has run in the game. Risks (reverse-engineering
   verdict, 2026-11-05): Arxan guards may cover these bytes, repair them or use
   them (a crash before the menu, or hooks that are never hit); no committed pool
@@ -754,8 +756,9 @@ together.
 
 - A launch journal (`logs\journal.json`) records phases (`launching`, `symbols`,
   `frontend`, `loading_map`, `in_game`, `clean_exit`) with the `plan_id`, the
-  stack, the game mode and whether the launch ran in safe mode. The client
-  writes all of them (2026-11-05).
+  stack, the game mode, whether the launch ran in safe mode and whether it had
+  the larger zone memory (`db_pool`, 5.4). The client writes all of them
+  (2026-11-05).
 - Who owns the journal. The launcher writes it as `launching` with a fresh
   one-time launch id and hands the same id to the game in `XERCES_LAUNCH_ID`.
   The game takes the journal over only when the ids match and the phase is still
@@ -788,6 +791,17 @@ together.
 - "Find the culprit" keeps its state in `config\culprit.json` (the crashed mode
   and stack, the search, the mods of the test launch still to be recorded), so
   it spans launcher restarts.
+- Larger zone memory in crash recovery. Safe mode and every culprit test leave
+  `-xerces-db-pool` out whatever the settings say
+  (`launch_inputs::crash_followup`), so they all run on the stock pool and a
+  crash the setting causes is never narrowed down to a mod. When the crashed
+  launch had it, the safe-mode message names it, the search can start with one
+  mod, and its first test runs the whole crashed stack without it: if that runs
+  fine, Home says the setting caused the crash and offers to turn it off (the
+  profile keeps its mods); if it crashes too, the mods are bisected as usual. A
+  stack that only fits with the larger pool also crashes in that first test, so
+  its search can end in "these mods together"; Home then adds that together they
+  may need more zone memory than the stock pool.
 - After **any** crash with mods enabled, the next launch defaults to safe mode
   (all mods off, same game settings) with one-click "Retry with mods", and the
   launcher names the plan that crashed. Other options: report, or "find the

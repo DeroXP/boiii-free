@@ -62,6 +62,9 @@ struct launch_outcome {
   diagnostics diags;
   launch_refusal refusal = launch_refusal::none;
   std::optional<plan> resolved; // a modded launch's plan
+  // The command line passes -xerces-db-pool (larger zone memory); the
+  // journal records it.
+  bool db_pool = false;
 };
 
 struct launch_inputs {
@@ -71,11 +74,17 @@ struct launch_inputs {
   const std::vector<installed_content> *catalog = nullptr;
   std::string mode = "zm";
   bool modded = true;    // false: vanilla
-  // Safe mode: the last modded launch crashed. Mods are off, and so is the
-  // experimental larger zone memory (-xerces-db-pool).
+  // Safe mode: the last modded launch crashed, so mods are off. Implies
+  // crash_followup.
   bool mods_off = false;
+  // A launch that judges a crash: safe mode, or a culprit-search test (5.6).
+  // It leaves the experimental larger zone memory (-xerces-db-pool) out
+  // whatever the settings say, so safe mode and every test run on the same
+  // stock pool, and a crash the setting causes is never blamed on a mod.
+  bool crash_followup = false;
   std::optional<std::string> connect; // "+connect host:port" (Servers)
-  const std::vector<std::string> *mods = nullptr; // instead of the profile's
+  // Instead of the profile's (a culprit-search test, with crash_followup).
+  const std::vector<std::string> *mods = nullptr;
   bool dry_launch = false;
 };
 
@@ -86,7 +95,8 @@ launch_outcome preview_launch(const launch_inputs &in);
 
 // The launch: preview_launch, then the game (found and supported), no game
 // running already, and the client next to the program. Writes the plan file
-// (modded) and the journal (phase launching, the mode and a fresh launch id),
+// (modded) and the journal (phase launching, the mode, a fresh launch id and
+// whether the command passes -xerces-db-pool),
 // then starts the client from the game folder with XERCES_HOME,
 // XERCES_DATA_PATH (development builds) and XERCES_LAUNCH_ID set for it alone.
 // If Windows refuses, the old journal is put back. game_running is asked

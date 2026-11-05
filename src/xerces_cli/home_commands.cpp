@@ -746,6 +746,11 @@ int cmd_plan_apply(const arguments &args) {
     if (decision.safe_mode && !game_in_run_folder(home.paths.home)) {
       std::cerr << "note: the last modded launch crashed. Launching with mods "
                    "as asked; --mods-off launches with mods off.\n";
+      if (decision.crashed_with_db_pool) {
+        std::cerr << "note: that launch had larger zone memory "
+                     "(-xerces-db-pool), which is experimental and may be the "
+                     "cause; --mods-off leaves it out too.\n";
+      }
     }
     const auto report =
         read_text_file(home.paths.cache / "signatures-report.json");
