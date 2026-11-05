@@ -214,8 +214,8 @@ anything (multi-mod stays off on a miss), reports it in
 against the plan file named by `-xerces-plan`, and moves the journal
 (`<home>\logs\journal.json`) through `symbols`, `frontend`, `in_game` and
 `clean_exit`. Its log is `<home>\logs\<date>-<time>-game-<pid>.jsonl`. None of
-it has run in the game yet: these items need you (and your go-ahead to start
-the game).
+it has run in the game yet: these items need you (and your go-ahead to start the
+game).
 
 - [ ] Launch vanilla from `Xerces.exe` reaches the menu. The game log shows
       `xerces.signatures.resolved` (9 of 9) and the journal reads `frontend`;
@@ -226,15 +226,21 @@ the game).
 - [ ] A forced crash (end `boiii.exe` in Task Manager during a match) leads to
       safe mode on the next launcher start; "Launch with mods off" reaches the
       menu without mods.
+- [ ] After that crash, "Restart game" in the crash dialog: the restarted game
+      has no `XERCES_LAUNCH_ID`, so it leaves the journal alone and the launcher
+      still offers safe mode for the launch that crashed.
+- [ ] Close `Xerces.exe` while the game runs and open it again: Home does not
+      call the running game a crash (it finds the game's entry in `<home>\run`).
+- [ ] Settings changed in the launcher win over the game's saved config: the
+      game log shows `xerces.dvars.reapplied` after the config loads.
 - [ ] Find the culprit: one test launch per step, each result recorded when the
       game exits (checked with written journals only, see Launcher below).
-- [ ] With the game in the menus: `xerces_cli status` shows the build, the
-      plan and the stack (it finds the game's pipe in `<home>\run`);
-      `xerces_cli load --extras 3171632315,3656779213` and
-      `xerces_cli unload` change the extra mods and reload them, as the mods
-      menu does; in a match they answer that the stack only changes in the
-      menus. The pipe itself is tested in `test_ipc.cpp` (a served pipe, a
-      forged run file refused).
+- [ ] With the game in the menus: `xerces_cli status` shows the build, the plan
+      and the stack (it finds the game's pipe in `<home>\run`);
+      `xerces_cli load --extras 3171632315,3656779213` and `xerces_cli unload`
+      change the extra mods and reload them, as the mods menu does; in a match
+      they answer that the stack only changes in the menus. The pipe itself is
+      tested in `test_ipc.cpp` (a served pipe, a forged run file refused).
 
 ### Launcher (M3)
 
@@ -242,8 +248,8 @@ the game).
 third-party sources of the spike. Until the rename (DESIGN.md 7.7) it starts
 `boiii.exe` from the same folder as the game role.
 
-Checks without the game: always pass `--dry-launch` (the launch builds the
-plan file and the command line, logs them and starts nothing), and point
+Checks without the game: always pass `--dry-launch` (the launch builds the plan
+file and the command line, logs them and starts nothing), and point
 `XERCES_HOME` at a folder outside AppData (files created under AppData by
 programs started from the Claude app land in a private copy):
 
@@ -254,11 +260,11 @@ build\bin\x64\Release\Xerces.exe --dry-launch --skip-boot --view home --script s
 
 `tools\dev\launcher\check-screens.ps1 -Out <folder>` opens every screen that
 way, captures it and lists any RmlUi warning (also with `-Theme light`,
-`-Theme contrast` or `-Language pseudo`). A script plays timed steps, the
-first at 1 s: `+500 key down`, `+300 pad a`,
-`+200 view mods`, `+100 click launch-vanilla`, `+100 type text`,
-`+100 focus search`, `+100 shot C:\path\screen.png` (a PNG of the next frame),
-`+100 quit`. The log is `<home>\logs\<date>-<time>-launcher-<pid>.jsonl`.
+`-Theme contrast` or `-Language pseudo`). A script plays timed steps, the first
+at 1 s: `+500 key down`, `+300 pad a`, `+200 view mods`,
+`+100 click launch-vanilla`, `+100 type text`, `+100 focus search`,
+`+100 shot C:\path\screen.png` (a PNG of the next frame), `+100 quit`. The log
+is `<home>\logs\<date>-<time>-launcher-<pid>.jsonl`.
 
 Run on 2026-11-05 by Claude on your PC while you were away (dry launches only):
 
@@ -273,28 +279,34 @@ Run on 2026-11-05 by Claude on your PC while you were away (dry launches only):
       culprit search went from test 1 to test 2 across two launcher runs, the
       result read from a journal written for the test.
 - [x] A second `Xerces.exe` on the same home brings the first forward and exits.
+- [x] Two mods that declare each other as conflicts (`fake-game\mods\conflict_a`
+      and `conflict_b`) block the plan; Mods' "Allow this conflict" turns the
+      problem into the warning "Allowed by you", the plan then has no problems,
+      and `config\launcher.json` keeps the pair.
 - [ ] The window by hand: drag by the header, snap, resize from the edges,
       minimize, maximize, close; at 150 percent.
 - [ ] A physical controller: A, B, Y, LB/RB and the D-pad on every screen.
 - [ ] Q and E with Num Lock on switch tabs (fixed 2026-11-05 after review;
       scripted keys never carry lock flags, so only a real keyboard shows it).
 
-Screens, each built and checked by scripted runs (dry launches) on
-2026-11-05; what still needs you:
+Screens, each built and checked by scripted runs (dry launches) on 2026-11-05;
+what still needs you:
 
-- [ ] Mods: enable a few, reorder with Ctrl+Up/Down and with the mouse
-      (drag), Ctrl+Z, search; "Open in Steam" opens the item in Steam.
+- [ ] Mods: enable a few, reorder with Ctrl+Up/Down and with the mouse (drag),
+      Ctrl+Z, search; "Open in Steam" opens the item in Steam.
 - [ ] Settings: the player name shows in the game (written to
       `boiii_players\properties.json`, where the client reads it); FPS limit,
-      field of view, V-Sync and the FPS counter take effect in the game;
-      display mode (windowed, borderless); a value the game had saved in
-      config.cfg no longer wins over Xerces' (launch_dvars.cpp).
+      field of view, V-Sync and the FPS counter take effect in the game; display
+      mode (windowed, borderless); a value the game had saved in config.cfg no
+      longer wins over Xerces' (launch_dvars.cpp).
 - [ ] Binds and asset pools (from Settings): a custom bind works in the game;
       with larger asset pools off, a big mod that needs them fails as it did
       upstream. Checked on a copy of the folder only, never the real files.
 - [ ] Servers: join a self-hosted server by address (needs a server).
-- [ ] Packs: export a pack, apply it on another profile or PC, and get the
-      same plan id; a share code round trip.
+- [ ] Packs: export a pack, apply it on another profile or PC, and get the same
+      plan id; a share code round trip. A pack that allows a conflict or sets a
+      mod setting brings those decisions along (Mods shows the conflict as
+      allowed). Applying writes a config backup to `<home>\backups` first.
 - [ ] First run: on a PC with BOIII data, the import offers the name and the
       favourite servers (`boiii_players`); nothing under
       `%LOCALAPPDATA%\boiii\user` is opened.

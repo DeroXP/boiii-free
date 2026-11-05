@@ -446,7 +446,12 @@ the installed game.
 - A symbol must match exactly once in its section and agree with a known address
   when one exists. Zero or several matches fail closed.
 - Results are cached by exe identity and re-validated by comparing bytes, so a
-  normal start costs milliseconds.
+  normal start costs milliseconds. The cache file is
+  `<home>\cache\signatures-<build>-<registry hash>.json`: a new registry (a
+  Xerces update that adds or changes a pattern) never reads an old result. Every
+  resolved address is checked against the mapped image before use, and each run
+  writes `cache\signatures-report.json` (what matched, what missed, whether the
+  cache was used).
 - Code bytes are never written without first checking the whole expected
   instruction sequence.
 
@@ -681,7 +686,25 @@ together.
 ### 5.6 Safe mode and crash recovery
 
 - A launch journal (`logs\journal.json`) records phases (`launching`, `symbols`,
-  `frontend`, `loading_map`, `in_game`, `clean_exit`) with the `plan_id`.
+  `frontend`, `loading_map`, `in_game`, `clean_exit`) with the `plan_id`, the
+  stack, the game mode and whether the launch ran in safe mode. `loading_map` is
+  reserved; the client writes the others (2026-11-05).
+- Who owns the journal. The launcher writes it as `launching` with a fresh
+  one-time launch id and hands the same id to the game in `XERCES_LAUNCH_ID`.
+  The game takes the journal over only when the ids match and the phase is still
+  `launching`, clears the id, and removes the variable from its own environment,
+  so a game restarted from the crash dialog never overwrites the record of the
+  launch that crashed. `symbols` lasts while signatures resolve and returns to
+  `launching` afterwards; the first main-loop frame writes `frontend`; a
+  once-a-second check switches between `frontend` and `in_game`; a normal quit
+  writes `clean_exit`.
+- Exit code 0 is not proof of a clean exit: the crash dialog's restart and fatal
+  engine errors also end with 0. The launcher counts 0 as clean only when the
+  game never took the journal over (it quit before Xerces' code ran); otherwise
+  the journal decides. A game that is still running is never counted as a crash.
+- "Find the culprit" keeps its state in `config\culprit.json` (the crashed mode
+  and stack, the search, the mods of the test launch still to be recorded), so
+  it spans launcher restarts.
 - After **any** crash with mods enabled, the next launch defaults to safe mode
   (all mods off, same game settings) with one-click "Retry with mods", and the
   launcher names the plan that crashed. Other options: report, or "find the
@@ -1010,17 +1033,17 @@ Upstream launcher features and where they go (part of M3's exit):
 | Credits                                                      | About and Legal                                                        |
 
 Where the rows stand on 2026-11-05, in `Xerces.exe`: PLAY is Home's Launch
-modded and Launch vanilla; the launch options are in Settings (skip intro,
-skip cinematics, display mode through `-windowed`/`-borderless`, FPS limit,
-field of view, V-Sync and the FPS counter as dvars confirmed in the client,
-extra flags, close on launch). The player name is in Settings, written where
-the client reads it (`boiii_players\properties.json`). The Library is Mods;
-Friends is a page that says what is off until M5; Verify installation is
-Diagnostics' "Verify with Steam"; Credits is About (the footer link), with
-the licences and credits; asset pools and binds are Settings' "Binds and
-asset pools" (the game's binds.cfg and launcher_settings.json). Patches, the version picker and the archive.org
-exe download wait for D9; manage installation and the Workshop downloader
-are not carried over.
+modded and Launch vanilla; the launch options are in Settings (skip intro, skip
+cinematics, display mode through `-windowed`/`-borderless`, FPS limit, field of
+view, V-Sync and the FPS counter as dvars confirmed in the client, extra flags,
+close on launch). The player name is in Settings, written where the client reads
+it (`boiii_players\properties.json`). The Library is Mods; Friends is a page
+that says what is off until M5; Verify installation is Diagnostics' "Verify with
+Steam"; Credits is About (the footer link), with the licences and credits; asset
+pools and binds are Settings' "Binds and asset pools" (the game's binds.cfg and
+launcher_settings.json). Patches, the version picker and the archive.org exe
+download wait for D9; manage installation and the Workshop downloader are not
+carried over.
 
 ### 7.4 Navigation and input
 
@@ -2019,31 +2042,50 @@ M5a, which you asked for now.
   exists with `compat/builds.json`; `xerces_cli game check` calls the installed
   game supported. On 2026-11-05 the game-process side was built (389dff95 to
   db7fda81), not yet run in the game: the client resolves the registry before
-  mod_stack hooks anything (on a miss multi-mod stays off; the dedicated
-  server keeps upstream's tables, D22), checks `fs_game` and `fs_extramods`
-  against the plan named by `-xerces-plan`, keeps the journal for safe mode,
-  serves the command pipe (`xerces_cli status`, `load`, `reload`, `unload`),
-  and `xerces_cli diag bundle` makes the diagnostics zip (5.10, without
-  minidumps). The launcher does detection (4.7), safe mode and "find the
-  culprit" (5.6). The client's own game-folder lookup in `beta` (working
-  folder, saved path, Steam libraries, picker) is enough because the launcher
-  starts the game in its folder; loading DLLs by absolute path would mean
-  editing the fenced loader, so it stays as upstream has it. Open: the
-  in-game checks in docs/TESTING.md, the hook bus, the pool policy, ownership
-  events, the dev module, and leaving plugins out of release builds.
+  mod_stack hooks anything (on a miss multi-mod stays off; the dedicated server
+  keeps upstream's tables, D22), checks `fs_game` and `fs_extramods` against the
+  plan named by `-xerces-plan`, keeps the journal for safe mode, serves the
+  command pipe (`xerces_cli status`, `load`, `reload`, `unload`), and
+  `xerces_cli diag bundle` makes the diagnostics zip (5.10, without minidumps).
+  The launcher does detection (4.7), safe mode and "find the culprit" (5.6). The
+  client's own game-folder lookup in `beta` (working folder, saved path, Steam
+  libraries, picker) is enough because the launcher starts the game in its
+  folder; loading DLLs by absolute path would mean editing the fenced loader, so
+  it stays as upstream has it. Open: the in-game checks in docs/TESTING.md, the
+  hook bus, the pool policy, ownership events, the dev module, and leaving
+  plugins out of release builds.
 - M2, headless part done: the ownership map and rules, the merges, GSC hook
   chain planning, reports, determinism tests and the loose both-apply pair as
   unit tests. Open: index runs, the in-game merges and chains, the GSC call-next
   spike, the fastfile pair.
 - M4, headless part done: the pack format (`docs/schema/pack-1.schema.json`),
-  offline share codes, import as a dry run, the content check. Open: profiles,
-  backup and rollback, Workshop subscriptions, the installer and the release
-  pipeline.
+  offline share codes, import as a dry run, the content check. In the launcher
+  (2026-11-05): a profile per game mode, Packs (apply, import and export as a
+  file or share code, pins, validation, a config backup before each apply), and
+  a pack's decisions (conflicts it allows, per-mod settings) reach the plan;
+  Mods can allow a declared conflict too. Open: rollback from the launcher,
+  Workshop subscriptions, the installer and the release pipeline.
 - M3: D4 (RmlUi) and D5 (C / Signal) are decided, and the RmlUi spike gate
   passed on 2026-11-05 once the first-frame criterion was restated (7.1): the
-  original 150 ms is ruled out on this PC by GPU driver start-up alone. M3 can
-  start on RmlUi; still unchecked from the spike: a physical controller press,
-  vsync pacing on a live display, and Proton.
+  original 150 ms is ruled out on this PC by GPU driver start-up alone. Built
+  the same night in `Xerces.exe` (`src/xerces_launcher`, 3.1): the native boot
+  mark (about 100 ms) and the first RmlUi frame (about 210 ms); every screen in
+  7.3 (Boot, First run with the BOIII import, Home with safe mode and "find the
+  culprit", Mods, Packs, Servers with direct connect and favourites, a Friends
+  page that says what waits for M5, Settings with the launch options, player
+  name, binds and asset pools, Diagnostics with the report and the bundle, and
+  About and Legal); keyboard and controller through one action map; the three
+  themes; tokens generating the launcher styles and the Lua colour table, with
+  the contrast lint; translatable strings with a template and a pseudo-locale.
+  The launcher's settings reach the game: the client applies them again after
+  the game loads its own saved config. Every row of the parity table is placed
+  except the two that wait for D9. Checked in dry runs only (`--dry-launch`, a
+  fake game folder): all screens render with no RmlUi warnings in all three
+  themes, and every launch path builds the command line D3 verified. Open: a
+  person using it; the in-game Lua menu with origin checks (7.6); the rename
+  (7.7); the update client (D16); HarfBuzz for scripts that need shaping (its
+  download waits for your approval); and, from the spike, a physical controller
+  press, vsync pacing on a live display, and Proton.
 
 ---
 

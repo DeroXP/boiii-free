@@ -9,8 +9,14 @@ III. Self-hosted and offline play only.
 - Fenced code you must not touch, and upstream features Xerces must not build
   on: `docs/FENCED.md`.
 
-## Current state (2026-11-04)
+## Current state (2026-11-05)
 
+- On 2026-11-05 (overnight, the user away): the launcher `Xerces.exe` with every
+  M3 screen, and the M1 game-process side (signatures, journal, pipe, launch
+  settings re-applied). Checked with dry launches and a fake game folder only;
+  nothing of it has run in the game yet. DESIGN.md 18 has the status and what is
+  open; docs/TESTING.md lists the in-game checks, which need the user's
+  go-ahead.
 - M0 is under way on `xerces-main`: upstream `beta` f8f7b735 plus `mod-stack`'s
   two commits (conflicts resolved in 6bc02cb4), with the design docs and
   `backend/` merged in (D1). Upstream's updater and the `-beta` self-download
@@ -136,8 +142,8 @@ the `pgserver` wheel in a throwaway venv.
   screen API. RmlUi 6.3 and FreeType 2.14.3 are kept in
   `C:\Users\Ginld\XercesDev\third_party` (not in the repo). The spike
   (`src/xerces_launcher_spike/`, `-Spike`) stays for repeating DESIGN.md 7.1.
-  Moving an OpenGL context to another thread crashes NVIDIA's driver here;
-  warm the driver instead.
+  Moving an OpenGL context to another thread crashes NVIDIA's driver here; warm
+  the driver instead.
 - Run the launcher in checks only with `--dry-launch` and `XERCES_HOME` set
   outside AppData; `--script` plays input and takes PNG captures
   (docs/TESTING.md, Launcher). `tools/ci/check_contrast.py` checks the theme
