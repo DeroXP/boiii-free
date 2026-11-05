@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
+#include <cstdint>
 #include <fstream>
 #include <iterator>
 
@@ -200,6 +202,25 @@ std::optional<std::string> appmanifest_installdir(std::string_view acf) {
     return std::nullopt; // a folder name, nothing else
   }
   return dir->value;
+}
+
+std::optional<std::uint64_t> appmanifest_buildid(std::string_view acf) {
+  const auto root = parse_vdf(acf);
+  if (!root) {
+    return std::nullopt;
+  }
+  const kv_node *state = root->child("AppState");
+  const kv_node *build = state != nullptr ? state->child("buildid") : nullptr;
+  if (build == nullptr || build->value.empty()) {
+    return std::nullopt;
+  }
+  std::uint64_t value = 0;
+  const char *end = build->value.data() + build->value.size();
+  const auto parsed = std::from_chars(build->value.data(), end, value);
+  if (parsed.ec != std::errc{} || parsed.ptr != end) {
+    return std::nullopt;
+  }
+  return value;
 }
 
 detection detect_game(const std::optional<std::filesystem::path> &saved,

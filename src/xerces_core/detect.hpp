@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -29,6 +30,8 @@ inline constexpr std::string_view bo3_exe = "BlackOps3.exe";
 std::vector<std::filesystem::path> steam_libraries(std::string_view vdf);
 // "installdir" from an appmanifest.
 std::optional<std::string> appmanifest_installdir(std::string_view acf);
+// "buildid" from an appmanifest: Steam's build number of the installed game.
+std::optional<std::uint64_t> appmanifest_buildid(std::string_view acf);
 
 struct detection {
   std::optional<std::filesystem::path> game_dir;

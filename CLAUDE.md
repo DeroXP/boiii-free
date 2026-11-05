@@ -127,6 +127,10 @@ the `pgserver` wheel in a throwaway venv.
   from here (DESIGN.md 3.6). Its join prompt names missing mods instead of
   downloading them. The proof of concept's "queue-add" function is
   `SL_GetStringOfSize` (verified on a dump in D3). Do not call it.
+- `compat/builds.json` lists the game builds the pre-flight check knows;
+  `xerces_cli game check` (from the repo root) compares the installed
+  `BlackOps3.exe` and Steam's build number with it. Add a build there when Steam
+  updates the game and upstream supports it.
 - Signatures live in `compat/signatures.json`. Make one with
   `tools\dev\re\sigmaker.py` from a dump (`tools\dev\re\dump-module.ps1`, then
   `dump-xrefs.ps1 -Fix`), and check the registry with

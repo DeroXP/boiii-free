@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <xerces_core/catalog.hpp>
+#include <xerces_core/compat.hpp>
 #include <xerces_core/conflicts.hpp>
 #include <xerces_core/detect.hpp>
 #include <xerces_core/hooks.hpp>
@@ -140,6 +141,9 @@ Work without the game:
   packs import <file|XRC1.code> [--mods-dir <dir>] [--json]   validate + dry run
   packs validate <file|XRC1.code> [--json]
   game detect [--saved <folder>] [--json]          find the game install (reads only)
+  game check [--game-dir <folder>] [--builds <file>] [--json]
+                                                   the launcher's pre-flight check:
+                                                   is this game build supported?
   sig check --dump <file|folder> [--registry <file>] [--build <0x...>] [--json]
                                                    the signature registry against
                                                    a memory dump (newest .bin in
@@ -610,6 +614,82 @@ int cmd_game_detect(const arguments &args) {
   return result.game_dir ? exit_ok : exit_failed;
 }
 
+std::string hex(std::uint64_t value);
+
+// The launcher's pre-flight check (DESIGN.md 4.2): compares BlackOps3.exe and
+// Steam's build number with compat/builds.json. Reads only.
+int cmd_game_check(const arguments &args) {
+  fs::path game_dir;
+  if (const auto given = args.get("--game-dir")) {
+    game_dir = fs::path(*given);
+  } else {
+    const detection found = detect_game(
+        std::nullopt, steam_roots_from_registry(), real_filesystem());
+    if (!found.game_dir) {
+      std::cerr << "Black Ops III was not found; give --game-dir.\n";
+      return exit_error;
+    }
+    game_dir = *found.game_dir;
+  }
+  const fs::path builds_path =
+      args.get("--builds").value_or("compat/builds.json");
+  if (!fs::exists(builds_path)) {
+    std::cerr << utf8(builds_path)
+              << " does not exist. Run from the repository root or give "
+                 "--builds.\n";
+    return exit_error;
+  }
+  const build_registry registry = parse_build_registry(read_text(builds_path));
+  if (!registry.ok()) {
+    print_diagnostics(registry.diags);
+    return exit_failed;
+  }
+  const fs::path exe = game_dir / std::string(bo3_exe);
+  std::string error;
+  const auto facts = read_exe_facts(exe, &error);
+  if (!facts) {
+    std::cerr << utf8(exe) << ": " << error << "\n";
+    return exit_error;
+  }
+  // <library>\steamapps\common\<game> -> <library>\steamapps\appmanifest_*.acf
+  const fs::path manifest = game_dir.parent_path().parent_path() /
+                            ("appmanifest_" + std::string(bo3_app_id) + ".acf");
+  std::optional<std::uint64_t> steam_build;
+  if (fs::exists(manifest)) {
+    steam_build = appmanifest_buildid(read_text(manifest));
+  }
+  const preflight_result result =
+      preflight_check(*facts, steam_build, registry, bo3_exe);
+
+  if (args.has("--json")) {
+    rapidjson::Document doc(rapidjson::kObjectType);
+    auto &alloc = doc.GetAllocator();
+    json::set(doc, "verdict", to_string(result.verdict), alloc);
+    json::set(doc, "can_launch", result.can_launch(), alloc);
+    json::set(doc, "build", result.build ? result.build->name : "", alloc);
+    json::set(doc, "steam_build",
+              steam_build ? std::to_string(*steam_build) : "", alloc);
+    json::set(doc, "checksum", hex(facts->checksum), alloc);
+    json::set(doc, "link_time", hex(facts->link_time), alloc);
+    json::set(doc, "size", static_cast<std::int64_t>(facts->size), alloc);
+    json::set(doc, "sha256", facts->sha256, alloc);
+    json::set(doc, "message", result.message, alloc);
+    std::cout << json::pretty(doc) << "\n";
+  } else {
+    std::cout << "Black Ops III: " << utf8(exe) << "\n"
+              << "  Steam build "
+              << (steam_build ? std::to_string(*steam_build) : "unknown")
+              << ", checksum " << hex(facts->checksum) << ", link time "
+              << hex(facts->link_time) << ", " << facts->size << " bytes\n"
+              << "  " << to_string(result.verdict)
+              << (result.build ? " (" + result.build->name + ")" : "") << "\n";
+    if (!result.message.empty()) {
+      std::cout << result.message << "\n";
+    }
+  }
+  return result.can_launch() ? exit_ok : exit_failed;
+}
+
 int not_running(const std::string &command) {
   std::cerr << "Xerces is not running. \"" << command
             << "\" talks to a running Xerces over its named pipe, which comes "
@@ -810,6 +890,9 @@ int main(int argc, char **argv) {
     }
     if (group == "game" && action == "detect") {
       return cmd_game_detect(args);
+    }
+    if (group == "game" && action == "check") {
+      return cmd_game_check(args);
     }
     if (group == "sig") {
       return cmd_sig(args, action);

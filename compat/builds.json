@@ -1,0 +1,30 @@
+{
+  "schema": "xerces.builds/1",
+  "note": "Game builds the launcher's pre-flight check knows (docs/DESIGN.md 4.2, 4.6 and 17.1). A field left out matches anything. Check the installed game with `xerces_cli game check`.",
+  "builds": [
+    {
+      "name": "September 2026 Steam client",
+      "exe": "BlackOps3.exe",
+      "steam_build": 24784313,
+      "checksum": "0x6531394",
+      "size": 106059256,
+      "link_time": "0x6A7B6355",
+      "sha256": "51ca63bbc660e0826943c60da67606f6bcb4b3b519528b5e0548c68c9423a323",
+      "status": "supported"
+    },
+    {
+      "name": "Previous Steam client (the proof of concept's build)",
+      "exe": "BlackOps3.exe",
+      "checksum": "0x888C368",
+      "status": "upstream-only",
+      "note": "Upstream still has tables for it; Xerces signatures were never checked on it."
+    },
+    {
+      "name": "Unranked Dedicated Server",
+      "exe": "BlackOps3_UnrankedDedicatedServer.exe",
+      "checksum": "0x14C28B4",
+      "status": "upstream-only",
+      "note": "Upstream-only until D22."
+    }
+  ]
+}

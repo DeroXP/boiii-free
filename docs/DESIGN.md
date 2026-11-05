@@ -418,7 +418,10 @@ time and SHA-256 with `compat/builds.json`:
 - **Unknown or modified**: the same message, plus "Verify the game files in
   Steam".
 
-This replaces upstream's archive.org patch prompt (D9).
+This replaces upstream's archive.org patch prompt (D9). `xerces_core/compat`
+implements the check (the most specific matching entry wins; "newer" needs
+Steam's `buildid` from the appmanifest), and `xerces_cli game check` runs it on
+the installed game.
 
 ### 4.3 Signature registry
 
@@ -1962,9 +1965,10 @@ M5a, which you asked for now.
   the CLI's offline commands. The signature registry file exists
   (`compat/signatures.json`) with the nine day-one entries for mod-stack's
   targets, made from the D3 dump; `xerces_cli sig check --dump` resolves all
-  nine at upstream's addresses for build `0x6531394`. Open: everything in the
-  game process (resolving the registry at startup, hook bus, `xerces_loader`,
-  pipe, safe mode, detection).
+  nine at upstream's addresses for build `0x6531394`. The pre-flight check (4.2)
+  exists with `compat/builds.json`; `xerces_cli game check` calls the installed
+  game supported. Open: everything in the game process (resolving the registry
+  at startup, hook bus, `xerces_loader`, pipe, safe mode, detection).
 - M2, headless part done: the ownership map and rules, the merges, GSC hook
   chain planning, reports, determinism tests and the loose both-apply pair as
   unit tests. Open: index runs, the in-game merges and chains, the GSC call-next
