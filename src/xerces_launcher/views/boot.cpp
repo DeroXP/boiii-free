@@ -1,7 +1,7 @@
 // Boot (docs/DESIGN.md 7.3): the mark (already drawn by the window's native
 // paint) with the word and the status fading in, while the game is found and
 // its build checked on the worker thread; then First run
-// (no game folder yet, or never finished) or Home. It never waits on the
+// (never finished, or detection found no game) or Home. It never waits on the
 // network, and gives up waiting after three seconds.
 
 #include <RmlUi/Core.h>
@@ -31,7 +31,7 @@ public:
   Rml::Element *default_focus() override { return nullptr; }
 
   void update(double now) override {
-    if (owner_->current() != "boot" || !doc) {
+    if (owner_->current() != "boot" || !doc || stuck_) {
       return;
     }
     const double elapsed = now - shown_at_;
@@ -57,16 +57,34 @@ public:
     }
 
     const bool ready = svc.game().searched && elapsed >= 0.65;
-    if (ready || elapsed >= 3.0) {
-      const auto &config = svc.config();
-      const bool first_run =
-          owner_->find("first_run") &&
-          (!config.first_run_done || !svc.game().dir);
-      std::string next = first_run ? "first_run" : "home";
-      if (!owner_->opts().start_view.empty()) {
-        next = owner_->opts().start_view;
-      }
-      owner_->show(next);
+    if (!ready && elapsed < 3.0) {
+      return;
+    }
+    // First run when it was never finished, or when detection has finished
+    // and found no game. After the timeout detection may still be running
+    // (BlackOps3.exe hashed on a slow disk): a returning player then goes
+    // Home, which says it is still looking, not back through First run.
+    const auto &config = svc.config();
+    const bool first_run =
+        owner_->find("first_run") &&
+        (!config.first_run_done || (svc.game().searched && !svc.game().dir));
+    std::string next = first_run ? "first_run" : "home";
+    if (!owner_->opts().start_view.empty()) {
+      next = owner_->opts().start_view;
+    }
+    // show() refuses a screen whose document did not load (or an unknown
+    // one): fall back to Home, and with no Home either, say so here rather
+    // than ask again every frame.
+    owner_->show(next);
+    if (owner_->current() == "boot" && next != "home") {
+      owner_->show("home");
+    }
+    if (owner_->current() == "boot") {
+      stuck_ = true;
+      step_ = owner_->tr(
+          "Xerces could not load its screens. Reinstalling it usually fixes "
+          "this.");
+      handle_.DirtyVariable("step");
     }
   }
 
@@ -76,6 +94,7 @@ private:
   Rml::String step_;
   double shown_at_ = 0;
   bool faded_ = false;
+  bool stuck_ = false; // no screen to go on to; the error stays up
   int frames_ = 0;
 };
 } // namespace

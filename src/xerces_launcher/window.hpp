@@ -22,6 +22,9 @@ class SystemInterface;
 namespace xerces_launcher {
 enum class hit_region { client, caption };
 
+// The launcher window's class; a second launcher looks for the first by it.
+inline constexpr wchar_t window_class_name[] = L"xerces_launcher_window";
+
 struct window_callbacks {
   // Client-area pixel to region; the header's empty space is the caption.
   std::function<hit_region(int x, int y)> hit_test;
@@ -47,6 +50,9 @@ public:
   Rml::SystemInterface *system_interface();
   Rml::RenderInterface *render_interface();
 
+  // Waits up to max_wait_ms for a window message (input, a wake); true when
+  // one is waiting. Pumps nothing.
+  bool wait_events(int max_wait_ms);
   // Pumps messages; waits up to max_wait_ms when idle (0: never waits).
   // Returns false once the window was asked to close.
   bool process_events(Rml::Context *context, int max_wait_ms);
@@ -57,7 +63,8 @@ public:
   void toggle_maximize();
   bool maximized() const;
   void request_close();
-  // Wakes process_events from another thread.
+  // Wakes process_events from another thread. Safe while the window closes
+  // (it then does nothing).
   void wake();
 
   float dp_ratio() const;

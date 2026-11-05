@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cwchar>
 #include <cwctype>
 #include <fstream>
 #include <iterator>
@@ -122,36 +123,60 @@ enum pad_bits : unsigned {
   pad_rb = 256,
 };
 
-unsigned read_pad() {
-  for (DWORD index = 0; index < XUSER_MAX_COUNT; ++index) {
-    XINPUT_STATE state{};
-    if (XInputGetState(index, &state) != ERROR_SUCCESS) {
-      continue;
-    }
-    const XINPUT_GAMEPAD &pad = state.Gamepad;
-    const SHORT dead = 16000;
-    unsigned out = 0;
-    if ((pad.wButtons & XINPUT_GAMEPAD_DPAD_UP) || pad.sThumbLY > dead)
-      out |= pad_up;
-    if ((pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN) || pad.sThumbLY < -dead)
-      out |= pad_down;
-    if ((pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT) || pad.sThumbLX < -dead)
-      out |= pad_left;
-    if ((pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) || pad.sThumbLX > dead)
-      out |= pad_right;
-    if (pad.wButtons & XINPUT_GAMEPAD_A)
-      out |= pad_a;
-    if (pad.wButtons & XINPUT_GAMEPAD_B)
-      out |= pad_b;
-    if (pad.wButtons & XINPUT_GAMEPAD_Y)
-      out |= pad_y;
-    if (pad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER)
-      out |= pad_lb;
-    if (pad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER)
-      out |= pad_rb;
-    return out;
+constexpr unsigned pad_directions = pad_up | pad_down | pad_left | pad_right;
+
+unsigned pad_buttons(const XINPUT_GAMEPAD &pad) {
+  const SHORT dead = 16000;
+  unsigned out = 0;
+  if ((pad.wButtons & XINPUT_GAMEPAD_DPAD_UP) || pad.sThumbLY > dead)
+    out |= pad_up;
+  if ((pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN) || pad.sThumbLY < -dead)
+    out |= pad_down;
+  if ((pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT) || pad.sThumbLX < -dead)
+    out |= pad_left;
+  if ((pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) || pad.sThumbLX > dead)
+    out |= pad_right;
+  if (pad.wButtons & XINPUT_GAMEPAD_A)
+    out |= pad_a;
+  if (pad.wButtons & XINPUT_GAMEPAD_B)
+    out |= pad_b;
+  if (pad.wButtons & XINPUT_GAMEPAD_Y)
+    out |= pad_y;
+  if (pad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER)
+    out |= pad_lb;
+  if (pad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER)
+    out |= pad_rb;
+  return out;
+}
+
+// The window property that names the home a launcher window belongs to: the
+// single-instance mutex is per home, so the window brought forward must be
+// that home's too, not whichever launcher window comes first.
+constexpr wchar_t home_property[] = L"xerces_launcher_home";
+
+struct home_window_search {
+  std::uintptr_t tag = 0;
+  HWND found = nullptr;
+};
+
+BOOL CALLBACK match_home_window(HWND handle, LPARAM param) {
+  auto *search = reinterpret_cast<home_window_search *>(param);
+  wchar_t name[64] = {};
+  if (GetClassNameW(handle, name, 64) > 0 &&
+      std::wcscmp(name, window_class_name) == 0 &&
+      reinterpret_cast<std::uintptr_t>(GetPropW(handle, home_property)) ==
+          search->tag) {
+    search->found = handle;
+    return FALSE;
   }
-  return 0;
+  return TRUE;
+}
+
+HWND find_home_window(std::uintptr_t tag) {
+  home_window_search search;
+  search.tag = tag;
+  EnumWindows(&match_home_window, reinterpret_cast<LPARAM>(&search));
+  return search.found;
 }
 
 Rml::Input::KeyIdentifier key_by_name(const std::string &name) {
@@ -276,13 +301,74 @@ options parse_options(int argc, wchar_t **argv) {
 app::app(options opts) : opts_(std::move(opts)) {}
 
 app::~app() {
+  // The members go in reverse order, the posted queue before the services:
+  // an early return from run() would leave the scan worker posting into a
+  // queue that no longer exists. shutdown() joins it first.
+  shutdown();
   if (instance_mutex_) {
     ReleaseMutex(instance_mutex_);
     CloseHandle(instance_mutex_);
   }
 }
 
+void app::shutdown() {
+  if (services_) {
+    services_->cancel_scan();
+  }
+  // RmlUi first, with the services still there: closing the documents moves
+  // focus, so blur handlers in the screens run (and may save settings).
+  if (rml_started_) {
+    rml_started_ = false;
+    Rml::Shutdown(); // documents and data models go first
+  }
+  context_ = nullptr;
+  dialog_doc_ = nullptr;
+  for (auto &e : views_) {
+    e.screen.reset();
+  }
+  listeners_.clear();
+  // Then the scan worker is joined, while the queue it posts to and the
+  // window it wakes both still exist.
+  services_.reset();
+  if (HWND handle = static_cast<HWND>(window_.native_handle())) {
+    RemovePropW(handle, home_property);
+  }
+  window_.close();
+}
+
 double app::now() const { return ms_since_process_start() / 1000.0 - started_; }
+
+unsigned app::read_pad(double now) {
+  // Asking an empty XInput slot is slow (the driver is asked every time), so
+  // slots without a controller are asked again only every 1.5 s; the slots
+  // that answered are read every time. A controller is connected when its
+  // slot answers, whether or not anything on it is pressed.
+  const bool rescan = now >= pad_rescan_at_;
+  if (rescan) {
+    pad_rescan_at_ = now + 1.5;
+  }
+  unsigned out = 0;
+  for (DWORD index = 0; index < XUSER_MAX_COUNT; ++index) {
+    const unsigned slot = 1u << index;
+    if (!(pad_slots_ & slot) && !rescan) {
+      continue;
+    }
+    XINPUT_STATE state{};
+    if (XInputGetState(index, &state) != ERROR_SUCCESS) {
+      if (pad_slots_ & slot) {
+        log_info("launcher.pad.disconnected", std::to_string(index));
+      }
+      pad_slots_ &= ~slot;
+      continue;
+    }
+    if (!(pad_slots_ & slot)) {
+      log_info("launcher.pad.connected", std::to_string(index));
+    }
+    pad_slots_ |= slot;
+    out |= pad_buttons(state.Gamepad);
+  }
+  return out;
+}
 
 void app::post(std::function<void()> task) {
   {
@@ -403,8 +489,17 @@ void app::wire_shell(Rml::ElementDocument *doc) {
       continue;
     }
     const std::string id = e.info.id;
-    listen(doc->GetElementById("tab-" + id), "click",
-           [this, id](Rml::Event &) { show(id); });
+    listen(doc->GetElementById("tab-" + id), "click", [this, id](Rml::Event &) {
+      // The current tab again (Enter or A after B brought focus up here):
+      // back into the screen, which arrows alone cannot reach (on_key).
+      if (id == current_) {
+        if (view *v = find(id)) {
+          focus_default(*v);
+        }
+        return;
+      }
+      show(id);
+    });
   }
   listen(doc->GetElementById("win-min"), "click",
          [this](Rml::Event &) { window_.minimize(); });
@@ -451,12 +546,18 @@ void app::show(const std::string &id) {
     return;
   }
   if (!target->loaded) {
-    target->loaded = load_view(*target->screen, target->info);
-    if (!target->loaded) {
-      notify("The " + id + " screen could not be loaded.", true);
-      return;
+    target->loaded = true;
+    target->failed = !load_view(*target->screen, target->info);
+    if (!target->failed) {
+      apply_look();
     }
-    apply_look();
+  }
+  // A screen whose document did not load (missing or broken RML; the log has
+  // the reason) has nothing to show, whether it was tried here or by the
+  // loader in run(): stay where we are.
+  if (target->failed || !target->screen->doc) {
+    notify("The " + id + " screen could not be loaded.", true);
+    return;
   }
   if (current_ == id) {
     return;
@@ -473,30 +574,80 @@ void app::show(const std::string &id) {
   // sees the elements data-if shows or hides.
   v.update(now());
   context_->Update();
-  if (Rml::Element *focus = v.default_focus()) {
-    focus->Focus(true);
-    focus->ScrollIntoView(Rml::ScrollAlignment::Adaptive);
-  } else {
+  if (!focus_default(v)) {
     v.doc->Focus();
   }
+  focus_lost_frames_ = 0;
   notice_dirty_ = true;
   log_info("launcher.view.shown", id);
+}
+
+bool app::focus_default(view &v) {
+  Rml::Element *focus = v.default_focus();
+  if (!focus) {
+    return false;
+  }
+  focus->Focus(true);
+  focus->ScrollIntoView(Rml::ScrollAlignment::Adaptive);
+  return true;
+}
+
+void app::keep_focus() {
+  view *v = find(current_);
+  if (dialog_open_ || !v || !v->doc) {
+    focus_lost_frames_ = 0;
+    return;
+  }
+  // RmlUi navigates and clicks from the focused element. When data-if hides
+  // the box around it, RmlUi blurs only the box and the context keeps the
+  // hidden button; when its row is removed, the context has no focus at all.
+  // Either way arrows, Enter and A do nothing until focus is put back.
+  Rml::Element *focus = context_->GetFocusElement();
+  const bool lost =
+      !focus || !focus->GetOwnerDocument() || !focus->IsVisible(true);
+  if (!lost) {
+    focus_lost_frames_ = 0;
+    return;
+  }
+  // Screens that move focus themselves after such a change (to the next row,
+  // say) wait a frame or two for the new elements; they go first.
+  if (++focus_lost_frames_ < 3) {
+    return;
+  }
+  focus_lost_frames_ = 0;
+  if (!focus_default(*v)) {
+    v->doc->Focus();
+  }
+  log(xerces_core::log_level::debug, "launcher.focus.recovered", current_);
 }
 
 void app::next_tab(int delta) {
   std::vector<std::string> tabs;
   for (const auto &e : views_) {
-    if (e.info.tab) {
+    // A screen whose document failed to load is never shown (show()).
+    if (e.info.tab && !e.failed) {
       tabs.push_back(e.info.id);
     }
   }
-  if (tabs.empty()) {
+  if (tabs.empty() || delta == 0) {
     return;
   }
   const auto it = std::ranges::find(tabs, current_);
-  const int index = it == tabs.end() ? 0 : int(it - tabs.begin());
   const int size = int(tabs.size());
-  show(tabs[std::size_t(((index + delta) % size + size) % size)]);
+  const int step = delta < 0 ? -1 : 1;
+  int index = (it == tabs.end() ? 0 : int(it - tabs.begin())) + delta;
+  // A screen that fails to load now (its first show) is passed over too:
+  // show() then leaves current_ as it was.
+  for (int tries = 0; tries < size; ++tries, index += step) {
+    const std::string &id = tabs[std::size_t((index % size + size) % size)];
+    if (id == current_) {
+      return;
+    }
+    show(id);
+    if (current_ == id) {
+      return;
+    }
+  }
 }
 
 void app::notify(const std::string &text, bool error) {
@@ -713,9 +864,32 @@ bool app::on_key(Rml::Input::KeyIdentifier key, int modifiers, bool priority) {
     next_tab(+1);
     return false;
   }
-  if (key == Rml::Input::KI_OEM_2 && v) {
-    if (Rml::Element *search = v->search_field()) {
-      search->Focus(true);
+  if (key == Rml::Input::KI_OEM_2 && v && v->search_field()) {
+    // Windows has already queued this key's character ('/') behind it; were
+    // the field focused now, the character would be typed into it. Posted
+    // tasks run after the queued messages, so focus moves once it is gone.
+    post([this, id = current_] {
+      view *target = find(id);
+      if (current_ != id || dialog_open_ || !target) {
+        return;
+      }
+      if (Rml::Element *search = target->search_field()) {
+        search->Focus(true);
+        search->ScrollIntoView(Rml::ScrollAlignment::Adaptive);
+      }
+    });
+    return false;
+  }
+  // #content is a scroll container (base.rcss), and RmlUi's spatial
+  // navigation neither enters nor leaves one: from the header's tabs Down
+  // would skip the screen for the footer, and Up from the footer would skip
+  // it back to the tabs. Both go into the screen instead. (Screens that
+  // navigate themselves, such as Mods, have used the key by now.)
+  if (modifiers == 0 && v && v->doc && focus &&
+      focus->GetOwnerDocument() == v->doc &&
+      ((key == Rml::Input::KI_DOWN && inside(focus, "header")) ||
+       (key == Rml::Input::KI_UP && inside(focus, "footer")))) {
+    if (focus_default(*v)) {
       return false;
     }
   }
@@ -807,9 +981,18 @@ int app::run() {
       hash = (hash ^ static_cast<std::uint32_t>(towlower(c))) * 16777619u;
     }
     const std::wstring name = L"Local\\xerces_launcher_" + std::to_wstring(hash);
+    // Never 0, which is what GetPropW returns for a window without the tag.
+    home_tag_ = (std::uintptr_t(hash) << 1) | 1;
     instance_mutex_ = CreateMutexW(nullptr, TRUE, name.c_str());
     if (instance_mutex_ && GetLastError() == ERROR_ALREADY_EXISTS) {
-      if (HWND other = FindWindowW(L"xerces_launcher_window", nullptr)) {
+      // The first launcher of this home may still be opening its window
+      // (a double-click starts two at once): give it a moment.
+      HWND other = find_home_window(home_tag_);
+      for (int tries = 0; !other && tries < 40; ++tries) {
+        Sleep(50);
+        other = find_home_window(home_tag_);
+      }
+      if (other) {
         if (IsIconic(other)) {
           ShowWindow(other, SW_RESTORE);
         }
@@ -839,6 +1022,8 @@ int app::run() {
     log_error("launcher.window.failed", "The window could not be created.");
     return 1;
   }
+  SetPropW(static_cast<HWND>(window_.native_handle()), home_property,
+           reinterpret_cast<HANDLE>(home_tag_));
   // Detection and the catalog scan start while RmlUi loads.
   services_->refresh(true);
 
@@ -846,12 +1031,13 @@ int app::run() {
   Rml::SetSystemInterface(system_.get());
   Rml::SetRenderInterface(window_.render_interface());
   Rml::Initialise();
+  rml_started_ = true;
   context_ = Rml::CreateContext(
       "main", Rml::Vector2i(std::max(1, window_.width()),
                             std::max(1, window_.height())));
   if (!context_) {
     log_error("launcher.rmlui.context", "RmlUi could not create a context.");
-    Rml::Shutdown();
+    shutdown();
     return 1;
   }
   load_language();
@@ -868,7 +1054,7 @@ int app::run() {
   for (auto &e : views_) {
     if (!e.screen->bind(context_, *this)) {
       log_error("launcher.view.bind_failed", e.info.id);
-      Rml::Shutdown();
+      shutdown();
       return 1;
     }
   }
@@ -887,8 +1073,35 @@ int app::run() {
            });
   }
 
-  const bool boot = !opts_.skip_boot && find("boot") != nullptr;
-  show(boot ? "boot" : (opts_.start_view.empty() ? "home" : opts_.start_view));
+  // The first screen; show() refuses one whose document did not load, so
+  // then the screen asked for, then Home. With none of them there is
+  // nothing to show, and the player is told so instead of a blank window.
+  std::vector<std::string> firsts;
+  if (!opts_.skip_boot && find("boot") != nullptr) {
+    firsts.push_back("boot");
+  }
+  if (!opts_.start_view.empty() && opts_.start_view != "home") {
+    firsts.push_back(opts_.start_view);
+  }
+  firsts.push_back("home");
+  for (const std::string &id : firsts) {
+    if (current_.empty()) {
+      show(id);
+    }
+  }
+  if (current_.empty()) {
+    log_error("launcher.view.none", "No screen could be loaded.");
+    // Not in scripted checks, where nobody would close the box.
+    if (opts_.script.empty() && opts_.seconds <= 0) {
+      MessageBoxW(static_cast<HWND>(window_.native_handle()),
+                  L"Xerces could not load its screens, so it has nothing to "
+                  L"show.\n\nReinstalling Xerces usually fixes this. The log "
+                  L"is in the Xerces logs folder.",
+                  L"Xerces", MB_OK | MB_ICONERROR);
+    }
+    shutdown();
+    return 1;
+  }
   apply_look();
   mark("first screen loaded");
 
@@ -913,26 +1126,60 @@ int app::run() {
   bool running = true;
   std::string last_focus;
   while (running) {
-    const bool pad_connected = pad_previous_ != 0 || read_pad() != 0;
     const bool busy = first_frame || !script_.empty() ||
                       context_->GetNextUpdateDelay() == 0 ||
                       std::ranges::any_of(views_, [](const entry &e) {
                         return !e.loaded;
                       }) ||
                       opts_.seconds > 0 || window_.capture_pending();
-    int wait = busy ? 0 : (pad_connected ? 8 : 100);
+    int wait = busy ? 0 : 100;
     if (!busy && context_->GetNextUpdateDelay() < 0.1) {
       wait = std::min(wait, int(context_->GetNextUpdateDelay() * 1000.0));
     }
-    running = window_.process_events(context_, wait);
+    // Only the window in front takes the controller. XInput reads it from
+    // anywhere, so a launcher left open behind the game would otherwise take
+    // every press meant for the game (toggling mods, switching tabs) and
+    // wake up for each one.
+    const auto in_front = [this] {
+      return GetForegroundWindow() ==
+             static_cast<HWND>(window_.native_handle());
+    };
+    const bool front = in_front();
+    if (front && (pad_previous_ & pad_directions)) {
+      wait = std::min(wait, 8); // a held direction repeats (below)
+    }
+    // XInput sends no window messages. With a controller connected the idle
+    // wait is cut into 8 ms slices with the controller read between them, so
+    // a quick tap wakes the loop as a key would; no frames are drawn while
+    // nothing changes.
+    std::optional<unsigned> pad_read;
+    const double wait_until = now() + wait / 1000.0;
+    for (int left = wait; left > 0;
+         left = int((wait_until - now()) * 1000.0)) {
+      const bool pad = front && pad_slots_ != 0;
+      if (window_.wait_events(pad ? std::min(left, 8) : left)) {
+        break;
+      }
+      if (pad) {
+        const unsigned buttons = read_pad(now());
+        if (buttons != pad_previous_) {
+          pad_read = buttons;
+          break;
+        }
+      }
+    }
+    running = window_.process_events(context_, 0);
     run_posted();
     services_->poll();
     apply_look();
 
-    // Controller: the same action map as the keyboard (7.4).
-    const unsigned buttons = read_pad();
-    const unsigned pressed = buttons & ~pad_previous_;
+    // Controller: the same action map as the keyboard (7.4). In the
+    // background the buttons are still tracked, so one held while the
+    // launcher comes to the front does not count as a press.
     const double t = now();
+    const unsigned buttons = pad_read ? *pad_read : read_pad(t);
+    const bool takes_pad = in_front();
+    const unsigned pressed = takes_pad ? buttons & ~pad_previous_ : 0;
     const auto fire = [&](unsigned bit) {
       switch (bit) {
       case pad_up: inject_key(Rml::Input::KI_UP); break;
@@ -955,7 +1202,7 @@ int app::run() {
         }
       }
     }
-    const unsigned held = buttons & (pad_up | pad_down | pad_left | pad_right);
+    const unsigned held = takes_pad ? buttons & pad_directions : 0;
     if (held && !(pressed & held) && t >= pad_repeat_at_) {
       for (unsigned bit = 1; bit <= pad_right; bit <<= 1) {
         if (held & bit) {
@@ -972,12 +1219,12 @@ int app::run() {
     if (!first_frame) {
       for (auto &e : views_) {
         if (!e.loaded) {
-          e.loaded = load_view(*e.screen, e.info);
-          if (e.loaded && e.screen->doc) {
+          // Tried once: a document that fails is not retried every frame,
+          // and show() refuses the screen (with a notice) from then on.
+          e.loaded = true;
+          e.failed = !load_view(*e.screen, e.info);
+          if (!e.failed) {
             e.screen->doc->Hide();
-          }
-          if (!e.loaded) {
-            e.loaded = true; // do not retry every frame; show() reports it
           }
           break;
         }
@@ -999,6 +1246,8 @@ int app::run() {
     }
 
     context_->Update();
+    // After the update: data-if and data-for changes have taken effect.
+    keep_focus();
     window_.begin_frame();
     context_->Render();
     const bool capturing = window_.capture_pending();
@@ -1020,16 +1269,7 @@ int app::run() {
   }
 
   log_info("launcher.exit", "closed");
-  services_->cancel_scan();
-  Rml::Shutdown(); // documents and data models go first
-  context_ = nullptr;
-  dialog_doc_ = nullptr;
-  for (auto &e : views_) {
-    e.screen.reset();
-  }
-  listeners_.clear();
-  window_.close();
-  services_.reset();
+  shutdown();
   return 0;
 }
 } // namespace xerces_launcher
