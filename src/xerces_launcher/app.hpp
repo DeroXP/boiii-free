@@ -3,6 +3,7 @@
 // The launcher application: the window, RmlUi, the screens and the one
 // action map for keyboard and controller (DESIGN.md 7.3, 7.4).
 
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -143,6 +144,10 @@ private:
   // Stops the worker, RmlUi, the screens and the window in the order they
   // depend on each other. Safe to call more than once.
   void shutdown();
+  // Counts a presented frame against the window's state; every minute (and
+  // at the end) logs launcher.activity.
+  void count_present(double t, bool front);
+  void log_activity(double t);
 
   options opts_;
   window window_;
@@ -202,5 +207,22 @@ private:
   int focus_lost_frames_ = 0; // frames the focus has been lost or hidden
   void *instance_mutex_ = nullptr; // one launcher per home
   std::uintptr_t home_tag_ = 0;    // this home on the window (single instance)
+
+  // Frames presented while the window was in front, behind another window,
+  // minimized, or while a game ran (whatever the window was), and the time
+  // spent in each, since the last launcher.activity line.
+  enum activity_state {
+    state_front,
+    state_behind,
+    state_minimized,
+    state_game,
+    state_count
+  };
+  std::array<std::uint64_t, state_count> frames_{};
+  std::array<double, state_count> state_seconds_{};
+  double activity_since_ = -1; // start of the counted span; -1 before any
+  double last_frame_at_ = 0;
+  double game_checked_at_ = -1;
+  bool game_seen_ = false; // services::game_running, asked once a second
 };
 } // namespace xerces_launcher

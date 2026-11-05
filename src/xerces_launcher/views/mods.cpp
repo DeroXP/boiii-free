@@ -841,7 +841,10 @@ private:
     }
     for (const auto &item : catalog.diags.items()) {
       if (item.code == "catalog.read") {
-        general_.push_back({item.message + " (" + item.path + ")", true});
+        general_.push_back({item.path.empty()
+                                ? item.message
+                                : item.message + " (" + item.path + ")",
+                            true});
       }
     }
 

@@ -361,6 +361,11 @@ PC, files that processes started from the Claude app create under AppData land
 in a private copy other programs cannot see, so Claude-driven runs use a folder
 such as `C:\Users\Ginld\XercesHome`.
 
+`<home>\cache\hashes.txt` is the Workshop hash cache (12.6): each file's SHA-256
+by path, size and write time. A new home can start from another one:
+`XERCES_HASH_CACHE` names a `hashes.txt`, a cache folder or another home, which
+is read and never written.
+
 Compatibility paths stay where they are: upstream's identity key
 (`%LOCALAPPDATA%\boiii\user\`, read by the fenced `auth.cpp`) is never moved or
 regenerated, and `<game>\boiii\` (user scripts, script data, lookup tables)
@@ -1910,6 +1915,64 @@ The first load and launcher baseline from existing logs is in
 - GPU cost cannot be tagged per mod; the profiler estimates it by re-running the
   benchmark with each mod disabled in turn (or bisecting) and shows the
   difference.
+
+### 12.6 Launcher speed
+
+Measured on the test PC (Core Ultra 9 285K, SK hynix PC811 NVMe, 32 GB) on
+2026-11-05, with `tools\dev\bench\launcher-bench.ps1` (20 dry starts each) and
+`xerces_tests --bench-hash` (docs/TESTING.md, Launcher speed). The Workshop
+folder holds 686 files, 63.3 GB; the largest is 9.0 GB.
+
+| What                                                | Before         | After                 |
+| --------------------------------------------------- | -------------- | --------------------- |
+| First scan of the Workshop folder (no cache)        | 195 s          | 10.4 s (6.1 GB/s)     |
+| Hashing 8.15 GiB of Workshop files already in RAM   | 24.4 s, 1 file | 0.95 s, 4 files       |
+| Hashing in memory, one thread                       | 394 MiB/s      | 4,099 MiB/s (CNG)     |
+| Game detected (start to `launcher.game.detected`)   | 322 ms         | 54 ms                 |
+| Catalog ready (start to `launcher.catalog.scanned`) | 409 ms         | 214 ms                |
+| `xerces_cli plan apply --dry-launch`                | 384 ms         | 85 ms                 |
+| First frame presented                               | 224 ms         | 224 ms (unchanged)    |
+| Home shown through the boot screen                  | 675 ms         | 682 ms (650 ms floor) |
+
+What changed:
+
+- **Hashing.** Files are hashed through Windows CNG (`bcrypt.dll`, inbox; it
+  uses the CPU's SHA extensions), loaded when first needed so the game client
+  imports nothing new, and checked once against the portable code's digest of
+  "abc"; without it the portable code runs. Files are read with `ReadFile` into
+  one buffer, and the portable code hashes whole blocks where they lie instead
+  of copying each one. The digests are the same bytes: tests compare both
+  engines on random buffers and edge sizes, and a full rescan on the test PC
+  gave the cached hash of every one of the 686 files, the same content hashes
+  and the same plan id.
+- **Several files at once.** A scan lists every file first and hashes the
+  largest first, on half the logical processors (1 to 6; 1 on a drive with a
+  seek penalty, a spinning disk, and 1 when the launcher rescans while a game
+  runs), then reads the folders in their sorted order as before. Cancel is
+  checked before each file and between 1 MiB reads. The 9 GB file alone takes
+  8.7 s at the 1 GB/s each of six readers gets, so the first scan is bound by
+  the disk (about 6.5 GB/s unbuffered).
+- **The cache is kept.** A version 1 cache is migrated (the entries that held a
+  failed read are dropped, as version 2 drops them) instead of being thrown
+  away, which would have cost the 195 s again. Keys ignore ASCII letter case, so
+  a game folder typed by hand and one found in the registry share entries; paths
+  are written as first seen, so older builds still read the file. Only folders a
+  scan read in full lose entries for files it did not see: an unplugged library
+  drive, a folder that could not be listed, a game that was not found or a
+  cancelled scan prune nothing. `XERCES_HASH_CACHE` seeds a new home read-only.
+  A line that is not a size, a time, a hex hash and a UTF-8 path (a save cut
+  short by a crash, two programs saving at once) is skipped, never thrown on;
+  the launcher's worker turns anything it throws into a scan error instead of
+  ending the process. The scan's figures (`launcher.catalog.scanned`,
+  Diagnostics) count only its own files, and only bytes read in full, never the
+  pre-flight's BlackOps3.exe.
+- **The pre-flight.** BlackOps3.exe (106 MB) is hashed through the same cache,
+  and the launcher's worker runs the pre-flight next to the catalog scan instead
+  of before it.
+
+Not changed here: the boot screen's 650 ms floor (a design choice), the cached
+rescan itself (about 75 ms for 686 files), and the launcher loop presenting a
+frame on every pass (`launcher.activity` now counts them per window state).
 
 ---
 

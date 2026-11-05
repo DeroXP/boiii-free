@@ -3,6 +3,8 @@
 
 #include "harness.hpp"
 
+#include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -352,6 +354,8 @@ TEST_CASE("catalog: the hash cache rehashes only changed files") {
     seen.push_back(name);
   };
   const catalog_scan first = scan_mods_directory(mods, options);
+  // Folders are reported as their files are done, in no fixed order.
+  std::ranges::sort(seen);
   CHECK((seen == std::vector<std::string>{"111", "222"}));
   CHECK_EQ(cache.misses(), std::size_t{4});
   CHECK_EQ(cache.hits(), std::size_t{0});
@@ -361,7 +365,7 @@ TEST_CASE("catalog: the hash cache rehashes only changed files") {
   }
 
   const fs::path file = dir / "cache" / "hashes.txt";
-  REQUIRE(cache.save(file, false));
+  REQUIRE(cache.save(file));
   hash_cache reloaded;
   REQUIRE(reloaded.load(file));
   CHECK_EQ(reloaded.size(), std::size_t{4});
@@ -378,13 +382,14 @@ TEST_CASE("catalog: the hash cache rehashes only changed files") {
   CHECK_EQ(second.catalog[1].content_hash, fresh.catalog[1].content_hash);
   CHECK(second.catalog[1].content_hash != first.catalog[1].content_hash);
 
-  // Pruning drops entries no scan used since load.
+  // Pruning drops entries no scan used since load, under a folder the scan
+  // read in full.
   fs::remove_all(mods / "111");
   hash_cache pruned;
   REQUIRE(pruned.load(file));
   options.cache = &pruned;
   scan_mods_directory(mods, options);
-  REQUIRE(pruned.save(file, true));
+  REQUIRE(pruned.save(file, {mods}));
   hash_cache after;
   REQUIRE(after.load(file));
   CHECK_EQ(after.size(), std::size_t{2});
@@ -397,7 +402,7 @@ TEST_CASE("catalog: the hash cache rehashes only changed files") {
   fs::remove_all(dir);
 }
 
-TEST_CASE("catalog: a cancelled scan stops between folders") {
+TEST_CASE("catalog: a cancelled scan stops between files") {
   const fs::path dir = fresh_dir("cancel");
   for (const char *id : {"1", "2", "3"}) {
     write_bytes(dir / id / "zone" / "workshop.json",
@@ -407,6 +412,7 @@ TEST_CASE("catalog: a cancelled scan stops between folders") {
   std::atomic<bool> cancel = false;
   scan_options options;
   options.cancel = &cancel;
+  options.hash_threads = 1; // one file at a time: the cancel lands in order
   options.progress = [&](std::size_t index, std::size_t, const std::string &) {
     if (index == 1) {
       cancel = true;

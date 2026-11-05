@@ -18,9 +18,13 @@ struct exe_facts {
   std::string sha256;          // lower-case hex
 };
 
-// Reads the PE header and hashes the file in pieces.
+class hash_cache;
+
+// Reads the PE header and hashes the file in pieces, through cache when one
+// is given (its size and write time unchanged: no read at all).
 std::optional<exe_facts> read_exe_facts(const std::filesystem::path &exe,
-                                        std::string *error = nullptr);
+                                        std::string *error = nullptr,
+                                        hash_cache *cache = nullptr);
 
 enum class build_status { supported, upstream_only, unsupported };
 

@@ -107,10 +107,16 @@ bool make_junction(const std::filesystem::path &link,
   CloseHandle(dir);
   return ok != FALSE;
 }
+
+// bench_hash.cpp: the hashing micro-benchmark, only with --bench-hash.
+int run_hash_bench(int argc, char **argv);
 } // namespace xerces_tests
 
 int main(int argc, char **argv) {
   using namespace xerces_tests;
+  if (argc > 1 && std::string_view(argv[1]) == "--bench-hash") {
+    return run_hash_bench(argc, argv);
+  }
   const std::string_view filter = argc > 1 ? argv[1] : "";
   int failed_tests = 0;
   int run = 0;

@@ -156,7 +156,7 @@ const char *to_string(preflight_verdict verdict) {
 }
 
 std::optional<exe_facts> read_exe_facts(const std::filesystem::path &exe,
-                                        std::string *error) {
+                                        std::string *error, hash_cache *cache) {
   const auto fail = [&](std::string why) -> std::optional<exe_facts> {
     if (error != nullptr) {
       *error = std::move(why);
@@ -189,7 +189,9 @@ std::optional<exe_facts> read_exe_facts(const std::filesystem::path &exe,
     return fail("not a Windows executable (PE header missing)");
   }
   facts.size = static_cast<std::uint64_t>(size);
-  facts.sha256 = file_sha256_hex(exe);
+  // An empty hash (the file could not be read in full) matches no build.
+  facts.sha256 = cache != nullptr ? cache->file_sha256(exe).value_or("")
+                                  : file_sha256_hex(exe);
   return facts;
 }
 

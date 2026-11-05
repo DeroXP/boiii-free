@@ -17,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -93,6 +94,12 @@ public:
   // given, replace the profile's list (a culprit-search test launch).
   xerces_core::plan resolve(const std::string &mode,
                             const std::vector<std::string> *mods = nullptr) const;
+  // How long resolve() took, over every call so far (launcher.activity).
+  struct resolve_timing {
+    std::size_t count = 0;
+    double total_ms = 0, max_ms = 0;
+  };
+  resolve_timing resolve_stats() const { return resolve_stats_; }
   xerces_core::plan_request request_for(const std::string &mode) const;
   // The game's launcher_settings.json (read on every call: Settings edits
   // it), as text for plan requests and as the client's pool settings.
@@ -165,14 +172,26 @@ private:
                                     const std::optional<std::string> &connect,
                                     const std::vector<std::string> *mods) const;
   void load_config();
+  // The scan worker's body (refresh): the cache, detection, the pre-flight
+  // next to the catalog scan, the save; posts finish_scan.
+  void run_refresh(const fs::path &cache_file,
+                   std::shared_ptr<std::atomic<bool>> cancel, bool detect,
+                   std::optional<std::string> saved_dir,
+                   std::optional<game_state> known, unsigned hash_threads);
+  // What the worker posts instead when run_refresh threw: an error in the
+  // catalog's diagnostics and the log, never std::terminate.
+  void fail_refresh(bool detect, std::string_view what);
   void finish_scan(std::shared_ptr<catalog_state> result);
   void save_culprit();
   // Records the result of a culprit test launch that has ended.
   void settle_culprit_test(bool crashed);
   // poll() without a process handle: watches <home>\run.
   void watch_run_folder();
-  game_state detect_now(const std::optional<std::string> &saved_dir) const;
+  game_state detect_now(const std::optional<std::string> &saved_dir,
+                        bool preflight, xerces_core::hash_cache *cache) const;
   void apply_detection(game_state next);
+  // launcher.catalog.scanned, with the hashing throughput.
+  void log_scan(const catalog_state &scan) const;
 
   launcher_paths paths_;
   poster post_;
@@ -201,5 +220,6 @@ private:
   bool game_was_live_ = false; // a game was in <home>\run at the last check
   std::optional<xerces_core::culprit_progress> culprit_;
   std::uint64_t culprit_rev_ = 1;
+  mutable resolve_timing resolve_stats_;
 };
 } // namespace xerces_launcher

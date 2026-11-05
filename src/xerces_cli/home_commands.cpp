@@ -133,25 +133,32 @@ void read_config(home_view &out) {
 }
 
 // <home> as Xerces.exe reads it: launcher.json, then (when asked) the game,
-// its pre-flight check and the catalog with the hash cache.
+// its pre-flight check and the catalog, both through the hash cache.
 home_view open_home(const arguments &args, bool detect, bool preflight,
                     bool scan) {
   home_view out;
   out.paths = find_paths(home_override(args));
   read_config(out);
-  if (detect || scan) {
-    out.game =
-        detect_game_state(out.config.game_dir, out.paths.compat, preflight);
+  if (!detect && !scan) {
+    return out;
   }
+  const fs::path cache_file = out.paths.hash_cache_file();
+  hash_cache cache;
+  const hash_cache_opened opened = open_hash_cache(cache, cache_file);
+  out.game = detect_game_state(out.config.game_dir, out.paths.compat, preflight,
+                               &cache);
   if (scan) {
-    const fs::path cache = out.paths.cache / "hashes.txt";
-    std::error_code ec;
-    if (out.game.dir && !fs::exists(cache, ec)) {
+    if (out.game.dir && opened.version == 0 && !opened.seed) {
       std::cerr << "There is no hash cache in " << utf8(out.paths.cache)
                 << " yet: this first scan reads every file of the Workshop "
-                   "folder (minutes for a large one).\n";
+                   "folder (a minute or more for a large one). "
+                   "XERCES_HASH_CACHE can name another home to start "
+                   "from.\n";
     }
     out.catalog = scan_catalog(out.game, cache);
+    save_hash_cache(cache, cache_file, out.catalog);
+  } else if (cache.misses() > 0) {
+    cache.save(cache_file); // BlackOps3.exe was hashed: keep it
   }
   return out;
 }
@@ -944,7 +951,7 @@ int cmd_packs_apply(const arguments &args) {
   }
   // The catalog for the check afterwards; its first scan can take minutes.
   home.game = detect_game_state(home.config.game_dir, home.paths.compat, false);
-  home.catalog = scan_catalog(home.game, home.paths.cache / "hashes.txt");
+  home.catalog = scan_catalog(home.game, home.paths.hash_cache_file());
 
   // From the read to the write, the launcher's mutex (see cmd_mods_edit).
   const launcher_home_lock lock(home.paths.home);

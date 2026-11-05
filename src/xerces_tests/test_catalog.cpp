@@ -100,7 +100,7 @@ TEST_CASE("catalog: a file held without shared reads is never cached") {
     CHECK(scan.diags.has("catalog.file.unreadable"));
     REQUIRE_EQ(scan.catalog.size(), std::size_t{1});
     CHECK(scan.catalog[0].content_hash != real.catalog[0].content_hash);
-    CHECK(cache.save(cache_file, false));
+    CHECK(cache.save(cache_file));
     CloseHandle(held);
   }
 
@@ -150,12 +150,15 @@ TEST_CASE("catalog: a failed read written down by an older build is dropped") {
   };
   const fs::path file = dir / "cache" / "hashes.txt";
 
-  // A version 1 cache is not trusted at all.
+  // A version 1 cache is migrated, with the same rule: the failed read is
+  // dropped and the file is read again.
   write_bytes(file, "xerces.hashcache/1\n" + line(ff, bytes.size()));
   hash_cache old;
-  CHECK(!old.load(file));
+  CHECK(old.load(file));
+  CHECK_EQ(old.loaded_version(), 1);
   CHECK_EQ(old.size(), std::size_t{0});
   CHECK_EQ(old.file_sha256(ff).value_or(""), sha256::hex(bytes));
+  CHECK_EQ(old.misses(), std::size_t{1});
 
   // In a current cache, the empty-input hash for a file with bytes in it is
   // skipped; for an empty file it is that file's real hash and stays.

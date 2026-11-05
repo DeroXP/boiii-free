@@ -13,6 +13,8 @@ can show (docs/DESIGN.md 15.3 and 15.4). The checklist grows every milestone.
 | Benchmark: frame statistics, Welch, TOST, the bootstrap, the probe/PresentMon/console/log readers; `bench` on small logs and CSVs                                | `tools\build.ps1 -Tests`                                       | the same                      |
 | Signature registry against a stored dump (`compat/signatures.json`)                                                                                              | `xerces_cli sig check --dump C:\Users\Ginld\XercesDev\dumps`   | a dump on this PC             |
 | Pre-flight check of the installed game against `compat/builds.json`                                                                                              | `xerces_cli game check`                                        | the game on this PC           |
+| Hashing micro-benchmark: disk read speed apart from hashing speed, the portable code against CNG, files hashed 1 to 6 at once (reads only)                       | `xerces_tests --bench-hash <file>...`                          | large files (Workshop)        |
+| Launcher start times: 20 dry starts and one through the boot screen, summarized from the launcher log                                                            | `tools\dev\bench\launcher-bench.ps1`                           | a seeded home                 |
 | Backend: auth, rate limits, privacy, migrations                                                                                                                  | `cd backend` then `pytest -q`                                  | Python 3.12+                  |
 | Formatting: prettier, clang-format, stylua                                                                                                                       | `yarn run check`, `clang-format --dry-run`, `stylua --check .` | Node, LLVM, StyLua            |
 
@@ -471,6 +473,7 @@ Run on 2026-11-05 by Claude on your PC while you were away (dry launches only):
 - [x] The game was found and its build called supported; the catalog read 17
       Workshop items. The first scan of the 59 GB Workshop folder took 195 s;
       with the hash cache (`<home>\cache\hashes.txt`) a rescan takes 0.09 s.
+      (The first scan took 10.4 s after the launcher speed work below.)
 - [x] Launch modded with the D3 stack builds
       `-launch -nointro -xerces-plan <id> +set fs_game 1944930083 +set fs_extramods 3171632315,3656779213`,
       the command D3 ran in the game, and writes the plan file.
@@ -513,6 +516,64 @@ what still needs you:
       `%LOCALAPPDATA%\boiii\user` is opened.
 - [ ] Diagnostics: "Verify with Steam" opens Steam's file check; Copy report
       pastes a report with `%USERPROFILE%` instead of your folder.
+
+### Launcher speed (2026-11-05)
+
+DESIGN.md 12.6 has the numbers and what changed. Nothing here starts the game:
+`Xerces.exe` runs with `--dry-launch` only, and Workshop files are only read.
+
+- `tools\dev\bench\launcher-bench.ps1 -Runs 20 -HomeDir C:\Users\Ginld\XercesHome-bench`
+  starts
+  `Xerces.exe --home <home> --dry-launch --skip-boot --view home --seconds 2` 20
+  times, then once without `--skip-boot` for the boot screen, and prints the
+  median, p90, mean and a 95% interval of every startup mark and measured event.
+  `-Exe` runs another build (keep the old one as `Xerces-old.exe` next to the
+  new one for before and after; it finds `data\` the same way), and `-Label`
+  names the JSON saved in `<home>\bench`. Seed the home first by copying another
+  home's `cache\hashes.txt` and `config\launcher.json` into it (never write into
+  the other home). `-FreshScan` times one scan with no cache in `<home>-fresh`:
+  it reads the whole Workshop folder (63 GB here), so it never runs by default
+  and never right before load benchmarks.
+- `build\bin\x64\Release\xerces_tests.exe --bench-hash [--threads 1,2,4,6] <file>...`
+  on a few large Workshop files: the portable code and CNG on 1 GiB in memory,
+  the disk unbuffered (1 to 6 files at once), a buffered read twice (the second
+  from the file cache), then the files hashed by the scan's code, by the
+  portable code, and by CNG 1 to 6 at once. The files are opened for reading
+  only. For before and after, build the old `xerces_tests.exe` with the
+  benchmark first (the "before" numbers in DESIGN.md 12.6 are
+  `try_file_sha256_hex` at fcfa9f01).
+- `XERCES_TEST_V1_CACHE=<a version 1 hashes.txt>` with
+  `xerces_tests "real version 1"` migrates a copy of a real version 1 cache and
+  checks that every line survives; the file named is never written.
+- The launcher's log events for this: `launcher.view.loaded` (ms per screen
+  document), `launcher.view.shown` (ms spent in `show`),
+  `launcher.services.resolve` (debug, ms per plan resolve),
+  `launcher.refresh.timing` (cache load, detection, pre-flight, scan and cache
+  save, in ms), `launcher.catalog.scanned` (with per-file and overall MB/s, the
+  slowest file and the threads), and `launcher.activity` every minute and at
+  exit (frames presented per minute in front, behind, minimized and while a game
+  runs, and the resolve totals). With `--seconds` the loop never waits, so the
+  benchmark's frame counts are an upper bound, not what a player's launcher
+  draws.
+
+Run on 2026-11-05 by Claude (no game running, dry launches only):
+
+- [x] 20 dry starts before and after: the game detected 322 ms after start
+      before, 54 ms after (medians); the catalog ready at 409 and 214 ms; the
+      first frame at 224 ms both times. Through the boot screen Home shows at
+      675 and 682 ms (the 650 ms floor).
+- [x] One scan with no cache: 63.3 GB in 10.4 s (6.1 GB/s, six files at once;
+      the 9.0 GB file took 8.7 s), against 195 s before. Every file's hash
+      equals the one cached in `XercesHome-maps`, and the 17 content hashes and
+      the plan id (`sha256:7fb8e51e...`) are unchanged.
+- [x] `C:\Users\Ginld\XercesHome\cache\hashes.txt` (version 1) migrates line for
+      line (on a copy).
+- [x] After review: `XERCES_HASH_CACHE` naming a version 2 file whose one line
+      ends in `caf\xC3.ff` (cut inside a character) no longer fails
+      `xerces_cli mods list --home C:\Users\Ginld\XercesHome-bench` (exit 0, as
+      with a valid "é"), and `Xerces.exe --dry-launch` on that home reads its 17
+      items instead of ending in `std::terminate`. Its scan event reports 686
+      hits, without BlackOps3.exe.
 
 ### Conflict system (M2)
 

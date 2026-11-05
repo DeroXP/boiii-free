@@ -109,6 +109,34 @@ launcher_paths find_paths(const std::optional<fs::path> &home_override,
   return out;
 }
 
+std::optional<fs::path> hash_cache_seed_file(const fs::path &own_cache_file) {
+  const auto named = env_path(L"XERCES_HASH_CACHE");
+  if (!named || named->empty()) {
+    return std::nullopt;
+  }
+  std::error_code ec;
+  std::optional<fs::path> found;
+  if (fs::is_directory(*named, ec)) {
+    for (const fs::path &file :
+         {*named / "cache" / "hashes.txt", *named / "hashes.txt"}) {
+      if (fs::is_regular_file(file, ec)) {
+        found = file;
+        break;
+      }
+    }
+  } else if (fs::is_regular_file(*named, ec)) {
+    found = *named;
+  }
+  if (!found) {
+    return std::nullopt;
+  }
+  // The home's own file is never its seed: it is read and saved as itself.
+  if (fs::equivalent(*found, own_cache_file, ec) && !ec) {
+    return std::nullopt;
+  }
+  return fs::absolute(*found, ec);
+}
+
 std::uint32_t launcher_home_hash(const fs::path &home) {
   std::error_code ec;
   fs::path absolute = fs::absolute(home, ec);
