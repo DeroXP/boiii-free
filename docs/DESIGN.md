@@ -3442,8 +3442,10 @@ M5a, which you asked for now.
   (2026-11-05): a profile per game mode, Packs (apply, import and export as a
   file or share code, pins, validation, a config backup before each apply), and
   a pack's decisions (conflicts it allows, per-mod settings) reach the plan;
-  Mods can allow a declared conflict too. Open: rollback from the launcher,
-  Workshop subscriptions, the installer and the release pipeline.
+  Mods can allow a declared conflict too. Tester zips come from
+  `tools/release.ps1` (16.1, in the beta candidate below). Open: rollback from
+  the launcher, Workshop subscriptions, the installer and the public release
+  pipeline.
 - M3: D4 (RmlUi) and D5 (C / Signal) are decided, and the RmlUi spike gate
   passed on 2026-11-05 once the first-frame criterion was restated (7.1): the
   original 150 ms is ruled out on this PC by GPU driver start-up alone. Built
@@ -3469,6 +3471,22 @@ M5a, which you asked for now.
   (D16); right-to-left layout and OpenType-positioned marks for translations
   that need them (7.1); and, from the spike, a physical controller press, vsync
   pacing on a live display, and Proton.
+- The beta candidate (2026-11-05, `launcher/integrate-2` on `xerces-main`
+  0212339c, which already had D9, the second review's fixes, the idle launcher
+  loop, the precise frame limiter and flip-model presentation): the clean-room
+  `str.hpp` and `tlssup.cpp` with the licence and Microsoft notice lints in CI
+  (16.5); HarfBuzz text shaping (7.1); crash reports, on by default (D21, 5.10,
+  `docs/CRASH_REPORTS.md`); the tester package, version `0.1.0-beta.1`, from
+  `tools/release.ps1` with `THIRD_PARTY_NOTICES.txt`, `SOURCE.txt`, `README.txt`
+  and `KNOWN_ISSUES.txt` (16.1); joining another tester's game with a lobby open
+  to direct connect, the router's port through UPnP and the host's own password
+  check (11.10); push-to-talk on a new game profile (10.5). Checked with unit
+  tests and dry runs only. Open before testers get it: the two-PC test
+  (`docs/TWO_PC_TEST.md`; README.txt says joining is untested until it passes),
+  the in-game checks of crash reports, push-to-talk and the package's data
+  folder (docs/TESTING.md), the backend's crash routes on Railway (until then
+  reports wait in the outbox), and pushing the commit that `SOURCE.txt` and
+  About link to. Code signing (16.4) stays open for the public release.
 
 ---
 

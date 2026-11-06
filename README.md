@@ -27,6 +27,14 @@ zip) and [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
 - **Crash recovery.** After a crash with mods on, Xerces offers to start without
   them, and "Find the culprit" narrows a crash down to one mod.
 - **Packs.** A mod list with its order and settings, shared as a file or a code.
+- **Playing together.** A host opens its lobby to direct connect (the game asks
+  the host's router to forward its port with UPnP), others join by address, and
+  the joiner's game loads the host's mods or names the ones it lacks, with their
+  Workshop pages. A host can ask for a password that its own game checks. Not
+  yet tested on two PCs ([docs/TWO_PC_TEST.md](docs/TWO_PC_TEST.md)).
+- **Crash reports.** On by default, off in Settings > Privacy: a redacted report
+  with a stacks-only dump goes to the Xerces server
+  ([docs/CRASH_REPORTS.md](docs/CRASH_REPORTS.md)).
 - **Diagnostics.** The game build, the mods, logs and crash bundles in one
   place, and a report to paste into a bug report.
 - **Game builds checked.** Xerces starts only Black Ops III builds it knows, and
@@ -68,7 +76,8 @@ Requirements: LLVM 23 (clang and LLD), Ninja, premake 5.0.0, and the Visual
 Studio 2022 Build Tools with the C++ workload and the "C++ ATL for latest v143
 build tools (x86 & x64)" component. The launcher also needs RmlUi 6.3 and
 FreeType 2.14.3 sources in one folder (`rmlui\RmlUi-6.3`,
-`freetype\freetype-2.14.3`); their archives and hashes are in
+`freetype\freetype-2.14.3`), and shapes its text with HarfBuzz 15.0.0 when the
+folder also has `harfbuzz\harfbuzz-15.0.0`; their archives and hashes are in
 [docs/TESTING.md](docs/TESTING.md).
 
 ```

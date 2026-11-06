@@ -41,11 +41,23 @@ to report these again, but tell us if you see them somewhere else or worse.
   while a map was starting, with no crash report, and ran fine the next time. If
   it happens to you, report it (README.txt, Reporting bugs) and say what you did
   just before.
-- **Joining another tester's game is not tested yet.** Joining by address
-  (Servers), the message that names a mod you lack, and playing a custom map
-  together all need a second PC, and none has been tried with Xerces. Xerces
-  does not open a port on your router either (README.txt, Playing with other
-  testers).
+- **Joining another tester's game is not tested yet.** Opening a lobby to direct
+  connect, the router's port (UPnP) and the address it shows, joining by address
+  (Servers), the dialogs that name a mod or map you lack, the network password
+  and playing a custom map together all need a second PC, and none has been
+  tried with Xerces (README.txt, Playing with other testers). Two limits are
+  known: while a lobby is open, anyone who can reach it can join, and a password
+  is checked on the joins Xerces handles but not on the game's own lobby join,
+  so close the lobby when you are done. Whether the router's port closes by
+  itself when you leave the lobby for the main menu is not seen yet; closing the
+  lobby or quitting the game closes it.
+- **Crash reports wait on your PC.** The Xerces server does not take crash
+  reports yet, so they stay in `crash\outbox` in your Xerces folder and Xerces
+  tries again later (README.txt, When the game crashes). Reports older than 7
+  days are removed unsent.
+- **Push-to-talk on a new game profile is not checked in the game yet.** If a
+  new profile starts on open mic, turn on Push to talk in the game's voice
+  options, and tell us.
 - **Some names still say BOIII.** The game program is still called boiii.exe, so
   the Windows firewall prompt says "BOIII", and so does the game's own settings
   menu ("BOIII SETTINGS"). Allow the firewall prompt if you want to host games

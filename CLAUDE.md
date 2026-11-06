@@ -17,6 +17,14 @@ III. Self-hosted and offline play only.
   in-game checks ran through `tools\dev\session\m1-check.ps1 -Live` and all
   passed (docs/TESTING.md, Loader and manifest). DESIGN.md 18 has the status and
   what is open.
+- The beta candidate is `launcher/integrate-2` (xerces-main 0212339c plus the
+  str and TLS clean-room rewrites, HarfBuzz, crash reports, the tester package,
+  joining with UPnP and host-side passwords, and push-to-talk on new profiles).
+  `tools\release.ps1` on a clean committed tree builds, tests and writes
+  `dist\xerces-<version>.zip` (VERSION), its `SHA256SUMS-<version>.txt` and the
+  symbols zip; it never pushes. Checked with tests and dry runs only: the two-PC
+  join test (`docs/TWO_PC_TEST.md`) and the in-game checks are open, and the
+  backend has no crash routes yet, so reports wait in `<home>\crash\outbox`.
 - M0 is under way on `xerces-main`: upstream `beta` f8f7b735 plus `mod-stack`'s
   two commits (conflicts resolved in 6bc02cb4), with the design docs and
   `backend/` merged in (D1). Upstream's updater is disabled (62e28935). D9
@@ -42,7 +50,9 @@ III. Self-hosted and offline play only.
 - `backend/` is backend slice M5a (FastAPI + Postgres), live on Railway. Since
   2026-11-05 the launcher (and `xerces_cli crash send`) sends crash reports to
   it while "Send crash reports" is on (D21, `docs/CRASH_REPORTS.md`); nothing
-  else talks to it yet.
+  else talks to it yet. A dry-launch launcher never sends; for
+  `xerces_cli crash send` in checks, set `XERCES_CRASH_URL` to a stub on
+  127.0.0.1 (only this PC is accepted), never the real service.
 - Work on `xerces-main` happens in the worktree
   `C:\Users\Ginld\XercesDev\xerces-main`, outside OneDrive, so build output and
   `node_modules` are not synced. The OneDrive checkout stays on `xerces-design`.
