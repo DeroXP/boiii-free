@@ -402,6 +402,8 @@ TEST_CASE("shared launcher: launches after a crash leave the precise "
   REQUIRE(out.dry_run);
   CHECK_EQ(out.command_line,
            std::string("-launch -nointro -windowed -xerces-precise-limiter"));
+  CHECK(out.precise_limiter); // what the journal records
+  CHECK(!out.db_pool);
 
   // A culprit-search test runs on the engine's own pacing.
   in.modded = true;
@@ -410,6 +412,7 @@ TEST_CASE("shared launcher: launches after a crash leave the precise "
   in.crash_followup = true;
   out = launch_game(in, [] { return false; }, {});
   REQUIRE(out.dry_run);
+  CHECK(!out.precise_limiter);
   CHECK(out.command_line.find("xerces-precise-limiter") == std::string::npos);
 
   // So does safe mode.
@@ -418,6 +421,7 @@ TEST_CASE("shared launcher: launches after a crash leave the precise "
   in.mods_off = true;
   out = launch_game(in, [] { return false; }, {});
   REQUIRE(out.dry_run);
+  CHECK(!out.precise_limiter);
   CHECK_EQ(out.command_line, std::string("-launch -nointro -windowed"));
 
   // The setting itself stays on.

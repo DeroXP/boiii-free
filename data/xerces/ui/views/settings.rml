@@ -100,7 +100,7 @@
 			<div class="field">
 				<div class="field-text">
 					<div class="field-name">Precise FPS limit (experimental)</div>
-					<div class="field-help">-xerces-precise-limiter: frames start exactly 1000 / limit ms apart (4.17 ms at 240) instead of on the game's whole milliseconds. Spins up to 0.3 ms a frame; no effect at 0. Turn it off if the game stutters. Safe mode always leaves it off.</div>
+					<div class="field-help">-xerces-precise-limiter: frames start 1000 / limit ms apart (4.17 ms at 240) instead of on the game's whole milliseconds. Uses a short spin of about 0.3 ms a frame, sometimes up to 1.3 ms. No effect at 0 or under 20. Turn it off if the game stutters. Safe mode always leaves it off.</div>
 				</div>
 				<button id="precise-limiter" class="toggle" data-class-on="precise_limiter" data-event-click="toggle('precise_limiter')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="precise_limiter">On</span><span class="toggle-state" data-if="!precise_limiter">Off</span></button>
 			</div>

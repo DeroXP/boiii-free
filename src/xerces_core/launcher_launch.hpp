@@ -66,9 +66,11 @@ struct launch_outcome {
   diagnostics diags;
   launch_refusal refusal = launch_refusal::none;
   std::optional<plan> resolved; // a modded launch's plan
-  // The command line passes -xerces-db-pool (larger zone memory); the
-  // journal records it.
+  // The command line passes -xerces-db-pool (larger zone memory) or
+  // -xerces-precise-limiter (the precise frame limiter); the journal records
+  // them.
   bool db_pool = false;
+  bool precise_limiter = false;
 };
 
 struct launch_inputs {
@@ -82,11 +84,13 @@ struct launch_inputs {
   // crash_followup.
   bool mods_off = false;
   // A launch that judges a crash: safe mode, or a culprit-search test (5.6).
-  // It leaves the experimental larger zone memory (-xerces-db-pool) out
-  // whatever the settings say, so safe mode and every test run on the same
-  // stock pool, and a crash the setting causes is never blamed on a mod. The
-  // experimental precise frame limiter (-xerces-precise-limiter) stays out
-  // too.
+  // It leaves the experimental settings out whatever the settings say: the
+  // larger zone memory (-xerces-db-pool), so safe mode and every test run on
+  // the same stock pool, and the precise frame limiter
+  // (-xerces-precise-limiter), so they run the engine's own pacing. The
+  // journal records which of them the crashed launch had, and the culprit
+  // search tests the whole stack without them first, so a crash a setting
+  // causes is never blamed on a mod.
   bool crash_followup = false;
   std::optional<std::string> connect; // "+connect host:port" (Servers)
   // Instead of the profile's (a culprit-search test, with crash_followup).

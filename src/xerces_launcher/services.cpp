@@ -617,18 +617,25 @@ bool services::start_culprit() {
   progress.mode =
       decision.crashed_mode.empty() ? config_.mode : decision.crashed_mode;
   progress.crashed_stack = decision.crashed_stack;
-  // A crashed launch with the larger zone memory has it as a suspect too:
-  // the first test runs the same stack without it.
+  // A crashed launch with an experimental setting has it as a suspect too:
+  // the first test runs the same stack without the settings.
+  progress.settings = xerces_core::crashed_settings(decision);
   progress.search = xerces_core::culprit_search(decision.crashed_stack,
-                                                decision.crashed_with_db_pool);
+                                                !progress.settings.empty());
   culprit_ = std::move(progress);
   save_culprit();
-  log_info("launcher.culprit.start",
-           std::to_string(culprit_->crashed_stack.size()) +
-               (culprit_->crashed_stack.size() == 1 ? " mod" : " mods") +
-               (decision.crashed_with_db_pool ? " and larger zone memory" : ""),
-           std::string("{\"db_pool\":") +
-               (decision.crashed_with_db_pool ? "true" : "false") + "}");
+  std::string settings;
+  for (const auto &name : culprit_->settings) {
+    settings += " and -" + name;
+  }
+  log_info(
+      "launcher.culprit.start",
+      std::to_string(culprit_->crashed_stack.size()) +
+          (culprit_->crashed_stack.size() == 1 ? " mod" : " mods") + settings,
+      std::string("{\"db_pool\":") +
+          (decision.crashed_with_db_pool ? "true" : "false") +
+          ",\"precise_limiter\":" +
+          (decision.crashed_with_precise_limiter ? "true" : "false") + "}");
   return true;
 }
 
@@ -646,8 +653,9 @@ launch_outcome services::launch_culprit_test() {
     return out;
   }
   const std::vector<std::string> mods = culprit_->search.next_test();
-  // Without the larger zone memory, as in safe mode: every test runs on the
-  // stock pool, so a crash the setting causes never narrows the mods.
+  // Without the experimental settings, as in safe mode: every test runs on
+  // the stock pool and the engine's own frame pacing, so a crash a setting
+  // causes never narrows the mods.
   xerces_core::launch_inputs in =
       inputs(culprit_->mode, true, false, std::nullopt, &mods);
   in.crash_followup = true;
@@ -669,8 +677,8 @@ void services::settle_culprit_test(bool crashed) {
   log_info("launcher.culprit.result", crashed ? "crashed" : "ran fine",
            "{\"launches\":" + std::to_string(culprit_->search.launches()) +
                ",\"done\":" + (culprit_->search.done() ? "true" : "false") +
-               ",\"db_pool_culprit\":" +
-               (culprit_->search.db_pool_culprit() ? "true" : "false") + "}");
+               ",\"settings_culprit\":" +
+               (culprit_->search.settings_culprit() ? "true" : "false") + "}");
 }
 
 // --------------------------------------------------------------- signatures

@@ -75,11 +75,11 @@ launch_outcome preview_launch(const launch_inputs &in) {
   std::optional<launcher_config> followup;
   if (in.mods_off || in.crash_followup) {
     // Safe mode and the culprit search's tests follow a crash. The
-    // experimental larger zone memory is a suspect of its own (the journal
-    // says whether the crashed launch had it), so none of them has it,
-    // whatever the settings say: the tests then compare like with like. The
-    // plan is checked against the stock pool too. The experimental precise
-    // frame limiter stays off as well, so they run the engine's own pacing.
+    // experimental settings are suspects of their own (the journal says
+    // which the crashed launch had), so none of them has one, whatever the
+    // settings say: the tests then compare like with like. The plan is
+    // checked against the stock pool, and they run the engine's own frame
+    // pacing.
     followup = *in.config;
     followup->extra_flags =
         with_flag(std::move(followup->extra_flags), db_pool::flag_name, false);
@@ -119,6 +119,7 @@ launch_outcome preview_launch(const launch_inputs &in) {
   out.diags.append(command.diags);
   out.command_line = command.command_line;
   out.db_pool = db_pool::requested(command.args);
+  out.precise_limiter = frame_pacing::requested(command.args);
   if (!command.ok()) {
     out.message = command.diags.items().empty()
                       ? "The launch command could not be built."
@@ -280,6 +281,7 @@ launch_outcome launch_game(const launch_inputs &in,
   journal.mode = in.mode;
   journal.launch_id = new_launch_id();
   journal.db_pool = out.db_pool;
+  journal.precise_limiter = out.precise_limiter;
   if (out.resolved) {
     const plan &resolved = *out.resolved;
     out.plan_file = paths.plans / (plan_file_id(resolved.plan_id) + ".json");

@@ -8,8 +8,11 @@
 // added: the pacer runs inside two hooks that already exist.
 //
 // Every 30 s the main pipeline takes the counters and the async pipeline
-// logs them (xerces.frame_pacing.stats), so a test run shows how often the
-// engine's check still missed a step and how long the pacer spun.
+// logs them (xerces.frame_pacing.stats), so a test run shows how close to
+// their deadlines frames were let go, how often the engine's check still
+// missed a step and how long the pacer spun. The line comes every 30 s even
+// when nothing was paced (com_maxfps 0), so a tester can see the pacer is on
+// and which com_maxfps it read.
 
 #include <timeapi.h>
 
@@ -54,16 +57,25 @@ public:
   // Sys_Milliseconds is timeGetTime() minus its first value.
   std::uint32_t engine_ms() { return timeGetTime(); }
 
-  void sleep(const std::int64_t ticks) {
-    wait_100ns(ticks * 10'000'000 / freq_);
+  // False when the timer could not wait: the pacer then spins instead.
+  bool sleep(const std::int64_t ticks) {
+    return wait_100ns(ticks * 10'000'000 / freq_);
   }
 
   void pause() { YieldProcessor(); }
 
   // What upstream's frame_limiter_sleep does: the same wait on a
-  // high-resolution timer.
-  void upstream_wait(const std::uint32_t ms) {
-    wait_100ns(static_cast<std::int64_t>(ms) * 10'000);
+  // high-resolution timer. When the timer fails, spins for the rest.
+  bool upstream_wait(const std::uint32_t ms) {
+    const std::int64_t until =
+        now() + static_cast<std::int64_t>(ms) * freq_ / 1'000;
+    if (wait_100ns(static_cast<std::int64_t>(ms) * 10'000)) {
+      return true;
+    }
+    while (now() < until) {
+      YieldProcessor();
+    }
+    return false;
   }
 
   int maxfps() {
@@ -74,11 +86,24 @@ public:
   }
 
 private:
-  void wait_100ns(const std::int64_t units) {
+  // A timer that was not set never signals, so the result of setting it is
+  // checked, and the wait has a limit: twice the time asked for plus 5 ms. A
+  // wait past that cancels the timer and takes a signal that came in
+  // between, so the next wait does not end early.
+  bool wait_100ns(const std::int64_t units) {
+    const std::int64_t wait = std::max<std::int64_t>(units, 1);
     LARGE_INTEGER due{};
-    due.QuadPart = -std::max<std::int64_t>(units, 1);
-    SetWaitableTimer(timer_, &due, 0, nullptr, nullptr, FALSE);
-    WaitForSingleObject(timer_, INFINITE);
+    due.QuadPart = -wait;
+    if (!SetWaitableTimer(timer_, &due, 0, nullptr, nullptr, FALSE)) {
+      return false;
+    }
+    const auto limit_ms = static_cast<DWORD>(wait * 2 / 10'000 + 5);
+    if (WaitForSingleObject(timer_, limit_ms) != WAIT_OBJECT_0) {
+      CancelWaitableTimer(timer_);
+      WaitForSingleObject(timer_, 0);
+      return false;
+    }
+    return true;
   }
 
   HANDLE timer_ = nullptr;
@@ -91,9 +116,6 @@ std::optional<core::pacer<platform>> the_pacer;
 
 void report() {
   const core::counters c = the_pacer->take_stats();
-  if (c.frames == 0 && c.tick_waits == 0 && c.upstream_waits == 0) {
-    return;
-  }
   std::string data =
       core::counters_json(c, the_platform.freq(), the_platform.maxfps());
   scheduler::once(
@@ -135,7 +157,8 @@ public:
     detail::armed.store(true, std::memory_order_release);
     xerces_runtime::log_info(
         "xerces.frame_pacing.on",
-        "Precise frame limiter on: frames start one com_maxfps period apart",
+        "Precise frame limiter on: frames start one com_maxfps period apart "
+        "(com_maxfps 20 and up)",
         "{\"qpc_freq\":" + std::to_string(the_platform.freq()) + "}");
     scheduler::loop(report, scheduler::main, 30s);
   }

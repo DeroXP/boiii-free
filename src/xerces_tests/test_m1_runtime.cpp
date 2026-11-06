@@ -405,12 +405,12 @@ TEST_CASE(
     return db_pool;
   };
   culprit_search search(decision.crashed_stack, decision.crashed_with_db_pool);
-  CHECK(search.testing_db_pool());
+  CHECK(search.testing_settings());
   CHECK(search.next_test() == decision.crashed_stack);
   while (!search.done()) {
     search.record(crashes(search.next_test(), false));
   }
-  CHECK(search.db_pool_culprit());
+  CHECK(search.settings_culprit());
   CHECK(!search.culprit().has_value());
   CHECK(!search.needs_combination());
   CHECK_EQ(search.launches(), 1u);
@@ -421,6 +421,75 @@ TEST_CASE(
   const safe_mode_decision plain = decide_safe_mode(journal);
   CHECK(!plain.crashed_with_db_pool);
   CHECK(plain.message.find("zone memory") == std::string::npos);
+}
+
+TEST_CASE("safe mode: a crash the precise FPS limit causes is not blamed on "
+          "a mod") {
+  // The precise frame limiter on with three mods, and it hangs or crashes
+  // the game whatever the mods load.
+  launch_journal journal;
+  journal.plan_id = "sha256:abc";
+  journal.stack = {"a", "b", "c"};
+  journal.mode = "zm";
+  journal.precise_limiter = true;
+  const std::string text = journal_to_json(journal);
+  const auto back = parse_journal(text);
+  REQUIRE(back.has_value());
+  CHECK(back->precise_limiter);
+  CHECK(!back->db_pool);
+  CHECK_EQ(journal_to_json(*back), text);
+  const safe_mode_decision decision = decide_safe_mode(back);
+  REQUIRE(decision.safe_mode);
+  CHECK(decision.crashed_with_precise_limiter);
+  CHECK(!decision.crashed_with_db_pool);
+  CHECK(decision.message.find("precise FPS limit") != std::string::npos);
+  CHECK(decision.message.find("Settings > Display") != std::string::npos);
+  CHECK(decision.message.find("zone memory") == std::string::npos);
+  CHECK((crashed_settings(decision) ==
+         std::vector<std::string>{"xerces-precise-limiter"}));
+  CHECK(culprit_search_possible(decision));
+
+  // Every test runs without the setting, so the first one, the whole stack,
+  // runs fine: the setting is the culprit, no mod is. Without that step the
+  // halves would both run fine and the mods would be called a combination.
+  const auto crashes = [](const std::vector<std::string> &, bool limiter) {
+    return limiter;
+  };
+  culprit_search search(decision.crashed_stack,
+                        !crashed_settings(decision).empty());
+  CHECK(search.testing_settings());
+  CHECK(search.next_test() == decision.crashed_stack);
+  while (!search.done()) {
+    search.record(crashes(search.next_test(), false));
+  }
+  CHECK(search.settings_culprit());
+  CHECK(!search.culprit().has_value());
+  CHECK(!search.needs_combination());
+  CHECK_EQ(search.launches(), 1u);
+
+  // One mod and the setting are two suspects.
+  safe_mode_decision one = decision;
+  one.crashed_stack = {"a"};
+  CHECK(culprit_search_possible(one));
+  one.crashed_with_precise_limiter = false;
+  CHECK(!culprit_search_possible(one));
+
+  // Both settings: one step leaves both out, and the message names both.
+  journal.db_pool = true;
+  const safe_mode_decision both = decide_safe_mode(journal);
+  CHECK(both.crashed_with_db_pool);
+  CHECK(both.crashed_with_precise_limiter);
+  CHECK((crashed_settings(both) ==
+         std::vector<std::string>{"xerces-db-pool", "xerces-precise-limiter"}));
+  CHECK(both.message.find("larger zone memory and the precise FPS limit") !=
+        std::string::npos);
+
+  // A journal from before the field reads as without it.
+  const auto older =
+      parse_journal(R"({"schema":1,"plan_id":"sha256:abc","stack":["a"],)"
+                    R"("phase":"in_game","db_pool":false})");
+  REQUIRE(older.has_value());
+  CHECK(!older->precise_limiter);
 }
 
 TEST_CASE(
@@ -434,7 +503,7 @@ TEST_CASE(
     tested.push_back(search.next_test());
     search.record(crashes(tested.back()));
   }
-  CHECK(search.db_pool() == db_pool_suspect::cleared);
+  CHECK(search.settings_step() == settings_suspect::cleared);
   REQUIRE(search.culprit().has_value());
   CHECK_EQ(*search.culprit(), "c");
   REQUIRE(!tested.empty());
@@ -452,7 +521,7 @@ TEST_CASE(
   culprit_search fine({"a"}, true);
   fine.record(false);
   CHECK(fine.done());
-  CHECK(fine.db_pool_culprit());
+  CHECK(fine.settings_culprit());
   CHECK(!fine.culprit().has_value());
 
   safe_mode_decision decision;

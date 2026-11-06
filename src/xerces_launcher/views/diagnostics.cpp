@@ -661,12 +661,16 @@ private:
     row("Updated", journal->updated.empty() ? "-" : journal->updated);
     row("Mods off", owner_->tr(journal->safe_mode ? "Yes (safe mode)" : "No"),
         false);
-    // The experimental setting is a suspect of its own when that launch
-    // crashed (5.4, 5.6).
+    // The experimental settings are suspects of their own when that launch
+    // crashed (5.4, 5.6, 12.4).
     row("Larger zone memory",
         journal->db_pool ? owner_->tr("On (-xerces-db-pool)")
                          : owner_->tr("Off"),
         false, journal->db_pool && decision.safe_mode);
+    row("Precise FPS limit",
+        journal->precise_limiter ? owner_->tr("On (-xerces-precise-limiter)")
+                                 : owner_->tr("Off"),
+        false, journal->precise_limiter && decision.safe_mode);
     row("Safe mode next",
         owner_->tr(decision.safe_mode ? "Suggested" : "Not needed"), false,
         decision.safe_mode);
@@ -898,6 +902,7 @@ private:
           {"Updated", journal->updated},
           {"Mods off", journal->safe_mode ? "yes" : "no"},
           {"Larger zone memory", journal->db_pool ? "on" : "off"},
+          {"Precise FPS limit", journal->precise_limiter ? "on" : "off"},
       };
       for (std::size_t i = 0; i < journal->stack.size(); ++i) {
         launch.lines.push_back(two_digits(i + 1) + "  " + journal->stack[i]);
