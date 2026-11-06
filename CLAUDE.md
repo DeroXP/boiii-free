@@ -19,12 +19,15 @@ III. Self-hosted and offline play only.
   what is open.
 - M0 is under way on `xerces-main`: upstream `beta` f8f7b735 plus `mod-stack`'s
   two commits (conflicts resolved in 6bc02cb4), with the design docs and
-  `backend/` merged in (D1). Upstream's updater and the `-beta` self-download
-  are disabled (62e28935). The whole client builds (2761e2d8, after the ATL
-  component was added on 2026-11-04). The supervised session (D3) ran on
-  2026-11-04 with 815545d3: vanilla, one Workshop mod and a three-mod stack
-  reach the menu, and the stack survives a match and a main-mod switch
-  (`docs/TESTING.md`).
+  `backend/` merged in (D1). Upstream's updater is disabled (62e28935). D9
+  (decided by the user on 2026-11-05: remove) took out the archive.org exe swap,
+  the old launcher's version picker and Patches tab, and the `-beta`
+  self-download (`-beta` is accepted and ignored); an official map the game
+  lacks gets the DLC notice (`src/xerces_core/missing_dlc`), which opens the
+  Steam store page. The whole client builds (2761e2d8, after the ATL component
+  was added on 2026-11-04). The supervised session (D3) ran on 2026-11-04 with
+  815545d3: vanilla, one Workshop mod and a three-mod stack reach the menu, and
+  the stack survives a match and a main-mod switch (`docs/TESTING.md`).
 - The headless core builds and its tests pass: manifests, the planner, merges,
   conflict rules, hook chains, packs and share codes, logs, and the CLI's
   offline commands (`src/xerces_core`, `src/xerces_tests`, `src/xerces_cli`).
