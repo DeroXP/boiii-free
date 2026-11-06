@@ -346,7 +346,10 @@ bus with small, mechanical diffs. Until the bus exists,
 and flip model call into it), and with `-xerces-flip-model`
 `IDXGIFactory::CreateSwapChain` and `IDXGISwapChain::ResizeBuffers` are detoured
 by `xerces_flip` (12.4 item 4); a second user goes through them. Demonware's
-import-table hooks are not moved (11.2).
+import-table hooks are not moved (11.2). A second detour on a taken address
+fails (`MH_ERROR_ALREADY_CREATED`); `utils::hook::detour::create` then leaves
+its detour empty, so clearing it afterwards never removes the first owner's hook
+and its trampoline.
 
 ### 3.5 Paths and data
 
@@ -2118,7 +2121,20 @@ The first load and launcher baseline from existing logs is in
      (vtable slot 10 of a factory made at `post_unpack`, before the renderer
      starts) and `IDXGISwapChain::ResizeBuffers` (slot 13 of the download
      overlay's dummy chain). Present stays the overlay's one detour. Chains are
-     changed only once both detours are in place.
+     changed only once all three are in place.
+   - Start-up order. The overlay makes its Present hook on the async scheduler
+     thread, queued from its own `post_unpack`. That `post_unpack` runs well
+     before flip model's (same priority, so link order): in the 2026-11-05 bench
+     runs about 130 to 160 ms before, while the setup takes about 16 ms. So in
+     the game the Present hook is normally in place first. The overlay therefore
+     always hands over its dummy chain's ResizeBuffers address (dxgi.dll stays
+     loaded, so the address outlives the dummy), and whichever of the two steps
+     comes second installs the ResizeBuffers detour
+     (`xerces_core::flip_model::arming`, unit-tested in both orders). A detour
+     that fails stays `hook_failed` with its error; it is never reported as
+     `hooks_not_ready` later. (The first build armed in the overlay's step only,
+     which saw the flag as not asked for yet, so in the game it would never have
+     flipped a chain.)
    - The rules (`src/xerces_core/flip_model.*`, unit-tested): only DISCARD
      changes, and only with 2 to 16 buffers, no multisampling, a format flip
      model takes (R8G8B8A8_UNORM, B8G8R8A8_UNORM, R16G16B16A16_FLOAT,
@@ -2150,12 +2166,14 @@ The first load and launcher baseline from existing logs is in
      only the output-merger targets need this.
    - The download overlay's ImGui draws before Present into the targets the
      engine left bound, as before.
-   - Logs: `xerces.flip_model.armed` at start-up; `xerces.flip_model` once for
-     each chain the game makes (what was asked, what was made, the reason,
-     tearing; info when applied, warn when not);
-     `xerces.flip_model.resize_failed` and `xerces.flip_model.tearing_refused`
-     once each if they happen. `perf.swapchain` and the probe's flags show the
-     result (12.2).
+   - Logs: `xerces.flip_model.armed` at start-up once all three detours are in
+     place, with `armed_by` the step that came last (`post_unpack` normally,
+     `present_hook` if the overlay was slower; `xerces.flip_model.waiting` is
+     logged first then); `xerces.flip_model` once for each chain the game makes
+     (what was asked, what was made, the reason, tearing; info when applied,
+     warn when not); `xerces.flip_model.resize_failed` and
+     `xerces.flip_model.tearing_refused` once each if they happen.
+     `perf.swapchain` and the probe's flags show the result (12.2).
    - Safe mode and the culprit search's tests leave the flag out
      (`preview_launch`), like the larger zone memory. The journal does not
      record it, so the culprit search never suspects it.

@@ -329,3 +329,94 @@ TEST_CASE("flip model: perf.swapchain shows the effective swap effect") {
   CHECK(contains(text, "\"engine_swap_effect_name\":\"discard\""));
   CHECK(contains(text, "\"engine_flags\":\"0x2\""));
 }
+
+TEST_CASE("flip model: arming works in either start-up order") {
+  // The usual order in the game: the overlay's Present hook (async thread)
+  // ends before this component's post_unpack. post_unpack then installs
+  // ResizeBuffers itself.
+  flip::arming usual;
+  CHECK(!flip::arm_present_hook(usual)); // the flag is not known yet
+  CHECK(flip::not_armed(usual) == flip::outcome::hooks_not_ready);
+  CHECK(flip::arm_create_hook(usual, true));
+  CHECK(usual.armed_by == flip::arm_step::create_hook);
+  CHECK(flip::not_armed(usual) == flip::outcome::hooks_not_ready);
+  CHECK_EQ(flip::missing(usual),
+           std::string("the ResizeBuffers detour is not in place yet"));
+  flip::arm_resize_hook(usual, true);
+  CHECK(!flip::not_armed(usual));
+  CHECK(flip::missing(usual).empty());
+  CHECK_EQ(flip::to_string(*usual.armed_by), std::string_view("post_unpack"));
+
+  // The other order: post_unpack first, the Present hook installs it.
+  flip::arming late;
+  CHECK(!flip::arm_create_hook(late, true));
+  CHECK(flip::not_armed(late) == flip::outcome::hooks_not_ready);
+  CHECK_EQ(flip::missing(late),
+           std::string("the overlay's Present detour is not in place"));
+  CHECK(flip::arm_present_hook(late));
+  CHECK(late.armed_by == flip::arm_step::present_hook);
+  flip::arm_resize_hook(late, true);
+  CHECK(!flip::not_armed(late));
+  CHECK_EQ(flip::to_string(*late.armed_by), std::string_view("present_hook"));
+
+  // Handed out once only, whatever comes again.
+  CHECK(!flip::arm_present_hook(late));
+  CHECK(!flip::arm_create_hook(late, true));
+}
+
+TEST_CASE("flip model: arming never flips without every detour") {
+  // Without the flag post_unpack never arms: the Present hook alone does
+  // nothing.
+  flip::arming off;
+  CHECK(!flip::arm_present_hook(off));
+  CHECK(!off.resize_due);
+  CHECK(flip::not_armed(off) == flip::outcome::hooks_not_ready);
+
+  // The overlay's setup failed (no Present hook): never armed, and the
+  // report says what is missing.
+  flip::arming no_present;
+  CHECK(!flip::arm_create_hook(no_present, true));
+  CHECK(flip::not_armed(no_present) == flip::outcome::hooks_not_ready);
+  CHECK(contains(flip::missing(no_present), "Present"));
+
+  // CreateSwapChain could not be detoured: the Present hook does not arm,
+  // and the failure is kept.
+  flip::arming no_create;
+  CHECK(!flip::arm_create_hook(no_create, false,
+                               "CreateSwapChain: already been hooked"));
+  CHECK(!flip::arm_present_hook(no_create));
+  CHECK(flip::not_armed(no_create) == flip::outcome::hook_failed);
+  CHECK_EQ(flip::missing(no_create),
+           std::string("CreateSwapChain: already been hooked"));
+
+  // ResizeBuffers failed: hook_failed stays, never hooks_not_ready.
+  flip::arming no_resize;
+  CHECK(!flip::arm_present_hook(no_resize));
+  CHECK(flip::arm_create_hook(no_resize, true));
+  flip::arm_resize_hook(no_resize, false,
+                        "ResizeBuffers: MH_ERROR_MEMORY_ALLOC");
+  CHECK(flip::not_armed(no_resize) == flip::outcome::hook_failed);
+  CHECK(!no_resize.resize_hooked);
+  CHECK_EQ(flip::missing(no_resize),
+           std::string("ResizeBuffers: MH_ERROR_MEMORY_ALLOC"));
+  // A later step does not hand it out again or hide the failure.
+  CHECK(!flip::arm_present_hook(no_resize));
+  CHECK(flip::not_armed(no_resize) == flip::outcome::hook_failed);
+
+  // An install that was never handed out is ignored.
+  flip::arming stray;
+  flip::arm_resize_hook(stray, true);
+  CHECK(!stray.resize_hooked);
+  CHECK(flip::not_armed(stray) == flip::outcome::hooks_not_ready);
+
+  // The report's line names the missing detour.
+  flip::report r;
+  r.chain = 1;
+  r.asked = engine_desc();
+  r.made = r.asked;
+  r.result = *flip::not_armed(no_present);
+  r.error = flip::missing(no_present);
+  CHECK(contains(flip::message(r), "not both in place"));
+  CHECK(contains(flip::message(r), "Present detour is not in place"));
+  CHECK(contains(flip::data_json(r), "\"reason\":\"hooks_not_ready\""));
+}

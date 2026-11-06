@@ -80,8 +80,14 @@ utils::hook::detour create_hook;
 utils::hook::detour resize_hook;
 
 std::atomic_bool requested{false};
-// The overlay's Present detour and the ResizeBuffers detour are in place.
-std::atomic_bool hooks_ready{false};
+
+// Arming (xerces_core::flip_model::arming): post_unpack (the game's start-up
+// thread) and the overlay's Present hook (the async thread) can come in
+// either order; the second one installs ResizeBuffers. Never held while a
+// detour is made.
+std::mutex arm_mutex;
+core::arming armed;            // under arm_mutex
+void *resize_target = nullptr; // under arm_mutex: ResizeBuffers in dxgi.dll
 
 // The flipped chain (detail::flipped): its creation flags, whether it has
 // ALLOW_TEARING, and whether Present refused the tearing flag on it.
@@ -164,8 +170,17 @@ HRESULT __stdcall create_swap_chain_stub(IDXGIFactory *factory,
   detail::flipped.store(nullptr, std::memory_order_release);
 
   core::decision decided;
-  if (!hooks_ready.load(std::memory_order_acquire)) {
-    r.result = core::outcome::hooks_not_ready;
+  std::optional<core::outcome> not_armed;
+  {
+    std::lock_guard lock(arm_mutex);
+    not_armed = core::not_armed(armed);
+    if (not_armed) {
+      // A failed detour stays hook_failed, with its error.
+      r.error = core::missing(armed);
+    }
+  }
+  if (not_armed) {
+    r.result = *not_armed;
   } else {
     r.tearing_supported = tearing_supported(factory);
     decided = core::decide(*r.asked, r.tearing_supported);
@@ -249,16 +264,18 @@ void log_hook_failed(const std::string &error) {
   log_report(r);
 }
 
-bool install_create_hook() {
+// Empty when the detour is in place, otherwise why not. A failed create
+// leaves the detour empty (utils::hook::detour::create), so nothing is
+// cleared here: clearing would remove another owner's hook on the address.
+std::string install_create_hook() {
   // A factory made only to find CreateSwapChain: every DXGI factory shares
   // dxgi.dll's implementation, which the detour patches, and the game
   // imports dxgi.dll, so it stays loaded after this one is released.
   IDXGIFactory1 *factory = nullptr;
   const HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
   if (FAILED(hr) || !factory) {
-    log_hook_failed("CreateDXGIFactory1 failed (" +
-                    hex(static_cast<std::uint32_t>(hr)) + ")");
-    return false;
+    return "CreateDXGIFactory1 failed (" + hex(static_cast<std::uint32_t>(hr)) +
+           ")";
   }
   void *const target =
       (*reinterpret_cast<void ***>(factory))[create_swap_chain_slot];
@@ -267,11 +284,47 @@ bool install_create_hook() {
     create_hook.create(target,
                        reinterpret_cast<void *>(&create_swap_chain_stub));
   } catch (const std::exception &e) {
-    create_hook.clear();
-    log_hook_failed(std::string("CreateSwapChain: ") + e.what());
-    return false;
+    return std::string("CreateSwapChain: ") + e.what();
   }
-  return true;
+  return {};
+}
+
+// The last arming step, on whichever thread brought it: post_unpack's or
+// the async thread. Runs once (arming hands it out once).
+void install_resize_hook() {
+  void *target = nullptr;
+  core::arm_step by = core::arm_step::create_hook;
+  {
+    std::lock_guard lock(arm_mutex);
+    target = resize_target;
+    by = armed.armed_by.value_or(by);
+  }
+  std::string error;
+  if (!target) {
+    error = "ResizeBuffers: no address from the overlay's dummy chain";
+  } else {
+    try {
+      resize_hook.create(target,
+                         reinterpret_cast<void *>(&resize_buffers_stub));
+    } catch (const std::exception &e) {
+      error = std::string("ResizeBuffers: ") + e.what();
+    }
+  }
+  {
+    std::lock_guard lock(arm_mutex);
+    core::arm_resize_hook(armed, error.empty(), error);
+  }
+  if (!error.empty()) {
+    log_hook_failed(error);
+    return;
+  }
+  const std::string_view last = core::to_string(by);
+  xerces_runtime::log_info(
+      "xerces.flip_model.armed",
+      "Flip model asked for (-xerces-flip-model): CreateSwapChain, Present "
+      "and ResizeBuffers are detoured (the last step was " +
+          std::string(last) + ")",
+      "{\"armed_by\":\"" + std::string(last) + "\"}");
 }
 } // namespace
 
@@ -279,20 +332,22 @@ own_chain_scope::own_chain_scope() { ++own_chain_depth; }
 own_chain_scope::~own_chain_scope() { --own_chain_depth; }
 
 void on_present_hooked(IDXGISwapChain *dummy) {
-  if (!requested.load(std::memory_order_acquire) || !dummy ||
-      !create_hook.get_place()) {
+  if (!dummy) {
     return;
   }
+  // Kept with or without the flag (post_unpack may not have run yet): the
+  // address is in dxgi.dll, which stays loaded after the dummy is released.
   void *const target =
       (*reinterpret_cast<void ***>(dummy))[resize_buffers_slot];
-  try {
-    resize_hook.create(target, reinterpret_cast<void *>(&resize_buffers_stub));
-  } catch (const std::exception &e) {
-    resize_hook.clear();
-    log_hook_failed(std::string("ResizeBuffers: ") + e.what());
-    return;
+  bool install = false;
+  {
+    std::lock_guard lock(arm_mutex);
+    resize_target = target;
+    install = core::arm_present_hook(armed);
   }
-  hooks_ready.store(true, std::memory_order_release);
+  if (install) {
+    install_resize_hook();
+  }
 }
 
 void before_present(IDXGISwapChain *chain, UINT sync_interval, UINT flags,
@@ -414,11 +469,23 @@ public:
     }
     requested.store(true, std::memory_order_release);
     // Before the engine's renderer starts, so its CreateSwapChain is seen.
-    if (install_create_hook()) {
+    const std::string error = install_create_hook();
+    bool install = false;
+    {
+      std::lock_guard lock(arm_mutex);
+      install = core::arm_create_hook(armed, error.empty(), error);
+    }
+    if (!error.empty()) {
+      log_hook_failed(error);
+    } else if (install) {
+      // The overlay's Present hook came first (the usual order).
+      install_resize_hook();
+    } else {
       xerces_runtime::log_info(
-          "xerces.flip_model.armed",
+          "xerces.flip_model.waiting",
           "Flip model asked for (-xerces-flip-model): CreateSwapChain is "
-          "detoured; ResizeBuffers follows with the overlay's Present hook");
+          "detoured; ResizeBuffers follows when the overlay's Present detour "
+          "is in place");
     }
   }
 };

@@ -145,7 +145,8 @@ std::string_view explain(outcome value) {
   case outcome::flags:
     return "the chain has flags flip model may not accept";
   case outcome::hooks_not_ready:
-    return "the Present and ResizeBuffers detours were not in place yet";
+    return "the Present and ResizeBuffers detours were not both in place "
+           "(ResizeBuffers follows the download overlay's Present detour)";
   case outcome::hook_failed:
     return "a detour could not be installed";
   case outcome::create_failed:
@@ -155,6 +156,89 @@ std::string_view explain(outcome value) {
     return "the game's swap chain was created before the detour was in place";
   }
   return "unknown";
+}
+
+std::string_view to_string(arm_step value) {
+  switch (value) {
+  case arm_step::create_hook:
+    return "post_unpack";
+  case arm_step::present_hook:
+    return "present_hook";
+  }
+  return "unknown";
+}
+
+namespace {
+// Both detours ResizeBuffers waits for are in, with the flag, and nothing
+// failed: the caller installs it, once.
+bool hand_out_resize(arming &state, arm_step step) {
+  if (!state.requested || !state.create_hooked || !state.present_hooked ||
+      state.resize_due || !state.error.empty()) {
+    return false;
+  }
+  state.resize_due = true;
+  state.armed_by = step;
+  return true;
+}
+
+void keep_first_error(arming &state, std::string_view error) {
+  if (state.error.empty()) {
+    state.error =
+        error.empty() ? std::string("unknown error") : std::string(error);
+  }
+}
+} // namespace
+
+bool arm_create_hook(arming &state, bool hooked, std::string_view error) {
+  state.requested = true;
+  state.create_hooked = hooked;
+  if (!hooked) {
+    keep_first_error(state, error);
+    return false;
+  }
+  return hand_out_resize(state, arm_step::create_hook);
+}
+
+bool arm_present_hook(arming &state) {
+  state.present_hooked = true;
+  return hand_out_resize(state, arm_step::present_hook);
+}
+
+void arm_resize_hook(arming &state, bool hooked, std::string_view error) {
+  if (!state.resize_due) {
+    return; // never handed out
+  }
+  state.resize_hooked = hooked;
+  if (!hooked) {
+    keep_first_error(state, error);
+  }
+}
+
+std::optional<outcome> not_armed(const arming &state) {
+  if (!state.error.empty()) {
+    return outcome::hook_failed;
+  }
+  if (state.requested && state.create_hooked && state.present_hooked &&
+      state.resize_hooked) {
+    return std::nullopt;
+  }
+  return outcome::hooks_not_ready;
+}
+
+std::string missing(const arming &state) {
+  if (!state.error.empty()) {
+    return state.error;
+  }
+  if (!state.create_hooked) {
+    return "the CreateSwapChain detour is not in place";
+  }
+  if (!state.present_hooked) {
+    return "the overlay's Present detour is not in place";
+  }
+  if (!state.resize_hooked) {
+    return "the ResizeBuffers detour is not in place yet";
+  }
+  return {};
 }
 
 decision decide(const chain_desc &engine, bool tearing_supported) {

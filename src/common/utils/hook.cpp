@@ -328,6 +328,12 @@ void detour::create(void *place, void *target) {
       MH_CreateHook(this->place_, target, &this->original_);
   const int64_t create_ticks = qpc_now() - start;
   if (status != MH_OK) {
+    // Xerces: a failed create leaves this detour empty, so clear() (or the
+    // destructor) never calls MH_RemoveHook on the address. When the failure
+    // is MH_ERROR_ALREADY_CREATED, that would remove the other owner's hook
+    // and free the trampoline its detour still calls.
+    this->place_ = nullptr;
+    this->original_ = nullptr;
     throw std::runtime_error(string::va(
         "Unable to hook %s with %s: %s", describe_address(place).c_str(),
         describe_address(target).c_str(),

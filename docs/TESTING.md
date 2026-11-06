@@ -545,11 +545,14 @@ during a measurement window.
       `tools\dev\bench\game-bench.ps1 -Variant flip -ExtraFlags -xerces-flip-model -Dvars @{com_maxfps='0'} -OutDir C:\Users\Ginld\XercesDev\bench\<session> -Live`
       against the same without `-ExtraFlags` (`-Variant w0`), then both again
       with `-FullScreenMode 2` (borderless). In the game log:
-  - `xerces.flip_model.armed`, then `xerces.flip_model` at info: asked `discard`
-    with flags 0x2, made `flip_discard` with 0x802 (0x2 if the PC reports no
-    tearing support). A warning instead names the reason (for example
-    `hooks_not_ready`: the overlay's Present hook was not in place when the
-    engine made its chain), and the run proves nothing about flip model.
+  - `xerces.flip_model.armed` with `armed_by` `post_unpack` (the overlay's
+    Present hook came first, as expected), then `xerces.flip_model` at info:
+    chain 1, asked `discard` with flags 0x2, made `flip_discard` with 0x802 (0x2
+    if the PC reports no tearing support). A warning instead names the reason,
+    and the run proves nothing about flip model. `hooks_not_ready` means the
+    overlay's Present detour (and so ResizeBuffers) was still missing when the
+    engine made its chain; its `error` says which. `hook_failed` names the
+    detour that could not be installed.
   - `perf.swapchain`:
     `flip_discard, 2 buffers, 3840x2160, windowed, flip model: applied` with
     `engine_swap_effect` 0.
@@ -560,6 +563,15 @@ during a measurement window.
     `SetFullscreenState`); a resolution or window size change keeps drawing
     (`ResizeBuffers`); Alt+Tab out and back works; the download overlay's dialog
     still shows and takes clicks (join a server whose map is missing).
+  - A second chain: make the engine create its swap chain again. Which change
+    does that rather than `ResizeBuffers` is not known yet (open question in
+    docs/research/upstream-render.md); try the backbuffer count
+    (`r_backBufferCount`), the display mode and the monitor, and `vid_restart`
+    if the console takes it, watching the log. A second `xerces.flip_model` line
+    with `chain` 2 at info shows one, and the picture keeps drawing. A warning
+    or a black screen there means the new chain was made before the old flip
+    chain was gone; note which change did it. If nothing makes a second chain,
+    say so here.
   - Numbers: `xerces_cli bench compare --a <w0> --b <flip>` on the probe CSVs.
     The goal is windowed and borderless close to exclusive fullscreen's 345 FPS
     and its p99 and 1% low (DESIGN.md 12.4 item 4). The flags column has 32 on

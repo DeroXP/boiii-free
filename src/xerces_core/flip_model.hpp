@@ -91,7 +91,7 @@ enum class outcome {
   format,          // a buffer format flip model does not take
   usage,           // buffer usage bits flip model may not accept
   flags,           // chain flags flip model may not accept
-  hooks_not_ready, // the Present and ResizeBuffers detours were not in place
+  hooks_not_ready, // Present and ResizeBuffers were not both detoured yet
   hook_failed,     // a detour could not be installed
   create_failed,   // DXGI refused the flip description; made as asked
   not_seen,        // the chain was made before the detour was in place
@@ -106,6 +106,45 @@ struct decision {
   bool tearing = false; // desc has DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING added
   bool applied() const { return result == outcome::applied; }
 };
+
+// Arming: a chain is flipped only once three detours are in place.
+// CreateSwapChain is the client component's own, installed in its
+// post_unpack on the game's start-up thread. Present is
+// download_overlay.cpp's, installed on the async scheduler thread from the
+// overlay's post_unpack; it usually finishes first, because the overlay's
+// post_unpack runs earlier (link order) and the scheduler runs its queue every
+// 10 ms. ResizeBuffers goes through the vtable of the overlay's dummy chain,
+// so it needs both. Whichever of the first two arrives second hands out the
+// ResizeBuffers install, once, so the order never matters.
+enum class arm_step {
+  create_hook,  // the component's post_unpack: CreateSwapChain
+  present_hook, // the overlay's setup: Present
+};
+std::string_view to_string(arm_step value);
+
+struct arming {
+  bool requested = false;           // post_unpack saw -xerces-flip-model
+  bool create_hooked = false;       // the CreateSwapChain detour is in place
+  bool present_hooked = false;      // the overlay's Present detour is in place
+  bool resize_due = false;          // the ResizeBuffers install was handed out
+  bool resize_hooked = false;       // and it is in place: chains may be flipped
+  std::optional<arm_step> armed_by; // the step that completed the pair
+  std::string error;                // the first detour that failed, and why
+};
+
+// post_unpack with the flag: whether the CreateSwapChain detour went in (and
+// if not, why). True when this call must install ResizeBuffers now.
+bool arm_create_hook(arming &state, bool hooked, std::string_view error = {});
+// The overlay's Present detour is in place (with or without the flag). True
+// when this call must install ResizeBuffers now.
+bool arm_present_hook(arming &state);
+// The ResizeBuffers install handed out above went in, or failed and why.
+void arm_resize_hook(arming &state, bool hooked, std::string_view error = {});
+// Whether a chain made now may be flipped: none when it may, otherwise
+// hook_failed (a detour failed; error says which) or hooks_not_ready.
+std::optional<outcome> not_armed(const arming &state);
+// For a report: which detour is still missing, in a few words.
+std::string missing(const arming &state);
 
 // From the engine's description alone. tearing_supported is
 // IDXGIFactory5::CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING).

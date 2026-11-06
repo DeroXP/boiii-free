@@ -88,7 +88,7 @@
 			<div class="field">
 				<div class="field-text">
 					<div class="field-name">Flip-model presentation (experimental)</div>
-					<div class="field-help">Windowed and borderless show frames the way fullscreen does, without the extra copy through the desktop. With V-Sync off, frames may tear. -xerces-flip-model. Turn it off if the picture freezes, goes black or the game crashes. Safe mode always leaves it off.</div>
+					<div class="field-help">Frames reach the screen without the extra copy through the desktop. Borderless can then present the way fullscreen does, and with V-Sync off its frames may tear. -xerces-flip-model. Turn it off if the picture freezes, goes black or the game crashes. Safe mode always leaves it off.</div>
 				</div>
 				<button id="flip-model" class="toggle" data-class-on="flip_model" data-event-click="toggle('flip_model')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="flip_model">On</span><span class="toggle-state" data-if="!flip_model">Off</span></button>
 			</div>

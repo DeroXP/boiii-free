@@ -13,6 +13,9 @@
 //   engine's description allows it.
 // - IDXGISwapChain::ResizeBuffers (slot 13), detoured through the vtable of
 //   download_overlay.cpp's dummy chain, keeps the flags fixed at creation.
+//   The overlay's setup runs on the async thread and usually ends before this
+//   component's post_unpack, so whichever of the two comes second installs it
+//   (xerces_core::flip_model::arming).
 // - Present stays download_overlay.cpp's one detour (MinHook takes one per
 //   address). For the flipped chain it calls before_present and
 //   after_present: the tearing flag when allowed, and the render targets
@@ -53,8 +56,10 @@ public:
 };
 
 // download_overlay.cpp, on the async thread, once its Present detour is in
-// place: the dummy chain whose vtable it used. With the flag this detours
-// ResizeBuffers through the same vtable; chains are flipped only after it.
+// place: the dummy chain whose vtable it used. Its ResizeBuffers address is
+// kept either way; with the flag, ResizeBuffers is detoured now if
+// post_unpack already ran, or by post_unpack later. Chains are flipped only
+// after that.
 void on_present_hooked(IDXGISwapChain *dummy);
 
 // One Present of the flipped chain (the thread that presents).
