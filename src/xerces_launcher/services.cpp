@@ -82,9 +82,18 @@ struct services::crash_state {
     std::optional<std::int64_t> deleted;
     std::string delete_error;
     std::string error;
+    // When the worker finished: launcher.crash.event says how long the
+    // event waited for the loop.
+    std::chrono::steady_clock::time_point done{};
   };
   std::mutex mutex;
   std::vector<event> events;
+  // Wakes the launcher's loop once an event is in, so its notice is drawn
+  // now rather than at the loop's next timed pass (it draws only when
+  // something changed: up to 100 ms later, a second behind a running game).
+  // services' poster; ~services clears it under the mutex, so a worker that
+  // outlives the launcher wakes nothing.
+  std::function<void()> wake;
   std::atomic<bool> send_enabled{true};
   std::atomic<bool> busy{false};
 };
@@ -99,6 +108,10 @@ services::services(launcher_paths paths, poster post, bool dry_launch)
   // still running keeps its crashes until it has exited. poll() starts this
   // once the first detection is done, so the reports carry the game's build.
   crash_state_->send_enabled = config_.send_crash_reports;
+  // An empty posted task is enough: the pass it starts drains the events
+  // (poll), the Settings screen turns them into the footer notice, and a
+  // pass that ran a posted task draws.
+  crash_state_->wake = [post = post_] { post([] {}); };
   crash_job job;
   job.collect = !game_running();
   job.send = true;
@@ -115,6 +128,10 @@ services::services(launcher_paths paths, poster post, bool dry_launch)
 }
 
 services::~services() {
+  {
+    std::lock_guard lock(crash_state_->mutex);
+    crash_state_->wake = nullptr; // the app and its queue go after this
+  }
   cancel_scan();
   if (scan_thread_.joinable()) {
     scan_thread_.join();
@@ -770,11 +787,14 @@ void services::run_crash_job(crash_job job) {
     } catch (...) {
       event.error = "an unknown error";
     }
-    {
-      std::lock_guard lock(state->mutex);
-      state->events.push_back(std::move(event));
-    }
+    std::lock_guard lock(state->mutex);
+    event.done = std::chrono::steady_clock::now();
+    state->events.push_back(std::move(event));
+    // Before the wake, so the pass it starts can run a job queued meanwhile.
     state->busy = false;
+    if (state->wake) {
+      state->wake();
+    }
   }).detach();
 }
 
@@ -785,6 +805,14 @@ void services::drain_crash_events() {
     events.swap(crash_state_->events);
   }
   for (const auto &event : events) {
+    const double waited_ms = std::chrono::duration<double, std::milli>(
+                                 std::chrono::steady_clock::now() - event.done)
+                                 .count();
+    char waited[32];
+    std::snprintf(waited, sizeof waited, "%.1f", waited_ms);
+    log(xerces_core::log_level::debug, "launcher.crash.event",
+        std::string("worker result taken after ") + waited + " ms",
+        std::string("{\"waited_ms\":") + waited + "}");
     if (!event.error.empty()) {
       log_error("launcher.crash.failed",
                 "Crash reports stopped on an error: " + event.error);
