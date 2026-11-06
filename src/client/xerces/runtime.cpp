@@ -98,6 +98,17 @@ void log(xerces_core::log_level level, std::string_view event,
   session->write(item);
 }
 
+std::string log_file_name() {
+  std::unique_lock lock(log_mutex, std::defer_lock);
+  for (int attempt = 0; attempt < 50 && !lock.try_lock(); ++attempt) {
+    Sleep(2);
+  }
+  if (!lock.owns_lock() || !session) {
+    return {};
+  }
+  return utf8(session->path().filename().wstring());
+}
+
 bool write_file(const std::filesystem::path &path, std::string_view text) {
   std::error_code ec;
   std::filesystem::create_directories(path.parent_path(), ec);
@@ -261,6 +272,18 @@ xerces_core::launch_phase journal_phase() {
 void set_journal_phase(xerces_core::launch_phase phase) {
   std::lock_guard lock(journal_mutex);
   write_phase(phase);
+}
+
+std::string journal_phase_for_crash() {
+  // The crash may have come inside a journal write on this very thread.
+  std::unique_lock lock(journal_mutex, std::defer_lock);
+  for (int attempt = 0; attempt < 50 && !lock.try_lock(); ++attempt) {
+    Sleep(2);
+  }
+  if (!lock.owns_lock() || !journal_owned) {
+    return {};
+  }
+  return xerces_core::to_string(journal_current);
 }
 
 journal_step::journal_step(xerces_core::launch_phase phase,

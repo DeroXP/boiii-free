@@ -37,6 +37,11 @@ inline void log_error(std::string_view event, std::string_view message,
   log(xerces_core::log_level::error, event, message, data_json);
 }
 
+// The file name of this session's log (<date>-<time>-game-<pid>.jsonl),
+// for the crash report (docs/CRASH_REPORTS.md); empty when there is none or
+// its lock is held (it never waits long: the crash handler calls it).
+std::string log_file_name();
+
 // Writes a file through a temporary file, so a crash never leaves half of
 // it behind.
 bool write_file(const std::filesystem::path &path, std::string_view text);
@@ -61,6 +66,9 @@ std::string flag_value(std::string_view flag);
 bool journal_active();
 xerces_core::launch_phase journal_phase();
 void set_journal_phase(xerces_core::launch_phase phase);
+// The phase for the crash report: empty when this process does not own the
+// journal or its lock stays held (a crash inside a journal write).
+std::string journal_phase_for_crash();
 
 // The signature lookup (DESIGN.md 3.3) is the journal's "symbols" step. The
 // object returned moves the journal back to "launching" (the engine is still
