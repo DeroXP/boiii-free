@@ -152,6 +152,21 @@ public static class XercesFront {
 "@
 }
 
+# Brings the game window (not its console) to the front. AppActivate by
+# process id picked the console in borderless runs, so it goes by the game
+# window's title.
+function Activate-Game([int]$gamePid) {
+  $game = Get-Process -Id $gamePid -ErrorAction SilentlyContinue
+  if (-not $game) { return }
+  $window = Find-XercesWindow $game 'CoDBlackOps'
+  if (-not $window) { return }
+  $title = [XercesWin]::TitleOf($window)
+  try {
+    $shell = New-Object -ComObject WScript.Shell
+    if ($title) { [void]$shell.AppActivate($title) } else { [void]$shell.AppActivate($gamePid) }
+  } catch { }
+}
+
 function Foreground {
   $foregroundPid = [XercesFront]::ForegroundPid()
   $p = Get-Process -Id $foregroundPid -ErrorAction SilentlyContinue
@@ -310,7 +325,7 @@ try {
   $proc = Get-Process -Id $gamePid
   if ($Affinity) { $proc.ProcessorAffinity = [IntPtr][Convert]::ToInt64($Affinity, 16); Say "affinity $Affinity" }
   if ($Priority) { $proc.PriorityClass = $Priority; Say "priority $Priority" }
-  try { [void](New-Object -ComObject WScript.Shell).AppActivate($gamePid) } catch { }
+  Activate-Game $gamePid
 
   & (Join-Path $session 'console-command.ps1') -Command "map $Map" -WaitMs 1500 | Out-Null
   $load_from = Get-Date
@@ -338,7 +353,7 @@ try {
     $echo = & (Join-Path $session 'console-command.ps1') -Command $command -WaitMs 700 | Where-Object { $_ } | Select-Object -Last 3
     $record.scene_echo += "$command => $($echo -join ' | ')"
   }
-  try { [void](New-Object -ComObject WScript.Shell).AppActivate($gamePid) } catch { }
+  Activate-Game $gamePid
   $quietUntil = $inGameAt.AddSeconds($windowStart - 2)
   if ((Get-Date) -gt $quietUntil) { Say 'warning: the scene commands ran into the window' }
   while ((Get-Date) -lt $quietUntil) { Start-Sleep -Milliseconds 250 }

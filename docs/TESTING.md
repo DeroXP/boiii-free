@@ -527,14 +527,83 @@ during a measurement window.
       present count for the game's swap chain agree within a frame or two at
       each end, and the dt series match frame by frame when joined on QPC
       (`t0_qpc` and `qpc_frequency` in `<run>.meta.json`).
-- [ ] `overlay_us` stays near 0 in front-end idle (the F4 idle skip), and the
-      `cpu` column shows which cores the render thread presents from.
+- [x] (2026-11-05, 843ba747) In a match, `overlay_us` stays near 0 (mean 0.001
+      µs: the idle skip), and the `cpu` column shows the render thread
+      presenting from the P-cores only (logical 0, 1, 10-13, 22, 23). Front-end
+      idle not measured.
+- [x] (2026-11-05, 843ba747) `XERCES_BENCH=1` arms the probe
+      (`perf.bench.armed`) and `XERCES_BENCH_AUTO=ingame:20:60` writes one run
+      20 s after the player is in (`perf.bench.written`, the three files), in 16
+      of 16 runs that reached the window.
 - [ ] `xerces_bench_map zm_ccube` from the console logs `perf.load` with the
       time to the first main frame with the client active, near what the
-      journal's `loading_map` to `in_game` shows;
-      `XERCES_BENCH_AUTO=ingame:15:60` writes one run after the level starts.
+      journal's `loading_map` to `in_game` shows.
 - [ ] `XERCES_BENCH_OUT` under AppData or in the game folder logs
       `perf.bench.refused` and writes nothing.
+
+### In-game frame times (2026-11-05)
+
+`tools\dev\bench\game-bench.ps1 -Variant <name> -OutDir <session> -Live` runs
+one measurement (with your go-ahead for the session):
+
+- it starts the game through `xerces_cli plan apply` with the home
+  `C:\Users\Ginld\XercesHome-bench`, so no launcher window runs during the
+  window;
+- it loads the map from the menu and, 3 s after the player is in, types
+  `notarget` and `god` (cheats come from a session-only launcher dvar,
+  `boiii_allowCheats 1`, which `config.cfg` never keeps);
+- the probe records `XERCES_BENCH_AUTO=ingame:20:60`. Nothing is sent to the
+  game during the window; one `GetForegroundWindow` every 2 s notes any other
+  window in front;
+- it then waits for `perf.bench.written`, takes a picture, disconnects and
+  quits. One JSON line per run goes to `<session>\results.jsonl`.
+
+`-Dvars` (session-only `+set`), `-FullScreenMode` (`boiii_players\config.ini`
+edited for the run and put back byte for byte after it), `-Stack`, `-Affinity`
+and `-Priority` set up a variant.
+
+Session 2 (`C:\Users\Ginld\XercesDev\bench\20261105-fps2`): Cheese Cube, no mods
+unless noted, your settings of that evening (100% render resolution, high mesh,
+shadow, volumetric and GTAO quality, motion blur off), three runs per variant in
+rotated order, 2 s of warm-up dropped. All 15 runs measured; the game's config
+files were as before afterwards (only `com_maxclients` in `config.cfg` changed,
+game state).
+
+| Variant                             | FPS   | Median ms | p99 ms | 1% low | 0.1% low |
+| ----------------------------------- | ----- | --------- | ------ | ------ | -------- |
+| Windowed, uncapped (`w0`)           | 315.8 | 3.163     | 4.032  | 230.8  | 191.3    |
+| Exclusive fullscreen (`f0`)         | 345.3 | 2.996     | 3.562  | 254.2  | 203.3    |
+| Borderless (`b0`)                   | 312.3 | 3.163     | 4.042  | 226.0  | 182.8    |
+| Windowed + D3 mod stack (`s0`)      | 301.0 | 3.336     | 4.254  | 213.7  | 173.4    |
+| Windowed, `com_maxfps 240` (`w240`) | 239.1 | 4.443     | 6.050  | 158.1  | 140.6    |
+
+Against `w0` (Welch, 3 runs a side):
+
+- exclusive fullscreen: +9.4% FPS (p 0.024), p99 -11.6% (p < 0.001), 1% low
+  +10.2% (p 0.003);
+- borderless: no difference (its swap chain is still windowed; in 2 of 3 runs
+  the game's console window, not the game, was in front, so those frames are
+  flagged unfocused);
+- the mod stack: -4.7% FPS (p 0.21), 1% low -7.4% (p 0.024), 0.1% low -9.4% (p
+  0.038). Only 4 script errors fired in the match, and Present took longer
+  (median 2.08 ms against 1.77), so the cost is GPU work, not scripts;
+- `com_maxfps 240`: the cap holds (239.1 FPS) but pacing is much worse: p99
+  +50%, 1% low -31.5%. The engine's limiter counts whole milliseconds (DESIGN.md
+  12.4), so frames leave at 3.0, 3.5, 4.5 and 5.0 ms instead of 4.17 ms.
+
+Uncapped, the game is GPU-bound at these settings: Present blocks a median 1.77
+ms windowed (1.50 ms in exclusive fullscreen, where the desktop compositor does
+not copy each frame). No hitch over 12 ms in any session 2 run.
+
+The shake-out run (the settings before, 60% render resolution, the menu's
+`com_maxfps 240`) showed the same limiter pattern: 230.7 FPS mean, main thread
+4.0-5.0 ms, Present 0.07 ms (CPU-side limiter, not the GPU). Session 1 is not
+usable: graphics settings were changed during it. The NVIDIA driver's 238 cap
+noted in October does not apply to the game: uncapped runs reached 550-630 FPS
+at the old settings.
+
+Not covered: a heavier map, PresentMon (displayed frames, present mode, CPU and
+GPU busy), more than 3 runs a side.
 
 ### Launcher (M3)
 
@@ -760,8 +829,9 @@ xerces_cli bench compare --a <folder|csv> --b <folder|csv> [--source probe|prese
 
 Each CSV is one run, in one of two formats:
 
-- the probe's frames CSV (`i,t_ms,dt_ms,present_ms,overlay_us,cpu,flags`). The
-  probe is not built yet (perf plan H3).
+- the probe's frames CSV (`i,t_ms,dt_ms,present_ms,overlay_us,cpu,flags`),
+  written into `XERCES_BENCH_OUT` (`game-bench.ps1` gives each variant its own
+  folder; see "In-game frame times").
 - PresentMon's CSV, with 1.x, 2.0 or 2.3+ column names. The process and swap
   chain with the most rows are kept.
 
@@ -823,8 +893,8 @@ PresentMon-2.4.1-x64.exe --process_name boiii.exe --output_file <run>\presentmon
 With `--qpc_time` the start times are QPC ticks, which `bench` does not convert.
 It then sums the frame times instead (for `--warmup-s`).
 
-- [ ] No frame times have been recorded yet: no probe build, no PresentMon
-      capture.
+- [x] (2026-11-05) Probe frame times recorded in the game: 16 runs of 60 s (see
+      "In-game frame times"). No PresentMon capture yet.
 
 ### First baseline (2026-11-05, existing logs only)
 
