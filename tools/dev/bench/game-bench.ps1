@@ -47,13 +47,20 @@ param(
   [switch]$SkipCinematic,
   [int]$MenuTimeoutSeconds = 240,
   [int]$LoadTimeoutSeconds = 480,
+  # The folder holding xerces_cli.exe and boiii.exe: the repo build by default,
+  # or an unzipped tester package (tools\release.ps1).
+  [string]$BinDir = '',
+  # Posts mouse-move messages with both buttons down to the game window from
+  # its creation until the menu: the input that crashed the first menu frame
+  # on 2026-11-05 (docs/TESTING.md, the menu crash).
+  [switch]$HoldMouseDuringLoad,
   [switch]$Live
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $session = Join-Path $repo 'tools\dev\session'
-$bin = Join-Path $repo 'build\bin\x64\Release'
+$bin = if ($BinDir) { $BinDir } else { Join-Path $repo 'build\bin\x64\Release' }
 $cli = Join-Path $bin 'xerces_cli.exe'
 $client = Join-Path $bin 'boiii.exe'
 . (Join-Path $session 'xerces-win32.ps1')
@@ -307,12 +314,37 @@ try {
   $record.pid = $gamePid
   Say "game started, pid $gamePid"
 
+  $script:mousePosts = 0
+  $postMouse = {
+    param([int]$buttons)
+    $p = Get-Process -Id $gamePid -ErrorAction SilentlyContinue
+    if (-not $p) { return }
+    $w = Find-XercesWindow $p 'CoDBlackOps'
+    if ($w) {
+      # WM_MOUSEMOVE, wParam MK_LBUTTON | MK_RBUTTON, at (100, 100).
+      [void][XercesWin]::PostMessage($w, 0x0200, [IntPtr]$buttons, [IntPtr](100 -bor (100 -shl 16)))
+      $script:mousePosts++
+    }
+  }
   $menu = Wait-For {
+    if ($HoldMouseDuringLoad) { & $postMouse 3 }
     if (-not (Get-Process -Id $gamePid -ErrorAction SilentlyContinue)) { return 'gone' }
     if (Find-Dialog $gamePid) { return 'dialog' }
     $j = Read-Journal
     if ($j -and -not $j.launch_id -and $j.phase -eq 'frontend') { return 'menu' }
-  } $MenuTimeoutSeconds
+  } $MenuTimeoutSeconds $(if ($HoldMouseDuringLoad) { 100 } else { 500 })
+  if ($HoldMouseDuringLoad) {
+    # Past the first menu frame, where the deferred call used to crash.
+    $holdUntil = (Get-Date).AddSeconds(3)
+    while ((Get-Date) -lt $holdUntil -and (Get-Process -Id $gamePid -ErrorAction SilentlyContinue)) { & $postMouse 3; Start-Sleep -Milliseconds 100 }
+    & $postMouse 0
+    Start-Sleep -Seconds 5
+    $record.mouse_posts = $script:mousePosts
+    $record.active_device_dropped = @(Find-Events $gamePid 'xerces.input.active_device_dropped').Count
+    if (-not (Get-Process -Id $gamePid -ErrorAction SilentlyContinue)) { $menu = 'gone after the menu' }
+    elseif (Find-Dialog $gamePid) { $menu = 'dialog after the menu' }
+    Say "mouse held during load: $($script:mousePosts) posts, active_device_dropped events: $($record.active_device_dropped)"
+  }
   if ($menu -ne 'menu') { Finish 'crash_menu' "no menu ($menu)" }
   $record.menu_seconds = [math]::Round(((Get-Date) - $started_at).TotalSeconds, 1)
   $armed = Find-Events $gamePid 'perf.bench.armed'

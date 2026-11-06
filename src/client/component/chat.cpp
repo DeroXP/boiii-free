@@ -176,7 +176,13 @@ void note_client_names() {
     return;
   }
   for (uint64_t xuid = 1; xuid < 19; ++xuid) {
-    xerces_runtime::note_player_name(get_client_name(xuid));
+    // An empty slot has an empty name, and utils::string::va gives nullptr
+    // for an empty result: get_client_name then returns nullptr (seen in the
+    // game on 2026-11-06, a crash 2 s after every menu and map load).
+    const char *name = get_client_name(xuid);
+    if (name != nullptr && name[0] != '\0') {
+      xerces_runtime::note_player_name(name);
+    }
   }
 }
 } // namespace
