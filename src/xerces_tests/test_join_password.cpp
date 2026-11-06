@@ -1,6 +1,7 @@
 // The network password checked by the host (docs/DESIGN.md 11.10): HMAC and
 // PBKDF2 against published vectors, the messages, the host's challenges,
-// checks, address rule and wrong-answer limit, and the words.
+// checks, address rules and limits, who gets in without the check, and the
+// words.
 
 #include "harness.hpp"
 
@@ -18,8 +19,11 @@ using namespace std::chrono_literals;
 
 namespace {
 const std::string session_a = "ffeeddccbbaa99887766554433221100";
+const std::string session_b = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const std::string nonce_a = "00112233445566778899aabbccddeeff";
 const std::string nonce_b = "0123456789abcdef0123456789abcdef";
+const std::string salt_a = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
+const std::string salt_b = "1111111111111111111111111111111a";
 const std::string joiner = "203.0.113.50:27017";
 const std::string host_lan = "192.168.1.20:27017";
 
@@ -36,13 +40,25 @@ bool contains(const std::string &text, const std::string &part) {
 
 std::string hex(const sha256::digest &digest) { return sha256::to_hex(digest); }
 
+const key &hunter2() {
+  static const key value = derive_key("hunter2", salt_a);
+  return value;
+}
+
 // A joiner's answer to the challenge the guard gave it.
 proof_message answer(const std::string &password, const std::string &nonce,
                      const std::string &host_address = host_lan,
                      const std::string &session = session_a) {
   return proof_message{
       session, nonce, host_address,
-      proof(derive_key(password), nonce, host_address, session)};
+      proof(password == "hunter2" ? hunter2() : derive_key(password, salt_a),
+            nonce, host_address, session)};
+}
+
+// "198.51.x.y:27017" for i in 0..39999, all different IP addresses.
+std::string many_ip(const int i) {
+  return "198.51." + std::to_string(i / 200) + "." +
+         std::to_string(i % 200 + 1) + ":27017";
 }
 } // namespace
 
@@ -102,14 +118,21 @@ TEST_CASE("join password: the constant-time compare") {
 
 TEST_CASE("join password: the key and the proof both sides compute") {
   // The same values Python's hashlib.pbkdf2_hmac and hmac give.
-  CHECK_EQ(hex(derive_key("hunter2")),
-           std::string("0904e7efa10bd6b354e844bb6e8f6aad"
-                       "287c91b9b86cc2deb263a076965f2729"));
-  const std::string expected = "2908827158d8a8b4bfd1c56b663fb094"
-                               "8b723d56c4ee8011e9e7fafd945b1ae7";
-  const key password_key = derive_key("hunter2");
+  CHECK_EQ(hex(hunter2()), std::string("0fed016e54ac504f5662f0221969fe09"
+                                       "49cb40bceba56f43ac3e4c743a5045c7"));
+  const std::string expected = "089939958d868b0e4037fa04c662e61b"
+                               "b289b88e9d50255c7056ebb84316f0fb";
+  const key &password_key = hunter2();
   CHECK_EQ(proof(password_key, nonce_a, host_lan, session_a), expected);
   CHECK(proof_matches(password_key, nonce_a, host_lan, session_a, expected));
+  // Another host's salt gives another key, and another answer.
+  const key other_host = derive_key("hunter2", salt_b);
+  CHECK_EQ(hex(other_host), std::string("1a77f09a96b6487afb88ecedbdd656bb"
+                                        "b56165698366e8f813ad0e9f598522b0"));
+  CHECK_EQ(proof(other_host, nonce_a, host_lan, session_a),
+           std::string("70b5e553dc20e30f7626f29fa2751821"
+                       "0b4ba13eb3fd133e41cfc2bf7666bfc6"));
+  CHECK(!proof_matches(other_host, nonce_a, host_lan, session_a, expected));
   // Upper-case hex is the same answer.
   std::string upper = expected;
   for (char &c : upper) {
@@ -117,8 +140,8 @@ TEST_CASE("join password: the key and the proof both sides compute") {
   }
   CHECK(proof_matches(password_key, nonce_a, host_lan, session_a, upper));
   // Every input is bound.
-  CHECK(!proof_matches(derive_key("hunter3"), nonce_a, host_lan, session_a,
-                       expected));
+  CHECK(!proof_matches(derive_key("hunter3", salt_a), nonce_a, host_lan,
+                       session_a, expected));
   CHECK(!proof_matches(password_key, nonce_b, host_lan, session_a, expected));
   CHECK(!proof_matches(password_key, nonce_a, "192.168.1.21:27017", session_a,
                        expected));
@@ -149,10 +172,12 @@ TEST_CASE("join password: the messages round trip") {
   REQUIRE(challenge.has_value());
   CHECK_EQ(challenge->session, session_a);
 
-  const nonce_message nonce{session_a, nonce_a};
+  const nonce_message nonce{session_a, nonce_a, salt_a};
+  CHECK_EQ(format(nonce), "1 " + session_a + " " + nonce_a + " " + salt_a);
   const auto nonce_back = parse_nonce(format(nonce));
   REQUIRE(nonce_back.has_value());
   CHECK_EQ(nonce_back->nonce, nonce_a);
+  CHECK_EQ(nonce_back->host_salt, salt_a);
 
   const proof_message sent = answer("hunter2", nonce_a);
   const auto proof_back = parse_proof(format(sent));
@@ -163,20 +188,23 @@ TEST_CASE("join password: the messages round trip") {
   const auto ok = parse_result(format(result_message{session_a, result::ok}));
   REQUIRE(ok.has_value());
   CHECK(ok->code == result::ok);
-  const auto wait =
-      parse_result(format(result_message{session_a, result::wait, 42}));
-  REQUIRE(wait.has_value());
-  CHECK(wait->code == result::wait);
-  CHECK_EQ(wait->wait_seconds, 42u);
+  for (const result code : {result::wait, result::busy, result::paused}) {
+    CHECK(carries_seconds(code));
+    const auto back = parse_result(format(result_message{session_a, code, 42}));
+    REQUIRE(back.has_value());
+    CHECK(back->code == code);
+    CHECK_EQ(back->wait_seconds, 42u);
+  }
   const auto needed = parse_result("1 - needed");
   REQUIRE(needed.has_value());
   CHECK(needed->code == result::needed);
   CHECK_EQ(needed->session, std::string("-"));
   for (const result code :
        {result::ok, result::open, result::wrong, result::needed, result::wait,
-        result::stale, result::address}) {
+        result::busy, result::paused, result::stale, result::address}) {
     CHECK(parse_result_name(result_name(code)) == code);
   }
+  CHECK(!carries_seconds(result::wrong));
 }
 
 TEST_CASE("join password: broken or foreign messages do not parse") {
@@ -190,7 +218,10 @@ TEST_CASE("join password: broken or foreign messages do not parse") {
   CHECK(!parse_challenge("1 FFEEDDCCBBAA99887766554433221100")); // upper case
   CHECK(!parse_challenge("1 " + std::string(300, 'a')));
   CHECK(!parse_nonce("1 " + session_a));
-  CHECK(!parse_nonce("1 " + session_a + " " + nonce_a + "x"));
+  CHECK(!parse_nonce("1 " + session_a + " " + nonce_a)); // no salt
+  CHECK(!parse_nonce("1 " + session_a + " " + nonce_a + " " + salt_a + "x"));
+  CHECK(!parse_nonce("1 " + session_a + " " + nonce_a + " " + salt_a + " " +
+                     salt_a));
   const proof_message good = answer("hunter2", nonce_a);
   CHECK(parse_proof(format(good)).has_value());
   proof_message bad = good;
@@ -206,6 +237,8 @@ TEST_CASE("join password: broken or foreign messages do not parse") {
   bad.proof = good.proof.substr(2);
   CHECK(!parse_proof(format(bad)));
   CHECK(!parse_result("1 " + session_a + " wait"));    // no seconds
+  CHECK(!parse_result("1 " + session_a + " busy"));    // no seconds
+  CHECK(!parse_result("1 " + session_a + " paused"));  // no seconds
   CHECK(!parse_result("1 " + session_a + " ok 3"));    // seconds for ok
   CHECK(!parse_result("1 " + session_a + " maybe"));   // unknown code
   CHECK(!parse_result("1 nobody needed"));             // bad session
@@ -264,6 +297,50 @@ TEST_CASE("join password: the host knows its addresses as far as it can") {
   CHECK(is_own_address("203.0.113.8:27017", own));
 }
 
+TEST_CASE("join password: only this game itself skips the check") {
+  const own_addresses own = lan_host();
+  // This game's own socket: an address of this PC on the game's port.
+  CHECK(is_own_socket("127.0.0.1:27017", own));
+  CHECK(is_own_socket("192.168.1.20:27017", own));
+  CHECK(is_own_socket("26.10.20.30:27017", own));
+  // A relay or tunnel agent on this PC, or a second game, sends from
+  // another port.
+  CHECK(!is_own_socket("127.0.0.1:50123", own));
+  CHECK(!is_own_socket("192.168.1.20:27018", own));
+  CHECK(!is_own_socket("192.168.1.21:27017", own)); // another PC
+  CHECK(!is_own_socket("garbage", own));
+  CHECK(!is_own_socket("127.0.0.1:27017", own_addresses{})); // port unknown
+
+  host_guard guard;
+  // With a password: the engine's own local players and bots, and this
+  // game's own socket.
+  CHECK(guard.lets_in(sender_kind::engine_local, "", true, own));
+  CHECK(guard.lets_in(sender_kind::ip, "127.0.0.1:27017", true, own));
+  // Everyone else from this PC proves like anyone.
+  CHECK(!guard.lets_in(sender_kind::ip, "127.0.0.1:50123", true, own));
+  CHECK(!guard.lets_in(sender_kind::ip, "192.168.1.20:50123", true, own));
+  CHECK(!guard.lets_in(sender_kind::ip, joiner, true, own));
+  CHECK(!guard.lets_in(sender_kind::other, "", true, own));
+
+  // A local relay's address passes once it answered the check.
+  const std::string relay = "127.0.0.1:50123";
+  const auto now = clock_type::now();
+  REQUIRE(guard.challenge(relay, session_a, nonce_a, now).code == result::ok);
+  CHECK(guard
+            .check(relay, answer("hunter2", nonce_a, "127.0.0.1:27017"),
+                   hunter2(), own, now)
+            .code == result::ok);
+  CHECK(guard.lets_in(sender_kind::ip, relay, true, own));
+
+  // Without a password: everyone, and an address is remembered, so a
+  // password set later keeps it in.
+  host_guard unlocked;
+  CHECK(unlocked.lets_in(sender_kind::ip, joiner, false, own));
+  CHECK(unlocked.lets_in(sender_kind::other, "", false, own));
+  CHECK(unlocked.lets_in(sender_kind::ip, joiner, true, own));
+  CHECK(!unlocked.lets_in(sender_kind::ip, "203.0.113.51:27017", true, own));
+}
+
 TEST_CASE("join password: the right answer admits the address, once") {
   host_guard guard;
   const auto now = clock_type::now();
@@ -272,9 +349,8 @@ TEST_CASE("join password: the right answer admits the address, once") {
   CHECK_EQ(given.nonce, nonce_a);
   CHECK(!guard.admitted(joiner));
 
-  const key password_key = derive_key("hunter2");
   const result_message reply = guard.check(joiner, answer("hunter2", nonce_a),
-                                           password_key, lan_host(), now + 1s);
+                                           hunter2(), lan_host(), now + 1s);
   CHECK(reply.code == result::ok);
   CHECK_EQ(reply.session, session_a);
   CHECK(guard.admitted(joiner));
@@ -282,7 +358,7 @@ TEST_CASE("join password: the right answer admits the address, once") {
   CHECK(!guard.admitted("203.0.113.51:27017"));
   // The challenge is used up: the same answer again is stale.
   CHECK(guard
-            .check(joiner, answer("hunter2", nonce_a), password_key, lan_host(),
+            .check(joiner, answer("hunter2", nonce_a), hunter2(), lan_host(),
                    now + 2s)
             .code == result::stale);
   CHECK_EQ(guard.challenge_count(), static_cast<std::size_t>(0));
@@ -291,34 +367,40 @@ TEST_CASE("join password: the right answer admits the address, once") {
 TEST_CASE("join password: wrong, foreign and late answers are refused") {
   host_guard guard;
   const auto now = clock_type::now();
-  const key password_key = derive_key("hunter2");
   const own_addresses own = lan_host();
 
   guard.challenge(joiner, session_a, nonce_a, now);
-  CHECK(guard.check(joiner, answer("hunter3", nonce_a), password_key, own, now)
+  CHECK(guard.check(joiner, answer("hunter3", nonce_a), hunter2(), own, now)
             .code == result::wrong);
   CHECK(!guard.admitted(joiner));
+  CHECK_EQ(guard.challenge_count(), static_cast<std::size_t>(0));
 
   // An answer from another address than the one challenged.
   guard.challenge(joiner, session_a, nonce_a, now);
   CHECK(guard
-            .check("203.0.113.51:27017", answer("hunter2", nonce_a),
-                   password_key, own, now)
+            .check("203.0.113.51:27017", answer("hunter2", nonce_a), hunter2(),
+                   own, now)
             .code == result::stale);
-  // Another nonce or session than the one given (and the challenge is gone).
-  guard.challenge(joiner, session_a, nonce_a, now);
-  CHECK(guard.check(joiner, answer("hunter2", nonce_b), password_key, own, now)
+  // Another nonce or session than the one given is stale, and leaves the
+  // challenge to its joiner: someone who sends with the joiner's address
+  // cannot use it up.
+  CHECK(guard.check(joiner, answer("hunter2", nonce_b), hunter2(), own, now)
             .code == result::stale);
-  guard.challenge(joiner, session_a, nonce_a, now);
-  CHECK(guard.check(joiner, answer("hunter2", nonce_a), password_key, own, now)
+  CHECK(guard
+            .check(joiner, answer("hunter2", nonce_a, host_lan, session_b),
+                   hunter2(), own, now)
+            .code == result::stale);
+  CHECK_EQ(guard.challenge_count(), static_cast<std::size_t>(1));
+  CHECK(guard.check(joiner, answer("hunter2", nonce_a), hunter2(), own, now)
             .code == result::ok);
 
   // Too late.
   host_guard late;
   late.challenge(joiner, session_a, nonce_a, now);
-  CHECK(late.check(joiner, answer("hunter2", nonce_a), password_key, own,
+  CHECK(late.check(joiner, answer("hunter2", nonce_a), hunter2(), own,
                    now + host_guard::challenge_lifetime)
             .code == result::stale);
+  CHECK_EQ(late.challenge_count(), static_cast<std::size_t>(0));
 
   // A resent challenge (same session) gets the same nonce, so the answer
   // to either reply matches.
@@ -326,29 +408,31 @@ TEST_CASE("join password: wrong, foreign and late answers are refused") {
   resent.challenge(joiner, session_a, nonce_a, now);
   CHECK_EQ(resent.challenge(joiner, session_a, nonce_b, now + 1s).nonce,
            nonce_a);
-  CHECK(resent
-            .check(joiner, answer("hunter2", nonce_a), password_key, own,
-                   now + 2s)
-            .code == result::ok);
+  CHECK(
+      resent.check(joiner, answer("hunter2", nonce_a), hunter2(), own, now + 2s)
+          .code == result::ok);
 
-  // A challenge for another session replaces the older one.
-  const std::string session_b = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  // A challenge for another session from the same address does not take
+  // the older one away: each answer matches its own.
   host_guard twice;
   twice.challenge(joiner, session_a, nonce_a, now);
   CHECK_EQ(twice.challenge(joiner, session_b, nonce_b, now + 1s).nonce,
            nonce_b);
-  CHECK_EQ(twice.challenge_count(), static_cast<std::size_t>(1));
+  CHECK_EQ(twice.challenge_count(), static_cast<std::size_t>(2));
+  CHECK(
+      twice.check(joiner, answer("hunter2", nonce_a), hunter2(), own, now + 2s)
+          .code == result::ok);
   CHECK(twice
-            .check(joiner, answer("hunter2", nonce_a), password_key, own,
-                   now + 2s)
-            .code == result::stale);
+            .check(joiner, answer("hunter2", nonce_b, host_lan, session_b),
+                   hunter2(), own, now + 2s)
+            .code == result::ok);
 
   // The host address the joiner proved is not this host's.
   host_guard relayed;
   relayed.challenge(joiner, session_a, nonce_a, now);
   CHECK(relayed
             .check(joiner, answer("hunter2", nonce_a, "192.168.1.99:27017"),
-                   password_key, own, now)
+                   hunter2(), own, now)
             .code == result::address);
   CHECK(!relayed.admitted(joiner));
 }
@@ -356,7 +440,6 @@ TEST_CASE("join password: wrong, foreign and late answers are refused") {
 TEST_CASE("join password: a few wrong answers a minute per IP address") {
   host_guard guard;
   const auto start = clock_type::now();
-  const key password_key = derive_key("hunter2");
   const own_addresses own = lan_host();
   auto now = start;
   for (std::size_t i = 0; i < host_guard::max_wrong_per_minute; ++i) {
@@ -365,7 +448,7 @@ TEST_CASE("join password: a few wrong answers a minute per IP address") {
     REQUIRE(guard.challenge(peer, session_a, nonce_a, now).code == result::ok);
     CHECK(guard
               .check(peer, answer("guess" + std::to_string(i), nonce_a),
-                     password_key, own, now)
+                     hunter2(), own, now)
               .code == result::wrong);
     now += 2s;
   }
@@ -381,7 +464,7 @@ TEST_CASE("join password: a few wrong answers a minute per IP address") {
   // A minute after the first wrong answer, one more answer is looked at.
   now = start + 60s;
   REQUIRE(guard.challenge(joiner, session_a, nonce_a, now).code == result::ok);
-  CHECK(guard.check(joiner, answer("hunter2", nonce_a), password_key, own, now)
+  CHECK(guard.check(joiner, answer("hunter2", nonce_a), hunter2(), own, now)
             .code == result::ok);
   CHECK(guard.admitted(joiner));
 }
@@ -389,20 +472,95 @@ TEST_CASE("join password: a few wrong answers a minute per IP address") {
 TEST_CASE("join password: an answer after the limit waits, right or not") {
   host_guard guard;
   const auto now = clock_type::now();
-  const key password_key = derive_key("hunter2");
   const own_addresses own = lan_host();
   // Challenge first, then use up the wrong answers from other ports.
   REQUIRE(guard.challenge(joiner, session_a, nonce_a, now).code == result::ok);
   for (std::size_t i = 0; i < host_guard::max_wrong_per_minute; ++i) {
     const std::string peer = "203.0.113.50:" + std::to_string(40000 + i);
     guard.challenge(peer, session_a, nonce_b, now);
-    guard.check(peer, answer("guess", nonce_b), password_key, own, now);
+    guard.check(peer, answer("guess", nonce_b), hunter2(), own, now);
   }
-  const result_message reply = guard.check(joiner, answer("hunter2", nonce_a),
-                                           password_key, own, now + 1s);
+  const result_message reply =
+      guard.check(joiner, answer("hunter2", nonce_a), hunter2(), own, now + 1s);
   CHECK(reply.code == result::wait);
   CHECK_EQ(reply.wait_seconds, 59u);
   CHECK(!guard.admitted(joiner));
+}
+
+TEST_CASE("join password: many addresses together get few guesses") {
+  host_guard guard;
+  const auto start = clock_type::now();
+  const own_addresses own = lan_host();
+  // More addresses than the guard keeps count of, one wrong answer each,
+  // within a minute: only max_wrong_per_minute_all are looked at.
+  std::size_t wrong = 0;
+  std::size_t paused = 0;
+  for (int i = 0; i < 300; ++i) {
+    const std::string peer = many_ip(i);
+    const auto now = start + std::chrono::milliseconds(i * 100);
+    const auto given = guard.challenge(peer, session_a, nonce_a, now);
+    if (given.code == result::paused) {
+      ++paused;
+      CHECK(given.wait_seconds > 0u);
+      continue;
+    }
+    REQUIRE(given.code == result::ok);
+    const result code =
+        guard.check(peer, answer("guess", nonce_a), hunter2(), own, now).code;
+    CHECK((code == result::wrong || code == result::paused));
+    wrong += code == result::wrong;
+    paused += code == result::paused;
+  }
+  CHECK_EQ(wrong, host_guard::max_wrong_per_minute_all);
+  CHECK_EQ(paused, 300 - host_guard::max_wrong_per_minute_all);
+
+  // Meanwhile the right password waits too (no answer is looked at), and
+  // the joiner is told it is not their doing.
+  const auto later = start + 30s;
+  const auto held = guard.challenge(joiner, session_a, nonce_a, later);
+  CHECK(held.code == result::paused);
+  CHECK(held.wait_seconds > 0u);
+  CHECK_EQ(held.wait_seconds, guard.paused_seconds(later));
+
+  // A minute after the first wrong answer, answers are looked at again.
+  const auto after = start + 61s;
+  REQUIRE(guard.challenge(joiner, session_a, nonce_a, after).code ==
+          result::ok);
+  CHECK(guard.check(joiner, answer("hunter2", nonce_a), hunter2(), own, after)
+            .code == result::ok);
+}
+
+TEST_CASE("join password: cycling addresses does not reset an address") {
+  host_guard guard;
+  const auto start = clock_type::now();
+  const own_addresses own = lan_host();
+  // One address uses most of its wrong answers.
+  for (std::size_t i = 0; i + 1 < host_guard::max_wrong_per_minute; ++i) {
+    const std::string peer = "203.0.113.50:" + std::to_string(40000 + i);
+    REQUIRE(guard.challenge(peer, session_a, nonce_a, start).code ==
+            result::ok);
+    REQUIRE(guard.check(peer, answer("guess", nonce_a), hunter2(), own, start)
+                .code == result::wrong);
+  }
+  // Then more addresses than the tables hold ask for challenges (which may
+  // drop the oldest challenge counts) and answer right.
+  for (int i = 0; i < 300; ++i) {
+    const std::string peer = many_ip(i);
+    REQUIRE(guard.challenge(peer, session_a, nonce_a, start + 1s).code ==
+            result::ok);
+    CHECK(
+        guard
+            .check(peer, answer("hunter2", nonce_a), hunter2(), own, start + 1s)
+            .code == result::ok);
+  }
+  // The first address still has one wrong answer left, not five.
+  const std::string again = "203.0.113.50:40100";
+  REQUIRE(guard.challenge(again, session_a, nonce_a, start + 2s).code ==
+          result::ok);
+  CHECK(guard.check(again, answer("guess", nonce_a), hunter2(), own, start + 2s)
+            .code == result::wrong);
+  CHECK(guard.challenge(again, session_b, nonce_b, start + 3s).code ==
+        result::wait);
 }
 
 TEST_CASE("join password: challenges per IP address are limited too") {
@@ -411,7 +569,11 @@ TEST_CASE("join password: challenges per IP address are limited too") {
   for (std::size_t i = 0; i < host_guard::max_challenges_per_minute; ++i) {
     CHECK(guard.challenge(joiner, session_a, nonce_a, now).code == result::ok);
   }
-  CHECK(guard.challenge(joiner, session_a, nonce_a, now).code == result::wait);
+  // Not a wrong password: the joiner is told it asked too often.
+  const auto refused = guard.challenge(joiner, session_a, nonce_a, now);
+  CHECK(refused.code == result::busy);
+  CHECK_EQ(refused.wait_seconds, 60u);
+  CHECK_EQ(guard.wait_seconds(joiner, now), 0u);
   CHECK(guard.challenge(joiner, session_a, nonce_a, now + 60s).code ==
         result::ok);
   // Broken input gets no challenge.
@@ -424,8 +586,7 @@ TEST_CASE("join password: the tables stay bounded") {
   host_guard guard;
   const auto now = clock_type::now();
   for (int i = 0; i < 300; ++i) {
-    const std::string peer = "198.51." + std::to_string(i / 200) + "." +
-                             std::to_string(i % 200 + 1) + ":27017";
+    const std::string peer = many_ip(i);
     guard.challenge(peer, session_a, nonce_a, now);
     guard.admit(peer);
   }
@@ -437,6 +598,13 @@ TEST_CASE("join password: the tables stay bounded") {
   // Admitting twice keeps one entry.
   guard.admit("198.51.1.100:27017");
   CHECK_EQ(guard.admitted_count(), host_guard::max_admitted);
+  // One address with many sessions holds at most its challenge budget.
+  host_guard one;
+  for (int i = 0; i < 40; ++i) {
+    std::string session = random_token();
+    one.challenge(joiner, session, nonce_a, now);
+  }
+  CHECK_EQ(one.challenge_count(), host_guard::max_challenges_per_minute);
 }
 
 TEST_CASE("join password: the words the player looks for") {
@@ -447,6 +615,11 @@ TEST_CASE("join password: the words the player looks for") {
   CHECK(contains(wait_message(30), "30 seconds"));
   CHECK(contains(wait_message(1), "1 second."));
   CHECK(contains(wait_message(0), "1 second."));
+  CHECK(busy_message(20).starts_with("Too many join attempts"));
+  CHECK(contains(busy_message(20), "20 seconds"));
+  CHECK(!contains(busy_message(20), "Wrong password"));
+  CHECK(paused_message(5).starts_with("The host's game has had too many"));
+  CHECK(contains(paused_message(5), "5 seconds"));
   CHECK(refused_connect_message().starts_with("This game needs a password"));
   CHECK(contains(refused_connect_message(), "refused"));
   CHECK(host_refused_message().starts_with("This game needs a password"));

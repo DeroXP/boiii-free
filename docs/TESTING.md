@@ -792,20 +792,39 @@ it has run on two PCs.
 The network password checked by the host (DESIGN.md 11.10, "The network
 password"; TWO_PC_TEST test 6). Built 2026-11-05 and unit-tested
 (`src/xerces_tests/test_join_password.cpp`: HMAC-SHA256 and PBKDF2 against RFC
-4231 and the published vectors, the messages, the host's challenges, checks,
-address rule and wrong-answer limit); not run in the game or on two PCs.
+4231 and the published vectors, the host's salt, the messages, the host's
+challenges and checks, a spoofed answer or second challenge that leaves the
+joiner's challenge alone, the address rules, who gets in without the check, the
+wrong-answer limits per address and in all with more addresses than the tables
+hold, and the challenge limit); not run in the game or on two PCs.
 
 - [ ] A join with `xerces_join_skip_password_check 1` and no password is refused
       by H: "This game needs a password, and the host's game refused the join".
 - [ ] J without `net_password`: "This game needs a password." from J's own game.
 - [ ] J with a wrong password: "Wrong password."; H's console says a joiner gave
-      a wrong password. The sixth wrong try within a minute says "Wrong password
-      too many times" with the seconds to wait.
+      a wrong password. After five wrong tries within a minute, the sixth says
+      "Wrong password too many times" with the seconds to wait.
 - [ ] J with the right password joins H's lobby, follows H into the match, and
       joins the running match again after leaving.
+- [ ] With `net_password` set, H's own game enters its own match: its own player
+      comes through the engine's loopback (`netadrtype_t::LOOPBACK`), which
+      skips the check, and H's console has no "[Join] Refused a connect". This
+      is assumed, not yet seen.
 - [ ] From J's PC, PowerShell's raw `lobbyJoin` gets `lobbyDenied ... password`,
       and a raw `connect` while H plays gets the `error` "This game needs a
-      password, and the host's game refused the connect".
+      password, and the host's game refused the connect". The same from H's own
+      PC with 127.0.0.1 (a relay or tunnel agent on the host's PC gets no free
+      pass).
+- [ ] J types `set net_password ""` after joining: J stays in H's lobby and
+      follows H into the match.
+- [ ] A `--with-ezz-social` build: a friend's join to a host with a password
+      gets `lobbyDenied`, answers the check, and joins with the right password
+      ("Wrong password." with a wrong one).
+- [ ] Three PCs: a joiner's party member who comes along into H's lobby is
+      refused at the match's connect, and gets in by joining H by address with
+      the password (TWO_PC_TEST test 6, step 11).
+- [ ] Three PCs: host migration with `net_password` still set on the members,
+      and with it cleared after joining (TWO_PC_TEST test 6, step 12).
 - [ ] H without a password: joins work as before.
 - [ ] An older Xerces build or BOIII with any password stops at its own check
       ("Server requires a network password." or "Network password mismatch.").

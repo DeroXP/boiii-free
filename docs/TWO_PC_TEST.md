@@ -105,8 +105,9 @@ Same network, no mods enabled on either PC (Xerces > Mods).
 
 The two PCs on different internet connections, for example J on a phone hotspot.
 H's router needs UPnP on (most home routers have it on). While H's lobby is
-open, anyone who has H's address can join it unless H set a network password
-(test 6), so H closes it when the test is done.
+open, anyone who has H's address can join it. A network password (test 6) is
+checked on the joins Xerces handles, not on the game's own lobby join, so H
+closes the lobby when the test is done.
 
 1. H: Launch vanilla, then open the lobby. Within a few seconds a toast says
    what the router answered:
@@ -142,7 +143,9 @@ and before step 6.
 
 1. H: quit the game if it still runs from an earlier test, then Launch vanilla.
    In the console: `set net_password tiger7` (the password is not saved; set it
-   again after each start of the game). Open the lobby.
+   again after each start of the game). Open the lobby. For real games, pick a
+   long random password: any host J joins while J's `net_password` is set can
+   test guesses against J's answer offline (DESIGN.md 11.10).
 2. J, a join that skips J's own check, as a modified client would: start the
    game (Launch vanilla), then in the console
    `set xerces_join_skip_password_check 1` and `connect <H's address>`.
@@ -152,14 +155,18 @@ and before step 6.
    password. ..." (J's own game says it, before asking H).
 4. J: `set net_password tiger8`, then `connect <H's address>`. Expected: "Wrong
    password. ..."; H's console shows "[Join] A joiner gave a wrong password".
-5. J: repeat step 4 four more times within a minute (`connect` again each time).
-   Expected: the sixth try says "Wrong password too many times ..." with a
-   number of seconds. Wait that long before step 6.
+5. J: repeat step 4 five more times within a minute (`connect` again each time).
+   Expected: tries two to five say "Wrong password. ...", and the sixth says
+   "Wrong password too many times ..." with a number of seconds. Wait that long
+   before step 6.
 6. J: `set net_password tiger7`, then `connect <H's address>`. Expected: J joins
    H's lobby; H's console shows "[Join] A joiner gave the right password".
-7. H: start a match on The Giant. Expected: J goes along. J: leave to the menu,
-   then `connect <H's address>` again while H plays. Expected: J joins the
-   running match.
+7. H: start a match on The Giant. Expected: H's own game enters the match (its
+   own player comes in through the engine's loopback, which skips the check),
+   H's console shows no "[Join] Refused a connect" line, and J goes along. J:
+   leave to the menu, then `connect <H's address>` again while H plays.
+   Expected: J joins the running match. If H's own game is refused instead, stop
+   and copy H's console: that is a bug.
 8. A raw join from J's PC, in PowerShell (Windows key, type PowerShell, Enter),
    while H's lobby is open and again while H plays a match. It sends the same
    lobby request and connect packet a modified game could, from a port that
@@ -189,7 +196,12 @@ and before step 6.
    the connect: `no answer` while H is in the lobby (nothing runs to connect
    to), and
    `error This game needs a password, and the host's game refused the connect ...`
-   while H plays. It must run on J's PC: H's game lets its own PC in.
+   while H plays.
+
+   Then the same on H's PC, with `$h = '127.0.0.1'`. Expected: the same answers.
+   H's game lets only its own players and its own port in without the check, not
+   another program on the same PC, such as a relay or tunnel agent that forwards
+   players from elsewhere.
 
 9. H: quit the game (that forgets who passed), start it again without setting a
    password, and open the lobby. J: join with no password set. Expected: J
@@ -197,6 +209,19 @@ and before step 6.
 10. Optional, if J has an older Xerces beta zip or BOIII: with H's password set,
     J joins with it. Expected: J's game stops with "Server requires a network
     password." or "Network password mismatch.", whatever J types.
+11. Optional, with a third PC K, a joiner's own party: H as in step 1. J sets
+    `net_password tiger7` and opens J's own lobby; K sets `net_password tiger7`
+    too (J's game now checks it as well) and joins J. Then J joins H, and K
+    comes along. H starts a match. Expected, not yet seen: K's game is refused
+    with "This game needs a password, and the host's game refused the connect
+    ...", because K never answered H's check. K then joins H by address
+    (`connect <H's address>`). Expected: K joins.
+12. Optional, with K, host migration: H, J and K in H's match, each joined with
+    the password. H quits the game. Expected, not yet seen: the game moves the
+    match to J or K, and the new host's own `net_password` refuses the other's
+    connect. Repeat with J and K typing `set net_password ""` right after they
+    joined. Expected: the match moves and both stay. Write down what happened
+    either way.
 
 ## What to collect afterwards
 

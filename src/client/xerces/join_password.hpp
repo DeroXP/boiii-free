@@ -18,12 +18,13 @@
 
 namespace xerces_join_password {
 // ------------------------------------------------------------ the host
-// Whether sender may join this game's lobby or connect to its match. With
-// net_password empty, always, and sender is remembered, so a password set
-// later does not lock out who already joined. With a password, only an
-// address that passed the check (or was remembered before). This PC itself
-// (loopback, its own addresses, bots) always may. Call on the thread that
-// handles packets.
+// Whether sender may join this game's lobby or connect to its match
+// (host_guard::lets_in). With net_password empty, always, and sender is
+// remembered, so a password set later does not lock it out. With a
+// password, only an address that passed the check (or was remembered
+// before), the engine's own local players (loopback) and bots, and this
+// game's own socket. A second game on this PC, or a relay or tunnel agent
+// on it, is checked like anyone. Call on the thread that handles packets.
 bool admits(const game::net::netadr_t &sender);
 
 // ----------------------------------------------------------- the joiner
@@ -33,6 +34,8 @@ enum class outcome {
   needed,  // this game has no net_password
   wrong,   // the host did not accept it
   wait,    // too many wrong answers from this address lately
+  busy,    // too many join attempts from this address lately
+  paused,  // too many wrong answers at the host lately, from anyone
   stale,   // the check did not finish (twice)
   address, // the host did not recognise the address dialled
   timeout, // the host did not answer

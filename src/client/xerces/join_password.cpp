@@ -32,13 +32,16 @@ using steady = std::chrono::steady_clock;
 // derive_key takes a few milliseconds; both sides keep the last one.
 std::mutex key_mutex;
 std::string key_password;
+std::string key_salt;
 core::key key_value{};
 
-core::key password_key(const std::string &password) {
+core::key password_key(const std::string &password,
+                       const std::string &host_salt) {
   std::lock_guard lock(key_mutex);
-  if (password != key_password) {
-    key_value = core::derive_key(password);
+  if (password != key_password || host_salt != key_salt) {
+    key_value = core::derive_key(password, host_salt);
     key_password = password;
+    key_salt = host_salt;
   }
   return key_value;
 }
@@ -74,6 +77,13 @@ void log_check(const std::string_view event, const std::string_view message,
 // ----------------------------------------------------------- the host
 std::mutex host_mutex;
 core::host_guard guard;
+
+// This host's salt, drawn once per start of the game (join_password.hpp,
+// derive_key).
+const std::string &host_salt() {
+  static const std::string salt = core::random_token();
+  return salt;
+}
 
 // This PC's IPv4 addresses, read again at most every 30 s.
 std::vector<std::string> own_ips;
@@ -147,24 +157,6 @@ core::own_addresses own_addresses() {
   return own;
 }
 
-// Call with host_mutex held.
-bool this_pc(const game::net::netadr_t &sender) {
-  using game::net::netadrtype_t;
-  if (sender.type == netadrtype_t::LOOPBACK ||
-      sender.type == netadrtype_t::BOT) {
-    return true;
-  }
-  if (!network::is_ip_address(sender)) {
-    return false;
-  }
-  if (sender.ipv4.a == 127) {
-    return true;
-  }
-  const std::string ip = core::endpoint_ip(network::address_to_string(sender));
-  const core::own_addresses own = own_addresses();
-  return !ip.empty() && std::ranges::find(own.ips, ip) != own.ips.end();
-}
-
 // Whether this game can be joined now: a match runs here, or the lobby is
 // open to direct connect. Nothing else answers a challenge.
 bool joinable() {
@@ -192,10 +184,11 @@ void receive_challenge(const game::net::netadr_t &sender,
   }
   if (answer.code == result::ok) {
     send(sender, core::nonce_command,
-         core::format(core::nonce_message{message->session, answer.nonce}));
-  } else if (answer.code == result::wait) {
+         core::format(
+             core::nonce_message{message->session, answer.nonce, host_salt()}));
+  } else if (core::carries_seconds(answer.code)) {
     send(sender, core::result_command,
-         core::format(core::result_message{message->session, result::wait,
+         core::format(core::result_message{message->session, answer.code,
                                            answer.wait_seconds}));
   }
 }
@@ -213,7 +206,7 @@ void receive_proof(const game::net::netadr_t &sender,
          core::format(core::result_message{message->session, result::open}));
     return;
   }
-  const core::key password_key_now = password_key(password);
+  const core::key password_key_now = password_key(password, host_salt());
   core::result_message reply;
   {
     std::lock_guard lock(host_mutex);
@@ -322,8 +315,10 @@ void finish(const outcome result, const std::uint32_t wait_seconds) {
   done_callback done = std::move(joining.done);
   joining = {};
   static constexpr const char *names[] = {
-      "passed", "open",    "needed",  "wrong", "wait",
-      "stale",  "address", "timeout", "newer", "refused"};
+      "passed", "open",  "needed",  "wrong",   "wait",  "busy",
+      "paused", "stale", "address", "timeout", "newer", "refused"};
+  static_assert(std::size(names) ==
+                static_cast<std::size_t>(outcome::refused) + 1);
   log_check("join.password.joiner", "the host's password check ended",
             names[static_cast<int>(result)]);
   if (done) {
@@ -358,8 +353,8 @@ void receive_nonce(const game::net::netadr_t &sender,
   joining.deadline = steady::now() + attempt_time;
   const core::proof_message answer{
       joining.session, message->nonce, joining.host_text,
-      core::proof(password_key(password), message->nonce, joining.host_text,
-                  joining.session)};
+      core::proof(password_key(password, message->host_salt), message->nonce,
+                  joining.host_text, joining.session)};
   send(joining.host, core::proof_command, core::format(answer));
 }
 
@@ -389,6 +384,12 @@ void receive_result(const game::net::netadr_t &sender,
     return;
   case result::wait:
     finish(outcome::wait, message->wait_seconds);
+    return;
+  case result::busy:
+    finish(outcome::busy, message->wait_seconds);
+    return;
+  case result::paused:
+    finish(outcome::paused, message->wait_seconds);
     return;
   case result::address:
     finish(outcome::address, 0);
@@ -429,20 +430,28 @@ void update_joiner() {
 } // namespace
 
 bool admits(const game::net::netadr_t &sender) {
+  using game::net::netadrtype_t;
   const bool locked = network_password::is_password_set();
+  // Without the check: the engine's own local players and bots, and this
+  // game's own socket (DESIGN.md 11.10). A second game on this PC, or a
+  // relay or tunnel agent that hands players from elsewhere to this game,
+  // sends from 127.x or this PC's address on another port, and answers the
+  // check like anyone.
+  core::sender_kind kind = core::sender_kind::other;
+  if (sender.type == netadrtype_t::LOOPBACK ||
+      sender.type == netadrtype_t::BOT) {
+    kind = core::sender_kind::engine_local;
+  } else if (network::is_ip_address(sender)) {
+    kind = core::sender_kind::ip;
+  }
+  const std::string peer = kind == core::sender_kind::ip
+                               ? network::address_to_string(sender)
+                               : std::string{};
   std::lock_guard lock(host_mutex);
-  if (!locked) {
-    // As before this check existed; the sender is remembered.
-    if (network::is_ip_address(sender)) {
-      guard.admit(network::address_to_string(sender));
-    }
-    return true;
-  }
-  if (this_pc(sender)) {
-    return true;
-  }
-  return network::is_ip_address(sender) &&
-         guard.admitted(network::address_to_string(sender));
+  return guard.lets_in(kind, peer, locked,
+                       locked && kind == core::sender_kind::ip
+                           ? own_addresses()
+                           : core::own_addresses{});
 }
 
 void prove(const game::net::netadr_t &host, done_callback done) {
@@ -466,6 +475,10 @@ std::string message(const outcome result, const std::uint32_t wait_seconds) {
     return core::wrong_message();
   case outcome::wait:
     return core::wait_message(wait_seconds);
+  case outcome::busy:
+    return core::busy_message(wait_seconds);
+  case outcome::paused:
+    return core::paused_message(wait_seconds);
   case outcome::stale:
     return core::stale_message();
   case outcome::address:

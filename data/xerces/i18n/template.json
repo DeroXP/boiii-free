@@ -582,7 +582,7 @@
   "What a bug report needs: the game build, the signatures, the mods found, the last launch and the logs. Copy report puts all of it on the clipboard, with your user folder hidden.": "",
   "What leaves this PC: nothing.": "",
   "Where Black Ops III is installed, and the name other players see.": "",
-  "While it is on, anyone who has your address can join your lobby, unless you set a network password: type set net_password followed by a password in the game's console (again after each start of the game), and give it to the players you invite. Your game checks it before they join. The router's toast shows your internet address on screen.": "",
+  "While it is on, anyone who has your address can join your lobby. To ask for a password, type set net_password followed by a long password in the game's console (again after each start of the game), and give it to the players you invite: Xerces checks it on the joins it handles, but not on the game's own lobby join. The router's toast shows your internet address on screen.": "",
   "Why this order": "",
   "Windowed": "",
   "Windows' display scale here is": "",

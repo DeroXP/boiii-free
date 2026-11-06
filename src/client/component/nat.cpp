@@ -11,6 +11,7 @@
 #include "mod_stack.hpp"
 #include "nat.hpp"
 #include "network.hpp"
+#include "network_password.hpp"
 #include "party.hpp"
 #include "profile_infos.hpp"
 #include "scheduler.hpp"
@@ -84,6 +85,9 @@ struct lobby_request {
   game::net::netadr_t host{};
   std::chrono::steady_clock::time_point expires;
   std::function<void()> fallback;
+  // Xerces: this request follows a password check the host asked for
+  // (receive_lobby_denied); a second refusal is final.
+  bool after_password_check{};
 };
 
 lobby_request lobby_joining;
@@ -368,7 +372,8 @@ void connect_to(const game::net::netadr_t &endpoint) {
 }
 
 void request_lobby(const game::net::netadr_t &host, const std::string &token,
-                   std::function<void()> fallback = {}) {
+                   std::function<void()> fallback = {},
+                   const bool after_password_check = false) {
   const game::net::HostInfo *own = lobby_host_info();
   if (!own) {
     if (fallback) {
@@ -378,8 +383,12 @@ void request_lobby(const game::net::netadr_t &host, const std::string &token,
     show_error("Open the Multiplayer or Zombies menu first, then join again.");
     return;
   }
-  lobby_joining = {true, token, host, std::chrono::steady_clock::now() + 4s,
-                   std::move(fallback)};
+  lobby_joining = {true,
+                   token,
+                   host,
+                   std::chrono::steady_clock::now() + 4s,
+                   std::move(fallback),
+                   after_password_check};
   network::send(host, "lobbyJoin",
                 token + " " +
                     to_hex(own->serializedAdr.addrBuff,
@@ -917,20 +926,41 @@ void receive_lobby_host(const game::net::netadr_t &sender,
                     scheduler::main);
 }
 
-// Xerces: the host refused the lobby join; with "password", this game has
-// not passed its password check (no net_password, or the host restarted).
-// The join stops here, without the "did not answer" message or a direct
-// connect the host would refuse too.
+// Xerces: the host refused the lobby join; with "password", this address
+// has not passed its password check (DESIGN.md 11.10). No check ran before
+// this request (a friend's join, which skips getinfo), or the host's game
+// restarted since. With net_password set, this game answers the host's
+// check once and asks again; otherwise, or refused again, the join stops
+// here, without the "did not answer" message or a direct connect the host
+// would refuse too.
 void receive_lobby_denied(const game::net::netadr_t &sender,
                           const network::data_view &data,
                           game::LocalClientNum_t) {
   const std::vector<std::string> parts = fields(payload_string(data));
+  // Only the host this game asked: the check is answered to it alone.
   if (parts.size() != 2 || parts[1] != "password" ||
+      !network::are_addresses_equal(sender, lobby_joining.host) ||
       !from_lobby_request(sender, parts[0]))
     return;
-  game_join_fallback = {};
-  printf("[Friends] The host refused the join: no password check passed\n");
-  xerces_join_password::show(xerces_join_password::outcome::refused, 0);
+  const bool checked = lobby_joining.after_password_check;
+  std::function<void()> fallback = std::exchange(game_join_fallback, {});
+  using xerces_join_password::outcome;
+  if (checked || !network_password::is_password_set() ||
+      xerces_join_password::skip_check_for_test()) {
+    printf("[Friends] The host refused the join: no password check passed\n");
+    xerces_join_password::show(outcome::refused, 0);
+    return;
+  }
+  printf("[Friends] The host asks for its password check first\n");
+  xerces_join_password::prove(
+      sender, [host = sender, token = parts[0], fallback = std::move(fallback)](
+                  const outcome result, const uint32_t wait_seconds) {
+        if (result == outcome::passed || result == outcome::open) {
+          request_lobby(host, token, fallback, true);
+        } else {
+          xerces_join_password::show(result, wait_seconds);
+        }
+      });
 }
 
 void receive_lobby_follow(const game::net::netadr_t &sender,
