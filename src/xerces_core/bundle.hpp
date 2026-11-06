@@ -7,8 +7,8 @@
 // favourite and recent server addresses, and its favourites' names, word for
 // word), the config loses the player name and keeps only counts of its
 // favourite and recent servers, and FILES.txt lists what is inside, so the
-// player can see it before sharing (uploading stays opt-in per crash, D21,
-// and is not built).
+// player can see it before sharing. The bundle is never uploaded; crash
+// reports are a separate, smaller thing (crash_report.hpp, D21).
 //
 // Inside: the newest logs (max_logs of them, with the newest of each role,
 // the launcher's and the game's among them), the launch journal, the plan

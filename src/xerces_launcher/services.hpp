@@ -23,6 +23,7 @@
 
 #include <xerces_core/catalog.hpp>
 #include <xerces_core/compat.hpp>
+#include <xerces_core/crash_outbox.hpp>
 #include <xerces_core/journal.hpp>
 #include <xerces_core/launch.hpp>
 #include <xerces_core/launcher_config.hpp>
@@ -48,6 +49,23 @@ using xerces_core::signature_state;
 // A launch is xerces_core's too (launcher_launch.hpp), shared with
 // `xerces_cli plan apply`.
 using xerces_core::launch_outcome;
+
+// What the crash reports' worker did, for a footer notice (the Settings
+// screen words and shows them; services.cpp logs them).
+struct crash_notice {
+  enum class kind {
+    sent,          // reports reached the server; server_id is the last one's
+    later,         // queued; sent at a later try
+    off,           // the game crashed with sending off: nothing was sent
+    rejected,      // the server refused a report; it was removed
+    deleted,       // the server deleted this install's reports (count)
+    delete_failed, // error says why
+  };
+  kind what = kind::sent;
+  std::size_t count = 0;
+  std::string server_id;
+  std::string error;
+};
 
 class services {
 public:
@@ -183,6 +201,22 @@ public:
   // The scrubbed diagnostics zip (5.10) in <home>\crash; empty on failure.
   fs::path make_bundle(std::string *error = nullptr) const;
 
+  // ---------------------------------------------------------- crash reports
+  // docs/CRASH_REPORTS.md. After the game this launcher started exits with a
+  // crash, after a game it only saw in <home>\run exits, and at the start,
+  // the client's pending crashes become reports in <home>\crash\outbox and
+  // the outbox is sent, on a worker thread that never holds up a launch.
+  // With "Send crash reports" off nothing is sent. A dry launcher queues
+  // reports but sends nothing.
+  // The setting changed (Settings, first run): off drops the queue, on sends
+  // what is queued.
+  void crash_reports_setting_changed();
+  // "Delete my crash reports": DELETE on the worker; a notice follows.
+  void delete_crash_reports();
+  bool crash_reports_busy() const;
+  // The worker's results since the last call, for the footer.
+  std::vector<crash_notice> take_crash_notices();
+
   // ---------------------------------------------------------------- version
   static std::string version();
 
@@ -209,6 +243,20 @@ private:
   void settle_culprit_test(bool crashed);
   // poll() without a process handle: watches <home>\run.
   void watch_run_folder();
+  // Crash reports: one job at a time on a detached worker, which owns only
+  // crash_state_ (a launcher that closes mid-send does not wait for it).
+  struct crash_job {
+    bool collect = false;
+    std::optional<std::uint32_t> exit_code;
+    std::string journal_text; // the journal when the game exited
+    bool send = false;
+    bool remove_remote = false;
+  };
+  struct crash_state;
+  void queue_crash_job(crash_job job);
+  void run_crash_job(crash_job job);
+  // The worker's results: logs them, makes notices, plans a retry.
+  void drain_crash_events();
   game_state detect_now(const std::optional<std::string> &saved_dir,
                         bool preflight, xerces_core::hash_cache *cache) const;
   void apply_detection(game_state next);
@@ -245,5 +293,11 @@ private:
   std::optional<xerces_core::culprit_progress> culprit_;
   std::uint64_t culprit_rev_ = 1;
   mutable resolve_timing resolve_stats_;
+
+  std::shared_ptr<crash_state> crash_state_;
+  std::optional<crash_job> crash_next_; // asked for while the worker ran
+  std::chrono::steady_clock::time_point crash_retry_at_{};
+  bool crash_retry_ = false;
+  std::vector<crash_notice> crash_notices_;
 };
 } // namespace xerces_launcher

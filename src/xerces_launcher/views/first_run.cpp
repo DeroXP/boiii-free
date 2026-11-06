@@ -4,7 +4,8 @@
 //   01 Game     what detection found, the pre-flight verdict, a folder picker
 //   02 Import   the read-only BOIII import (xerces_core/first_run_import)
 //   03 Look     theme, UI scale and reduced motion, applied live
-//   04 Privacy  the plain statement
+//   04 Privacy  what crash reports send and what is never sent, with the
+//               "Send crash reports" switch (D21, decided 2026-11-05)
 // Finish (and "Skip setup") marks the setup done and opens Home. Nothing on
 // this screen blocks: every step can be left as it is.
 
@@ -158,6 +159,7 @@ public:
     model.Bind("reduced", &reduced_);
     model.Bind("scale_help", &scale_help_);
     model.Bind("home_path", &home_path_);
+    model.Bind("send_crash", &send_crash_);
 
     model.BindEventCallback(
         "act", [this](Rml::DataModelHandle, Rml::Event &,
@@ -367,6 +369,21 @@ private:
     } else if (action == "motion") {
       svc.config().reduced_motion = !svc.config().reduced_motion;
       save_look();
+    } else if (action == "crash") {
+      auto &config = svc.config();
+      config.send_crash_reports = !config.send_crash_reports;
+      if (!svc.save_config()) {
+        owner_->notify(owner_->tr("Xerces could not save its settings."), true);
+      } else {
+        owner_->notify(config.send_crash_reports
+                           ? owner_->tr("Crash reports are on: after a crash, "
+                                        "Xerces sends a report.")
+                           : owner_->tr("Crash reports are off: nothing is "
+                                        "sent, and reports still waiting were "
+                                        "removed."));
+      }
+      svc.crash_reports_setting_changed();
+      refresh();
     }
   }
 
@@ -653,6 +670,7 @@ private:
 
     // 04 Privacy.
     home_path_ = utf8(svc.paths().home);
+    send_crash_ = config.send_crash_reports;
 
     handle_.DirtyAllVariables();
   }
@@ -688,6 +706,7 @@ private:
   int scale_ = 0;
   bool reduced_ = false;
   Rml::String scale_help_, home_path_;
+  bool send_crash_ = true;
 };
 } // namespace
 

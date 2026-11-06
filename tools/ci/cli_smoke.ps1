@@ -2,7 +2,8 @@
 .SYNOPSIS
   CLI smoke test for the commands that work on <home> as Xerces.exe does
   (docs/DESIGN.md 15.2): mods list, info, enable, disable and order, plan
-  apply --dry-launch, packs apply, logs tail and sig check; and the offline
+  apply --dry-launch, packs apply, logs tail, sig check and crash list and
+  send (to a local port only); and the offline
   benchmark (bench loads, launcher, analyze and compare) on small logs and
   frame CSVs written here.
 
@@ -299,6 +300,39 @@ try {
   [IO.File]::WriteAllText("$homeDir\cache\signatures-report.json", $report.Replace('"resolved":false', '"resolved":true').Replace('"multi_mod":["b"]', ''))
   Invoke-Xcli 0 sig check | Out-Null
   Invoke-Xcli 1 sig check --registry compat/signatures.json | Out-Null # --registry goes with --dump
+
+  # -------------------------------------------- crash reports (no internet)
+  # docs/CRASH_REPORTS.md: a pending crash as the game's handler leaves it,
+  # sent to the discard port on this PC. Nothing answers there, so the report
+  # is queued and kept for a later try.
+  $crashList = Invoke-XcliJson 0 crash list --json
+  Check (@($crashList.outbox).Count -eq 0 -and @($crashList.pending).Count -eq 0 -and $crashList.send_crash_reports) `
+    "crash list: nothing queued at first, sending on by default"
+  $reportId = '0123456789abcdef0123456789abcdef'
+  New-Item -ItemType Directory -Force "$homeDir\crash\pending" | Out-Null
+  [IO.File]::WriteAllText("$homeDir\crash\pending\$reportId.json",
+    '{"code":"0xC0000005","report_id":"' + $reportId + '","frames":["BlackOps3.exe+0x140001000"],"module":"BlackOps3.exe","offset":"0x140001000","phase":"frontend","thread":"main"}')
+  $savedUrl = $env:XERCES_CRASH_URL
+  try {
+    $env:XERCES_CRASH_URL = 'http://127.0.0.1:9'
+    $crashSent = Invoke-XcliJson 5 crash send --json # 5: waits for a later try
+    Check (@($crashSent.queued) -contains $reportId -and @($crashSent.sent)[0].outcome -eq 'retry' -and $crashSent.outbox_left -eq 1) `
+      "crash send: queued, kept after no answer $($crashSent | ConvertTo-Json -Compress -Depth 4)"
+    $env:XERCES_CRASH_URL = 'http://example.org'
+    Invoke-Xcli 1 crash send | Out-Null # not local: nothing is sent
+    $env:XERCES_CRASH_URL = 'https://evil.example'
+    Invoke-Xcli 1 crash send | Out-Null # https too: only this PC replaces the backend
+    $crashRefused = Invoke-XcliJson 1 crash send --json
+    Check ($crashRefused.error -match 'local address' -and @($crashRefused.sent).Count -eq 0) `
+      "crash send --json: a remote XERCES_CRASH_URL is refused $($crashRefused | ConvertTo-Json -Compress -Depth 4)"
+  } finally {
+    $env:XERCES_CRASH_URL = $savedUrl
+  }
+  $crashList = Invoke-XcliJson 0 crash list --json
+  Check (@($crashList.outbox).Count -eq 1 -and @($crashList.outbox)[0].kind -eq 'exception' -and @($crashList.pending).Count -eq 0) `
+    "crash list: the report waits in the outbox $($crashList | ConvertTo-Json -Compress -Depth 4)"
+  Invoke-Xcli 1 crash | Out-Null
+  Invoke-Xcli 1 crash send --exit-code banana | Out-Null
 
   # ------------------------------------------------- bench (offline only)
   # A launcher log, a map-check folder (game log, console, results.jsonl) and

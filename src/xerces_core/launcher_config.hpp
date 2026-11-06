@@ -63,6 +63,9 @@ struct launcher_config {
 
   // Privacy and updates (16.6).
   bool check_updates = true;
+  // Crash reports go to the Xerces backend after a crash (D21, decided
+  // 2026-11-05; docs/CRASH_REPORTS.md). On by default; off sends nothing.
+  bool send_crash_reports = true;
 
   std::vector<favorite_server> favorites;
   std::vector<std::string> recent_servers; // host:port, newest first

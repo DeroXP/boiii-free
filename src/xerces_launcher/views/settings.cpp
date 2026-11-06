@@ -27,6 +27,10 @@
 // - Precise FPS limit (experimental): the client's -xerces-precise-limiter
 //   (src/client/xerces/frame_pacing.cpp), in config.extra_flags. Safe mode
 //   leaves it out (xerces_core::preview_launch).
+// - Send crash reports (D21, decided 2026-11-05; docs/CRASH_REPORTS.md):
+//   config.send_crash_reports, on by default. The services send the reports;
+//   this screen also shows their notices, every frame, whichever screen is
+//   in front.
 
 #include <RmlUi/Core.h>
 #include <RmlUi/Core/Elements/ElementFormControl.h>
@@ -38,6 +42,7 @@
 #include <iterator>
 #include <optional>
 
+#include <xerces_core/crash_report.hpp>
 #include <xerces_core/db_pool.hpp>
 #include <xerces_core/flip_model.hpp>
 #include <xerces_core/frame_pacing.hpp>
@@ -164,6 +169,8 @@ public:
     model.Bind("language_note", &language_note_);
     model.Bind("home_path", &home_path_);
     model.Bind("check_updates", &check_updates_);
+    model.Bind("send_crash_reports", &send_crash_reports_);
+    model.Bind("crash_busy", &crash_busy_);
     model.Bind("version", &version_);
 
     model.BindEventCallback(
@@ -220,6 +227,7 @@ public:
   void update(double) override {
     remember_focus();
     services &svc = owner_->svc();
+    show_crash_notices();
     const std::uint64_t key[] = {svc.config_rev(), svc.game_rev(),
                                  svc.journal_rev(), owner_->mode_rev(),
                                  svc.detecting() ? 1u : 0u};
@@ -683,6 +691,8 @@ private:
     }
     home_path_ = utf8(s.paths().home);
     check_updates_ = c.check_updates;
+    send_crash_reports_ = c.send_crash_reports;
+    crash_busy_ = s.crash_reports_busy();
     version_ = "Xerces " + services::version();
 
     force_ = text_field::none;
@@ -826,15 +836,99 @@ private:
       if (!owner_->open_folder(s.paths().home)) {
         owner_->notify(owner_->tr("The folder could not be opened."), true);
       }
+    } else if (action == "delete crash reports") {
+      if (s.crash_reports_busy()) {
+        owner_->notify(owner_->tr("Crash reports are being sent. Try again in "
+                                  "a moment."));
+        return;
+      }
+      owner_->dialog(
+          "Delete my crash reports",
+          owner_->tr("Deletes every crash report this PC sent from the Xerces "
+                     "server. It cannot be undone. Reports still waiting on "
+                     "this PC stay until they are sent; turn crash reports "
+                     "off to drop them too."),
+          {"Delete", "Cancel"},
+          [this](int choice) { delete_crash_reports(choice == 0); });
+    } else if (action == "report by hand") {
+      owner_->open_url(std::string(core::crash_issues_url));
+    }
+  }
+
+  // The answer to "Delete my crash reports" (kept out of the dialog call, so
+  // the string extractor sees only the dialog's own text there).
+  void delete_crash_reports(bool confirmed) {
+    if (!confirmed) {
+      log_info("launcher.settings.action", "delete crash reports cancelled");
+      return;
+    }
+    svc().delete_crash_reports();
+    crash_busy_ = true;
+    handle_.DirtyVariable("crash_busy");
+    owner_->notify(owner_->tr("Deleting your crash reports..."));
+  }
+
+  // The crash reports' results (services::take_crash_notices), in the footer.
+  void show_crash_notices() {
+    services &s = svc();
+    for (const crash_notice &n : s.take_crash_notices()) {
+      switch (n.what) {
+      case crash_notice::kind::sent:
+        owner_->notify(n.count == 1
+                           ? owner_->tr("Crash report sent.") + " " +
+                                 owner_->tr("Server id:") + " " + n.server_id
+                           : std::to_string(n.count) + " " +
+                                 owner_->tr("crash reports sent.") + " " +
+                                 owner_->tr("Server id:") + " " + n.server_id);
+        break;
+      case crash_notice::kind::later:
+        owner_->notify(owner_->tr("The crash report could not be sent now. "
+                                  "Xerces sends it later."));
+        break;
+      case crash_notice::kind::off:
+        owner_->notify(owner_->tr("The game crashed. Crash reports are off, so "
+                                  "nothing was sent. To report it, open an "
+                                  "issue on GitHub with Diagnostics > Copy "
+                                  "report."));
+        break;
+      case crash_notice::kind::rejected:
+        owner_->notify(owner_->tr("The Xerces server refused a crash report; "
+                                  "it was removed."),
+                       true);
+        break;
+      case crash_notice::kind::deleted:
+        owner_->notify(n.count == 0
+                           ? owner_->tr("The Xerces server has no crash "
+                                        "reports from this PC.")
+                           : owner_->tr("Crash reports deleted from the Xerces "
+                                        "server:") +
+                                 " " + std::to_string(n.count) + ".");
+        break;
+      case crash_notice::kind::delete_failed:
+        owner_->notify(
+            n.error == "dry"
+                ? owner_->tr("This launcher runs with --dry-launch, so nothing "
+                             "was sent to the server.")
+                : owner_->tr("Your crash reports could not be deleted now. Try "
+                             "again later.") +
+                      " (" + n.error + ")",
+            true);
+        break;
+      }
+    }
+    const bool busy = s.crash_reports_busy();
+    if (busy != crash_busy_) {
+      crash_busy_ = busy;
+      handle_.DirtyVariable("crash_busy");
     }
   }
 
   // The first control of each section; the index at the top jumps there.
   void jump(const std::string &section) {
     static const std::pair<const char *, const char *> targets[] = {
-        {"game", "game-change"},     {"display", "display-game"},
-        {"launch", "nointro"},       {"look", "theme-dark"},
-        {"language", "lang-en"},     {"privacy", "open-home"},
+        {"game", "game-change"},      {"display", "display-game"},
+        {"launch", "nointro"},        {"look", "theme-dark"},
+        {"language", "lang-en"},      {"privacy", "send-crash-reports"},
         {"updates", "check-updates"},
     };
     if (!doc) {
@@ -973,6 +1067,16 @@ private:
            c.reduced_motion ? owner_->tr("Reduced motion is on.")
                             : owner_->tr("Reduced motion is off."));
       owner_->apply_look();
+    } else if (key == "crash") {
+      c.send_crash_reports = !c.send_crash_reports;
+      save(std::string("send_crash_reports ") +
+               (c.send_crash_reports ? "on" : "off"),
+           c.send_crash_reports
+               ? owner_->tr("Crash reports are on: after a crash, Xerces "
+                            "sends a report.")
+               : owner_->tr("Crash reports are off: nothing is sent, and "
+                            "reports still waiting were removed."));
+      svc().crash_reports_setting_changed();
     } else if (key == "updates") {
       c.check_updates = !c.check_updates;
       save(std::string("check_updates ") + (c.check_updates ? "on" : "off"),
@@ -1379,6 +1483,8 @@ private:
   Rml::String look_note_, language_ = "en", language_note_;
   Rml::String home_path_, version_;
   bool check_updates_ = true;
+  bool send_crash_reports_ = true;
+  bool crash_busy_ = false;
 };
 } // namespace
 

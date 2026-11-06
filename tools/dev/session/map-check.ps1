@@ -9,7 +9,7 @@
 # vanilla). At the menu the map is started from the console (-StartCommand,
 # default "map <Map>"). The check then waits for the journal's in_game phase,
 # stays -PlaySeconds in the match, captures the game window, disconnects back
-# to the menu and quits. A crash dialog ("Ezz ERROR"), an engine error box, the
+# to the menu and quits. A crash dialog ("Xerces"), an engine error box, the
 # process ending, a freeze report or the time running out ends the run early;
 # the dialog is captured from the screen and the game is ended.
 #
@@ -20,6 +20,11 @@
 #
 # -Live starts the real game: only with the user's go-ahead for that session
 # (CLAUDE.md, Hard rules). The home must be outside AppData.
+#
+# "Send crash reports" is off in the home this writes: the crashes these
+# runs provoke on purpose would otherwise go to the production backend
+# (docs/CRASH_REPORTS.md). -SendCrashReports turns it on for a run that is
+# meant to report.
 param(
   [Parameter(Mandatory = $true)][string]$Map,
   [string[]]$Stack = @(),
@@ -37,6 +42,7 @@ param(
   # Return, every few seconds while the level loads). Stock maps such as
   # Shadows of Evil play a 3.5 minute intro otherwise.
   [switch]$SkipCinematic,
+  [switch]$SendCrashReports,
   [switch]$Live
 )
 
@@ -117,7 +123,8 @@ function Write-Config {
   if ($extra.Count -gt 0) {
     $flags = "  `"extra_flags`": [" + (($extra | ForEach-Object { '"' + $_ + '"' }) -join ', ') + "],`n"
   }
-  $json = "{`n  `"schema`": `"xerces.config/1`",`n  `"first_run_done`": true,`n  `"mode`": `"$Mode`",`n" + $flags +
+  $crash = if ($SendCrashReports) { 'true' } else { 'false' }
+  $json = "{`n  `"schema`": `"xerces.config/1`",`n  `"first_run_done`": true,`n  `"send_crash_reports`": $crash,`n  `"mode`": `"$Mode`",`n" + $flags +
     "  `"profiles`": { `"$Mode`": { `"mods`": [$mods], `"modded`": $flag } }`n}`n"
   [System.IO.File]::WriteAllText((Join-Path $config 'launcher.json'), $json)
   # A fresh record each run: an unfinished journal would make Home offer safe
@@ -141,7 +148,7 @@ function Close-Launcher($process) {
   if (-not $process.WaitForExit(10000)) { Stop-Process -Id $process.Id -Force }
 }
 
-# The game's dialogs: the client's crash dialog ("Ezz ERROR", a task dialog)
+# The game's dialogs: the client's crash dialog ("Xerces", a task dialog)
 # and the engine's error boxes are #32770 windows of the game process.
 function Find-Dialog([int]$gamePid) {
   foreach ($h in [XercesWin]::TopWindows([uint32]$gamePid)) {

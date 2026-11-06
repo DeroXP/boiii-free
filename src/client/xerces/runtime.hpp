@@ -37,6 +37,11 @@ inline void log_error(std::string_view event, std::string_view message,
   log(xerces_core::log_level::error, event, message, data_json);
 }
 
+// The file name of this session's log (<date>-<time>-game-<pid>.jsonl),
+// for the crash report (docs/CRASH_REPORTS.md); empty when there is none or
+// its lock is held (it never waits long: the crash handler calls it).
+std::string log_file_name();
+
 // Writes a file through a temporary file, so a crash never leaves half of
 // it behind.
 bool write_file(const std::filesystem::path &path, std::string_view text);
@@ -61,6 +66,9 @@ std::string flag_value(std::string_view flag);
 bool journal_active();
 xerces_core::launch_phase journal_phase();
 void set_journal_phase(xerces_core::launch_phase phase);
+// The phase for the crash report: empty when this process does not own the
+// journal or its lock stays held (a crash inside a journal write).
+std::string journal_phase_for_crash();
 
 // The signature lookup (DESIGN.md 3.3) is the journal's "symbols" step. The
 // object returned moves the journal back to "launching" (the engine is still
@@ -104,6 +112,27 @@ std::optional<std::uint32_t> exit_code();
 // game log when a map fails or the game ends without quitting (DESIGN.md
 // 5.10), because the console window dies with the process. Safe to call from
 // any thread and during shutdown.
+// The last lines come with every name note_player_name knows replaced by
+// <player>.
 void console_append(std::string_view text);
 std::vector<std::string> console_last_lines(std::size_t count);
+
+// While one lives on a thread, what that thread prints stays out of the
+// console tail. chat.cpp puts one around each chat line: it holds another
+// player's name and what they wrote, which neither the game log nor a crash
+// report keeps (docs/CRASH_REPORTS.md).
+class console_private_line {
+public:
+  console_private_line();
+  ~console_private_line();
+  console_private_line(const console_private_line &) = delete;
+  console_private_line &operator=(const console_private_line &) = delete;
+};
+
+// The player names the game knows, in memory only (at most 64): its own
+// (name.cpp) and the players in the match (chat.cpp). The console tail and
+// crash reports hide them. player_names() never waits long: the crash
+// handler calls it.
+void note_player_name(std::string_view name);
+std::vector<std::string> player_names();
 } // namespace xerces_runtime

@@ -39,8 +39,10 @@ III. Self-hosted and offline play only.
   `mod-stack`).
 - A tag named `main` exists, so always write `refs/heads/main` for the fork
   branch.
-- `backend/` is backend slice M5a (FastAPI + Postgres), live on Railway. The
-  game client does not talk to it yet.
+- `backend/` is backend slice M5a (FastAPI + Postgres), live on Railway. Since
+  2026-11-05 the launcher (and `xerces_cli crash send`) sends crash reports to
+  it while "Send crash reports" is on (D21, `docs/CRASH_REPORTS.md`); nothing
+  else talks to it yet.
 - Work on `xerces-main` happens in the worktree
   `C:\Users\Ginld\XercesDev\xerces-main`, outside OneDrive, so build output and
   `node_modules` are not synced. The OneDrive checkout stays on `xerces-design`.

@@ -19,6 +19,14 @@ local function headless_includes()
   defines({ "RAPIDJSON_HAS_STDSTRING", "ZSTD_STATIC_LINKING_ONLY" })
 end
 
+-- Crash reports (src/xerces_core/crash_*.cpp): zlib for gzip bodies, and the
+-- build's version.h (premake writes it to build\src) for the git commit.
+-- WinHTTP, DXGI and BCrypt are system libraries named by #pragma there.
+local function crash_report_includes()
+  includedirs({ root_path("deps/zlib"), "%{wks.location}/src" })
+  defines({ "ZLIB_CONST" })
+end
+
 -- The workspace links everything for the Windows subsystem; these are console programs.
 local function console_app()
   kind("ConsoleApp")
@@ -38,22 +46,24 @@ kind("StaticLib")
 language("C++")
 files({ root_path("src/xerces_core/**.hpp"), root_path("src/xerces_core/**.cpp") })
 headless_includes()
+crash_report_includes()
 
 project("xerces_tests")
 console_app()
 language("C++")
 files({ root_path("src/xerces_tests/**.hpp"), root_path("src/xerces_tests/**.cpp") })
 headless_includes()
+crash_report_includes()
 -- MinHook with Xerces' thread walk (deps/premake/minhook.lua), tested on its own.
 includedirs({ root_path("deps/minhook/include") })
-links({ "xerces_core", "zstd", "advapi32", "minhook" })
+links({ "xerces_core", "zstd", "zlib", "advapi32", "minhook" })
 
 project("xerces_cli")
 console_app()
 language("C++")
 files({ root_path("src/xerces_cli/**.hpp"), root_path("src/xerces_cli/**.cpp") })
 headless_includes()
-links({ "xerces_core", "zstd", "advapi32" })
+links({ "xerces_core", "zstd", "zlib", "advapi32" })
 
 group("")
 

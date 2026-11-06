@@ -8,7 +8,10 @@
 #include <loader/component_loader.hpp>
 
 #include <utils/hook.hpp>
+#include <utils/nt.hpp>
 #include <utils/string.hpp>
+
+#include <xerces_core/crash_module.hpp>
 
 namespace error_help {
 namespace {
@@ -25,17 +28,8 @@ const std::unordered_set<std::string> LANGUAGE_PREFIXES{
     "en", "fr", "de", "it", "es", "ea", "ru", "pl", "po",
     "br", "pt", "ja", "ko", "tc", "sc", "cz", "ar"};
 
-const std::unordered_map<std::string, std::string> OVERLAYS{
-    {"gameoverlayrenderer64.dll", "the Steam overlay"},
-    {"discordhook64.dll", "the Discord overlay"},
-    {"rtsshooks64.dll", "RivaTuner Statistics Server (MSI Afterburner)"},
-    {"graphics-hook64.dll", "OBS game capture"},
-    {"nvspcap64.dll", "the GeForce Experience overlay"},
-    {"ow-graphics-hook64.dll", "the Overwolf overlay"}};
-
-const std::unordered_set<std::string> PROXY_DLLS{
-    "dxgi.dll",    "d3d11.dll", "d3d9.dll",      "dinput8.dll",
-    "version.dll", "winmm.dll", "xinput1_3.dll", "dsound.dll"};
+// Xerces: the overlay and proxy DLL lists moved to xerces_core/crash_module
+// with the rest of explain_module's decision.
 
 std::string explain_zone(const std::string &zone) {
   const size_t separator = zone.find('_');
@@ -398,56 +392,67 @@ std::string strip_colors(const std::string &text) {
 }
 
 std::string explain_module(const std::filesystem::path &module_path) {
-  const std::string name =
-      utils::string::to_lower(module_path.filename().string());
-  const std::string path = utils::string::to_lower(module_path.string());
+  // Xerces: the decision is xerces_core::classify_module (tested there).
+  // Under Xerces the client, boiii.exe, sits next to Xerces.exe and not in
+  // the game folder; upstream's rule called it "loaded into the game by other
+  // software". The client's own module is the client, wherever it is.
+  const auto text = [](const std::filesystem::path &path) {
+    const std::u8string u8 = path.u8string();
+    return std::string(u8.begin(), u8.end());
+  };
+  const std::string path = text(module_path);
+  const std::string name = xerces_core::module_file_name(path);
+  const std::filesystem::path client =
+      utils::nt::library::get_by_address(
+          reinterpret_cast<const void *>(&explain_module))
+          .get_path();
+  // equivalent() also sees through links and short names, as upstream did.
+  std::error_code error;
+  const std::string game_dir =
+      std::filesystem::equivalent(module_path.parent_path(),
+                                  game::get_game_path(), error)
+          ? text(module_path.parent_path())
+          : text(game::get_game_path());
+  char windows[MAX_PATH]{};
+  GetWindowsDirectoryA(windows, MAX_PATH);
 
-  if (const auto overlay = OVERLAYS.find(name); overlay != OVERLAYS.end()) {
-    return std::format(
-        "^1The crash happened inside {} ({}).\n^3Fix: ^7Disable {} "
-        "for this game and try again.",
-        overlay->second, name, overlay->second);
+  switch (xerces_core::classify_module(path, text(client), game_dir, windows)) {
+  case xerces_core::module_origin::client:
+  case xerces_core::module_origin::game:
+  case xerces_core::module_origin::windows:
+    return {};
+  case xerces_core::module_origin::overlay: {
+    const std::string overlay(xerces_core::overlay_name(name).value_or(name));
+    return std::format("^1The crash happened inside {} ({}).\n^3Fix: ^7Disable "
+                       "{} for this game and try again.",
+                       overlay, name, overlay);
   }
-
-  if (path.find("\\driverstore\\") != std::string::npos) {
+  case xerces_core::module_origin::graphics_driver:
     return std::format("^1The crash happened inside your {}graphics driver "
                        "({}).\n^3Fix: ^7{}",
                        gpu_vendor(name), name, GPU_FIX);
+  case xerces_core::module_origin::game_proxy:
+    return std::format(
+        "^1The crash happened inside '{}' in the game folder, which is not "
+        "part of the game (for example ReShade or another mod "
+        "loader).\n^3Fix: ^7"
+        "Remove or update '{}' in the game folder.",
+        name, name);
+  case xerces_core::module_origin::directx:
+    return std::format("^1The crash happened inside DirectX ({}), which is "
+                       "usually caused by the graphics driver or an "
+                       "overlay.\n^3Fix: ^7{}",
+                       name, GPU_FIX);
+  case xerces_core::module_origin::other_software:
+    break;
   }
-
-  std::error_code error;
-  if (std::filesystem::equivalent(module_path.parent_path(),
-                                  game::get_game_path(), error)) {
-    if (PROXY_DLLS.contains(name)) {
-      return std::format(
-          "^1The crash happened inside '{}' in the game folder, which is not "
-          "part of the game (for example ReShade or another mod "
-          "loader).\n^3Fix: ^7"
-          "Remove or update '{}' in the game folder.",
-          name, name);
-    }
-    return {};
-  }
-
-  char windows[MAX_PATH]{};
-  GetWindowsDirectoryA(windows, MAX_PATH);
-  if (path.starts_with(utils::string::to_lower(windows))) {
-    if (name == "d3d11.dll" || name == "dxgi.dll" || name == "d3d9.dll") {
-      return std::format("^1The crash happened inside DirectX ({}), which is "
-                         "usually caused by the graphics driver or an "
-                         "overlay.\n^3Fix: ^7{}",
-                         name, GPU_FIX);
-    }
-    return {};
-  }
-
   return std::format(
       "^1The crash happened inside '{}' ({}), which is not part of the game. "
       "It was loaded into the game by other software, such as an overlay, "
       "recorder, monitoring/RGB tool or antivirus.\n^3Fix: ^7Close or "
       "uninstall "
       "that software, or add the game folder to its exclusions.",
-      name, module_path.string());
+      name, path);
 }
 
 struct component final : generic_component {

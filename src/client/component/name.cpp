@@ -21,6 +21,8 @@
 #include "game_event.hpp"
 #include "sv.hpp"
 
+#include <xerces/runtime.hpp>
+
 namespace name {
 namespace {
 constexpr const str<13> sync_packet_name = "nameoverride";
@@ -61,6 +63,10 @@ std::string sanitize_name(const std::string &name) {
 }
 
 void update_player_name(const std::string &new_name) {
+  // Xerces: the name the game really uses (properties.json, else Steam's),
+  // which launcher.json often does not hold, for the console tail and crash
+  // reports to hide (xerces/runtime.hpp).
+  xerces_runtime::note_player_name(new_name);
   player_name.access([&](std::string &name) { name = new_name; });
   utils::properties::store("playerName", new_name);
 }

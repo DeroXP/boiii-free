@@ -19,6 +19,10 @@
 
 #include <exception/minidump.hpp>
 #include <xerces/runtime.hpp>
+#include <xerces_core/crash_report.hpp>
+#include <xerces_core/journal.hpp>
+#include <xerces_core/launcher_home.hpp>
+#include <xerces_core/log.hpp>
 
 // In case of clangd compilation
 #if __has_include("version.hpp")
@@ -403,7 +407,7 @@ bool ask_restart(const std::string &text,
   TASKDIALOGCONFIG config{};
   config.cbSize = sizeof(config);
   config.dwFlags = TDF_USE_COMMAND_LINKS | TDF_SIZE_TO_CONTENT;
-  config.pszWindowTitle = L"Ezz ERROR";
+  config.pszWindowTitle = L"Xerces";
   config.pszMainIcon = TD_ERROR_ICON;
   config.pszMainInstruction = headline;
   config.pszContent = content.c_str();
@@ -416,21 +420,41 @@ bool ask_restart(const std::string &text,
          pressed == RESTART_BUTTON;
 }
 
+// Xerces: whether "Send crash reports" is on (launcher.json, read when the
+// crash happens, so a change in the open launcher counts). Off when the file
+// cannot be read: the person may have turned it off in the file that broke.
+bool crash_reports_on() {
+  return xerces_runtime::started_by_launcher() &&
+         xerces_core::crash_reports_enabled(xerces_runtime::read_file(
+             xerces_runtime::home() / "config" / "launcher.json"));
+}
+
+// Xerces: what happens to this crash's report (docs/CRASH_REPORTS.md), for
+// the dialog: the launcher sends it when the game closes or when Xerces
+// opens next or, with the setting off, how to report it by hand.
+std::string crash_report_note(bool dump = true) {
+  const bool by_launcher = xerces_runtime::started_by_launcher();
+  return xerces_core::crash_report_note(
+      by_launcher, by_launcher && crash_reports_on(),
+      by_launcher && xerces_core::launcher_running(xerces_runtime::home()),
+      dump);
+}
+
 void display_error_dialog() {
   const std::string minidumps_out =
       (game::get_appdata_path() / "minidumps").string();
-  const std::string error_str = std::format(
-      "{}\n\nDetails: {} (0x{:08X}) at {:p} on the {} thread.\n\n"
-      "Crash dump saved in:\n{}\nPlease report it on https://dc.ezz.lol",
-      crash_reason(), get_exception_string(exception_data.code),
-      exception_data.code, game::derelocate(exception_data.address),
-      thread_role(), minidumps_out);
+  const std::string error_str =
+      std::format("{}\n\nDetails: {} (0x{:08X}) at {:p} on the {} thread.\n\n"
+                  "Crash dump saved in:\n{}\n\n{}",
+                  crash_reason(), get_exception_string(exception_data.code),
+                  exception_data.code, game::derelocate(exception_data.address),
+                  thread_role(), minidumps_out, crash_report_note());
 
   utils::thread::suspend_other_threads();
   show_mouse_cursor();
 
   if (game::quiet_crash() || game::is_headless()) {
-    game::show_error(error_str, "Ezz ERROR");
+    game::show_error(error_str, "Xerces");
     utils::thread::terminate_other_threads(exception_data.code);
   } else if (ask_restart(error_str)) {
     restart_game();
@@ -881,9 +905,8 @@ std::string find_culprit(const std::vector<resolved_frame> &frames) {
   if (crashed.get_ptr() == utils::nt::library::get_by_address(
                                reinterpret_cast<const void *>(&find_culprit))
                                .get_ptr()) {
-    return "This is a bug in the Ezz client, not a problem with your PC or "
-           "game files.\nFix: Please report it on https://dc.ezz.lol with the "
-           "crash dump.";
+    return "This is a bug in the Xerces game client (boiii.exe), not a "
+           "problem with your PC or game files.";
   }
 
   std::vector<const void *> addresses{exception_data.address};
@@ -901,6 +924,109 @@ std::string find_culprit(const std::vector<resolved_frame> &frames) {
     }
   }
   return {};
+}
+
+// Xerces: the crash report's part (docs/CRASH_REPORTS.md). When the launcher
+// started this game (XERCES_HOME is set) and "Send crash reports" is on, a
+// stacks-only dump goes to <home>\crash\pending\<report_id>.dmp first, then
+// a note with the code, the module and offset, the thread and the frames
+// (module+offset, as the console report prints them) next to it. The
+// launcher sends both when the game has closed. Upstream's dump and zip in
+// the minidumps folder stay as they are, for local use. Returns the report
+// id; empty when nothing was written.
+std::string begin_pending_report(const LPEXCEPTION_POINTERS exceptioninfo) {
+  if (!crash_reports_on()) {
+    return {};
+  }
+  const std::string id = xerces_core::new_launch_id();
+  std::error_code ec;
+  const std::filesystem::path dir =
+      xerces_runtime::home() / "crash" / "pending";
+  std::filesystem::create_directories(dir, ec);
+  // Written as .dmp.tmp and renamed: the MiniDumpWriteDump hook above sends
+  // every other .dmp to the minidumps folder.
+  const std::filesystem::path temporary = dir / (id + ".dmp.tmp");
+  if (write_stacks_minidump_file(exceptioninfo, temporary.c_str())) {
+    std::filesystem::rename(temporary, dir / (id + ".dmp"), ec);
+  }
+  return id;
+}
+
+std::string frame_text(const resolved_frame &frame) {
+  return xerces_core::crash_frame(
+      frame.module_name == "unknown" ? "" : frame.module_name, frame.rva);
+}
+
+// The note's common part: the thread, the journal's phase, the console's
+// last lines (the names the game knows already replaced), the flags, the
+// game log's name, the journal, and those names for the report to hide.
+void write_pending_note(xerces_core::pending_crash note) {
+  note.created_utc = xerces_core::json_log::now_utc();
+  note.thread = thread_role();
+  note.phase = xerces_runtime::journal_phase_for_crash();
+  note.console =
+      xerces_runtime::console_last_lines(xerces_core::crash_console_lines);
+  note.flags =
+      xerces_core::launch_flag_names(xerces_runtime::command_line_args());
+  note.game_log = xerces_runtime::log_file_name();
+  note.journal = xerces_runtime::read_file(xerces_runtime::home() / "logs" /
+                                           "journal.json");
+  note.names = xerces_runtime::player_names();
+  xerces_runtime::write_file(xerces_runtime::home() / "crash" / "pending" /
+                                 (note.report_id + ".json"),
+                             xerces_core::pending_crash_to_json(note));
+}
+
+void finish_pending_report(const std::string &id, const resolved_frame &crash,
+                           const std::vector<resolved_frame> &frames) {
+  if (id.empty()) {
+    return;
+  }
+  xerces_core::pending_crash note;
+  note.report_id = id;
+  note.code = exception_data.code;
+  if (crash.module_name != "unknown") {
+    note.module = crash.module_name;
+    note.offset = crash.rva;
+  }
+  for (const resolved_frame &frame : frames) {
+    if (note.frames.size() == xerces_core::crash_frame_cap) {
+      break;
+    }
+    note.frames.push_back(frame_text(frame));
+  }
+  write_pending_note(std::move(note));
+}
+
+// Xerces: a fatal engine error (Com_Error FATAL, Sys_Error) ends the game
+// though no exception ran. Its note has no dump (kind unknown_exit); the
+// module and offset are the first frame outside the client, the code that
+// raised the error. Without it "Restart game", which ends this process with
+// code 0, would read as a clean exit and nothing would be reported.
+void write_fatal_report() {
+  if (!crash_reports_on()) {
+    return;
+  }
+  xerces_core::pending_crash note;
+  note.report_id = xerces_core::new_launch_id();
+  note.kind = xerces_core::crash_kind::unknown_exit;
+  void *stack[xerces_core::crash_frame_cap]{};
+  const USHORT count = RtlCaptureStackBackTrace(
+      1, static_cast<DWORD>(std::size(stack)), stack, nullptr);
+  const auto client = reinterpret_cast<uint64_t>(
+      utils::nt::library::get_by_address(
+          reinterpret_cast<const void *>(&write_fatal_report))
+          .get_ptr());
+  for (USHORT i = 0; i < count; ++i) {
+    const resolved_frame frame = resolve_address(stack[i]);
+    note.frames.push_back(frame_text(frame));
+    if (!note.offset && frame.module_name != "unknown" &&
+        frame.module_base != client) {
+      note.module = frame.module_name;
+      note.offset = frame.rva;
+    }
+  }
+  write_pending_note(std::move(note));
 }
 
 bool is_harmless_error(const LPEXCEPTION_POINTERS exceptioninfo) {
@@ -933,6 +1059,7 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
                       ? early.string().c_str()
                       : "(failed)");
   }
+  const std::string report_id = begin_pending_report(exceptioninfo);
 
   const resolved_frame crash_frame =
       resolve_address(exceptioninfo->ExceptionRecord->ExceptionAddress);
@@ -966,11 +1093,13 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
                   target < 0x10000 ? " (NULL pointer dereference)" : "");
   }
 
-  // Print condensed callstack to console
-  std::vector<resolved_frame> frames = capture_stackwalk(exceptioninfo, 16);
+  // Print condensed callstack to console. Xerces: 32 frames are walked for
+  // the crash report; the console shows the first 16, as before.
+  std::vector<resolved_frame> frames = capture_stackwalk(
+      exceptioninfo, static_cast<int32_t>(xerces_core::crash_frame_cap));
   if (!frames.empty()) {
     exception_log(true, "  Callstack:");
-    for (size_t i = 0; i < frames.size(); ++i) {
+    for (size_t i = 0; i < frames.size() && i < 16; ++i) {
       const resolved_frame *f = &frames[i];
 
       if (!f->function_name.empty()) {
@@ -996,6 +1125,7 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
               exception_data.access == 8
           ? *reinterpret_cast<void **>(exceptioninfo->ContextRecord->Rsp)
           : nullptr;
+  finish_pending_report(report_id, crash_frame, frames);
   exception_data.culprit = find_culprit(frames);
   exception_data.scripts = describe_scripts();
 
@@ -1096,12 +1226,14 @@ void WINAPI set_unhandled_exception_filter_stub(LPTOP_LEVEL_EXCEPTION_FILTER) {
 }
 
 void show_fatal_error(const std::string &message) {
+  // Xerces: before the other threads are suspended, while their locks can
+  // still be released.
+  write_fatal_report();
   if (!game::quiet_crash() && !game::is_headless()) {
     utils::thread::suspend_other_threads();
     show_mouse_cursor();
-    if (ask_restart(error_help::strip_colors(message) +
-                        "\n\nIf this keeps happening, please report it on "
-                        "https://dc.ezz.lol",
+    if (ask_restart(error_help::strip_colors(message) + "\n\n" +
+                        crash_report_note(false),
                     L"The game hit an error and has to close.")) {
       restart_game();
     }

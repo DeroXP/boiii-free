@@ -16,11 +16,14 @@
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
 
+#include <xerces_core/crash_outbox.hpp>
+#include <xerces_core/crash_report.hpp>
 #include <xerces_core/journal.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/launcher_config.hpp>
@@ -35,6 +38,7 @@
 #include <xerces_core/pack.hpp>
 #include <xerces_core/pack_apply.hpp>
 #include <xerces_core/packs_store.hpp>
+#include <xerces_core/version.hpp>
 
 #include "cli.hpp"
 
@@ -1264,5 +1268,232 @@ int cmd_sig_report(const arguments &args) {
     }
   }
   return report.has_miss() ? exit_signatures : exit_ok;
+}
+
+// crash list | send (docs/CRASH_REPORTS.md): the crash reports Xerces.exe
+// sends, for games xerces_cli started. list shows the outbox and the
+// client's pending crashes; send turns pending crashes into reports (and,
+// with --exit-code, a crash the client wrote nothing for), then sends the
+// outbox when "Send crash reports" is on. send exits 5 (exit_queued) when
+// reports still wait in the outbox for a later try.
+int cmd_crash(const arguments &args, const std::string &action) {
+  if (action != "list" && action != "send") {
+    std::cerr << "Use crash list or crash send. Try --help.\n";
+    return exit_error;
+  }
+  if (action == "list"
+          ? !accept_only(args, 2, {"--home"}, {"--json"})
+          : !accept_only(args, 2, {"--home", "--exit-code"}, {"--json"})) {
+    return exit_error;
+  }
+  const bool as_json = args.has("--json");
+  const home_view home = open_home(args, false, false, false);
+  const fs::path crash_dir = home.paths.crash;
+  const std::string config_text =
+      read_text_file(home.paths.config_file()).value_or("");
+  // The rule the launcher and the game client follow: no launcher.json
+  // yet is on, a broken one off.
+  const bool enabled = crash_reports_enabled(config_text);
+  const std::optional<std::string> base = crash_base_url();
+
+  if (action == "list") {
+    const auto outbox = list_outbox(crash_dir);
+    const auto pending = list_pending(crash_dir);
+    if (as_json) {
+      rapidjson::Document doc(rapidjson::kObjectType);
+      auto &alloc = doc.GetAllocator();
+      json::set(doc, "send_crash_reports", enabled, alloc);
+      json::set(doc, "url", base.value_or(""), alloc);
+      rapidjson::Value queued(rapidjson::kArrayType);
+      for (const auto &entry : outbox) {
+        rapidjson::Value item(rapidjson::kObjectType);
+        json::set(item, "report_id", entry.report_id, alloc);
+        json::set(item, "bytes", static_cast<std::int64_t>(entry.size), alloc);
+        json::set(item, "queued", entry.queued, alloc);
+        const auto report =
+            json::parse(read_text_file(entry.file).value_or(""));
+        const auto *crash =
+            report.ok ? json::member(report.document, "crash") : nullptr;
+        json::set(item, "kind",
+                  crash ? json::get_string(*crash, "kind").value_or("")
+                        : std::string(),
+                  alloc);
+        queued.PushBack(std::move(item), alloc);
+      }
+      json::set(doc, "outbox", std::move(queued), alloc);
+      rapidjson::Value waiting(rapidjson::kArrayType);
+      for (const auto &entry : pending) {
+        rapidjson::Value item(rapidjson::kObjectType);
+        json::set(item, "report_id", entry.crash.report_id, alloc);
+        json::set(item, "code", crash_code_hex(entry.crash.code), alloc);
+        json::set(item, "dump", !entry.dump_file.empty(), alloc);
+        waiting.PushBack(std::move(item), alloc);
+      }
+      json::set(doc, "pending", std::move(waiting), alloc);
+      std::cout << json::pretty(doc) << "\n";
+      return exit_ok;
+    }
+    std::cout << "Send crash reports: " << (enabled ? "on" : "off") << "\n";
+    std::cout << "Sends to: "
+              << (base ? *base
+                       : std::string("nothing (XERCES_CRASH_URL is not a "
+                                     "local address)"))
+              << "\n";
+    std::cout << "Queued in " << utf8(crash_dir / "outbox") << ": "
+              << outbox.size() << "\n";
+    for (const auto &entry : outbox) {
+      std::cout << "  " << entry.report_id << "  " << entry.size << " bytes\n";
+    }
+    std::cout << "Pending from the game: " << pending.size() << "\n";
+    for (const auto &entry : pending) {
+      std::cout << "  " << entry.crash.report_id << "  "
+                << crash_code_hex(entry.crash.code)
+                << (entry.dump_file.empty() ? "  (no dump)" : "") << "\n";
+    }
+    return exit_ok;
+  }
+
+  std::optional<std::uint32_t> exit_code;
+  if (const auto given = args.get("--exit-code")) {
+    std::string text = *given;
+    int radix = 10;
+    if (text.starts_with("0x") || text.starts_with("0X")) {
+      text = text.substr(2);
+      radix = 16;
+    }
+    std::uint32_t value = 0;
+    const auto [end, error] =
+        std::from_chars(text.data(), text.data() + text.size(), value, radix);
+    if (text.empty() || error != std::errc() ||
+        end != text.data() + text.size()) {
+      std::cerr << "--exit-code takes the game's exit code, decimal or 0x "
+                   "hex.\n";
+      return exit_error;
+    }
+    exit_code = value;
+  }
+  if (launcher_running(home.paths.home)) {
+    std::cerr << "Xerces.exe is running on this home and sends crash reports "
+                 "itself.\n";
+    return exit_error;
+  }
+
+  crash_context ctx;
+  ctx.home = home.paths.home;
+  ctx.version = xerces_version_text;
+  ctx.commit = xerces_build_commit();
+  ctx.dirty = xerces_build_dirty();
+  ctx.config_text = config_text;
+  const auto env = [](const char *name) {
+    char *value = nullptr;
+    std::size_t size = 0;
+    std::string out;
+    if (_dupenv_s(&value, &size, name) == 0 && value != nullptr) {
+      out = value;
+    }
+    std::free(value);
+    return out;
+  };
+  ctx.profile = env("USERPROFILE");
+  ctx.user_name = env("USERNAME");
+  ctx.system = [] { return collect_crash_system(); };
+  ctx.now_utc = json_log::now_utc();
+  ctx.now = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch())
+                .count();
+  collect_result collected;
+  if (!game_in_run_folder(home.paths.home)) {
+    if (enabled) {
+      // The game's build for the report; detection reads the cached hash.
+      const home_view detected = open_home(args, true, true, false);
+      if (detected.game.exe) {
+        ctx.game_checksum = detected.game.exe->checksum;
+      }
+      ctx.steam_build = detected.game.steam_build;
+    }
+    collected = collect_crashes(ctx, enabled, exit_code);
+  } else if (!as_json) {
+    std::cout << "A game is running: its crashes are collected once it has "
+                 "exited.\n";
+  }
+
+  std::vector<send_result> sent;
+  if (enabled && base && !list_outbox(crash_dir).empty()) {
+    send_options options;
+    options.base_url = *base;
+    options.install_id = crash_install_id(ctx.home);
+    options.user_agent = std::string("Xerces/") + xerces_version_text;
+    sent = send_outbox(crash_dir, options, winhttp_send);
+  }
+  // Reports that wait for a later try (no answer, rate limited); the ones
+  // the server refused are gone.
+  const bool waiting = enabled && base && !list_outbox(crash_dir).empty();
+  const char *const refused_url =
+      "XERCES_CRASH_URL must be a local address (127.0.0.1, localhost or "
+      "[::1]); nothing was sent.";
+  if (as_json) {
+    rapidjson::Document doc(rapidjson::kObjectType);
+    auto &alloc = doc.GetAllocator();
+    json::set(doc, "send_crash_reports", enabled, alloc);
+    if (enabled && !base) {
+      json::set(doc, "error", refused_url, alloc);
+    }
+    json::set(doc, "crashed", collected.crashed, alloc);
+    json::set(doc, "queued", json::string_array(collected.queued, alloc),
+              alloc);
+    json::set(doc, "dropped", static_cast<std::int64_t>(collected.dropped),
+              alloc);
+    rapidjson::Value results(rapidjson::kArrayType);
+    for (const auto &result : sent) {
+      rapidjson::Value item(rapidjson::kObjectType);
+      json::set(item, "report_id", result.report_id, alloc);
+      json::set(item, "outcome", to_string(result.outcome), alloc);
+      json::set(item, "status", static_cast<std::int64_t>(result.status),
+                alloc);
+      json::set(item, "server_id", result.server_id, alloc);
+      json::set(item, "error", json::valid_utf8(result.error, 256), alloc);
+      results.PushBack(std::move(item), alloc);
+    }
+    json::set(doc, "sent", std::move(results), alloc);
+    json::set(doc, "outbox_left",
+              static_cast<std::int64_t>(list_outbox(crash_dir).size()), alloc);
+    std::cout << json::pretty(doc) << "\n";
+    return enabled && !base ? exit_error : waiting ? exit_queued : exit_ok;
+  }
+  for (const auto &id : collected.queued) {
+    std::cout << "queued   " << id << "\n";
+  }
+  if (!enabled) {
+    std::cout << "Send crash reports is off: nothing was sent"
+              << (collected.dropped > 0
+                      ? ", and the crashes waiting to be sent were removed"
+                      : "")
+              << ". To report a crash, open an issue at " << crash_issues_url
+              << " with the diagnostics bundle (xerces_cli diag bundle).\n";
+    return exit_ok;
+  }
+  if (!base) {
+    std::cerr << refused_url << "\n";
+    return exit_error;
+  }
+  for (const auto &result : sent) {
+    std::cout << (result.outcome == send_outcome::sent        ? "sent     "
+                  : result.outcome == send_outcome::duplicate ? "had it   "
+                  : result.outcome == send_outcome::rejected  ? "refused  "
+                  : result.outcome == send_outcome::off       ? "off      "
+                                                              : "later    ")
+              << result.report_id;
+    if (!result.server_id.empty()) {
+      std::cout << "  server id " << result.server_id;
+    }
+    if (!result.error.empty()) {
+      std::cout << "  (" << json::valid_utf8(result.error, 256) << ")";
+    }
+    std::cout << "\n";
+  }
+  if (sent.empty() && collected.queued.empty()) {
+    std::cout << "Nothing to send.\n";
+  }
+  return waiting ? exit_queued : exit_ok;
 }
 } // namespace xerces_cli

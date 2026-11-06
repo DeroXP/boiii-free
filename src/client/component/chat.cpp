@@ -16,6 +16,8 @@
 #include "scheduler.hpp"
 #include "sv.hpp"
 
+#include <xerces/runtime.hpp>
+
 #include <atomic>
 #include <charconv>
 
@@ -155,11 +157,27 @@ void g_say_to_stub(utils::hook::assembler &a) {
 
 void cl_handle_chat(char *dest, size_t dest_size, const char *src) {
   game::I_strcpy(dest, dest_size, src);
+  // Xerces: a chat line holds another player's name and what they wrote, so
+  // it stays out of the console tail the game log and crash reports keep
+  // (xerces/runtime.hpp, docs/CRASH_REPORTS.md).
+  const xerces_runtime::console_private_line chat_line;
   printf("%s\n", dest);
 }
 
 inline const char *sv_sayname_val() {
   return sv_sayname ? sv_sayname.get_cstring() : nullptr;
+}
+
+// Xerces: the names of the players in the match, for the console tail and
+// crash reports to hide (xerces/runtime.hpp). Kept in memory only.
+void note_client_names() {
+  if (game::cg::clientUIActives->actives[0].connectionState !=
+      game::connstate_t::ACTIVE) {
+    return;
+  }
+  for (uint64_t xuid = 1; xuid < 19; ++xuid) {
+    xerces_runtime::note_player_name(get_client_name(xuid));
+  }
 }
 } // namespace
 
@@ -273,6 +291,8 @@ public:
 
       utils::hook::call(game::select(0x141DDDF7F, 0x141DEAA0F, 0x0),
                         cl_handle_chat);
+
+      scheduler::loop(note_client_names, scheduler::pipeline::main, 2s);
     }
   }
 };

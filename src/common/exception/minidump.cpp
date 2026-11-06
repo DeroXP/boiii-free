@@ -96,4 +96,27 @@ bool write_minidump_file(const LPEXCEPTION_POINTERS exceptioninfo,
   }
   return written;
 }
+
+bool write_stacks_minidump_file(const LPEXCEPTION_POINTERS exceptioninfo,
+                                const wchar_t *path) {
+  constexpr MINIDUMP_TYPE type =
+      static_cast<MINIDUMP_TYPE>(MiniDumpNormal | MiniDumpWithThreadInfo);
+  MINIDUMP_EXCEPTION_INFORMATION info = {.ThreadId = GetCurrentThreadId(),
+                                         .ExceptionPointers = exceptioninfo,
+                                         .ClientPointers = FALSE};
+  const HANDLE file =
+      CreateFileW(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                  FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  const bool written =
+      MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file, type,
+                        &info, nullptr, nullptr) != FALSE;
+  CloseHandle(file);
+  if (!written) {
+    DeleteFileW(path);
+  }
+  return written;
+}
 } // namespace exception
