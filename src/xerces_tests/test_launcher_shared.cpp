@@ -123,12 +123,25 @@ struct fake_setup {
 
 struct recorded {
   std::vector<std::string> events;
+  std::vector<std::string> data; // each event's data_json, in step
   event_log sink() {
     return [this](log_level, std::string_view event, std::string_view,
-                  std::string_view) { events.emplace_back(event); };
+                  std::string_view data_json) {
+      events.emplace_back(event);
+      data.emplace_back(data_json);
+    };
   }
   bool has(const std::string &event) const {
     return std::ranges::find(events, event) != events.end();
+  }
+  // The data of the last such event; empty when there is none.
+  std::string data_of(const std::string &event) const {
+    for (std::size_t i = events.size(); i-- > 0;) {
+      if (events[i] == event) {
+        return data[i];
+      }
+    }
+    return {};
   }
 };
 
@@ -232,6 +245,10 @@ TEST_CASE("shared launcher: a dry launch writes the plan, no journal") {
            plan_file_id(out.plan_id) + ".json");
   CHECK(!fs::exists(setup.paths.journal_file()));
   CHECK(log.has("launch.dry"));
+  // No client data folder in this fake install: a real launch would pass no
+  // XERCES_DATA_PATH, and the dry launch says so.
+  CHECK(log.data_of("launch.dry").find("\"xerces_data_path\":null") !=
+        std::string::npos);
   // Every installed item's content id, for the game's join checks
   // (join_check.hpp).
   const auto index_text =
@@ -259,6 +276,21 @@ TEST_CASE("shared launcher: a dry launch writes the plan, no journal") {
   CHECK(refused.plan_file.empty());
   CHECK(!fs::exists(out.plan_file));
   CHECK(!fs::exists(setup.paths.journal_file()));
+}
+
+TEST_CASE("shared launcher: a dry launch names the data folder it would pass") {
+  fake_setup setup("dry_data", true);
+  profile_for(setup.config, "zm").mods = {"fixture.alpha"};
+  // An unzipped package's data folder next to the launcher (locate_install).
+  setup.paths.client_data = setup.paths.home / "package" / "data";
+  recorded log;
+  const launch_outcome out =
+      launch_game(setup.inputs(true), [] { return false; }, log.sink());
+  REQUIRE(out.dry_run);
+  const std::string data = log.data_of("launch.dry");
+  CHECK(data.find("\"xerces_data_path\":\"") != std::string::npos);
+  CHECK(data.find("package/data") != std::string::npos ||
+        data.find("package\\\\data") != std::string::npos);
 }
 
 TEST_CASE("shared launcher: refusals") {

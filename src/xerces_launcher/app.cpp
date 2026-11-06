@@ -1245,10 +1245,17 @@ int app::run() {
   // from when this launcher really starts, after any wait above.
   started_ = ms_since_process_start() / 1000.0;
   open_log(generic(paths.logs));
+  // client_data: the game's data folder, passed to it as XERCES_DATA_PATH
+  // (null when neither a package nor the checkout has one).
   log_info("launcher.start", "Xerces " + services::version(),
            "{\"home\":" + xerces_core::json::quote(generic(paths.home)) +
                ",\"data\":" + xerces_core::json::quote(generic(paths.data)) +
-               ",\"dry_launch\":" + (opts_.dry_launch ? "true" : "false") + "}");
+               ",\"client_data\":" +
+               (paths.client_data
+                    ? xerces_core::json::quote(generic(*paths.client_data))
+                    : std::string("null")) +
+               ",\"dry_launch\":" + (opts_.dry_launch ? "true" : "false") +
+               "}");
   if (taken_over) {
     log_info("launcher.instance.took_over",
              "Started once the closing launcher of this home had stopped.");

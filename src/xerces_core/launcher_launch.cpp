@@ -390,8 +390,13 @@ launch_outcome launch_game(const launch_inputs &in,
             : "Dry launch: the command was written to the log (a "
               "real launch would stop: " +
                   would_stop + ").";
+    // The data folder a real launch would pass as XERCES_DATA_PATH (below),
+    // so a dry run shows that an unzipped package finds its own.
     emit(log, log_level::info, "launch.dry", out.command_line,
-         "{\"plan_id\":" + json::quote(out.plan_id) + "}");
+         "{\"plan_id\":" + json::quote(out.plan_id) + ",\"xerces_data_path\":" +
+             (paths.client_data ? json::quote(path_utf8(*paths.client_data))
+                                : std::string("null")) +
+             "}");
     return out; // no journal: nothing ran that could crash
   }
   // Kept so a launch Windows refuses can put it back (below).
