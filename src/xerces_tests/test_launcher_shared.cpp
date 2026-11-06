@@ -391,6 +391,44 @@ TEST_CASE("shared launcher: culprit tests leave the larger zone memory off") {
          std::vector<std::string>{"-windowed", "-xerces-db-pool"}));
 }
 
+TEST_CASE("shared launcher: launches after a crash leave the precise "
+          "limiter off") {
+  fake_setup setup("precise_limiter", true);
+  setup.config.extra_flags = {"-windowed", "-xerces-precise-limiter"};
+  profile_for(setup.config, "zm").mods = {"fixture.alpha", "fixture.beta"};
+  launch_inputs in = setup.inputs(true);
+  in.modded = false;
+  launch_outcome out = launch_game(in, [] { return false; }, {});
+  REQUIRE(out.dry_run);
+  CHECK_EQ(out.command_line,
+           std::string("-launch -nointro -windowed -xerces-precise-limiter"));
+  CHECK(out.precise_limiter); // what the journal records
+  CHECK(!out.db_pool);
+
+  // A culprit-search test runs on the engine's own pacing.
+  in.modded = true;
+  const std::vector<std::string> half = {"fixture.alpha"};
+  in.mods = &half;
+  in.crash_followup = true;
+  out = launch_game(in, [] { return false; }, {});
+  REQUIRE(out.dry_run);
+  CHECK(!out.precise_limiter);
+  CHECK(out.command_line.find("xerces-precise-limiter") == std::string::npos);
+
+  // So does safe mode.
+  in.mods = nullptr;
+  in.crash_followup = false;
+  in.mods_off = true;
+  out = launch_game(in, [] { return false; }, {});
+  REQUIRE(out.dry_run);
+  CHECK(!out.precise_limiter);
+  CHECK_EQ(out.command_line, std::string("-launch -nointro -windowed"));
+
+  // The setting itself stays on.
+  CHECK((setup.config.extra_flags ==
+         std::vector<std::string>{"-windowed", "-xerces-precise-limiter"}));
+}
+
 TEST_CASE("shared launcher: a pack becomes the profile") {
   mode_profile profile;
   profile.mods = {"old.mod"};

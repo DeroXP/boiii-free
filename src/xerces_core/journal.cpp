@@ -1,5 +1,7 @@
 #include "journal.hpp"
 
+#include "db_pool.hpp"
+#include "frame_pacing.hpp"
 #include "json.hpp"
 
 #include <algorithm>
@@ -17,54 +19,51 @@ constexpr std::pair<launch_phase, const char *> phase_names[] = {
     {launch_phase::clean_exit, "clean_exit"},
 };
 
-// The safe-mode notice for a crash in a phase, with or without the larger
-// zone memory. Whole sentences, so that the launcher translates each as one
-// string (Home, Servers and Diagnostics show it through app::tr();
+// The safe-mode notice for a crash in a phase, with or without experimental
+// settings (the sentences naming them follow, setting_on_sentence). Whole
+// sentences, so that the launcher translates each as one string (Home,
+// Servers and Diagnostics show them through app::tr();
 // tools/i18n/extract_strings.py reads the sentences from here).
-const char *safe_mode_message(launch_phase phase, bool db_pool) {
+const char *safe_mode_message(launch_phase phase, bool settings) {
   switch (phase) {
   case launch_phase::symbols:
-    return db_pool
-               ? "The last launch with mods and larger zone memory "
-                 "(experimental) crashed while finding the game's functions. "
-                 "This launch starts with mods and larger zone memory off. "
-                 "Larger zone memory may be the cause: find the culprit runs "
-                 "the same mods without it first. Or retry with mods, report "
-                 "the crash, or turn larger zone memory off in Settings > "
-                 "Launch."
+    return settings
+               ? "The last launch with mods and experimental settings "
+                 "crashed while finding the game's functions. This launch "
+                 "starts with mods and those settings off. They may be the "
+                 "cause: find the culprit runs the same mods without them "
+                 "first. Or retry with mods, report the crash, or turn them "
+                 "off in Settings."
                : "The last launch with mods crashed while finding the game's "
                  "functions. This launch starts with mods off. Retry with "
                  "mods, report the crash, or find the mod that causes it.";
   case launch_phase::frontend:
-    return db_pool
-               ? "The last launch with mods and larger zone memory "
-                 "(experimental) crashed in the menus. This launch starts "
-                 "with mods and larger zone memory off. Larger zone memory "
-                 "may be the cause: find the culprit runs the same mods "
-                 "without it first. Or retry with mods, report the crash, or "
-                 "turn larger zone memory off in Settings > Launch."
+    return settings
+               ? "The last launch with mods and experimental settings "
+                 "crashed in the menus. This launch starts with mods and "
+                 "those settings off. They may be the cause: find the "
+                 "culprit runs the same mods without them first. Or retry "
+                 "with mods, report the crash, or turn them off in Settings."
                : "The last launch with mods crashed in the menus. This launch "
                  "starts with mods off. Retry with mods, report the crash, or "
                  "find the mod that causes it.";
   case launch_phase::loading_map:
-    return db_pool
-               ? "The last launch with mods and larger zone memory "
-                 "(experimental) crashed while loading a map. This launch "
-                 "starts with mods and larger zone memory off. Larger zone "
-                 "memory may be the cause: find the culprit runs the same "
-                 "mods without it first. Or retry with mods, report the "
-                 "crash, or turn larger zone memory off in Settings > Launch."
+    return settings
+               ? "The last launch with mods and experimental settings "
+                 "crashed while loading a map. This launch starts with mods "
+                 "and those settings off. They may be the cause: find the "
+                 "culprit runs the same mods without them first. Or retry "
+                 "with mods, report the crash, or turn them off in Settings."
                : "The last launch with mods crashed while loading a map. This "
                  "launch starts with mods off. Retry with mods, report the "
                  "crash, or find the mod that causes it.";
   case launch_phase::in_game:
-    return db_pool
-               ? "The last launch with mods and larger zone memory "
-                 "(experimental) crashed in a match. This launch starts with "
-                 "mods and larger zone memory off. Larger zone memory may be "
-                 "the cause: find the culprit runs the same mods without it "
-                 "first. Or retry with mods, report the crash, or turn larger "
-                 "zone memory off in Settings > Launch."
+    return settings
+               ? "The last launch with mods and experimental settings "
+                 "crashed in a match. This launch starts with mods and those "
+                 "settings off. They may be the cause: find the culprit runs "
+                 "the same mods without them first. Or retry with mods, "
+                 "report the crash, or turn them off in Settings."
                : "The last launch with mods crashed in a match. This launch "
                  "starts with mods off. Retry with mods, report the crash, or "
                  "find the mod that causes it.";
@@ -72,16 +71,27 @@ const char *safe_mode_message(launch_phase phase, bool db_pool) {
   case launch_phase::clean_exit: // not a crash; never asked for
     break;
   }
-  return db_pool
-             ? "The last launch with mods and larger zone memory "
-               "(experimental) crashed while starting. This launch starts "
-               "with mods and larger zone memory off. Larger zone memory may "
-               "be the cause: find the culprit runs the same mods without it "
-               "first. Or retry with mods, report the crash, or turn larger "
-               "zone memory off in Settings > Launch."
+  return settings
+             ? "The last launch with mods and experimental settings crashed "
+               "while starting. This launch starts with mods and those "
+               "settings off. They may be the cause: find the culprit runs "
+               "the same mods without them first. Or retry with mods, report "
+               "the crash, or turn them off in Settings."
              : "The last launch with mods crashed while starting. This launch "
                "starts with mods off. Retry with mods, report the crash, or "
                "find the mod that causes it.";
+}
+
+// The sentence after safe_mode_message for each setting the crashed launch
+// had: which one, and where it is turned off.
+const char *setting_on_sentence(std::string_view flag) {
+  if (flag == db_pool::flag_name) {
+    return "Larger zone memory was on (Settings > Launch).";
+  }
+  if (flag == frame_pacing::flag_name) {
+    return "The precise FPS limit was on (Settings > Display).";
+  }
+  return "";
 }
 } // namespace
 
@@ -116,6 +126,7 @@ std::string journal_to_json(const launch_journal &value) {
   json::set(doc, "mode", value.mode, alloc);
   json::set(doc, "launch_id", value.launch_id, alloc);
   json::set(doc, "db_pool", value.db_pool, alloc);
+  json::set(doc, "precise_limiter", value.precise_limiter, alloc);
   return json::canonical(doc);
 }
 
@@ -152,6 +163,10 @@ std::optional<launch_journal> parse_journal(std::string_view text) {
   if (const auto *db_pool = json::member(root, "db_pool");
       db_pool != nullptr && db_pool->IsBool()) {
     out.db_pool = db_pool->GetBool();
+  }
+  if (const auto *limiter = json::member(root, "precise_limiter");
+      limiter != nullptr && limiter->IsBool()) {
+    out.precise_limiter = limiter->GetBool();
   }
   return out;
 }
@@ -203,15 +218,53 @@ safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last) {
   out.crashed_mode = last->mode;
   out.crashed_started = last->started;
   out.crashed_with_db_pool = last->db_pool;
-  // The experimental setting is as much a suspect as the mods (5.4).
-  out.message = safe_mode_message(last->phase, last->db_pool);
+  out.crashed_with_precise_limiter = last->precise_limiter;
+  // The experimental settings are as much suspects as the mods (5.4, 12.4):
+  // the phase's sentence, then one naming each setting.
+  const std::vector<std::string> settings = crashed_settings(out);
+  out.message_parts.emplace_back(
+      safe_mode_message(last->phase, !settings.empty()));
+  for (const auto &flag : settings) {
+    out.message_parts.emplace_back(setting_on_sentence(flag));
+  }
+  for (const auto &part : out.message_parts) {
+    out.message += (out.message.empty() ? "" : " ") + part;
+  }
   return out;
 }
 
+std::vector<std::string> crashed_settings(const safe_mode_decision &decision) {
+  std::vector<std::string> out;
+  if (decision.crashed_with_db_pool) {
+    out.emplace_back(db_pool::flag_name);
+  }
+  if (decision.crashed_with_precise_limiter) {
+    out.emplace_back(frame_pacing::flag_name);
+  }
+  return out;
+}
+
+const std::vector<std::string> &suspect_settings() {
+  static const std::vector<std::string> flags{
+      std::string(db_pool::flag_name), std::string(frame_pacing::flag_name)};
+  return flags;
+}
+
+const char *setting_name(std::string_view flag) {
+  if (flag == db_pool::flag_name) {
+    return "larger zone memory";
+  }
+  if (flag == frame_pacing::flag_name) {
+    return "the precise FPS limit";
+  }
+  return "";
+}
+
 bool culprit_search_possible(const safe_mode_decision &decision) {
+  // The settings are one suspect: the first test leaves them all out.
   return decision.safe_mode &&
          decision.crashed_stack.size() +
-                 (decision.crashed_with_db_pool ? 1 : 0) >=
+                 (crashed_settings(decision).empty() ? 0 : 1) >=
              2;
 }
 
@@ -222,20 +275,20 @@ bool holds(const std::vector<std::string> &ids, const std::string &id) {
 } // namespace
 
 culprit_search::culprit_search(std::vector<std::string> crashed_stack,
-                               bool crashed_with_db_pool,
+                               bool crashed_with_settings,
                                std::vector<std::string> always)
     : suspects_(std::move(crashed_stack)), always_(std::move(always)),
-      db_pool_(crashed_with_db_pool ? db_pool_suspect::untested
-                                    : db_pool_suspect::none) {}
+      settings_(crashed_with_settings ? settings_suspect::untested
+                                      : settings_suspect::none) {}
 
 culprit_search::culprit_search(std::vector<std::string> suspects,
                                std::vector<std::string> cleared,
                                bool combination, std::size_t launches,
-                               db_pool_suspect db_pool,
+                               settings_suspect settings,
                                std::vector<std::string> always, bool ran_fine)
     : suspects_(std::move(suspects)), always_(std::move(always)),
       combination_(combination), ran_fine_(ran_fine), launches_(launches),
-      db_pool_(db_pool) {
+      settings_(settings) {
   // Only suspects can be cleared, and never all of them (that ends the
   // search as a combination instead).
   for (const auto &id : cleared) {
@@ -264,8 +317,8 @@ std::vector<std::string> culprit_search::next_test() const {
   if (done()) {
     return {};
   }
-  if (db_pool_ == db_pool_suspect::untested) {
-    return suspects_; // the whole crashed stack, without the setting
+  if (settings_ == settings_suspect::untested) {
+    return suspects_; // the whole crashed stack, without the settings
   }
   if (!cleared_.empty()) {
     // The lower part ran fine: the rest, as a whole.
@@ -299,8 +352,8 @@ void culprit_search::record(bool crashed,
     return;
   }
   ++launches_;
-  if (db_pool_ == db_pool_suspect::untested) {
-    db_pool_ = crashed ? db_pool_suspect::cleared : db_pool_suspect::culprit;
+  if (settings_ == settings_suspect::untested) {
+    settings_ = crashed ? settings_suspect::cleared : settings_suspect::culprit;
     return;
   }
   const std::vector<std::string> asked = next_test();
@@ -358,10 +411,10 @@ void culprit_search::record(bool crashed,
 }
 
 bool culprit_search::done() const {
-  if (db_pool_ == db_pool_suspect::untested) {
+  if (settings_ == settings_suspect::untested) {
     return false;
   }
-  if (db_pool_ == db_pool_suspect::culprit || combination_ ||
+  if (settings_ == settings_suspect::culprit || combination_ ||
       suspects_.size() <= 1) {
     return true;
   }
@@ -369,7 +422,7 @@ bool culprit_search::done() const {
 }
 
 std::optional<std::string> culprit_search::culprit() const {
-  if (done() && db_pool_ != db_pool_suspect::culprit && !combination_ &&
+  if (done() && settings_ != settings_suspect::culprit && !combination_ &&
       suspects_.size() == 1) {
     return suspects_.front();
   }
@@ -377,16 +430,16 @@ std::optional<std::string> culprit_search::culprit() const {
 }
 
 bool culprit_search::inseparable() const {
-  return done() && db_pool_ != db_pool_suspect::culprit && !combination_ &&
+  return done() && settings_ != settings_suspect::culprit && !combination_ &&
          suspects_.size() >= 2;
 }
 
 namespace {
-constexpr std::pair<db_pool_suspect, const char *> db_pool_names[] = {
-    {db_pool_suspect::none, "none"},
-    {db_pool_suspect::untested, "untested"},
-    {db_pool_suspect::cleared, "cleared"},
-    {db_pool_suspect::culprit, "culprit"},
+constexpr std::pair<settings_suspect, const char *> settings_names[] = {
+    {settings_suspect::none, "none"},
+    {settings_suspect::untested, "untested"},
+    {settings_suspect::cleared, "cleared"},
+    {settings_suspect::culprit, "culprit"},
 };
 
 std::vector<std::string> strings_at(const rapidjson::Value &root,
@@ -416,6 +469,7 @@ std::string culprit_progress_to_json(const culprit_progress &value) {
   json::set(doc, "mode", value.mode, alloc);
   json::set(doc, "crashed_stack",
             json::string_array(value.crashed_stack, alloc), alloc);
+  json::set(doc, "settings", json::string_array(value.settings, alloc), alloc);
   json::set(doc, "testing", json::string_array(value.testing, alloc), alloc);
   json::set(doc, "loaded", json::string_array(value.loaded, alloc), alloc);
   json::set(doc, "suspects", json::string_array(value.search.suspects(), alloc),
@@ -428,8 +482,10 @@ std::string culprit_progress_to_json(const culprit_progress &value) {
   json::set(doc, "ran_fine", value.search.ran_fine(), alloc);
   json::set(doc, "launches", static_cast<std::int64_t>(value.search.launches()),
             alloc);
-  for (const auto &[state, name] : db_pool_names) {
-    if (state == value.search.db_pool()) {
+  // "db_pool" is the settings step's name from when larger zone memory was
+  // the only setting; searches saved then still read.
+  for (const auto &[state, name] : settings_names) {
+    if (state == value.search.settings_step()) {
       json::set(doc, "db_pool", name, alloc);
     }
   }
@@ -445,6 +501,7 @@ std::optional<culprit_progress> parse_culprit_progress(std::string_view text) {
   culprit_progress out;
   out.mode = json::get_string(root, "mode").value_or("");
   out.crashed_stack = strings_at(root, "crashed_stack");
+  out.settings = strings_at(root, "settings");
   out.testing = strings_at(root, "testing");
   out.loaded = strings_at(root, "loaded");
   std::size_t launches = 0;
@@ -456,18 +513,24 @@ std::optional<culprit_progress> parse_culprit_progress(std::string_view text) {
   if (out.mode.empty() || suspects.empty()) {
     return std::nullopt;
   }
-  // Searches saved before the larger zone memory was a suspect have no
-  // "db_pool"; a value this version does not know ends the search.
-  db_pool_suspect db_pool = db_pool_suspect::none;
+  // The settings step keeps its first name, "db_pool". Searches saved
+  // before the larger zone memory was a suspect have no "db_pool"; a value
+  // this version does not know ends the search.
+  settings_suspect settings = settings_suspect::none;
   if (const auto name = json::get_string(root, "db_pool")) {
     const auto *known =
-        std::ranges::find_if(db_pool_names, [&](const auto &entry) {
+        std::ranges::find_if(settings_names, [&](const auto &entry) {
           return *name == entry.second;
         });
-    if (known == std::ranges::end(db_pool_names)) {
+    if (known == std::ranges::end(settings_names)) {
       return std::nullopt;
     }
-    db_pool = known->first;
+    settings = known->first;
+  }
+  // Saved before "settings" existed (larger zone memory was the only
+  // experimental setting then), a settings step was larger zone memory.
+  if (out.settings.empty() && settings != settings_suspect::none) {
+    out.settings = {std::string(db_pool::flag_name)};
   }
   std::vector<std::string> cleared = strings_at(root, "cleared");
   std::int64_t schema = 1;
@@ -482,9 +545,10 @@ std::optional<culprit_progress> parse_culprit_progress(std::string_view text) {
                    suspects.begin() +
                        static_cast<std::ptrdiff_t>(suspects.size() / 2));
   }
-  out.search = culprit_search(
-      std::move(suspects), std::move(cleared), bool_at(root, "combination"),
-      launches, db_pool, strings_at(root, "always"), bool_at(root, "ran_fine"));
+  out.search =
+      culprit_search(std::move(suspects), std::move(cleared),
+                     bool_at(root, "combination"), launches, settings,
+                     strings_at(root, "always"), bool_at(root, "ran_fine"));
   return out;
 }
 } // namespace xerces_core

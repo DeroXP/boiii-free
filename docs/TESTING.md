@@ -1021,6 +1021,73 @@ It then sums the frame times instead (for `--warmup-s`).
 - [x] (2026-11-05) Probe frame times recorded in the game: 16 runs of 60 s (see
       "In-game frame times"). No PresentMon capture yet.
 
+### Precise frame limiter (2026-11-05)
+
+`-xerces-precise-limiter` (DESIGN.md 12.4, Precise frame limiter). Settings,
+Display, "Precise FPS limit (experimental)" adds it to the extra flags.
+
+- [x] (2026-11-05, offline) `test_frame_pacing.cpp`: the engine's loop on a fake
+      clock. At 240, frames leave 4.132 to 4.201 ms apart (upstream's wait: 3.01
+      to 5.14 ms); 200, 250 and 1000 FPS stay within 0.05 ms of their period;
+      `com_maxfps 0` and caps under 20 give exactly upstream's timeline; a
+      15.625 ms system timer costs at most 1.3 ms of spin a frame. Added after
+      the review: an event loop of up to 0.3 ms (3.88 to 4.46 ms, mean 4.167),
+      one that grows with its queue (no change), a timer that cannot be set
+      (spins, counted in `timer_errors`), and the release counts in the stats.
+- [x] (2026-11-05, dry launches only, home
+      `C:\Users\Ginld\XercesHome-agent-frame-limiter`) The toggle saves
+      `-xerces-precise-limiter` in `launcher.json`, the dry launch logs
+      `-launch -nointro -xerces-precise-limiter`, and turning it off removes it.
+      Safe mode and culprit tests leave it out (unit test).
+- [x] (2026-11-05, unit tests and dry launcher runs, home
+      `C:\Users\Ginld\XercesHome-agent-frame-limiter-review`) Crash recovery:
+      the journal records `precise_limiter`; after a crash with it the safe-mode
+      message names it, and the culprit search first runs the whole crashed
+      stack without it, so a crash it causes is not called "these mods together"
+      (`test_m1_runtime`, `test_launcher_core`). On a hand-written journal, Home
+      showed that message, then "Test 1: launch the crashed mods again without
+      the precise FPS limit"; with both settings found, "Turn both off" removed
+      both flags from `launcher.json`.
+- [ ] In the game, with your go-ahead: an A/B at `com_maxfps 240`, windowed, on
+      Cheese Cube, 3 runs a side in A-B-B-A order:
+
+  ```
+  tools\dev\bench\game-bench.ps1 -Variant w240 -Dvars @{com_maxfps='240'} -OutDir C:\Users\Ginld\XercesDev\bench\<session> -Live
+  tools\dev\bench\game-bench.ps1 -Variant w240p -Dvars @{com_maxfps='240'} -ExtraFlags -xerces-precise-limiter -OutDir C:\Users\Ginld\XercesDev\bench\<session> -Live
+  xerces_cli bench compare --a <session>\w240 --b <session>\w240p --source probe
+  ```
+
+  `bench compare` reads only `frames.csv`. For a run's `main.csv`, in
+  PowerShell:
+
+  ```
+  $d = Import-Csv <run>.main.csv | Select-Object -Skip 5 | ForEach-Object { [double]$_.dt_ms } | Sort-Object
+  $d[[int]($d.Count * 0.01)], $d[[int]($d.Count * 0.5)], $d[[int]($d.Count * 0.99)]
+  ```
+
+  - The game log has `xerces.frame_pacing.on`, then `xerces.frame_pacing.stats`
+    every 30 s: `paced` close to `frames`, `released_under_100us` close to
+    `paced` (the limiter let those frames go within 0.1 ms of their deadline),
+    `released_p99_us` well under 1000, `tick_waits` a small share, `tick_missed`
+    and `timer_errors` 0, `spin_us` about 0.2 to 0.3 ms per frame.
+  - The probe's `main.csv` stamps each main frame at its end, after its work, so
+    it shows the release spacing plus the change in work from frame to frame; a
+    tight tolerance around 4.167 does not apply. Compare p1 to p99 between the
+    two sides: on 2026-11-05 `w240` had p1 3.19 ms and p99 5.59 ms. From the
+    uncapped runs' work, perfect releases would give about 3.5 to 4.8 ms, and a
+    median near 4.167.
+  - `frames.csv`: mean 239 to 240 FPS; p99 and the 1% low better than w240's
+    (6.05 ms and 158.1 FPS on 2026-11-05). The render thread may keep its 0.5 ms
+    steps (DESIGN.md 12.4); note how much.
+  - Aiming feels the same or smoother, with no added input lag.
+
+- [ ] In the same session: `com_maxfps` 60, 144 and 0 from the console take
+      effect at the next frame. At 0 the stats line still comes every 30 s, with
+      `frames` 0 and `maxfps` 0 (`upstream_waits` only in very fast menus). At
+      10 it is the same as without the flag: about 17 FPS, `frames` 0. Dragging
+      the in-game Max FPS slider stays smooth; alt-tab and minimize do not hang
+      the game; quitting is normal.
+
 ### First baseline (2026-11-05, existing logs only)
 
 The baseline is in `C:\Users\Ginld\XercesDev\bench\baseline-20261105\`:

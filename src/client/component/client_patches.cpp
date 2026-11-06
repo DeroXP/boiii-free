@@ -16,6 +16,8 @@
 #include <utils/hook.hpp>
 #include <utils/string.hpp>
 
+#include <xerces/frame_pacing.hpp>
+
 #include <mmeapi.h>
 
 namespace client_patches {
@@ -494,6 +496,12 @@ utils::hook::detour Com_FPSLimit_hook;
 // The FPS limiter waits with Sleep(1), which can take up to 15 ms unless the
 // window gets a raised timer resolution, so borderless and windowed lose FPS
 void WINAPI frame_limiter_sleep(const DWORD milliseconds) {
+  // -xerces-precise-limiter: the pacer waits instead, normally only for the
+  // engine's next clock step (xerces/frame_pacing.hpp). Without the flag
+  // nothing changes.
+  if (xerces_frame_pacing::on_limiter_wait(milliseconds)) {
+    return;
+  }
   static const HANDLE timer = CreateWaitableTimerExW(
       nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
       TIMER_ALL_ACCESS);

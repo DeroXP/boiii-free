@@ -7,6 +7,8 @@
 #include <utils/hook.hpp>
 #include <utils/thread.hpp>
 
+#include <xerces/frame_pacing.hpp>
+
 namespace scheduler {
 namespace {
 struct task {
@@ -84,6 +86,9 @@ void server_frame_stub() {
 }
 
 void main_frame_stub() {
+  // -xerces-precise-limiter: wait for the frame's start here, before the
+  // engine's own limiter (xerces/frame_pacing.hpp). Off, a load and a branch.
+  xerces_frame_pacing::on_frame_start();
   main_frame_hook.invoke<void>();
   execute(main);
 }

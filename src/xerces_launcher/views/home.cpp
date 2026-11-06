@@ -6,9 +6,11 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <string_view>
 
 #include <xerces_core/compat.hpp>
 #include <xerces_core/db_pool.hpp>
+#include <xerces_core/frame_pacing.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/launcher_launch.hpp>
 #include <xerces_core/settings_options.hpp>
@@ -282,7 +284,8 @@ private:
                  ? decision.crashed_plan_id + "\n" + decision.crashed_started
                  : "";
     safe_ = decision.safe_mode && crash_ != dismissed_crash_;
-    safe_text_ = owner_->tr(decision.message);
+    safe_text_ = xerces_core::safe_mode_text(
+        decision, [this](const std::string &part) { return owner_->tr(part); });
     safe_value_ = decision.safe_mode ? owner_->tr("Suggested")
                                      : owner_->tr("Off");
     safe_detail_ = decision.safe_mode
@@ -330,9 +333,21 @@ private:
     return it != profiles.end() && it->second.map.has_value();
   }
 
+  // The experimental settings a culprit search suspects
+  // (culprit_progress::settings), named as in a sentence and listed.
+  std::string settings_list(const std::vector<std::string> &flags) const {
+    std::string out;
+    for (const auto &flag : flags) {
+      out += (out.empty() ? "" : ", ") +
+             owner_->tr(xerces_core::setting_name(flag));
+    }
+    return out;
+  }
+
   // The culprit search (5.6): one test launch at a time, the result read
-  // from the journal when the game exits. A crashed launch that had the
-  // larger zone memory is first run again without it.
+  // from the journal when the game exits. A crashed launch that had an
+  // experimental setting (larger zone memory, the precise FPS limit) is first
+  // run again without it.
   void refresh_culprit(const xerces_core::safe_mode_decision &decision) {
     const auto &culprit = owner_->svc().culprit();
     can_bisect_ = xerces_core::culprit_search_possible(decision) && !culprit;
@@ -344,11 +359,35 @@ private:
     if (!culprit) {
       return;
     }
-    if (culprit->search.db_pool_culprit()) {
+    const std::vector<std::string> &settings = culprit->settings;
+    const bool db_pool = culprit->has_setting(xerces_core::db_pool::flag_name);
+    if (culprit->search.settings_culprit()) {
       culprit_done_ = culprit_found_ = true;
-      culprit_text_ = owner_->tr("Found it:") + " " +
-                      owner_->tr("larger zone memory (experimental). The same "
-                                 "mods ran fine without it. Turn it off?");
+      if (settings.size() >= 2) {
+        // The first test leaves them all out, so it cannot tell them apart.
+        culprit_text_ =
+            owner_->tr("Found it:") + " " +
+            owner_->tr("the experimental settings that were on:") + " " +
+            settings_list(settings) + ". " +
+            owner_->tr(settings.size() == 2
+                           ? "The same mods ran fine without them. Turn both "
+                             "off?"
+                           : "The same mods ran fine without them. Turn them "
+                             "all off?");
+        culprit_off_ = owner_->tr(settings.size() == 2 ? "Turn both off"
+                                                       : "Turn them all off");
+      } else {
+        const std::string flag =
+            settings.empty() ? std::string(xerces_core::db_pool::flag_name)
+                             : settings.front();
+        culprit_text_ =
+            owner_->tr("Found it:") + " " +
+            owner_->tr(flag == xerces_core::frame_pacing::flag_name
+                           ? "the precise FPS limit (experimental). The same "
+                             "mods ran fine without it. Turn it off?"
+                           : "larger zone memory (experimental). The same "
+                             "mods ran fine without it. Turn it off?");
+      }
       culprit_mods_ = mod_list(culprit->crashed_stack);
       culprit_stop_ = owner_->tr("Close");
     } else if (const auto found = culprit->search.culprit()) {
@@ -418,7 +457,8 @@ private:
       culprit_text_ = owner_->tr("No single mod crashes alone: the crash needs "
                                  "these mods together, or it did not happen "
                                  "again.");
-      if (culprit->search.db_pool() == xerces_core::db_pool_suspect::cleared) {
+      if (db_pool && culprit->search.settings_step() ==
+                         xerces_core::settings_suspect::cleared) {
         // They crashed on the stock pool, where the crashed launch had the
         // larger one: together they may simply not fit without it.
         culprit_text_ += " " + owner_->tr("They also crashed without larger "
@@ -428,13 +468,27 @@ private:
       }
       culprit_mods_ = mod_list(culprit->search.suspects());
       culprit_stop_ = owner_->tr("Close");
-    } else if (culprit->search.testing_db_pool()) {
+    } else if (culprit->search.testing_settings()) {
+      const std::string flag =
+          settings.empty() ? std::string(xerces_core::db_pool::flag_name)
+                           : settings.front();
       culprit_text_ =
           owner_->tr("Test") + " " +
           std::to_string(culprit->search.launches() + 1) + ": " +
-          owner_->tr("launch the crashed mods again without larger zone "
-                     "memory and play to where it crashed. Quit normally if "
-                     "it does not crash.");
+          (settings.size() >= 2
+               ? owner_->tr("launch the crashed mods again without the "
+                            "experimental settings they had and play to "
+                            "where it crashed. Quit normally if it does not "
+                            "crash.") +
+                     " " + owner_->tr("Left out:") + " " +
+                     settings_list(settings) + "."
+           : flag == xerces_core::frame_pacing::flag_name
+               ? owner_->tr("launch the crashed mods again without the "
+                            "precise FPS limit and play to where it crashed. "
+                            "Quit normally if it does not crash.")
+               : owner_->tr("launch the crashed mods again without larger "
+                            "zone memory and play to where it crashed. Quit "
+                            "normally if it does not crash."));
       culprit_mods_ = mod_list(culprit->search.next_test());
     } else {
       const auto next = culprit->search.next_test();
@@ -552,19 +606,33 @@ private:
       const auto &culprit = owner_->svc().culprit();
       // Only what the box offers a button for: a search still running, or
       // a culprit the map needs too, is left as it is.
-      if (!culprit || !(culprit->search.db_pool_culprit() ||
+      if (!culprit || !(culprit->search.settings_culprit() ||
                         remedy_for(*culprit).mods_enough())) {
         return;
       }
-      if (culprit->search.db_pool_culprit()) {
-        // The setting, not a mod: the profile keeps its mods.
+      if (culprit->search.settings_culprit()) {
+        // The settings, not a mod: the profile keeps its mods. Only the
+        // settings the crashed launch had are turned off.
         auto &config = owner_->svc().config();
-        config.extra_flags =
-            xerces_core::with_flag(std::move(config.extra_flags),
-                                   xerces_core::db_pool::flag_name, false);
-        log_info("launcher.home.db_pool", "off after the culprit search");
+        std::vector<std::string> off = culprit->settings;
+        if (off.empty()) {
+          off.emplace_back(xerces_core::db_pool::flag_name);
+        }
+        for (const auto &flag : off) {
+          config.extra_flags = xerces_core::with_flag(
+              std::move(config.extra_flags), flag, false);
+          log_info(flag == xerces_core::frame_pacing::flag_name
+                       ? "launcher.home.precise_limiter"
+                       : "launcher.home.db_pool",
+                   "off after the culprit search");
+        }
         if (owner_->svc().save_config()) {
-          owner_->notify(owner_->tr("Larger zone memory is off."));
+          const std::string &flag = off.front();
+          owner_->notify(off.size() >= 2 ? owner_->tr("Turned off:") + " " +
+                                               settings_list(off) + "."
+                         : flag == xerces_core::frame_pacing::flag_name
+                             ? owner_->tr("The precise FPS limit is off.")
+                             : owner_->tr("Larger zone memory is off."));
         } else {
           owner_->notify(owner_->tr("The config could not be saved:") + " " +
                              owner_->tr(owner_->svc().config_error()),

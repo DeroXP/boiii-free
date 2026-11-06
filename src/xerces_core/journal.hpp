@@ -39,6 +39,9 @@ struct launch_journal {
   // (DESIGN.md 5.4), so a crash can be traced to it and not only to the mods.
   // False in older journals.
   bool db_pool = false;
+  // The same for -xerces-precise-limiter, the experimental precise frame
+  // limiter (DESIGN.md 12.4).
+  bool precise_limiter = false;
 };
 
 std::string journal_to_json(const launch_journal &value);
@@ -83,34 +86,70 @@ struct safe_mode_decision {
   launch_phase crashed_in = launch_phase::launching;
   std::string crashed_mode;    // empty when an older journal did not say
   std::string crashed_started; // when the crashed launch started (UTC)
-  // The crashed launch had the larger zone memory (-xerces-db-pool): it is a
-  // suspect too, and the culprit search tests it first.
+  // The crashed launch had the larger zone memory (-xerces-db-pool) or the
+  // precise frame limiter (-xerces-precise-limiter): each is a suspect too,
+  // and the culprit search tests them first.
   bool crashed_with_db_pool = false;
-  // What the screens say: one of a fixed set of sentences (per phase, with
-  // or without the larger zone memory), so it can be translated as it is.
+  bool crashed_with_precise_limiter = false;
+  bool crashed_with_settings() const {
+    return crashed_with_db_pool || crashed_with_precise_limiter;
+  }
+  // What the screens say, made of fixed sentences so that each can be
+  // translated as it is: the sentence for the phase (with or without
+  // experimental settings), then one per setting the crashed launch had
+  // (message_parts; message is them joined with spaces).
   std::string message;
+  std::vector<std::string> message_parts;
 };
 
 // After any crash with mods enabled, the next launch defaults to safe mode.
 safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last);
 
+// The safe-mode notice with each of message_parts passed through translate
+// (the launcher's app::tr), joined with spaces.
+template <class Translate>
+std::string safe_mode_text(const safe_mode_decision &decision,
+                           Translate &&translate) {
+  std::string out;
+  for (const auto &part : decision.message_parts) {
+    out += (out.empty() ? "" : " ") + std::string(translate(part));
+  }
+  return out;
+}
+
+// The experimental settings the crashed launch had, as flag names without
+// the dash (settings_options' with_flag), in this order: "xerces-db-pool",
+// "xerces-precise-limiter".
+std::vector<std::string> crashed_settings(const safe_mode_decision &decision);
+
+// Every experimental setting that is a crash suspect of its own (5.6), as
+// flag names in the order above. Safe mode and the culprit tests leave them
+// all out (launch_inputs::crash_followup).
+const std::vector<std::string> &suspect_settings();
+
+// What the screens call a setting of suspect_settings() in a sentence
+// ("larger zone memory", "the precise FPS limit"); fixed text a translation
+// can match. Empty for any other flag.
+const char *setting_name(std::string_view flag);
+
 // Whether "Find the culprit" has something to tell apart after this crash:
-// two mods or more, or one mod and the larger zone memory.
+// two mods or more, or one mod and an experimental setting.
 bool culprit_search_possible(const safe_mode_decision &decision);
 
-// The larger zone memory (-xerces-db-pool) in a culprit search. Safe mode and
-// every test launch run without it (launch_inputs::crash_followup), so they
-// all see the stock pool. When the crashed launch had it, the first test is
-// the whole crashed stack without it.
-enum class db_pool_suspect {
-  none,     // the crashed launch did not have it
-  untested, // the next test: the whole crashed stack without it
-  cleared,  // that stack crashed without it too: the mods are bisected
-  culprit,  // that stack ran fine without it: it caused the crash
+// The experimental settings (crashed_settings) in a culprit search. Safe
+// mode and every test launch run without them
+// (launch_inputs::crash_followup), so they all see the stock pool and the
+// engine's own frame limiter. When the crashed launch had one, the first test
+// is the whole crashed stack without them.
+enum class settings_suspect {
+  none,     // the crashed launch had none of them
+  untested, // the next test: the whole crashed stack without them
+  cleared,  // that stack crashed without them too: the mods are bisected
+  culprit,  // that stack ran fine without them: they caused the crash
 };
 
 // "Find the culprit": halve the crashed stack over a few launches, after
-// testing the larger zone memory when the crashed launch had it.
+// testing the experimental settings when the crashed launch had any.
 //
 // The suspects are the whole crashed stack, the dependencies the planner
 // pulled in included, in stack order (highest first). A test asks the
@@ -136,13 +175,13 @@ public:
   // always: the suspects every test loads, whatever it asks for (the
   // dependencies of the profile's map); empty when the profile has no map.
   explicit culprit_search(std::vector<std::string> crashed_stack,
-                          bool crashed_with_db_pool = false,
+                          bool crashed_with_settings = false,
                           std::vector<std::string> always = {});
   // A search read back from disk (it spans several launches).
   culprit_search(std::vector<std::string> suspects,
                  std::vector<std::string> cleared, bool combination,
                  std::size_t launches,
-                 db_pool_suspect db_pool = db_pool_suspect::none,
+                 settings_suspect settings = settings_suspect::none,
                  std::vector<std::string> always = {}, bool ran_fine = false);
 
   // Mods for the next test launch, to be asked for as the plan's mods;
@@ -163,11 +202,15 @@ public:
   // No single mod either: the suspects left all load in every test (the
   // map needs them), so no test can tell them apart.
   bool inseparable() const;
-  // The next test is the whole crashed stack without the larger zone memory.
-  bool testing_db_pool() const { return db_pool_ == db_pool_suspect::untested; }
-  // The crashed stack ran fine without the larger zone memory.
-  bool db_pool_culprit() const { return db_pool_ == db_pool_suspect::culprit; }
-  db_pool_suspect db_pool() const { return db_pool_; }
+  // The next test is the whole crashed stack without the settings.
+  bool testing_settings() const {
+    return settings_ == settings_suspect::untested;
+  }
+  // The crashed stack ran fine without the settings.
+  bool settings_culprit() const {
+    return settings_ == settings_suspect::culprit;
+  }
+  settings_suspect settings_step() const { return settings_; }
   std::size_t launches() const { return launches_; }
   const std::vector<std::string> &suspects() const { return suspects_; }
   // Suspects the lower part's test loaded, and it ran fine: the next test
@@ -188,18 +231,30 @@ private:
   bool combination_ = false;
   bool ran_fine_ = false;
   std::size_t launches_ = 0;
-  db_pool_suspect db_pool_ = db_pool_suspect::none;
+  settings_suspect settings_ = settings_suspect::none;
 };
 // A culprit search in progress, kept in <home>\config\culprit.json between
-// launches: the mode and stack that crashed, the search, and the test launch
-// whose result is still to be recorded (empty when none): the mods it asked
-// for and every mod its plan loaded.
+// launches: the mode and stack that crashed, the experimental settings it
+// had (crashed_settings: named when they are found to be the cause, and the
+// ones "Turn it off" removes), the search, and the test launch whose result
+// is still to be recorded (empty when none): the mods it asked for and every
+// mod its plan loaded.
 struct culprit_progress {
   std::string mode;
   std::vector<std::string> crashed_stack;
+  std::vector<std::string> settings;
   std::vector<std::string> testing;
   std::vector<std::string> loaded;
   culprit_search search{{}};
+
+  bool has_setting(std::string_view flag) const {
+    for (const auto &name : settings) {
+      if (name == flag) {
+        return true;
+      }
+    }
+    return false;
+  }
 };
 
 std::string culprit_progress_to_json(const culprit_progress &value);

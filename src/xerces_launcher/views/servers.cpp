@@ -364,8 +364,13 @@ private:
         // Cancel returns to the Join that asked (a favourite or recent row
         // deep in a list), not the default focus the dialog closed onto.
         const std::string asked_from = focused_id();
+        // The notice is made of fixed sentences, translated one by one
+        // (the dialog's own tr() leaves the result as it is).
         owner_->dialog(
-            "The last modded launch crashed", decision.message,
+            "The last modded launch crashed",
+            xerces_core::safe_mode_text(
+                decision,
+                [this](const std::string &part) { return owner_->tr(part); }),
             {"Join with mods off", "Join with mods anyway", "Cancel"},
             [this, address, asked_from](int choice) {
               if (choice == 0) {

@@ -273,14 +273,14 @@ TEST_CASE("safe mode: the larger zone memory step survives between launches") {
   CHECK((progress.testing == std::vector<std::string>{"a", "b"}));
   auto back = parse_culprit_progress(culprit_progress_to_json(progress));
   REQUIRE(back.has_value());
-  CHECK(back->search.testing_db_pool());
+  CHECK(back->search.testing_settings());
   CHECK(back->testing == progress.testing);
 
   progress.search.record(true); // the stack crashed without it too
   progress.testing.clear();
   back = parse_culprit_progress(culprit_progress_to_json(progress));
   REQUIRE(back.has_value());
-  CHECK(back->search.db_pool() == db_pool_suspect::cleared);
+  CHECK(back->search.settings_step() == settings_suspect::cleared);
   CHECK((back->search.next_test() == std::vector<std::string>{"b"}));
   CHECK_EQ(back->search.launches(), std::size_t{1});
 
@@ -288,9 +288,24 @@ TEST_CASE("safe mode: the larger zone memory step survives between launches") {
   progress.search.record(false); // it ran fine without it
   back = parse_culprit_progress(culprit_progress_to_json(progress));
   REQUIRE(back.has_value());
-  CHECK(back->search.db_pool_culprit());
+  CHECK(back->search.settings_culprit());
   CHECK(back->search.done());
   CHECK(!back->search.culprit().has_value());
+
+  // The settings the crashed launch had are kept with the search.
+  progress.settings = {"xerces-db-pool", "xerces-precise-limiter"};
+  back = parse_culprit_progress(culprit_progress_to_json(progress));
+  REQUIRE(back.has_value());
+  CHECK(back->settings == progress.settings);
+  // Saved before they were: a settings step was larger zone memory.
+  const std::string before_settings =
+      R"({"schema":1,"mode":"zm","crashed_stack":["a","b"],"testing":[],)"
+      R"("suspects":["a","b"],"second_half":false,"combination":false,)"
+      R"("launches":0,"db_pool":"untested"})";
+  const auto earlier = parse_culprit_progress(before_settings);
+  REQUIRE(earlier.has_value());
+  CHECK(earlier->search.testing_settings());
+  CHECK((earlier->settings == std::vector<std::string>{"xerces-db-pool"}));
 
   // Saved before the setting was a suspect; a state this version does not
   // know is not read.
@@ -300,7 +315,8 @@ TEST_CASE("safe mode: the larger zone memory step survives between launches") {
       R"("launches":0})";
   const auto old = parse_culprit_progress(older);
   REQUIRE(old.has_value());
-  CHECK(old->search.db_pool() == db_pool_suspect::none);
+  CHECK(old->search.settings_step() == settings_suspect::none);
+  CHECK(old->settings.empty());
   CHECK((old->search.next_test() == std::vector<std::string>{"b"}));
   // Saved without "ran_fine": no test known to have run fine.
   CHECK(!old->search.ran_fine());

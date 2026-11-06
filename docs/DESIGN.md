@@ -844,8 +844,8 @@ together.
 - A launch journal (`logs\journal.json`) records phases (`launching`, `symbols`,
   `frontend`, `loading_map`, `in_game`, `clean_exit`) with the `plan_id`, the
   stack, the game mode, whether the launch ran in safe mode and whether it had
-  the larger zone memory (`db_pool`, 5.4). The client writes all of them
-  (2026-11-05).
+  the larger zone memory (`db_pool`, 5.4) or the precise frame limiter
+  (`precise_limiter`, 12.4). The client writes all of them (2026-11-05).
 - Who owns the journal. The launcher writes it as `launching` with a fresh
   one-time launch id and hands the same id to the game in `XERCES_LAUNCH_ID`.
   The game takes the journal over only when the ids match and the phase is still
@@ -925,37 +925,45 @@ together.
   game never took the journal over (it quit before Xerces' code ran); otherwise
   the journal decides. A game that is still running is never counted as a crash.
 - "Find the culprit" keeps its state in `config\culprit.json` (the crashed mode
-  and stack, the search, the test launch still to be recorded and what its plan
-  loaded), so it spans launcher restarts. The suspects are the whole crashed
-  stack, the dependencies the planner pulled in included. A test asks for some
-  of them as the profile's mods and keeps its map, so it loads what they and the
-  map need. Each split tests the lower part first: dependencies sit below the
-  mods that need them, so it loads nothing from above. A crash narrows the
-  suspects to what that test loaded; a test that runs fine clears what it
-  loaded, and the rest must then crash on its own. The map's dependencies load
-  in every test, so they are tested alone (with the map) when one other suspect
-  is left; suspects that only ever load with the map end the search without a
-  culprit. A culprit that is a dependency is turned off through the enabled mods
-  that pull it in. When the profile's map needs it too, turning mods off would
-  leave it loading, so Home offers no button and says to pick another map
-  (`culprit_remedy_for`).
+  and stack, the experimental settings it had, the search, the test launch
+  still to be recorded and what its plan loaded), so it spans launcher restarts.
+  The suspects are the whole crashed stack, the dependencies the planner pulled
+  in included. A test asks for some of them as the profile's mods and keeps its
+  map, so it loads what they and the map need. Each split tests the lower part
+  first: dependencies sit below the mods that need them, so it loads nothing
+  from above. A crash narrows the suspects to what that test loaded; a test that
+  runs fine clears what it loaded, and the rest must then crash on its own. The
+  map's dependencies load in every test, so they are tested alone (with the map)
+  when one other suspect is left; suspects that only ever load with the map end
+  the search without a culprit. A culprit that is a dependency is turned off
+  through the enabled mods that pull it in. When the profile's map needs it too,
+  turning mods off would leave it loading, so Home offers no button and says to
+  pick another map (`culprit_remedy_for`).
 - Limit: the map is never a suspect, but every test keeps it. So a culprit the
   map needs never ran without the map, and Home says "it, or the map that needs
   it". A map that crashes by itself makes every test crash, and the search ends
   on the lowest mod, as when that mod crashes; until a test runs fine
   (`culprit_search::ran_fine`, kept in `culprit.json`), Home names the map as a
   possible cause and still offers to turn the mod off.
-- Larger zone memory in crash recovery. Safe mode and every culprit test leave
-  `-xerces-db-pool` out whatever the settings say
-  (`launch_inputs::crash_followup`), so they all run on the stock pool and a
-  crash the setting causes is never narrowed down to a mod. When the crashed
-  launch had it, the safe-mode message names it, the search can start with one
-  mod, and its first test runs the whole crashed stack without it: if that runs
-  fine, Home says the setting caused the crash and offers to turn it off (the
-  profile keeps its mods); if it crashes too, the mods are bisected as usual. A
-  stack that only fits with the larger pool also crashes in that first test, so
-  its search can end in "these mods together"; Home then adds that together they
-  may need more zone memory than the stock pool.
+- Experimental settings in crash recovery: larger zone memory
+  (`-xerces-db-pool`) and the precise frame limiter (`-xerces-precise-limiter`,
+  12.4), listed in `xerces_core::suspect_settings`. The journal records which a
+  launch had. Safe mode and every culprit test leave them all out whatever the
+  settings say (`launch_inputs::crash_followup`), so they all run on the stock
+  pool and the engine's own frame limiter, and a crash a setting causes is never
+  narrowed down to a mod. When the crashed launch had any, the safe-mode message
+  names each (a fixed sentence per setting after the phase's), the search can
+  start with one mod (the settings count as one suspect), and its first test
+  runs the whole crashed stack without them: if that runs fine, Home says the
+  setting caused the crash and offers to turn it off (the profile keeps its
+  mods; with several on, the test cannot tell them apart, so Home names them
+  all and turns them all off: "Turn both off"); if it crashes too, the mods are
+  bisected as usual. `culprit.json` keeps the settings as a `settings` list of
+  flag names and the step under its first name, `db_pool`; a file saved before
+  the list existed had only larger zone memory. A stack that only fits with the
+  larger pool also crashes in that first test, so its search can end in "these
+  mods together"; when the crashed launch had larger zone memory, Home then adds
+  that together they may need more zone memory than the stock pool.
 - After **any** crash with mods enabled, the next launch defaults to safe mode
   (all mods off, same game settings) with one-click "Retry with mods", and the
   launcher names the plan that crashed. Other options: report, or "find the
@@ -2095,12 +2103,143 @@ The first load and launcher baseline from existing logs is in
    `d3dcompiler` use and the driver shader cache; keep or drop upstream's
    "reduce stutter" option (it renames `d3dcompiler_46.dll`) based on the
    measurement.
-4. Frame pacing: expose the engine's maximum frame latency; test a waitable swap
-   chain only if the engine's swap effect allows it.
+4. Frame pacing: the precise frame limiter (below; built 2026-11-05, off by
+   default, not yet run in the game). Then expose the engine's maximum frame
+   latency, and test a waitable swap chain only if the engine's swap effect
+   allows it (`perf.swapchain` says discard, 2 buffers).
 5. Opt-in process tweaks after the main menu: timer resolution, priority, P-core
    affinity for the main and render threads on hybrid CPUs like your Core Ultra
    9 285K.
 6. Not pursued: Sleep and Wait hooks (crashed), draw skipping (no gain).
+
+#### Precise frame limiter (item 4)
+
+On only with the launch flag `-xerces-precise-limiter` (Settings, Display,
+"Precise FPS limit (experimental)"), so it can be A/B tested. Safe mode and the
+culprit search's tests leave it out; the journal records it, and the search
+tests it like larger zone memory (5.6). Code: `src/xerces_core/frame_pacing.*`
+(the schedule and the waits), `src/client/xerces/frame_pacing.*` (the platform),
+calls from `scheduler.cpp` and `client_patches.cpp`; tests in
+`src/xerces_tests/test_frame_pacing.cpp`.
+
+Measured on your PC on 2026-11-05 with the frame probe (Cheese Cube, 3 runs
+each, 3840x2160 windowed): with `com_maxfps 240` the game ran at 239.1 FPS, but
+the median frame was 4.44 ms, p99 6.05 ms (50% above uncapped) and the 1% low
+158.1 FPS (31.5% below uncapped). The main thread's frame times (`main.csv`) had
+p1 3.19 ms and p99 5.59 ms; the render thread's Presents came 3.0 to 5.0 ms
+apart in 0.5 ms steps.
+
+What the engine does (`Com_Frame_Try_Block_Function`, read on the 2026-11-04
+dump of build 0x6531394):
+
+- It reads `com_maxfps` (the dvar with hash 0x29B732E8, default 60, 0 to 1000).
+  `Com_FPSLimit` returns UINT32_MAX (upstream's detour), so `com_maxfps` alone
+  counts.
+- The target is 1000 / `com_maxfps` in whole milliseconds, at least 1; also 1
+  for `com_maxfps 0`.
+- Up to 50 passes: run the event loop, read `Sys_Milliseconds` (`timeGetTime()`
+  minus its first value), move `last` back if the clock went back, and leave
+  when now - `last` >= target. Otherwise call the 1 ms wait at +0x113, which
+  upstream replaced with a high-resolution timer. After 50 waits the frame goes
+  anyway, so a target over 50 ms (`com_maxfps` 1 to 19) holds a frame for at
+  most about 51 to 57 ms: `com_maxfps 10` gives about 17 FPS.
+- On the way out, `last` becomes the final reading.
+
+`timeGetTime` moves only when the system timer ticks, so at 240 the target is 4
+ms and frames leave on whole-millisecond steps of a clock read after an
+overshooting 1 ms wait.
+
+Why the pacing does not live only in that wait: the engine checks before it
+waits. A frame whose own work already lasted most of the period never reaches
+the wait. At 240, a frame longer than 3 ms passes the check whenever four of the
+clock's millisecond steps fall inside it, and leaves before 4.17 ms. In the
+fake-clock model, 80% of frames with 3.6 to 4.1 ms of work did.
+
+What the limiter does, at `com_maxfps` 20 and up:
+
+- **At each frame's start** (the existing detour of the same function in
+  `scheduler.cpp`, before the engine's code), it waits until one period, 1000 /
+  `com_maxfps` ms, after it last let a frame go. A high-resolution waitable
+  timer covers the time until 0.3 ms before; then it spins on QPC. A period is
+  at most 50 ms, so the event loop runs at least that often.
+- **The engine's check** then normally passes on its first pass. Two of its
+  readings are one period apart, plus the change in the event loop's time, and a
+  period is never shorter than the target. When the system timer ticks at a
+  fixed interval that divides 1 ms, readings at least `target` ms apart always
+  count `target` steps.
+- **When the check still misses a step**, the engine calls its wait, and the
+  limiter spins until `timeGetTime` moves (at most 1 ms, once a frame). That
+  happens when a period of whole milliseconds (5 ms at 200, 4 ms at 250) meets
+  jitter, when the event loop ran much shorter than the frame before, or when
+  the clock lags. After that it falls back to upstream's 1 ms wait.
+- **The next frame counts from when this one left**, so a late frame is not
+  followed by short ones that catch up.
+- Frames slower than the period are not held. With `com_maxfps 0`, and under 20,
+  the engine's wait is upstream's, unchanged. Under 20 the engine's 50 waits can
+  run out before its target, so those caps hold only in part. Pacing them would
+  make them real but hold a frame for up to a second at `com_maxfps 1`, and the
+  in-game Max FPS slider (0 to 500) passes through them while it is dragged.
+- No engine address is added and nothing detours Sleep or WaitFor\*: the waits
+  are calls to the timer, QPC and `timeGetTime` inside two hooks that already
+  exist. Each call to the timer is checked: if `SetWaitableTimer` fails, or a
+  wait lasts longer than twice its time plus 5 ms, the limiter spins instead and
+  counts it (`timer_errors`). A timer that was never set never signals, so
+  without the check the main thread would wait for good.
+- Input is read as before: the event loop still runs right before the clock
+  reading that lets the frame go, so queued input reaches the same frame. It
+  only runs less often during a wait: once a frame, where upstream's wait ran it
+  about every millisecond.
+- The event loop's own time is the engine's. It runs between the limiter's
+  release and the clock reading, so a change in it from one frame to the next
+  goes into the frame spacing one for one, and the limiter cannot see it. Once a
+  frame, each call handles about one period of queued messages, so a time that
+  grows with the queue stays about the same from frame to frame (the model
+  below). Whether it does in the game is for the A/B to show.
+- One engine number changes: the function times itself with QPC from its own
+  start into a 32-frame average, and only a performance record reads it
+  (`frameavg`, `framemin` and `framemax`, next to `cameraX` and `disk_bw_kb`).
+  The frame-start wait comes before that timing, so with the flag the record
+  shows each frame's work, not its whole time.
+
+The cost is a spin of about 0.2 to 0.3 ms a frame (0.215 ms in the model, about
+5% of one core at 240 FPS), and up to 1 ms more in a frame whose check misses a
+step.
+
+On the fake clock (system timer at 1 or 0.5 ms, an event loop of 5 to 40 µs, a
+timer that wakes 20 to 150 µs late), frames at 240 leave 4.132 to 4.201 ms
+apart, against 3.01 to 5.14 ms with upstream's wait. The engine measures 4 or 5
+ms, 4.167 on average. With an event loop of 5 to 300 µs, frames leave 3.88 to
+4.46 ms apart (mean 4.167) and 4 frames in 3000 wait for the clock's next step;
+upstream's wait gives 3.04 to 5.34 ms. An event loop that takes 25 µs more for
+each millisecond of queued messages changes nothing (4.132 to 4.202 ms). At a
+1/1024 s timer, about one frame in ten waits for the clock's next step (at most
+0.98 ms more). At a 15.625 ms timer, neither limiter can beat the clock's steps;
+the limiter then spins at most 1.3 ms a frame.
+
+What to expect in the game:
+
+- `xerces.frame_pacing.on` is logged at start, and `xerces.frame_pacing.stats`
+  every 30 s, also when nothing was paced: `frames` (frame starts at a cap it
+  paces), `paced` (those that waited), `released_under_100us`, `released_p99_us`
+  and `released_max_us` (how long after its deadline each frame that waited was
+  let go, after any spin for the engine's clock), `tick_waits`, `tick_missed`,
+  `upstream_waits`, `timer_errors`, `spin_us` and `maxfps` (`com_maxfps`). The
+  release counts are the limiter's own precision. They are measured at its
+  release, before the event loop, so they do not include the event loop's time.
+- The probe's `main.csv` does not show the release. The probe stamps each main
+  frame at its end, in the scheduler's main pipeline after the frame's work, so
+  its `dt_ms` is the release spacing plus the change in the main thread's work
+  from one frame to the next. In the uncapped runs of 2026-11-05 that change had
+  a spread of about 0.29 ms (standard deviation): with perfect releases at 240,
+  `main.csv` would have p1 about 3.5 ms and p99 about 4.8 ms, with a third of
+  the frames within 0.1 ms of 4.167, against p1 3.19, p99 5.59 and 24% for
+  `w240`. So the A/B compares the spread (p1 to p99) of `main.csv` between
+  `w240` and `w240p`, not a fixed tolerance.
+- Uncapped, the render thread's Presents also came in 0.5 ms steps (3.0 and 3.5
+  ms), so Present-to-Present times (`frames.csv`) may keep some of that, plus
+  the same work changes.
+
+The in-game A/B is in docs/TESTING.md (Performance).
 
 ### 12.5 Per-mod profiler
 
