@@ -751,8 +751,8 @@ backend deployed with the crash routes:
 
 - Force a crash: add `-xerces-crash-test` in Settings > Extra launch flags,
   start the game from Xerces, open the console and run `xerces_crash_test` (an
-  access violation) or `xerces_crash_test fastfail` (0xC0000409, no dump).
-  Remove the flag afterwards.
+  access violation), `xerces_crash_test fastfail` (0xC0000409, no dump) or
+  `xerces_crash_test fatal` (a fatal engine error). Remove the flag afterwards.
 - [ ] Setting on, Xerces open: the dialog's title is "Xerces", it names no Ezz
       site, and it says Xerces sends a crash report as soon as the game closes.
       After "Close game", the footer says "Crash report sent." with a server id,
@@ -760,11 +760,25 @@ backend deployed with the crash routes:
 - [ ] The report is in the backend: `GET /v1/admin/crashes` (admin token) lists
       it with kind `exception`, the module and frames, `has_minidump` true; the
       report has no `C:\Users\<your name>`, no player name and no server
-      address. The minidump opens in WinDbg and has thread stacks only.
+      address. The minidump (`GET /v1/admin/crashes/{id}/minidump`) opens in
+      WinDbg with thread stacks only; its module paths read
+      `C:\Users\_____\...`, and a search of the file for your Windows user name
+      and your in-game name, as ASCII and as UTF-16 (a hex editor), finds
+      nothing.
 - [ ] Setting on, Xerces closed (close it after the game starts): the dialog
       says the report is sent when Xerces opens next; opening Xerces sends it.
 - [ ] `xerces_crash_test fastfail`: no dialog; the footer says the report was
       sent, kind `fail_fast` in the backend.
+- [ ] `xerces_crash_test fatal`: the fatal-error dialog says Xerces sends a
+      crash report. Press "Restart game" (the default, which ends the first game
+      with exit code 0): the backend has a report of kind `unknown_exit` with
+      frames and a game module, and the console tail holds the error. Quit the
+      restarted game, then repeat with "Close game": a second report.
+- [ ] Chat in a self-hosted match with a second PC (both players type), then
+      `xerces_crash_test` on one of them: the report's console tail has no chat
+      line, and neither player's in-game name appears anywhere in it (names the
+      console printed show as `<player>`), also when the name in Settings
+      differs from the one the game uses (Steam's).
 - [ ] Setting off: the dialog says crash reports are off and points to
       `https://github.com/DeroXP/boiii-free/issues` and Diagnostics > Copy
       report; nothing appears in `<home>\crash\pending`, `outbox` or the

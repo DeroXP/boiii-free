@@ -34,7 +34,9 @@
 # file and the command line and starts nothing. -Live starts the real game:
 # only with the user's go-ahead for that session (CLAUDE.md, Hard rules).
 # The home folder must be outside AppData; it is a test home that this script
-# writes freely (config, journal, logs).
+# writes freely (config, journal, logs). "Send crash reports" is off there, so
+# the crash cases never reach the production backend (docs/CRASH_REPORTS.md);
+# -SendCrashReports turns it on for a run that is meant to report.
 param(
   [ValidateSet('vanilla', 'modded', 'crash', 'restart', 'cli', 'safeoff', 'reopen', 'dvars', 'cliapply')]
   [string]$Case = 'vanilla',
@@ -45,7 +47,8 @@ param(
   [string]$DvarName = 'cg_fov_default',
   [string]$DvarValue = '',
   [switch]$Live,
-  [switch]$CliReload
+  [switch]$CliReload,
+  [switch]$SendCrashReports
 )
 
 $ErrorActionPreference = 'Stop'
@@ -109,7 +112,8 @@ function Write-Config([bool]$modded, [hashtable]$dvars = $null) {
     $pairs = ($dvars.GetEnumerator() | ForEach-Object { "`"$($_.Key)`": `"$($_.Value)`"" }) -join ', '
     $extra = "  `"dvars`": { $pairs },`n"
   }
-  $json = "{`n  `"schema`": `"xerces.config/1`",`n  `"first_run_done`": true,`n  `"mode`": `"$Mode`",`n" + $extra +
+  $crash = if ($SendCrashReports) { 'true' } else { 'false' }
+  $json = "{`n  `"schema`": `"xerces.config/1`",`n  `"first_run_done`": true,`n  `"send_crash_reports`": $crash,`n  `"mode`": `"$Mode`",`n" + $extra +
     "  `"profiles`": { `"$Mode`": { `"mods`": [$mods], `"modded`": $flag } }`n}`n"
   [System.IO.File]::WriteAllText((Join-Path $config 'launcher.json'), $json)
 }

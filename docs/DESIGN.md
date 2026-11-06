@@ -1022,10 +1022,14 @@ crash handler also writes a stacks-only minidump
 (`MiniDumpNormal | MiniDumpWithThreadInfo`) and a note with the code, module,
 offset, thread and frames to `<home>\crash\pending`, and the launcher sends them
 with the launch, the specs and redacted log tails to the backend after the game
-exits. Full dumps stay local and are never sent. Off, nothing is sent; the crash
-dialog then points to GitHub issues and this bundle. The contract and what is
-sent: `docs/CRASH_REPORTS.md`. Upstream's "post it on Discord" text is gone: the
-dialog names Xerces and says what happens to the report.
+exits. Full dumps stay local and are never sent. The stacks are raw memory, so
+before queueing the client masks the profile folder names, the Windows user name
+and the player names the game knew in the dump (keeping its layout), and chat
+never enters the console lines it keeps. A fatal engine error writes the note
+without a dump. Off, nothing is sent; the crash dialog then points to GitHub
+issues and this bundle. The contract and what is sent: `docs/CRASH_REPORTS.md`.
+Upstream's "post it on Discord" text is gone: the dialog names Xerces and says
+what happens to the report.
 
 ---
 
@@ -2324,11 +2328,12 @@ are not on the pipe.
 | `xerces_cli test run <scenario>`                         | in-game integration tests       |
 | `xerces_cli diag bundle`                                 | diagnostics bundle (5.10)       |
 | `xerces_cli logs tail [--follow]`                        | live log stream                 |
+| `xerces_cli crash list / send [--exit-code c]`           | crash reports (D21)             |
 
 Exit codes: 0 success, 1 error, 2 validation or conflict failures, 3 Xerces not
-running, 4 signature failures. The command set is versioned
-(`xerces_cli --api-version`). Commands that only need `xerces_core` work without
-the game.
+running, 4 signature failures, 5 crash reports waiting for a later try
+(`crash send`). The command set is versioned (`xerces_cli --api-version`).
+Commands that only need `xerces_core` work without the game.
 
 ### 15.3 Tests
 

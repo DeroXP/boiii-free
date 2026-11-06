@@ -20,9 +20,17 @@ first run) and `xerces_cli crash list|send`.
   the thread (main, server, auxiliary), up to 32 frames as `module+0xoffset`,
   and the launch journal's phase.
 - A stacks-only minidump (`MiniDumpNormal | MiniDumpWithThreadInfo`): the
-  threads, their registers and stacks. No data segments and no memory the stacks
-  point to, which can hold tokens and other players' addresses. At most 2 MiB;
-  larger ones are left out.
+  threads, their registers and stacks, and the loaded modules' paths. No data
+  segments and no memory the stacks point to, which can hold tokens and other
+  players' addresses. At most 2 MiB; larger ones are left out. The stack memory
+  itself is raw: it can hold bits of what the game was doing (a path, a name,
+  part of a message). Before the dump is queued the client masks, keeping every
+  length so the dump still opens: the name after every `X:\Users\` anywhere in
+  it (module paths, PDB paths), and every whole-word copy of the Windows user
+  name and of the player names the game knew (three characters or more, UTF-16
+  and UTF-8) in the module names, the PDB records and the stacks
+  (`xerces_core::mask_minidump`). Nothing else in the stacks is scrubbed. Bytes
+  that are not a minidump are left out.
 - The launch: game mode, map, plan id, the mods (id, name, version), the flags
   (names only), safe mode.
 - Versions: Xerces' version, git commit and whether the tree was dirty; the
@@ -30,18 +38,24 @@ first run) and `xerces_cli crash list|send`.
 - This PC: Windows version, CPU name, logical CPUs, RAM, GPUs with driver
   versions, the primary display's mode.
 - Logs: the launch journal, and the last lines of the game's log (200), the
-  launcher's log (100) and the console (200), each at most 64 KiB.
+  launcher's log (100) and the console (200), each at most 64 KiB. Chat lines
+  never enter the console lines the client keeps (`chat.cpp`), so neither the
+  game log nor a report has them.
 
-Before anything leaves the PC the client removes: the profile folder (written
-`%USERPROFILE%`), any other `X:\Users\<name>` (written `C:\Users\<user>`), the
-Windows user name, the player name, Steam ids, values after `xuid`, server
-addresses and favourites' names (the diagnostics bundle's redaction,
-`xerces_core/log.hpp`, plus these). The server checks again that no
-`C:\Users\<name>` path survives.
+Before anything leaves the PC the client removes from the logs: the profile
+folder (written `%USERPROFILE%`), any other `X:\Users\<name>` (written
+`C:\Users\<user>`), the Windows user name, player names, Steam ids, values after
+`xuid`, server addresses and favourites' names (the diagnostics bundle's
+redaction, `xerces_core/log.hpp`, plus these). The player names are the one in
+`launcher.json` and the ones the game knew: its own name (from `properties.json`
+or Steam, which `launcher.json` often does not hold) and the players it was in a
+match with. The game keeps those in memory only and puts them in its crash note;
+its console lines already show them as `<player>`. The dump is masked as above.
+The server checks again that no `C:\Users\<name>` path survives.
 
-Never sent: usage data or analytics, the player name, Steam ids or the game
-identity (XUID), full crash dumps, settings, packs or files. The full dumps stay
-in `%LOCALAPPDATA%\boiii\minidumps` for local use.
+Never sent: usage data or analytics, Steam ids or the game identity (XUID), full
+crash dumps, settings, packs or files. The full dumps stay in
+`%LOCALAPPDATA%\boiii\minidumps` for local use.
 
 Reports are tied to an install id: 32 random hex digits from the system's random
 source in `<home>\config\install_id`, made the first time a report is sent,
@@ -55,10 +69,14 @@ uses the address in memory for rate limits only).
    is set) and the setting is on, writes `<home>\crash\pending\<report_id>.dmp`
    (the stacks-only dump) and `<report_id>.json` next to it (code, module,
    offset, thread, frames, phase, the console's last lines, the flags, the game
-   log's file name and the journal). Upstream's own dump and zip stay as they
-   are. The dialog says the report is sent when the game closes (the launcher is
-   open) or when Xerces opens next; with the setting off it points to GitHub and
-   the bundle.
+   log's file name, the journal and the player names to hide). Upstream's own
+   dump and zip stay as they are. A fatal engine error (`Com_Error` with
+   `ERR_FATAL`, `Sys_Error`) writes the note alone, kind `unknown_exit`: the
+   frames from where the error was raised, and the first frame outside the
+   client as module and offset. Its dialog's "Restart game" ends the process
+   with exit code 0, which alone would read as a clean exit. The dialog says the
+   report is sent when the game closes (the launcher is open) or when Xerces
+   opens next; with the setting off it points to GitHub and the bundle.
 2. When the game the launcher started exits, the launcher counts it as a crash
    when the client wrote a dump, or the exit code is not 0 and the journal does
    not end in `clean_exit` (`xerces_core::exit_is_crash`). Each pending crash
@@ -71,24 +89,33 @@ uses the address in memory for rate limits only).
    report sent" with the server's id, or that it is sent later. A failed send is
    tried again in 10 minutes while Xerces is open (or after the server's
    Retry-After), and at every start.
-4. The outbox keeps at most 20 reports and none older than 7 days.
+4. The outbox keeps at most 20 reports and none older than 7 days. The limits
+   apply when a report is queued and again before every send, so a report older
+   than 7 days is removed, never sent.
 
 With the setting off, pending crashes are removed instead of queued, and turning
 it off removes what was waiting, so a crash from that time is never sent later.
 The setting is read again before each report is sent. A launcher started with
-`--dry-launch` queues reports but sends nothing.
+`--dry-launch` queues reports but sends nothing. The launcher, the game client
+and `xerces_cli` read `launcher.json` the same way
+(`xerces_core::crash_reports_enabled`): no file means the default, on; a file
+that is not JSON means off until the switch is turned on again, since it may
+have said off.
 
 Games started by `xerces_cli` are covered too: `xerces_cli crash send` turns
 pending crashes into reports and sends them (`--exit-code <code>` adds a crash
 the client wrote nothing for); `xerces_cli crash list` shows the outbox and the
 pending crashes. `crash send` refuses while Xerces.exe runs on the home, which
-sends them itself.
+sends them itself, and exits 5 when reports still wait in the outbox for a later
+try (no answer, rate limited).
 
 ## Contract (`xerces.crash/1`)
 
 Base: `https://boiii-free-production.up.railway.app`. `XERCES_CRASH_URL`
-replaces it, for local tests only: `https://`, or `http://` to 127.0.0.1,
-localhost or `[::1]`; anything else sends nothing.
+replaces it, for local tests only: `http://` or `https://` to 127.0.0.1,
+localhost or `[::1]`; anything else (another host, user info in the address)
+sends nothing. The transport also refuses every host but the backend's and this
+PC's.
 
 ### `POST {base}/v1/crashes`
 
@@ -152,7 +179,8 @@ Body: UTF-8 JSON, at most 4 MiB after gzip decoding.
   the module's base.
 - Kinds: `exception` (the client's handler ran and wrote the small dump),
   `fail_fast` (exit 0xC0000409, no dump), `out_of_memory` (exit 0xFFFFFFFF after
-  the out-of-memory box), `unknown_exit` (any other end that was not clean).
+  the out-of-memory box), `unknown_exit` (any other end that was not clean, a
+  fatal engine error among them).
 - `tests/fixtures/crash/report_golden.json` is a full report the client's
   builder must produce field for field (`xerces_tests crash`).
 
