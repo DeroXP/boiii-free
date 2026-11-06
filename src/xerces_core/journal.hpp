@@ -83,6 +83,12 @@ bool game_exit_is_clean(bool quit_requested,
 // No journal, or one that does not end in clean_exit: the launch crashed.
 bool journal_crashed(const std::optional<launch_journal> &journal);
 
+// The launch joined another player's game whose mods are not its own stack
+// (launch_journal::joined): what happened after that says nothing about the
+// launch's own mods. decide_safe_mode and the culprit search's test launches
+// (join_check.hpp, culprit_test_result) go by it.
+bool journal_ran_host_mods(const std::optional<launch_journal> &journal);
+
 struct safe_mode_decision {
   bool safe_mode = false;
   std::string crashed_plan_id;

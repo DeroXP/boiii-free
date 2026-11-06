@@ -11,6 +11,9 @@ std::vector<std::string> get();
 std::string serialize();
 void set(const std::string &list);
 bool is_loaded();
+// Whether the stack this list gives is the one loaded, without setting it
+// (a join checks the host's list before it takes it).
+bool is_loaded(const std::string &list);
 // Reloads the stack at the next front-end frame, as ModStack.Reload does.
 void request_reload();
 

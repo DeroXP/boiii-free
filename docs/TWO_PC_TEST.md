@@ -58,12 +58,16 @@ Same network, no mods enabled on either PC (Xerces > Mods).
    then Classic Viewmodel FOV. Home > Launch modded, then open the lobby.
 2. J (two of the three): join H. Expected: one dialog, "Mod not installed",
    naming Workshop item 3656779213 and offering its Workshop page. Yes opens it
-   in Steam. J does not join; nothing downloads or reconnects.
+   in Steam. J does not join; nothing downloads or reconnects. If J launched
+   modded, J's main menu still names J's own mods afterwards, not H's.
 3. J: subscribe to it, quit the game, let Steam finish, join again. Expected:
    J's game loads H's three mods, then joins the lobby by itself a few seconds
    later.
 4. Optional: J unsubscribes from two of them, and H starts a match before J
    joins. Expected: one dialog naming both, with "Open their 2 Workshop pages".
+   Yes opens them in Steam one after the other. Check that both pages can be
+   reached (Steam's Back button) and subscribed to; if only the last one shows,
+   note it.
 
 ## 3. The D3 stack on both
 
@@ -77,6 +81,9 @@ Same network, no mods enabled on either PC (Xerces > Mods).
 4. If either game crashes on H's game, start Xerces again on J and note what
    Home says. Expected: J's own mods are not put into safe mode because of it,
    unless J's own mods are the same stack.
+5. Optional, only if J's Home shows a "Find the culprit" test from an earlier
+   crash: start that test, join H, then quit. Expected: Home says the last test
+   joined another player's game and did not count, and shows the same test.
 
 ## 4. Host on a custom map (map-first)
 
@@ -97,12 +104,17 @@ Same network, no mods enabled on either PC (Xerces > Mods).
 ## 5. Over the internet with UPnP
 
 The two PCs on different internet connections, for example J on a phone hotspot.
-H's router needs UPnP on (most home routers have it on).
+H's router needs UPnP on (most home routers have it on). While H's lobby is
+open, anyone who has H's address can join it (the network password does not
+cover it), so H closes it when the test is done.
 
 1. H: Launch vanilla, then open the lobby. Within a few seconds a toast says
    what the router answered:
    - "Router port open" with an address such as `203.0.113.7:27017`: give J that
      address.
+   - "Router port open" saying the router did not say its internet address: H
+     looks up their public IP address (a web search for "what is my IP") and
+     gives J that address with port 27017.
    - "address shared" or "another router in front": the internet cannot reach H.
      Note it, then swap who hosts.
    - "No UPnP router found" or "Router refused the port": turn UPnP on in the

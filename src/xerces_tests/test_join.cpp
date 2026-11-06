@@ -388,3 +388,124 @@ TEST_CASE("join: the journal records the host's mods") {
   REQUIRE(odd.has_value());
   CHECK(odd->joined_stack.empty());
 }
+
+TEST_CASE("join: one offer gives one key from getinfo and from the lobby") {
+  const std::string ids = "zm_rust=0123456789abcdef";
+  // getinfo names a custom map without a mod "usermaps", the lobby "".
+  CHECK_EQ(join_offer_key("usermaps", "", "zm_rust", ids),
+           join_offer_key("", "", "zm_rust", ids));
+  // Spaces, duplicates and the main mod in the stack change nothing.
+  CHECK_EQ(
+      join_offer_key("1944930083", "3171632315, 1944930083,3171632315", "", ""),
+      join_offer_key("1944930083", "3171632315", "", ""));
+  // Another mod, another order, another map or other ids are another offer.
+  CHECK(join_offer_key("1944930083", "a,b", "", "") !=
+        join_offer_key("1944930083", "b,a", "", ""));
+  CHECK(join_offer_key("1944930083", "", "", "") !=
+        join_offer_key("", "1944930083", "", ""));
+  CHECK(join_offer_key("", "", "zm_rust", ids) !=
+        join_offer_key("", "", "zm_rust", "zm_rust=fedcba9876543210"));
+  CHECK(join_offer_key("", "", "zm_rust", "") !=
+        join_offer_key("", "", "zm_other", ""));
+}
+
+TEST_CASE("join: a host's long lists are cut short") {
+  std::string stack;
+  for (int i = 0; i < 200; ++i) {
+    stack += (i ? "," : "") + std::to_string(1000000000 + i);
+  }
+  const auto items = host_items("999", "", stack, "zm_rust", "3010010010");
+  // At most max_host_mods mods, the main mod among them, and the map.
+  REQUIRE_EQ(items.size(), max_host_mods + 1);
+  CHECK(items.front().kind == host_item_kind::main_mod);
+  CHECK(items.back().kind == host_item_kind::map);
+
+  fake_pc pc;
+  const join_check check = check_join(items, {}, pc.lookup());
+  REQUIRE_EQ(check.missing.size(), items.size());
+  const join_notice notice = missing_notice(check);
+  CHECK_EQ(notice.workshop_pages.size(), max_workshop_pages);
+  CHECK(contains(notice.message,
+                 "- and " + std::to_string(items.size() - max_listed_items) +
+                     " more\n"));
+  CHECK(contains(notice.message, "Open the first 10 of their " +
+                                     std::to_string(items.size()) +
+                                     " Workshop pages in Steam now?"));
+  // One line per listed item, plus the "and more" line.
+  std::size_t lines = 0;
+  for (std::size_t at = 0;
+       (at = notice.message.find("\n- ", at)) != std::string::npos; ++at) {
+    ++lines;
+  }
+  CHECK_EQ(lines, max_listed_items + 1);
+
+  // Up to the limit nothing is cut.
+  const join_check few = check_join(
+      host_items("", "", "1,2,3,4,5,6,7,8,9,10", "", ""), {}, pc.lookup());
+  const join_notice all = missing_notice(few);
+  CHECK_EQ(all.workshop_pages.size(), std::size_t(10));
+  CHECK(!contains(all.message, "more\n"));
+  CHECK(contains(all.message, "Open their 10 Workshop pages in Steam now?"));
+
+  // The "Different versions" list is cut the same way.
+  fake_pc has_all;
+  std::vector<content_id> host_ids;
+  for (const auto &item : items) {
+    has_all.items[item.key] = {true, "1111111111111111", ""};
+    host_ids.push_back({item.key, "2222222222222222"});
+  }
+  const join_check differ = check_join(
+      items, parse_content_ids(format_content_ids(host_ids)), has_all.lookup());
+  // Only the first max_content_ids ids travel; each of them differs.
+  CHECK_EQ(differ.differ.size(), max_content_ids);
+  CHECK(contains(differ_notice(differ).message, " more\n"));
+}
+
+TEST_CASE("join: a forwarded port without an outside address") {
+  CHECK(classify_mapped("203.0.113.7") == mapped_reach::public_address);
+  CHECK(classify_mapped("100.64.0.1") == mapped_reach::shared);
+  CHECK(classify_mapped("192.168.0.2") == mapped_reach::private_address);
+  for (const char *none : {"", "0.0.0.0", "127.0.0.1", "garbage"}) {
+    CHECK(classify_mapped(none) == mapped_reach::unknown);
+    const auto notice =
+        direct_connect_notice(port_map_result::mapped, none, 27017);
+    // The port is open; nothing blames a second router or says to swap.
+    CHECK_EQ(notice.title, std::string("Router port open"));
+    CHECK(contains(notice.message, "did not say its internet address"));
+    CHECK(contains(notice.message, "port 27017"));
+    CHECK(!contains(notice.message, "another router"));
+    CHECK(!contains(notice.message, "someone else host"));
+    CHECK(!contains(notice.message, "()"));
+  }
+}
+
+TEST_CASE("join: a culprit test that joined another game counts for nothing") {
+  CHECK(culprit_test_result(std::nullopt) == culprit_test_end::crashed);
+
+  launch_journal test;
+  test.stack = {"ws.1944930083"}; // the mods under test
+  test.phase = launch_phase::in_game;
+  CHECK(culprit_test_result(test) == culprit_test_end::crashed);
+  test.phase = launch_phase::clean_exit;
+  CHECK(culprit_test_result(test) == culprit_test_end::ran_fine);
+
+  // Joined a host with the whole D3 stack: neither a crash nor a clean run
+  // says anything about the one mod under test.
+  test.joined = true;
+  test.joined_stack = {"ws.1944930083", "ws.3171632315", "ws.3656779213"};
+  CHECK(journal_ran_host_mods(test));
+  CHECK(culprit_test_result(test) == culprit_test_end::not_counted);
+  test.phase = launch_phase::loading_map;
+  CHECK(culprit_test_result(test) == culprit_test_end::not_counted);
+
+  // A vanilla host: none of the tested mods ran either.
+  test.joined_stack.clear();
+  CHECK(culprit_test_result(test) == culprit_test_end::not_counted);
+
+  // The host ran exactly the tested mods: the result counts.
+  test.joined_stack = test.stack;
+  CHECK(!journal_ran_host_mods(test));
+  CHECK(culprit_test_result(test) == culprit_test_end::crashed);
+  test.phase = launch_phase::clean_exit;
+  CHECK(culprit_test_result(test) == culprit_test_end::ran_fine);
+}

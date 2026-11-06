@@ -155,6 +155,10 @@ public:
   void stop_culprit();
   // Launches the next test (a dry launch records nothing).
   launch_outcome launch_culprit_test();
+  // The last test launch joined another player's game, so it recorded
+  // nothing and the same test is next (join_check.hpp, culprit_test_result).
+  // Until the next test starts or the search ends; not kept on disk.
+  bool culprit_test_joined() const { return culprit_test_joined_; }
 
   // ------------------------------------------------------------- signatures
   const signature_state &signatures() const { return signatures_; }
@@ -189,6 +193,9 @@ private:
   void save_culprit();
   // Records the result of a culprit test launch that has ended.
   void settle_culprit_test(bool crashed);
+  // The same, from the journal: a test that joined another player's game
+  // records nothing.
+  void settle_culprit_from_journal();
   // poll() without a process handle: watches <home>\run.
   void watch_run_folder();
   game_state detect_now(const std::optional<std::string> &saved_dir,
@@ -223,6 +230,7 @@ private:
   std::chrono::steady_clock::time_point last_run_check_{};
   bool game_was_live_ = false; // a game was in <home>\run at the last check
   std::optional<xerces_core::culprit_progress> culprit_;
+  bool culprit_test_joined_ = false;
   std::uint64_t culprit_rev_ = 1;
   mutable resolve_timing resolve_stats_;
 };

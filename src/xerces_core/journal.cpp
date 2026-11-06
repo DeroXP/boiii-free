@@ -158,13 +158,17 @@ bool journal_crashed(const std::optional<launch_journal> &journal) {
   return !journal || journal->phase != launch_phase::clean_exit;
 }
 
+bool journal_ran_host_mods(const std::optional<launch_journal> &journal) {
+  return journal && journal->joined && journal->joined_stack != journal->stack;
+}
+
 safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last) {
   safe_mode_decision out;
   if (!last || last->phase == launch_phase::clean_exit || last->stack.empty() ||
       last->safe_mode) {
     return out; // no crash, or a crash with mods already off
   }
-  if (last->joined && last->joined_stack != last->stack) {
+  if (journal_ran_host_mods(last)) {
     // It crashed on another player's game, with the host's mods: this
     // plan's mods were not running, so they stay on.
     out.crashed_after_join = true;

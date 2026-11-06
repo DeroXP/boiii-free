@@ -12,6 +12,7 @@
 #include <string_view>
 #include <vector>
 
+#include "journal.hpp"
 #include "planner.hpp"
 
 namespace xerces_core {
@@ -74,11 +75,20 @@ struct host_item {
 
 // What the host runs, in load order: its main mod (none for "" and
 // "usermaps"), its stacked mods (modStack, ',' separated; duplicates and the
-// main mod left out), then its custom map ("" for a stock map or none).
+// main mod left out), then its custom map ("" for a stock map or none). At
+// most max_host_mods mods: the host sends the list, and a longer one is
+// broken or hostile (the game's zone limit stops a real stack long before).
+inline constexpr std::size_t max_host_mods = max_content_ids;
 std::vector<host_item> host_items(std::string_view main_mod,
                                   std::string_view main_title,
                                   std::string_view stack, std::string_view map,
                                   std::string_view map_workshop_id);
+
+// One text per offer, the same whichever way the host said it: getinfo names
+// a custom map without a mod "usermaps", the lobby content "". A "Join
+// anyway" holds for both checks of one join (src/client/xerces/join.cpp).
+std::string join_offer_key(std::string_view main_mod, std::string_view stack,
+                           std::string_view map, std::string_view content_ids);
 
 // This PC's copy of a host item.
 struct own_item {
@@ -112,6 +122,11 @@ struct join_notice {
   std::string message;
   std::vector<std::string> workshop_pages;
 };
+
+// A dialog names at most max_listed_items items, then says how many more.
+// "Yes" opens at most max_workshop_pages pages.
+inline constexpr std::size_t max_listed_items = 12;
+inline constexpr std::size_t max_workshop_pages = 10;
 
 // Everything missing at once, each with its Workshop page when it has one.
 join_notice missing_notice(const join_check &check);
@@ -163,6 +178,13 @@ enum class port_map_result {
   refused,   // the router said no (taken by another PC, or not allowed)
   closed,    // the lobby closed and the mapping was removed
 };
+// What a forwarded port means for players on the internet, by the outside
+// address the router reported. unknown: the router forwards the port but
+// gave no usable address ("", 0.0.0.0, loopback), which says nothing about
+// a second router; the host gives their public address themselves.
+enum class mapped_reach { public_address, unknown, shared, private_address };
+mapped_reach classify_mapped(std::string_view external_ip);
+
 // external_ip: the router's outside address for mapped; for closed, anything
 // non-empty when the router had forwarded the port.
 join_notice direct_connect_notice(port_map_result result,
@@ -175,4 +197,12 @@ join_notice direct_connect_notice(port_map_result result,
 std::vector<std::string>
 joined_stack_ids(const std::vector<std::string> &folders,
                  const std::vector<installed_entry> &index);
+
+// How a culprit-search test launch ended, by its journal (journal.hpp). A
+// test that joined another player's game with other mods ran the host's
+// mods, not the ones under test, so its crash or clean run counts for
+// nothing: the launcher records no result and the same test runs again.
+enum class culprit_test_end { crashed, ran_fine, not_counted };
+culprit_test_end
+culprit_test_result(const std::optional<launch_journal> &journal);
 } // namespace xerces_core

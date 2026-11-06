@@ -844,7 +844,9 @@ together.
   `frontend`, `loading_map`, `in_game`, `clean_exit`) with the `plan_id`, the
   stack, the game mode, whether the launch ran in safe mode and whether it had
   the larger zone memory (`db_pool`, 5.4). The client writes all of them
-  (2026-11-05).
+  (2026-11-05). After the game joins another player's game it also writes
+  `joined` and the host's mods, `joined_stack` (11.10): a crash or a culprit
+  test after that is not judged against this launch's own stack.
 - Who owns the journal. The launcher writes it as `launching` with a fresh
   one-time launch id and hands the same id to the game in `XERCES_LAUNCH_ID`.
   The game takes the journal over only when the ids match and the phase is still
@@ -1901,13 +1903,22 @@ direct connect; 11.3 and 11.4 still apply later. The two-PC test is
 - **Open to direct connect.** The lobby button upstream labelled "PARTY IS OPEN"
   now reads DIRECT CONNECT: OPEN or CLOSED. Open, a lobby in the menus answers
   joins by address (`nat.cpp`, `joinable_lobby`), and nothing is sent to Ezz's
-  masters. A match the host runs was already joinable. While it is open the game
-  asks the router to forward its UDP port (`upnp.cpp`) and says what the router
-  answered: forwarded (with the outside address, so the host can share it), a
-  shared or private outside address (carrier-grade NAT or a second router), no
-  UPnP router, or refused. The mapping goes when the host closes the lobby, has
-  had no lobby in the menus for about 15 s, or quits. A crash leaves it on the
-  router until the next time the port is mapped.
+  masters. A match the host runs was already joinable. While it is open, anyone
+  who can reach the port can join: the network password is checked only by the
+  joiner's own game, during getinfo, so it does not protect an open lobby. The
+  Servers screen's Hosting panel says so, and that the router's toast shows the
+  outside address on screen.
+- **The router.** While the lobby is open the game asks the router to forward
+  its UDP port (`upnp.cpp`) and says what the router answered: forwarded (with
+  the outside address, so the host can share it), forwarded without an outside
+  address (the host gives their public address themselves), a shared or private
+  outside address (carrier-grade NAT or a second router), no UPnP router, or
+  refused. The mapping goes when the host closes the lobby or quits; the game's
+  exit waits at most about 3 s for the router and logs when it did not answer.
+  It is also meant to go when the host has had no lobby in the menus for about
+  15 s, but whether Black Ops III keeps the party lobby in the main menu is not
+  yet seen (`docs/TESTING.md`). A crash leaves the mapping on the router until
+  the next time the port is mapped.
 - **What a host advertises.** getinfo and the lobby content carry each mod's and
   the custom map's short content id (the first 16 hex digits of the catalog's
   content hash), as `key=id` pairs in getinfo's `contentIds` and in a sixth
@@ -1920,18 +1931,31 @@ direct connect; 11.3 and 11.4 still apply later. The two-PC test is
   `xerces_core/join_check.hpp`). Before the host's mods load, everything the
   host runs that is missing here (main mod, stacked mods, custom map) is named
   in one dialog that offers each Workshop page in Steam. Items whose content id
-  differs are named in a dialog whose Yes joins anyway. A host on another Xerces
-  version gives a warning toast. A server that switches to a map this PC lacks
-  names it and offers its Workshop page (asked from the server's getinfo);
-  nothing reconnects to download.
-- **A direct connect to a lobby with other mods** loads the host's mods, then
-  connects to the same address again, once per host a minute. Before, it relied
-  on a friend id that a direct connect does not have, and stopped.
+  differs are named in a dialog whose Yes joins anyway; a Yes holds for both
+  checks of one join (getinfo, then the lobby). A host's list is cut at 64 mods,
+  a dialog names at most 12 items and says how many more, and Yes opens at most
+  10 pages, 1.5 s apart. Whether Steam's browser keeps the earlier pages
+  reachable is a two-PC check. A host on another Xerces version gives a warning
+  toast. A server that switches to a map this PC lacks names it and offers its
+  Workshop page (asked from the server's getinfo); nothing reconnects to
+  download. The engine's own help texts for a mismatch or a missing map or mod
+  name the Xerces build and the Steam Workshop, not BOIII or its launcher.
+- **Taking the host's mods.** A join takes the host's stack (`fs_extramods`) and
+  map-first rule only once nothing stops it: a join that ends at a dialog leaves
+  this game's own mods. A direct connect to a lobby with other mods loads the
+  host's mods, then connects to the same address again, once per host a minute.
+  Before, it relied on a friend id that a direct connect does not have, and
+  stopped.
 - **The journal** records the host's stack once a join takes it
-  (`launch_journal::joined`). A crash after that does not put the next launch
-  into safe mode or start a culprit search for this plan's mods, unless the host
-  ran this plan's own stack. Home does not yet say that the last launch crashed
-  on another player's game.
+  (`launch_journal::joined`): for a match when the host's mods load
+  (`party.cpp`, `connect_to_lobby`), for a lobby when the lobby join goes ahead
+  (`nat.cpp`). A crash after that does not put the next launch into safe mode or
+  start a culprit search for this plan's mods, unless the host ran this plan's
+  own stack. A culprit test launch that joins such a game records no result: the
+  same test is next, and Home says the last test did not count. Home does not
+  yet say that the last launch crashed on another player's game. If a mode
+  switch before a match join times out, the host's list stays in `fs_extramods`
+  without `joined`, as upstream left it.
 - **Servers** says the host decides which mods load; "Join modded" joins without
   your mods when your plan has problems or none are enabled; IPv6 addresses are
   refused for joins (the game's sockets are IPv4 only).

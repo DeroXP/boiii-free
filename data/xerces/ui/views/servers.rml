@@ -120,6 +120,7 @@
 		<div>
 			<div class="panel-head"><span class="panel-title">Hosting</span></div>
 			<div class="aside-note">In your Zombies or Multiplayer lobby, turn DIRECT CONNECT on. Others then join with your address and port, usually 27017. While it is on, the game asks your router to forward that UDP port (UPnP), and it stops when the lobby closes.</div>
+			<div class="aside-note quiet">While it is on, anyone who has your address can join your lobby: the network password does not cover it. The router's toast shows your internet address on screen.</div>
 		</div>
 
 		<div>

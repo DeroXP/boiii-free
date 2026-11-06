@@ -212,22 +212,26 @@ constexpr char HELP_GAME_MISMATCH[] =
     "^1Your game and the server are not running the same mod or "
     "version.\n^3Fix: ^7Load the same mod as the server (or none), and make "
     "sure both are up to date.";
+// Xerces: the join and Workshop texts below name what Xerces builds have (the
+// same Xerces build, the Steam Workshop), not BOIII or its launcher.
 constexpr char HELP_CONFIGSTRING_MISMATCH[] =
     "^1Your game and the server disagree about the match data (models, "
-    "effects or settings).\n^3Fix: ^7Your game and the server are probably "
-    "not on the same BOIII version or mod files. Update BOIII, load the same "
-    "mod as the server, or join another server.";
+    "effects or settings).\n^3Fix: ^7Your game and the server probably do "
+    "not have the same mod files, Xerces build or Black Ops III update. Use "
+    "the same Xerces build and the same versions of the server's mods (quit "
+    "and let Steam finish its updates), or join another server.";
 constexpr char HELP_RELIABLE_CYCLED_OUT[] =
     "^1The server sent updates faster than your game could confirm them, so "
     "the connection fell out of sync.\n^3Fix: ^7This is usually a lag spike or "
     "a server script/mod sending too many updates at once. Join again. If it "
     "keeps happening on this server, the server or its mods are the cause.";
 constexpr char HELP_MISSING_MAP[] =
-    "^1You do not have the map this server is running.\n^3Fix: ^7Download it "
-    "from the Steam Workshop or the launcher's Workshop tab, then join again.";
+    "^1You do not have the map this server is running.\n^3Fix: ^7Subscribe to "
+    "it on its Workshop page in Steam; Steam downloads it. Then join again.";
 constexpr char HELP_MISSING_MOD[] =
-    "^1This server uses a mod you do not have installed.\n^3Fix: ^7Download it "
-    "from the Steam Workshop or the launcher's Workshop tab, then join again.";
+    "^1This server uses a mod you do not have installed.\n^3Fix: ^7Subscribe "
+    "to it on its Workshop page in Steam; Steam downloads it. Then join "
+    "again.";
 constexpr char HELP_ZONE_LIMIT[] =
     "^1Too many map and mod files are loaded at once.\n^3Fix: ^7Unload the "
     "current mod or use fewer mods together.";

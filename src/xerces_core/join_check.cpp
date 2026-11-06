@@ -89,6 +89,19 @@ std::string describe(const join_item &entry) {
   return what + (name.empty() || name == key ? key : name + " (" + key + ")") +
          ", not a Workshop item";
 }
+
+// One line per item, at most max_listed_items, then how many more.
+std::string list(const std::vector<join_item> &items) {
+  std::string out;
+  for (std::size_t i = 0; i < items.size() && i < max_listed_items; ++i) {
+    out += "- " + describe(items[i]) + "\n";
+  }
+  if (items.size() > max_listed_items) {
+    out +=
+        "- and " + std::to_string(items.size() - max_listed_items) + " more\n";
+  }
+  return out;
+}
 } // namespace
 
 std::string short_content_id(std::string_view content_hash) {
@@ -241,6 +254,9 @@ std::vector<host_item> host_items(std::string_view main_mod,
     out.push_back(std::move(item));
   }
   for (const std::string_view part : split(stack, ',')) {
+    if (out.size() == max_host_mods) {
+      break;
+    }
     const std::string id = trim(part);
     if (id.empty() || id == main ||
         std::ranges::any_of(out,
@@ -268,6 +284,18 @@ std::vector<host_item> host_items(std::string_view main_mod,
     out.push_back(std::move(item));
   }
   return out;
+}
+
+std::string join_offer_key(std::string_view main_mod, std::string_view stack,
+                           std::string_view map, std::string_view content_ids) {
+  std::string out;
+  for (const host_item &item : host_items(main_mod, {}, stack, map, {})) {
+    out += item.kind == host_item_kind::main_mod      ? "main:"
+           : item.kind == host_item_kind::stacked_mod ? "mod:"
+                                                      : "map:";
+    out += item.key + ",";
+  }
+  return out + "|" + format_content_ids(parse_content_ids(content_ids));
 }
 
 join_check check_join(const std::vector<host_item> &items,
@@ -308,17 +336,21 @@ join_notice missing_notice(const join_check &check) {
   }
   std::size_t maps = 0;
   std::size_t without_page = 0;
+  std::vector<std::string> pages;
   for (const auto &entry : check.missing) {
     if (entry.item.kind == host_item_kind::map) {
       ++maps;
     }
     if (entry.item.workshop_id.empty()) {
       ++without_page;
-    } else if (std::ranges::find(out.workshop_pages, entry.item.workshop_id) ==
-               out.workshop_pages.end()) {
-      out.workshop_pages.push_back(entry.item.workshop_id);
+    } else if (std::ranges::find(pages, entry.item.workshop_id) ==
+               pages.end()) {
+      pages.push_back(entry.item.workshop_id);
     }
   }
+  out.workshop_pages.assign(pages.begin(),
+                            pages.begin() +
+                                std::min(pages.size(), max_workshop_pages));
   const std::size_t mods = check.missing.size() - maps;
   out.title = mods && maps ? "Mods and map not installed"
               : maps       ? "Map not installed"
@@ -328,19 +360,17 @@ join_notice missing_notice(const join_check &check) {
                            : maps       ? "a map"
                            : mods == 1  ? "a mod"
                                         : "mods";
-  out.message = "This server uses " + what + " you don't have:\n";
-  for (const auto &entry : check.missing) {
-    out.message += "- " + describe(entry) + "\n";
-  }
-  const std::size_t pages = out.workshop_pages.size();
-  if (pages == 0) {
+  out.message =
+      "This server uses " + what + " you don't have:\n" + list(check.missing);
+  if (pages.empty()) {
     out.message += "\nAsk the host where to get " +
                    std::string(check.missing.size() == 1 ? "it" : "them") +
                    ", then join again.";
     return out;
   }
   out.message += "\nSubscribe on the Steam Workshop; Steam downloads " +
-                 std::string(pages == 1 ? "it" : "them") + ". Then join again.";
+                 std::string(pages.size() == 1 ? "it" : "them") +
+                 ". Then join again.";
   if (without_page) {
     out.message += without_page == 1
                        ? " Ask the host where to get the one that is not a "
@@ -348,9 +378,14 @@ join_notice missing_notice(const join_check &check) {
                        : " Ask the host where to get the ones that are not "
                          "Workshop items.";
   }
-  out.message += pages == 1 ? "\n\nOpen its Workshop page in Steam now?"
-                            : "\n\nOpen their " + std::to_string(pages) +
-                                  " Workshop pages in Steam now?";
+  const std::size_t opened = out.workshop_pages.size();
+  out.message += pages.size() == 1 ? "\n\nOpen its Workshop page in Steam now?"
+                 : opened == pages.size()
+                     ? "\n\nOpen their " + std::to_string(opened) +
+                           " Workshop pages in Steam now?"
+                     : "\n\nOpen the first " + std::to_string(opened) +
+                           " of their " + std::to_string(pages.size()) +
+                           " Workshop pages in Steam now?";
   return out;
 }
 
@@ -360,12 +395,10 @@ join_notice differ_notice(const join_check &check) {
     return out;
   }
   out.title = "Different versions";
-  out.message = check.differ.size() == 1
-                    ? "Your copy differs from the host's:\n"
-                    : "Your copies differ from the host's:\n";
-  for (const auto &entry : check.differ) {
-    out.message += "- " + describe(entry) + "\n";
-  }
+  out.message =
+      (check.differ.size() == 1 ? "Your copy differs from the host's:\n"
+                                : "Your copies differ from the host's:\n") +
+      list(check.differ);
   out.message +=
       "\nOne of you has another version. Steam updates subscribed items while "
       "the game is closed: both of you quit, let Steam finish, then try "
@@ -485,6 +518,21 @@ ipv4_scope classify_ipv4(std::string_view address) {
   return ipv4_scope::public_net;
 }
 
+mapped_reach classify_mapped(std::string_view external_ip) {
+  switch (classify_ipv4(external_ip)) {
+  case ipv4_scope::public_net:
+    return mapped_reach::public_address;
+  case ipv4_scope::shared:
+    return mapped_reach::shared;
+  case ipv4_scope::private_net:
+    return mapped_reach::private_address;
+  case ipv4_scope::invalid:
+  case ipv4_scope::loopback: // 0.0.0.0 and 127/8 are no outside address
+    break;
+  }
+  return mapped_reach::unknown;
+}
+
 join_notice direct_connect_notice(port_map_result result,
                                   std::string_view external_ip,
                                   std::uint16_t port) {
@@ -499,21 +547,30 @@ join_notice direct_connect_notice(port_map_result result,
                   udp + " (UPnP)...";
     return out;
   case port_map_result::mapped:
-    switch (classify_ipv4(external_ip)) {
-    case ipv4_scope::public_net:
+    switch (classify_mapped(external_ip)) {
+    case mapped_reach::public_address:
       out.title = "Router port open";
       out.message = "Players on the internet join with " + ip + ":" +
                     std::to_string(port) +
                     ". The port closes when you close the lobby or quit.";
       return out;
-    case ipv4_scope::shared:
+    case mapped_reach::unknown:
+      out.title = "Router port open";
+      out.message = "Your router forwards " + udp +
+                    " but did not say its internet address. Players on the "
+                    "internet join with your public IP address and port " +
+                    std::to_string(port) +
+                    " (a web search for \"what is my IP\" shows it). The port "
+                    "closes when you close the lobby or quit.";
+      return out;
+    case mapped_reach::shared:
       out.title = "Router port open, address shared";
       out.message = "Your router's internet address (" + ip +
                     ") is shared with other customers of your provider, so "
                     "players on the internet probably cannot reach you. "
                     "Players on your network can. Let someone else host.";
       return out;
-    default:
+    case mapped_reach::private_address:
       out.title = "Router port open, another router in front";
       out.message = "Your router's outside address (" + ip +
                     ") is not public: another router is in front of it. "
@@ -522,6 +579,7 @@ join_notice direct_connect_notice(port_map_result result,
                     udp + " on that router too, or let someone else host.";
       return out;
     }
+    return out;
   case port_map_result::no_router:
     out.title = "No UPnP router found";
     out.message = "Players on your network can join with your address and "
@@ -561,5 +619,14 @@ joined_stack_ids(const std::vector<std::string> &folders,
     out.push_back(entry && !entry->id.empty() ? entry->id : folder);
   }
   return out;
+}
+
+culprit_test_end
+culprit_test_result(const std::optional<launch_journal> &journal) {
+  if (journal_ran_host_mods(journal)) {
+    return culprit_test_end::not_counted;
+  }
+  return journal_crashed(journal) ? culprit_test_end::crashed
+                                  : culprit_test_end::ran_fine;
 }
 } // namespace xerces_core

@@ -7,6 +7,8 @@
 
 #include <natupnp.h>
 
+#include <future>
+
 namespace upnp {
 namespace {
 std::mutex state_mutex;
@@ -152,17 +154,33 @@ void close_port() {
 
 void close_port_now() {
   wanted = false;
-  // A request still out finishes within a few seconds; its answer then
+  // A request still out usually finishes within a second; its answer then
   // sees wanted is false and removes what it mapped itself.
-  for (int i = 0; i < 30 && operation_running; ++i)
+  for (int i = 0; i < 10 && operation_running; ++i)
     std::this_thread::sleep_for(100ms);
-  if (const uint16_t port = take_mapped_port())
-    unmap_port(port);
+  const uint16_t port = take_mapped_port();
+  if (!port)
+    return;
+  // A router that stops answering would hold the exit for as long as
+  // Windows waits for it, so the removal runs on its own thread and the
+  // exit waits for it at most 2 s.
+  std::packaged_task<void()> task([port] { unmap_port(port); });
+  std::future<void> removed = task.get_future();
+  std::thread(std::move(task)).detach();
+  if (removed.wait_for(2s) != std::future_status::ready)
+    printf("[UPnP] The router did not answer in time; it may still forward "
+           "UDP port %u until the port is mapped again\n",
+           static_cast<unsigned>(port));
 }
 
 std::string external_endpoint() {
   std::lock_guard lock(state_mutex);
   return mapped_endpoint;
+}
+
+bool port_mapped() {
+  std::lock_guard lock(state_mutex);
+  return mapped_port != 0;
 }
 
 class component final : public client_component {

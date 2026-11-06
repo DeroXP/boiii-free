@@ -489,18 +489,24 @@ void rejoin_after_mod_load(const game::net::netadr_t &host,
   scheduler::once([host] { party::connect(host); }, scheduler::main, 3s);
 }
 
-// The rest of join_lobby, once the host's content is checked: the host's
-// mods load first if they are not loaded yet, then the engine's lobby join.
+// The rest of join_lobby, once the host's content is checked: the join
+// takes the host's stack and map-first rule, the host's mods load first if
+// they are not loaded yet, then the engine's lobby join. Nothing of the
+// host's is taken before this, so a join that stops at a dialog leaves this
+// game's own mods as they were.
 void finish_lobby_join(const game::net::netadr_t &host,
                        game::net::HostInfo info,
                        const game::lobby::LobbyType target,
                        const std::string &mod, const std::string &stack,
+                       const std::string &map_scripts_first,
                        const bool same_mods, const uint64_t friend_id) {
   // A dialog may have been open for a while.
   if (!can_join_lobby(host)) {
     fail_lobby_join("Leave your current match first, then join again.");
     return;
   }
+  mod_stack::set(stack);
+  mod_stack::follow_host_map_scripts_first(map_scripts_first);
   xerces_join::note_joined(mod, stack);
   if (!same_mods) {
     game_join_fallback = {};
@@ -573,18 +579,25 @@ void join_lobby(const game::net::netadr_t &host,
   const std::string mod = content[0];
   const std::string map = content[1];
   const std::string loaded_mod = game::ugc::UGC_ActiveMod_PublisherId();
-  mod_stack::set(content[3]);
-  mod_stack::follow_host_map_scripts_first(content[4]);
+  // Xerces: compared with the host's list without taking it; the join takes
+  // it in finish_lobby_join once nothing stops it.
   const bool same_mods =
       mod == (loaded_mod == "usermaps" ? std::string{} : loaded_mod) &&
-      mod_stack::is_loaded();
+      mod_stack::is_loaded(content[3]);
   if (game_join_fallback && !same_mods) {
+    // The fallback connects to the host's match and loads the host's mods
+    // there (party.cpp, connect_to_lobby), so it needs the host's list.
+    mod_stack::set(content[3]);
+    mod_stack::follow_host_map_scripts_first(content[4]);
     fail_lobby_join({});
     return;
   }
 
   const uint64_t friend_id = joining.friend_id;
   if constexpr (xerces_switches::upstream_downloaders) {
+    // Upstream takes the host's list before its downloads.
+    mod_stack::set(content[3]);
+    mod_stack::follow_host_map_scripts_first(content[4]);
     if (!workshop::check_valid_mod_id(mod, {}) ||
         !workshop::check_valid_mod_stack(content[3]) ||
         (target == game::lobby::LobbyType::GAME && !map.empty() &&
@@ -596,8 +609,8 @@ void join_lobby(const game::net::netadr_t &host,
       }
       return;
     }
-    finish_lobby_join(host, info, target, mod, content[3], same_mods,
-                      friend_id);
+    finish_lobby_join(host, info, target, mod, content[3], content[4],
+                      same_mods, friend_id);
     return;
   }
 
@@ -621,10 +634,11 @@ void join_lobby(const game::net::netadr_t &host,
   offer.content_ids = content[5];
   // Held back while a dialog may be open; the join puts it back.
   std::function<void()> fallback = std::exchange(game_join_fallback, {});
+  const std::string map_scripts_first = content[4];
   xerces_join::check_host(offer, [=] {
     game_join_fallback = fallback;
-    finish_lobby_join(host, info, target, mod, offer.stack, same_mods,
-                      friend_id);
+    finish_lobby_join(host, info, target, mod, offer.stack, map_scripts_first,
+                      same_mods, friend_id);
   });
 }
 
@@ -706,16 +720,17 @@ void port_mapped(const upnp::outcome &outcome) {
         if (!open_to_friends) {
           return;
         }
+        using xerces_core::mapped_reach;
         using xerces_core::port_map_result;
         const port_map_result result = outcome.value == upnp::result::mapped
                                            ? port_map_result::mapped
                                        : outcome.value == upnp::result::refused
                                            ? port_map_result::refused
                                            : port_map_result::no_router;
-        const bool public_address =
-            result == port_map_result::mapped &&
-            xerces_core::classify_ipv4(outcome.external_ip) ==
-                xerces_core::ipv4_scope::public_net;
+        const mapped_reach reach =
+            xerces_core::classify_mapped(outcome.external_ip);
+        const bool public_address = result == port_map_result::mapped &&
+                                    reach == mapped_reach::public_address;
         show_notice(xerces_core::direct_connect_notice(
                         result, outcome.external_ip, outcome.port),
                     !public_address);
@@ -723,8 +738,11 @@ void port_mapped(const upnp::outcome &outcome) {
             "join.direct_connect.port",
             result == port_map_result::mapped
                 ? (public_address ? "the router forwards the port"
-                                  : "the router forwards the port; its "
-                                    "outside address is not public")
+                   : reach == mapped_reach::unknown
+                       ? "the router forwards the port; it did not say its "
+                         "outside address"
+                       : "the router forwards the port; its outside address "
+                         "is not public")
             : result == port_map_result::refused ? "the router refused the port"
                                                  : "no UPnP router answered",
             "{\"port\":" + std::to_string(outcome.port) + "}");
@@ -756,9 +774,17 @@ void set_open(const bool enabled) {
   }
 }
 
+// Xerces: for the "closed" notice, non-empty while the router forwards the
+// port (join_check.hpp), also when it did not say its outside address.
+std::string forwarded_endpoint() {
+  if (std::string mapped = upnp::external_endpoint(); !mapped.empty())
+    return mapped;
+  return upnp::port_mapped() ? "forwarded" : std::string{};
+}
+
 // Xerces: closes the lobby to direct connect, saying so.
 void close_direct_connect() {
-  const std::string mapped = upnp::external_endpoint();
+  const std::string mapped = forwarded_endpoint();
   set_open(false);
   show_notice(xerces_core::direct_connect_notice(
                   xerces_core::port_map_result::closed, mapped, local_port()),
@@ -1229,7 +1255,7 @@ bool set_open_to_friends(const bool enabled) {
 }
 
 bool set_open_to_direct_connect(const bool enabled) {
-  const std::string mapped = upnp::external_endpoint();
+  const std::string mapped = forwarded_endpoint();
   if (!set_open_to_friends(enabled)) {
     toast::warn("Direct connect",
                 "Only the host of a lobby can open it. Open a Zombies or "

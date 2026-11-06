@@ -754,8 +754,12 @@ it has run on two PCs.
 - [ ] A joiner missing one stacked mod gets one dialog naming it with its
       Workshop page; Yes opens it in Steam. After subscribing, J's game loads
       H's mods and joins again by itself, once.
+- [ ] A join that stops at that dialog leaves J's own mods: J's main menu still
+      names them, not H's.
 - [ ] Several missing items are named in one dialog ("Open their 2 Workshop
-      pages").
+      pages"), and Yes opens each page in Steam: every page can be reached with
+      Steam's Back button and subscribed to. If only the last one can, the
+      dialog has to open one page only.
 - [ ] The D3 stack on both: J joins H's lobby and match with no "Different
       versions" dialog and plays with all three mods.
 - [ ] "Different versions" names the item whose files differ, and Yes joins
@@ -769,13 +773,20 @@ it has run on two PCs.
 - [ ] Over the internet: opening the lobby maps the UDP port on H's router (the
       "Router port open" toast shows the address), and J joins with it. Closing
       the lobby and quitting the game remove the mapping.
-- [ ] The toasts for a router without UPnP, a router that refuses the port, and
-      a shared (carrier-grade NAT) outside address.
+- [ ] The toasts for a router without UPnP, a router that refuses the port, a
+      shared (carrier-grade NAT) outside address, and a forwarded port whose
+      outside address the router did not report ("Router port open", no second
+      router blamed).
+- [ ] Quitting with the lobby open through the console window's close: the game
+      ends within about 3 s more, also when the router does not answer.
 - [ ] A host on another Xerces version gives J the "Xerces versions differ"
       toast; an older host or BOIII gives none, and joining works.
 - [ ] A crash on H's game with other mods than J's plan: J's next start of
       Xerces does not offer safe mode for J's own mods (`joined` in J's
       journal).
+- [ ] A culprit test launch that joins H's game with other mods records no
+      result: Home says the last test did not count and shows the same test
+      (`launcher.culprit.joined` in the launcher log).
 - [ ] Copy report and the console text from both PCs after the test.
 
 ### Conflict system (M2)

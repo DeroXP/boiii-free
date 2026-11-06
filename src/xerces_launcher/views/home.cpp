@@ -361,6 +361,13 @@ private:
                      "it does not crash.");
       culprit_mods_ = mod_list(next);
     }
+    if (owner_->svc().culprit_test_joined() && !culprit_done_) {
+      // The host's mods ran in that test, not these (join_check.hpp).
+      culprit_text_ = owner_->tr("The last test joined another player's "
+                                 "game, so it did not count. Run it again "
+                                 "and play your own game.") +
+                      " " + culprit_text_;
+    }
     if (culprit_on_) {
       safe_ = false; // the culprit box replaces the safe-mode box
     }

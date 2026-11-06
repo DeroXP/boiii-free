@@ -34,7 +34,10 @@ using xerces_core::installed_entry;
 constexpr std::chrono::seconds index_reread = 5s;
 // How long a "Join anyway" holds for the same offer.
 constexpr std::chrono::seconds accepted_for = 60s;
-// Workshop pages open one after another, so Steam shows each of them.
+// Workshop pages open one after another, so each request reaches Steam.
+// Steam shows them in its one browser view; whether Back reaches the earlier
+// ones is a check in docs/TWO_PC_TEST.md (test 2). The dialog names the
+// items by Workshop id too, so the player can find each one in Steam.
 constexpr std::chrono::milliseconds page_gap = 1500ms;
 
 std::mutex index_mutex;
@@ -148,9 +151,10 @@ std::mutex accepted_mutex;
 std::string accepted_offer;
 std::chrono::steady_clock::time_point accepted_time{};
 
+// The same for getinfo's and the lobby's view of one host (join_check.hpp).
 std::string offer_key(const host_offer &offer) {
-  return offer.main_mod + "|" + offer.stack + "|" + offer.map + "|" +
-         offer.content_ids;
+  return xerces_core::join_offer_key(offer.main_mod, offer.stack, offer.map,
+                                     offer.content_ids);
 }
 
 bool accepted_recently(const std::string &key) {

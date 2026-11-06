@@ -100,6 +100,14 @@ void connect_to_lobby(const game::ControllerIndex_t controllerIndex,
   workshop::setup_same_mod_as_host(
       game::com::Com_ControllerIndex_GetLocalClientNum(controllerIndex),
       usermap_id, mod_id, true);
+  // Xerces: the host's mods are this game's now (the join set their list
+  // before), so the journal says so (xerces/join.hpp). A lobby join records
+  // it in nat.cpp instead.
+  {
+    const std::string mod(mod_id);
+    xerces_join::note_joined(mod,
+                             utils::string::join(mod_stack::get(mod), ","));
+  }
 
   game::net::XSESSION_INFO info{};
 
@@ -611,12 +619,15 @@ void handle_connect_query_response(const bool success,
         workshop::set_pending_mod_reconnect(addr_str);
 
         const auto join = [=] {
-          mod_stack::set(mod_stack_list);
-          mod_stack::follow_host_map_scripts_first(map_scripts_first);
-          // Xerces: in a match the host's mods load now; a lobby in the
-          // menus is checked again when it answers (nat.cpp).
+          // Xerces: a host in the menus is joined through its lobby, and
+          // nat.cpp takes the host's mods from the lobby's answer once its
+          // check passes, so a join that stops there leaves this game's own
+          // mods. The journal records the join once the host's mods load
+          // (connect_to_lobby, or nat.cpp), not here: the mode switch before
+          // it can still fail.
           if (mapname != "core_frontend") {
-            xerces_join::note_joined(mod_id, mod_stack_list);
+            mod_stack::set(mod_stack_list);
+            mod_stack::follow_host_map_scripts_first(map_scripts_first);
           }
           connect_in_mode(target, mode, mapname, gametype, usermap_id, mod_id,
                           lobby);
