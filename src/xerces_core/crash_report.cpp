@@ -52,6 +52,15 @@ bool equal_at(std::string_view text, std::size_t at, std::string_view word) {
   return true;
 }
 
+// A word may start at i: the text's start, a character that is not part of
+// a word, or the end of a colour code ("^1Name", as the console prints
+// player names).
+bool word_start(std::string_view text, std::size_t i) {
+  return i == 0 || !word_char(text[i - 1]) ||
+         (i >= 2 && text[i - 2] == '^' && text[i - 1] >= '0' &&
+          text[i - 1] <= '9');
+}
+
 // Every whole-word copy of word (ASCII case ignored) becomes replacement.
 std::string replace_word(std::string_view text, std::string_view word,
                          std::string_view replacement) {
@@ -62,7 +71,7 @@ std::string replace_word(std::string_view text, std::string_view word,
   out.reserve(text.size());
   std::size_t i = 0;
   while (i < text.size()) {
-    if (equal_at(text, i, word) && (i == 0 || !word_char(text[i - 1])) &&
+    if (equal_at(text, i, word) && word_start(text, i) &&
         (i + word.size() == text.size() || !word_char(text[i + word.size()]))) {
       out += replacement;
       i += word.size();
@@ -271,6 +280,338 @@ std::vector<std::string> strings_of(const rapidjson::Value &object,
   return out;
 }
 
+crash_kind kind_from(std::string_view text) {
+  for (const crash_kind kind :
+       {crash_kind::fail_fast, crash_kind::out_of_memory,
+        crash_kind::unknown_exit}) {
+    if (text == to_string(kind)) {
+      return kind;
+    }
+  }
+  return crash_kind::exception;
+}
+
+// ------------------------------------------------------- minidump masking
+// The layout is minidumpapiset.h's (all little-endian, packed to 4 bytes).
+struct byte_range {
+  std::size_t begin = 0;
+  std::size_t end = 0;
+};
+
+std::optional<std::uint32_t> u32_at(std::string_view bytes, std::uint64_t at) {
+  if (at + 4 > bytes.size()) {
+    return std::nullopt;
+  }
+  std::uint32_t value = 0;
+  for (int i = 3; i >= 0; --i) {
+    value =
+        (value << 8) | std::uint8_t(bytes[static_cast<std::size_t>(at) + i]);
+  }
+  return value;
+}
+
+std::optional<std::uint64_t> u64_at(std::string_view bytes, std::uint64_t at) {
+  const auto low = u32_at(bytes, at);
+  const auto high = u32_at(bytes, at + 4);
+  if (!low || !high) {
+    return std::nullopt;
+  }
+  return (std::uint64_t(*high) << 32) | *low;
+}
+
+// The parts of a minidump that hold text or memory rather than the dump's
+// own structure: module names, PDB (CodeView) and misc records, and the
+// memory ranges (the thread stacks). nullopt when the header or the stream
+// directory does not fit the bytes.
+std::optional<std::vector<byte_range>> minidump_regions(std::string_view dump) {
+  constexpr std::uint32_t thread_list = 3, module_list = 4, memory_list = 5,
+                          thread_ex_list = 8, memory64_list = 9,
+                          unloaded_module_list = 14;
+  constexpr std::uint32_t most = 1u << 16; // entries read from one list
+  if (dump.size() < 32 || dump.substr(0, 4) != "MDMP") {
+    return std::nullopt;
+  }
+  const auto streams = u32_at(dump, 8);
+  const auto directory = u32_at(dump, 12);
+  if (!streams || !directory || *streams > 4096 ||
+      std::uint64_t(*directory) + std::uint64_t(*streams) * 12 > dump.size()) {
+    return std::nullopt;
+  }
+  std::vector<byte_range> out;
+  const auto add = [&](std::uint64_t at, std::uint64_t size) {
+    if (at < dump.size() && size > 0) {
+      // Cut at the end of the bytes (a size from the file can be anything).
+      const std::uint64_t room = dump.size() - at;
+      out.push_back({static_cast<std::size_t>(at),
+                     static_cast<std::size_t>(at + std::min(size, room))});
+    }
+  };
+  // MINIDUMP_STRING: its length in bytes, then UTF-16.
+  const auto add_string = [&](std::uint32_t at) {
+    if (const auto length = u32_at(dump, at)) {
+      add(std::uint64_t(at) + 4, *length);
+    }
+  };
+  const auto stacks = [&](std::uint64_t at, std::uint32_t entry_size) {
+    const std::uint32_t count = u32_at(dump, at).value_or(0);
+    for (std::uint32_t i = 0; i < count && i < most; ++i) {
+      // MINIDUMP_THREAD(_EX): Stack.Memory {DataSize, Rva} at 32.
+      const std::uint64_t thread = at + 4 + std::uint64_t(i) * entry_size;
+      const auto size = u32_at(dump, thread + 32);
+      const auto rva = u32_at(dump, thread + 36);
+      if (!size || !rva) {
+        break;
+      }
+      add(*rva, *size);
+    }
+  };
+  for (std::uint32_t s = 0; s < *streams; ++s) {
+    const std::uint64_t entry = std::uint64_t(*directory) + s * 12;
+    const std::uint32_t type = *u32_at(dump, entry);
+    const std::uint32_t rva = *u32_at(dump, entry + 8);
+    switch (type) {
+    case module_list: {
+      const std::uint32_t count = u32_at(dump, rva).value_or(0);
+      for (std::uint32_t i = 0; i < count && i < most; ++i) {
+        // MINIDUMP_MODULE (108 bytes): ModuleNameRva at 20, CvRecord at 76,
+        // MiscRecord at 84.
+        const std::uint64_t module = std::uint64_t(rva) + 4 + i * 108ull;
+        const auto name = u32_at(dump, module + 20);
+        if (!name) {
+          break;
+        }
+        add_string(*name);
+        add(u32_at(dump, module + 80).value_or(0),
+            u32_at(dump, module + 76).value_or(0));
+        add(u32_at(dump, module + 88).value_or(0),
+            u32_at(dump, module + 84).value_or(0));
+      }
+      break;
+    }
+    case unloaded_module_list: {
+      // A header (its size, the entry size, the count), then entries with
+      // ModuleNameRva at 20.
+      const std::uint32_t header = u32_at(dump, rva).value_or(0);
+      const std::uint32_t size =
+          u32_at(dump, std::uint64_t(rva) + 4).value_or(0);
+      const std::uint32_t count =
+          u32_at(dump, std::uint64_t(rva) + 8).value_or(0);
+      for (std::uint32_t i = 0; size >= 24 && i < count && i < most; ++i) {
+        const auto name = u32_at(dump, std::uint64_t(rva) + header +
+                                           std::uint64_t(i) * size + 20);
+        if (!name) {
+          break;
+        }
+        add_string(*name);
+      }
+      break;
+    }
+    case thread_list:
+      stacks(rva, 48);
+      break;
+    case thread_ex_list:
+      stacks(rva, 64);
+      break;
+    case memory_list: {
+      const std::uint32_t count = u32_at(dump, rva).value_or(0);
+      for (std::uint32_t i = 0; i < count && i < most; ++i) {
+        // MINIDUMP_MEMORY_DESCRIPTOR: start, then {DataSize, Rva}.
+        const std::uint64_t range = std::uint64_t(rva) + 4 + i * 16ull;
+        const auto size = u32_at(dump, range + 8);
+        const auto at = u32_at(dump, range + 12);
+        if (!size || !at) {
+          break;
+        }
+        add(*at, *size);
+      }
+      break;
+    }
+    case memory64_list: {
+      // The count and the base RVA, then {start, size}; the data follows
+      // one range after the other from the base.
+      const std::uint64_t count = u64_at(dump, rva).value_or(0);
+      std::uint64_t at = u64_at(dump, std::uint64_t(rva) + 8).value_or(0);
+      for (std::uint64_t i = 0; i < count && i < most; ++i) {
+        const auto size = u64_at(dump, std::uint64_t(rva) + 16 + i * 16 + 8);
+        if (!size) {
+          break;
+        }
+        add(at, *size);
+        at += *size;
+      }
+      break;
+    }
+    default:
+      break;
+    }
+  }
+  return out;
+}
+
+// UTF-8 to UTF-16 code units; empty when the text is not UTF-8.
+std::u16string utf16_of(std::string_view text) {
+  std::u16string out;
+  std::size_t i = 0;
+  while (i < text.size()) {
+    const auto lead = std::uint8_t(text[i]);
+    std::uint32_t cp = 0;
+    std::size_t more = 0;
+    if (lead < 0x80) {
+      cp = lead;
+    } else if ((lead & 0xE0) == 0xC0) {
+      cp = lead & 0x1F;
+      more = 1;
+    } else if ((lead & 0xF0) == 0xE0) {
+      cp = lead & 0x0F;
+      more = 2;
+    } else if ((lead & 0xF8) == 0xF0) {
+      cp = lead & 0x07;
+      more = 3;
+    } else {
+      return {};
+    }
+    if (i + more >= text.size() && more > 0) {
+      return {};
+    }
+    for (std::size_t k = 1; k <= more; ++k) {
+      const auto next = std::uint8_t(text[i + k]);
+      if ((next & 0xC0) != 0x80) {
+        return {};
+      }
+      cp = (cp << 6) | (next & 0x3F);
+    }
+    i += more + 1;
+    if (cp >= 0x10000) {
+      cp -= 0x10000;
+      out.push_back(static_cast<char16_t>(0xD800 + (cp >> 10)));
+      out.push_back(static_cast<char16_t>(0xDC00 + (cp & 0x3FF)));
+    } else {
+      out.push_back(static_cast<char16_t>(cp));
+    }
+  }
+  return out;
+}
+
+// The bytes of UTF-8 text, one unit each, for the 8-bit search.
+std::u16string units_of(std::string_view text) {
+  std::u16string out;
+  for (const char c : text) {
+    out.push_back(static_cast<char16_t>(std::uint8_t(c)));
+  }
+  return out;
+}
+
+char16_t lower16(char16_t c) {
+  return c >= u'A' && c <= u'Z' ? static_cast<char16_t>(c - u'A' + u'a') : c;
+}
+
+bool word_unit(char16_t c) {
+  return c < 0x80 && word_char(static_cast<char>(c));
+}
+
+// Reads 8-bit text (unit 1) or UTF-16LE (unit 2) at any byte offset, so
+// strings are found whatever their alignment in the file.
+struct text_view {
+  std::string &bytes;
+  std::size_t unit;
+
+  char16_t at(std::size_t pos) const {
+    return unit == 2
+               ? static_cast<char16_t>(std::uint8_t(bytes[pos]) |
+                                       (std::uint8_t(bytes[pos + 1]) << 8))
+               : static_cast<char16_t>(std::uint8_t(bytes[pos]));
+  }
+  void blank(std::size_t pos) const {
+    bytes[pos] = '_';
+    if (unit == 2) {
+      bytes[pos + 1] = '\0';
+    }
+  }
+};
+
+// Overwrites every whole-word copy of word (ASCII case ignored) in
+// [begin, end) with '_'.
+void mask_word(const text_view &text, std::size_t begin, std::size_t end,
+               const std::u16string &word) {
+  const std::size_t unit = text.unit;
+  const std::size_t length = word.size() * unit;
+  if (word.empty() || end < begin || end - begin < length) {
+    return;
+  }
+  for (std::size_t pos = begin; pos + length <= end; ++pos) {
+    bool same = true;
+    for (std::size_t k = 0; k < word.size() && same; ++k) {
+      same = lower16(text.at(pos + k * unit)) == lower16(word[k]);
+    }
+    if (!same || (pos >= begin + unit && word_unit(text.at(pos - unit))) ||
+        (pos + length + unit <= end && word_unit(text.at(pos + length)))) {
+      continue;
+    }
+    for (std::size_t k = 0; k < word.size(); ++k) {
+      text.blank(pos + k * unit);
+    }
+    pos += length - 1;
+  }
+}
+
+bool shared_profile(std::u16string name) {
+  for (char16_t &c : name) {
+    c = lower16(c);
+  }
+  return name == u"public" || name == u"default" || name == u"default user" ||
+         name == u"all users";
+}
+
+// The name after every "X:\Users\" (one or more '\' or '/') overwritten with
+// '_', unless it is a profile every PC has (Public, Default).
+void mask_profiles(const text_view &text) {
+  const std::size_t unit = text.unit;
+  const std::size_t size = text.bytes.size();
+  const auto separator = [](char16_t c) { return c == u'\\' || c == u'/'; };
+  const auto name_end = [&](char16_t c) {
+    return c < 0x20 || separator(c) || c == u':' || c == u'*' || c == u'?' ||
+           c == u'"' || c == u'<' || c == u'>' || c == u'|';
+  };
+  constexpr std::u16string_view users = u"users";
+  for (std::size_t pos = 0; pos + 9 * unit <= size; ++pos) {
+    const char16_t drive = lower16(text.at(pos));
+    if (drive < u'a' || drive > u'z' || text.at(pos + unit) != u':' ||
+        !separator(text.at(pos + 2 * unit))) {
+      continue;
+    }
+    std::size_t next = pos + 2 * unit;
+    while (next + unit <= size && separator(text.at(next))) {
+      next += unit;
+    }
+    bool match = next + users.size() * unit <= size;
+    for (std::size_t k = 0; match && k < users.size(); ++k) {
+      match = lower16(text.at(next + k * unit)) == users[k];
+    }
+    if (!match) {
+      continue;
+    }
+    next += users.size() * unit;
+    if (next + unit > size || !separator(text.at(next))) {
+      continue;
+    }
+    while (next + unit <= size && separator(text.at(next))) {
+      next += unit;
+    }
+    std::size_t end = next;
+    std::u16string name;
+    while (end + unit <= size && !name_end(text.at(end)) && name.size() < 256) {
+      name.push_back(text.at(end));
+      end += unit;
+    }
+    if (name.empty() || shared_profile(name)) {
+      continue;
+    }
+    for (std::size_t k = next; k < end; k += unit) {
+      text.blank(k);
+    }
+    pos = end - 1;
+  }
+}
 } // namespace
 
 const char *to_string(crash_kind kind) {
@@ -317,6 +658,7 @@ std::string pending_crash_to_json(const pending_crash &value) {
   json::set(doc, "schema", "xerces.crash.pending/1", alloc);
   json::set(doc, "report_id", value.report_id, alloc);
   json::set(doc, "created_utc", value.created_utc, alloc);
+  json::set(doc, "kind", to_string(value.kind), alloc);
   json::set(doc, "code", crash_code_hex(value.code), alloc);
   json::set(doc, "module", value.module, alloc);
   json::set(doc, "offset",
@@ -334,6 +676,11 @@ std::string pending_crash_to_json(const pending_crash &value) {
   json::set(doc, "console", json::string_array(console, alloc), alloc);
   json::set(doc, "flags", json::string_array(value.flags, alloc), alloc);
   json::set(doc, "game_log", value.game_log, alloc);
+  std::vector<std::string> names;
+  for (const auto &name : value.names) {
+    names.push_back(json::valid_utf8(name, crash_name_cap));
+  }
+  json::set(doc, "names", json::string_array(names, alloc), alloc);
   auto journal = json::parse(value.journal);
   json::set(doc, "journal",
             journal.ok && journal.document.IsObject()
@@ -355,6 +702,7 @@ std::optional<pending_crash> parse_pending_crash(std::string_view text) {
     return std::nullopt;
   }
   out.created_utc = json::get_string(root, "created_utc").value_or("");
+  out.kind = kind_from(json::get_string(root, "kind").value_or(""));
   out.code =
       parse_hex32(json::get_string(root, "code").value_or("")).value_or(0);
   out.module = json::get_string(root, "module").value_or("");
@@ -367,6 +715,7 @@ std::optional<pending_crash> parse_pending_crash(std::string_view text) {
   out.console = strings_of(root, "console");
   out.flags = strings_of(root, "flags");
   out.game_log = json::get_string(root, "game_log").value_or("");
+  out.names = strings_of(root, "names");
   if (const auto *journal = json::member(root, "journal");
       journal != nullptr && journal->IsObject()) {
     out.journal = json::canonical(*journal);
@@ -408,7 +757,7 @@ crash_kind classify_exit(std::uint32_t exit_code, bool out_of_memory_logged) {
 crash_facts crash_from_pending(const pending_crash &crash,
                                std::optional<std::uint32_t> exit_code) {
   crash_facts out;
-  out.kind = crash_kind::exception;
+  out.kind = crash.kind;
   out.code = crash_code_hex(crash.code);
   if (exit_code) {
     out.exit_code = crash_code_hex(*exit_code);
@@ -482,14 +831,59 @@ std::string redact_crash_text(std::string_view text,
   if (redaction.user_name.size() >= 3) {
     out = replace_word(out, redaction.user_name, "<user>");
   }
-  for (const auto &name : redaction.player_names) {
+  out = redact_player_names(out, redaction.player_names);
+  out = redact_ids(out);
+  return json ? redact_addresses_in_json(out, redaction.known_addresses)
+              : redact_addresses(out, redaction.known_addresses);
+}
+
+std::string redact_player_names(std::string_view text,
+                                const std::vector<std::string> &names) {
+  std::string out(text);
+  for (const auto &name : names) {
     if (name.size() >= 2) {
       out = replace_word(out, name, "<player>");
     }
   }
-  out = redact_ids(out);
-  return json ? redact_addresses_in_json(out, redaction.known_addresses)
-              : redact_addresses(out, redaction.known_addresses);
+  return out;
+}
+
+std::optional<std::string>
+mask_minidump(std::string_view dump, const std::vector<std::string> &words) {
+  auto regions = minidump_regions(dump);
+  if (!regions) {
+    return std::nullopt;
+  }
+  // A stack is in the thread list and in the memory list: search it once.
+  std::ranges::sort(*regions, {}, &byte_range::begin);
+  std::vector<byte_range> merged;
+  for (const byte_range &range : *regions) {
+    if (!merged.empty() && range.begin <= merged.back().end) {
+      merged.back().end = std::max(merged.back().end, range.end);
+    } else {
+      merged.push_back(range);
+    }
+  }
+  regions = std::move(merged);
+  std::string out(dump);
+  // Module paths are UTF-16; PDB paths in the CodeView records are 8-bit.
+  for (const std::size_t unit : {std::size_t{1}, std::size_t{2}}) {
+    mask_profiles(text_view{out, unit});
+  }
+  for (const auto &word : words) {
+    if (word.size() < 3) {
+      continue; // too short to tell from other bytes
+    }
+    const std::u16string wide = utf16_of(word);
+    const std::u16string narrow = units_of(word);
+    for (const byte_range &range : *regions) {
+      mask_word(text_view{out, 1}, range.begin, range.end, narrow);
+      if (!wide.empty()) {
+        mask_word(text_view{out, 2}, range.begin, range.end, wide);
+      }
+    }
+  }
+  return out;
 }
 
 std::string tail_text(std::string_view text, std::size_t max_bytes) {
@@ -625,6 +1019,12 @@ std::string build_crash_report(const crash_report_input &in) {
 }
 
 bool crash_reports_enabled(std::string_view launcher_json) {
+  // No launcher.json yet: the default.
+  if (std::ranges::all_of(launcher_json, [](char c) {
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+      })) {
+    return true;
+  }
   // A config that cannot be read sends nothing: the person may have turned
   // sending off in the file that broke.
   const launcher_config_result parsed = parse_launcher_config(launcher_json);
@@ -653,7 +1053,7 @@ crash_redaction redaction_from_config(std::string_view launcher_json) {
 }
 
 std::string crash_report_note(bool started_by_launcher, bool send,
-                              bool launcher_open) {
+                              bool launcher_open, bool dump) {
   const std::string by_hand =
       "To report it, open an issue at " + std::string(crash_issues_url) +
       " and attach the diagnostics bundle (Xerces > Diagnostics > Copy "
@@ -666,8 +1066,11 @@ std::string crash_report_note(bool started_by_launcher, bool send,
     return "Crash reports are off, so nothing is sent. " + by_hand;
   }
   const std::string what =
-      " (thread stacks without memory contents, redacted logs and this PC's "
-      "specs; turn it off in Xerces > Settings > Privacy).";
+      std::string(dump ? " (a small dump of the threads' stacks with your "
+                         "user name and player names masked, redacted logs "
+                         "and this PC's specs"
+                       : " (redacted logs and this PC's specs") +
+      "; turn it off in Xerces > Settings > Privacy).";
   return launcher_open
              ? "Xerces sends a crash report as soon as the game closes" + what
              : "Xerces sends a crash report when you open it next" + what;

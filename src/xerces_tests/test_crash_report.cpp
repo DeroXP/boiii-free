@@ -4,10 +4,15 @@
 
 #include "harness.hpp"
 
+#include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <vector>
 
 #include <zlib.h>
@@ -17,6 +22,19 @@
 #include <xerces_core/crash_report.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/launcher_config.hpp>
+
+// dbghelp writes a real stacks-only dump in one test, as the client does.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
+#undef GetObject
 
 using namespace xerces_core;
 namespace fs = std::filesystem;
@@ -101,6 +119,121 @@ crash_report_input sample_input() {
   in.console = {"Loading fastfile 'zm_castle'"};
   in.minidump = "MDMP";
   return in;
+}
+
+std::string utf16le(std::string_view ascii) {
+  std::string out;
+  for (const char c : ascii) {
+    out.push_back(c);
+    out.push_back('\0');
+  }
+  return out;
+}
+
+// ASCII case ignored.
+bool holds(const std::string &bytes, const std::string &needle) {
+  const auto low = [](std::string text) {
+    for (char &c : text) {
+      if (c >= 'A' && c <= 'Z') {
+        c = static_cast<char>(c - 'A' + 'a');
+      }
+    }
+    return text;
+  };
+  return low(bytes).find(low(needle)) != std::string::npos;
+}
+
+std::string unbase64(std::string_view text) {
+  static constexpr std::string_view table =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string out;
+  std::uint32_t bits = 0;
+  int count = 0;
+  for (const char c : text) {
+    const std::size_t value = table.find(c);
+    if (value == std::string_view::npos) {
+      continue; // '=' padding
+    }
+    bits = (bits << 6) | static_cast<std::uint32_t>(value);
+    count += 6;
+    if (count >= 8) {
+      count -= 8;
+      out.push_back(static_cast<char>((bits >> count) & 0xFF));
+    }
+  }
+  return out;
+}
+
+// A small minidump in minidumpapiset.h's layout: a module list with one
+// module (its UTF-16 path, and a CodeView record with an 8-bit PDB path), a
+// memory list with one range, and a thread list whose stack is that range.
+std::string fake_minidump(std::string_view module_path,
+                          std::string_view pdb_path, std::string_view stack) {
+  std::string out;
+  const auto u32 = [&](std::uint32_t value) {
+    for (int i = 0; i < 4; ++i) {
+      out.push_back(static_cast<char>((value >> (8 * i)) & 0xFF));
+    }
+  };
+  const auto patch = [&](std::size_t at, std::size_t value) {
+    for (int i = 0; i < 4; ++i) {
+      out[at + i] = static_cast<char>((value >> (8 * i)) & 0xFF);
+    }
+  };
+  out += "MDMP";
+  u32(0xA793);
+  u32(3);  // streams
+  u32(32); // the directory's RVA
+  u32(0);
+  u32(0);
+  u32(0);
+  u32(0);
+  const std::size_t directory = out.size();
+  out.append(3 * 12, '\0');
+  const std::size_t name = out.size();
+  u32(static_cast<std::uint32_t>(module_path.size() * 2));
+  out += utf16le(module_path);
+  out.append(2, '\0');
+  const std::size_t cv = out.size();
+  out += "RSDS";
+  out.append(16, '\x11');
+  u32(1);
+  out += pdb_path;
+  out.push_back('\0');
+  const std::size_t cv_size = out.size() - cv;
+  const std::size_t memory = out.size();
+  out += stack;
+  const std::size_t modules = out.size();
+  u32(1);
+  const std::size_t module = out.size();
+  out.append(108, '\0');
+  patch(module + 20, name);
+  patch(module + 76, cv_size);
+  patch(module + 80, cv);
+  const std::size_t modules_size = out.size() - modules;
+  const std::size_t ranges = out.size();
+  u32(1);
+  u32(0x10000);
+  u32(0);
+  u32(static_cast<std::uint32_t>(stack.size()));
+  u32(static_cast<std::uint32_t>(memory));
+  const std::size_t ranges_size = out.size() - ranges;
+  const std::size_t threads = out.size();
+  u32(1);
+  const std::size_t thread = out.size();
+  out.append(48, '\0');
+  patch(thread + 32, stack.size());
+  patch(thread + 36, memory);
+  const std::size_t threads_size = out.size() - threads;
+  const std::size_t streams[3][3] = {{4, modules_size, modules},
+                                     {5, ranges_size, ranges},
+                                     {3, threads_size, threads}};
+  for (std::size_t i = 0; i < 3; ++i) {
+    for (std::size_t k = 0; k < 3; ++k) {
+      patch(directory + i * 12 + k * 4, streams[i][k]);
+    }
+  }
+  return out;
 }
 } // namespace
 
@@ -299,6 +432,7 @@ TEST_CASE("crash report: the client's pending note round-trips") {
   in.flags = {"-nointro"};
   in.game_log = "20261105-120000-game-42.jsonl";
   in.journal = R"({"phase":"frontend","schema":1})";
+  in.names = {"DeroXP", "Kevin"};
   const auto out = parse_pending_crash(pending_crash_to_json(in));
   REQUIRE(out.has_value());
   CHECK_EQ(out->report_id, in.report_id);
@@ -310,6 +444,16 @@ TEST_CASE("crash report: the client's pending note round-trips") {
   CHECK(out->flags == in.flags);
   CHECK_EQ(out->game_log, in.game_log);
   CHECK_EQ(out->journal, in.journal);
+  CHECK(out->names == in.names);
+  CHECK(out->kind == crash_kind::exception);
+  // A fatal error's note: no dump, kind unknown_exit.
+  in.kind = crash_kind::unknown_exit;
+  CHECK(parse_pending_crash(pending_crash_to_json(in))->kind ==
+        crash_kind::unknown_exit);
+  // A note from before the kind was written is an exception's.
+  const std::string old_note =
+      "{\"report_id\":\"" + std::string(32, 'c') + "\"}";
+  CHECK(parse_pending_crash(old_note)->kind == crash_kind::exception);
   CHECK(!parse_pending_crash(R"({"report_id":"not-hex"})"));
   CHECK(launch_flag_names(
             {"-xerces-plan", "abc", "-nointro", "+set", "a", "-x"}) ==
@@ -323,6 +467,10 @@ TEST_CASE("crash report: the setting is on by default and kept") {
   CHECK(crash_reports_enabled("{}"));
   CHECK(!crash_reports_enabled(R"({"send_crash_reports":false})"));
   CHECK(!crash_reports_enabled("not json")); // a broken file sends nothing
+  // No launcher.json (the client and xerces_cli read it as empty): the
+  // default, as the launcher has it.
+  CHECK(crash_reports_enabled(""));
+  CHECK(crash_reports_enabled(" \r\n"));
   launcher_config config;
   config.send_crash_reports = false;
   const auto back = parse_launcher_config(launcher_config_to_json(config));
@@ -345,6 +493,10 @@ TEST_CASE("crash report: the dialog's note says what happens") {
   CHECK(crash_report_note(true, true, false).find("when you open it next") !=
         std::string::npos);
   CHECK(crash_report_note(true, true, false).find("Ezz") == std::string::npos);
+  CHECK(crash_report_note(true, true, true).find("dump") != std::string::npos);
+  // A fatal error's report has no dump, and its note says none.
+  CHECK(crash_report_note(true, true, true, false).find("dump") ==
+        std::string::npos);
 }
 
 TEST_CASE("crash outbox: at most 20 reports, none older than 7 days") {
@@ -373,9 +525,16 @@ TEST_CASE("crash outbox: at most 20 reports, none older than 7 days") {
 TEST_CASE("crash outbox: the base URL and the install id") {
   CHECK_EQ(crash_base_url_from(std::nullopt).value_or(""),
            std::string(crash_default_base));
+  // Only this PC replaces the backend: every host is in ENDPOINTS.md.
+  CHECK(!crash_base_url_from(std::string("https://x.example.org/")));
+  CHECK(!crash_base_url_from(std::string("https://evil.example")));
+  CHECK(!crash_base_url_from(std::string("https://localhost.evil.example")));
+  CHECK(!crash_base_url_from(std::string("https://127.0.0.1@evil.example")));
+  CHECK(!crash_base_url_from(std::string("https://127.0.0.1:x")));
   CHECK_EQ(
-      crash_base_url_from(std::string("https://x.example.org/")).value_or(""),
-      std::string("https://x.example.org"));
+      crash_base_url_from(std::string("https://127.0.0.1:8443/")).value_or(""),
+      std::string("https://127.0.0.1:8443"));
+  CHECK(crash_base_url_from(std::string("https://[::1]:8443")).has_value());
   CHECK_EQ(
       crash_base_url_from(std::string("http://127.0.0.1:8000")).value_or(""),
       std::string("http://127.0.0.1:8000"));
@@ -619,8 +778,11 @@ TEST_CASE("crash outbox: pending crashes and exits become reports") {
   pending.phase = "in_game";
   write(crash / "pending" / (pending.report_id + ".json"),
         pending_crash_to_json(pending));
-  write(crash / "pending" / (pending.report_id + ".dmp"), "MDMP");
-  // And a dump whose note was never written.
+  const std::string dump =
+      fake_minidump("C:\\Users\\Ginld\\XercesDev\\boiii.exe",
+                    "C:\\Users\\Ginld\\src\\boiii.pdb", "stack bytes");
+  write(crash / "pending" / (pending.report_id + ".dmp"), dump);
+  // And a dump whose note was never written; its bytes are no minidump.
   write(crash / "pending" / (std::string(32, '9') + ".dmp"), "MDMP");
   result = collect_crashes(ctx, true, std::nullopt);
   CHECK_EQ(result.queued.size(), std::size_t{2});
@@ -632,7 +794,225 @@ TEST_CASE("crash outbox: pending crashes and exits become reports") {
   CHECK_EQ(json::get_string(*json::member(report.document, "crash"), "kind")
                .value_or(""),
            std::string("exception"));
-  CHECK_EQ(json::get_string(report.document, "minidump_b64").value_or(""),
-           std::string("TURNUA=="));
+  // The dump is sent masked, the same size.
+  const std::string sent_dump =
+      unbase64(json::get_string(report.document, "minidump_b64").value_or(""));
+  CHECK_EQ(sent_dump.size(), dump.size());
+  CHECK(!holds(sent_dump, "Ginld"));
+  CHECK(!holds(sent_dump, utf16le("Ginld")));
+  CHECK(holds(sent_dump, utf16le("boiii.exe")));
+  // Not a minidump: the report goes without one (the server would refuse it).
+  const auto other =
+      json::parse(slurp(crash / "outbox" / (std::string(32, '9') + ".json")));
+  REQUIRE(other.ok);
+  CHECK(json::member(other.document, "minidump_b64")->IsNull());
   fs::remove_all(home);
+}
+
+TEST_CASE("crash report: chat and the game's player names stay out") {
+  // The game's own name (properties.json or Steam's) is not in launcher.json;
+  // the client's note carries it and the other players' names.
+  const fs::path home = fs::temp_directory_path() / "xerces_crash_names";
+  fs::remove_all(home);
+  const fs::path crash = home / "crash";
+  pending_crash pending;
+  pending.report_id = std::string(32, 'e');
+  pending.code = 0xC0000005;
+  pending.names = {"RealName", "Kevin the Great"};
+  pending.console = {"^1RealName^7 joined the game",
+                     "Kevin the Great: look behind you",
+                     "Loading fastfile 'zm_castle'"};
+  pending.game_log = "20261105-120000-game-42.jsonl";
+  write(home / "logs" / pending.game_log,
+        R"({"event":"loader.engine.error","msg":"RealName dropped"})"
+        "\n");
+  write(crash / "pending" / (pending.report_id + ".json"),
+        pending_crash_to_json(pending));
+  crash_context ctx;
+  ctx.home = home;
+  ctx.now = now_seconds();
+  ctx.config_text = R"({"player_name":"SomeoneElse"})";
+  REQUIRE_EQ(collect_crashes(ctx, true, 0xC0000005u).queued.size(),
+             std::size_t{1});
+  const std::string body =
+      slurp(crash / "outbox" / (pending.report_id + ".json"));
+  CHECK(body.find("RealName") == std::string::npos);
+  CHECK(body.find("Kevin the Great") == std::string::npos);
+  CHECK(body.find("<player>") != std::string::npos);
+  CHECK(body.find("zm_castle") != std::string::npos);
+  CHECK(body.find("\"names\"") == std::string::npos); // never sent
+  fs::remove_all(home);
+
+  // What the client runs on its console lines: a colour code before a name
+  // still starts a word, a name inside a longer word is left alone.
+  CHECK_EQ(redact_player_names("^2DeroXP^7: hi DeroXPfan", {"DeroXP"}),
+           std::string("^2<player>^7: hi DeroXPfan"));
+  CHECK_EQ(redact_player_names("x", {"x"}), std::string("x")); // too short
+}
+
+TEST_CASE("crash report: the minidump leaves without the user's names") {
+  const std::string stack = std::string("chat DeroXP: gg ") + utf16le("ginld") +
+                            " C:\\Users\\Public\\x.txt D:/users/Other/a.txt " +
+                            utf16le("C:\\USERS\\Bob\\b.dll") + " Ginldfan";
+  const std::string dump =
+      fake_minidump("C:\\Users\\Ginld\\XercesDev\\boiii.exe",
+                    "C:\\Users\\Ginld\\XercesDev\\build\\boiii.pdb", stack);
+  const auto masked = mask_minidump(dump, {"Ginld", "DeroXP", "ab"});
+  REQUIRE(masked.has_value());
+  CHECK_EQ(masked->size(), dump.size());
+  CHECK(!holds(*masked, utf16le("\\Ginld\\")));
+  CHECK(!holds(*masked, "\\Ginld\\"));
+  CHECK(!holds(*masked, "DeroXP"));
+  CHECK(!holds(*masked, utf16le("ginld")));
+  CHECK(!holds(*masked, "Other"));
+  CHECK(!holds(*masked, utf16le("Bob")));
+  CHECK(holds(*masked, "chat ______: gg "));
+  CHECK(holds(*masked, utf16le("C:\\Users\\_____\\XercesDev\\boiii.exe")));
+  CHECK(holds(*masked, "C:\\Users\\_____\\XercesDev\\build\\boiii.pdb"));
+  CHECK(holds(*masked, "C:\\Users\\Public\\x.txt")); // every PC has it
+  CHECK(holds(*masked, "Ginldfan"));                 // not the whole word
+  // Still a minidump.
+  CHECK(mask_minidump(*masked, {}).has_value());
+  CHECK(!mask_minidump("MDMP", {}).has_value());
+  CHECK(!mask_minidump("not a minidump at all, no header here", {}));
+  std::string broken = dump;
+  broken[12] = '\x7F'; // the directory past the end
+  broken[13] = '\x7F';
+  CHECK(!mask_minidump(broken, {}).has_value());
+}
+
+TEST_CASE("crash report: a real stacks-only dump of this process is masked") {
+  // A thread holds two words on its stack while dbghelp writes this process
+  // with the client's flags (exception/minidump.cpp): the one to hide must
+  // go, the other must stay, so the stacks were found in the dump's layout.
+  std::atomic<volatile char *> ascii_at{nullptr};
+  std::atomic<volatile wchar_t *> wide_at{nullptr};
+  std::atomic<bool> done{false};
+  std::thread holder([&] {
+    volatile char ascii[48] = "keep Kqzjvutsr hide Zqxwvutsr end";
+    volatile wchar_t wide[16] = L"Zqxwvutsr";
+    // Handing out the addresses makes the stores happen before: the
+    // compiler may delay stores to a local no other thread can see.
+    ascii_at = ascii;
+    wide_at = wide;
+    while (!done) {
+      Sleep(1);
+    }
+  });
+  while (!ascii_at || !wide_at) {
+    Sleep(1);
+  }
+  const fs::path file =
+      fs::temp_directory_path() / "xerces_crash_real_dump.dmp";
+  const HANDLE handle =
+      CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                  FILE_ATTRIBUTE_NORMAL, nullptr);
+  REQUIRE(handle != INVALID_HANDLE_VALUE);
+  const bool written =
+      MiniDumpWriteDump(
+          GetCurrentProcess(), GetCurrentProcessId(), handle,
+          static_cast<MINIDUMP_TYPE>(MiniDumpNormal | MiniDumpWithThreadInfo),
+          nullptr, nullptr, nullptr) != FALSE;
+  CloseHandle(handle);
+  done = true;
+  holder.join();
+  REQUIRE(written);
+  const std::string dump = slurp(file);
+  fs::remove(file);
+
+  const auto masked = mask_minidump(dump, {"Zqxwvutsr"});
+  REQUIRE(masked.has_value());
+  CHECK_EQ(masked->size(), dump.size());
+  CHECK(holds(dump, "Zqxwvutsr"));
+  CHECK(!holds(*masked, "Zqxwvutsr"));
+  CHECK(!holds(*masked, utf16le("Zqxwvutsr")));
+  CHECK(holds(*masked, "Kqzjvutsr"));
+  // This test's own path, when it is under a profile (as on the dev PC).
+  char *user = nullptr;
+  std::size_t size = 0;
+  if (_dupenv_s(&user, &size, "USERNAME") == 0 && user != nullptr) {
+    const std::string profile = std::string("\\Users\\") + user + "\\";
+    if (holds(dump, utf16le(profile))) {
+      CHECK(!holds(*masked, utf16le(profile)));
+    }
+  }
+  std::free(user);
+}
+
+TEST_CASE("crash outbox: a report older than 7 days is never sent") {
+  const fs::path home = fs::temp_directory_path() / "xerces_crash_old";
+  fs::remove_all(home);
+  const fs::path crash = home / "crash";
+  const std::string id(32, 'a');
+  REQUIRE(enqueue_report(crash, id, R"({"n":1})", now_seconds()));
+  fs::last_write_time(crash / "outbox" / (id + ".json"),
+                      fs::file_time_type::clock::now() -
+                          std::chrono::hours(24 * 8));
+  int calls = 0;
+  const crash_transport fake = [&](const http_request &) {
+    ++calls;
+    return reply(201, R"({"id":"x","duplicate":false})");
+  };
+  send_options options;
+  options.base_url = "https://x.example.org";
+  options.install_id = std::string(32, 'f');
+  options.enabled = [] { return true; };
+  CHECK(send_outbox(crash, options, fake).empty());
+  CHECK_EQ(calls, 0);
+  CHECK(list_outbox(crash).empty());
+  fs::remove_all(home);
+}
+
+TEST_CASE("crash report: a fatal error's note is a crash, whatever the exit") {
+  // "Restart game" after a fatal error ends the game with code 0.
+  const fs::path home = fs::temp_directory_path() / "xerces_crash_fatal";
+  fs::remove_all(home);
+  const fs::path crash = home / "crash";
+  write(
+      home / "logs" / "journal.json",
+      R"({"phase":"in_game","schema":1,"started":"2026-11-05T10:00:00.000Z"})");
+  pending_crash pending;
+  pending.report_id = std::string(32, 'f');
+  pending.kind = crash_kind::unknown_exit;
+  pending.module = "BlackOps3.exe";
+  pending.offset = 0x1420EB9F0;
+  pending.frames = {"boiii.exe+0x1234", "BlackOps3.exe+0x1420EB9F0"};
+  write(crash / "pending" / (pending.report_id + ".json"),
+        pending_crash_to_json(pending));
+  crash_context ctx;
+  ctx.home = home;
+  ctx.now = now_seconds();
+  const collect_result result = collect_crashes(ctx, true, 0u);
+  CHECK(result.crashed);
+  REQUIRE_EQ(result.queued.size(), std::size_t{1});
+  const auto report =
+      json::parse(slurp(crash / "outbox" / (pending.report_id + ".json")));
+  REQUIRE(report.ok);
+  const auto &c = *json::member(report.document, "crash");
+  CHECK_EQ(json::get_string(c, "kind").value_or(""),
+           std::string("unknown_exit"));
+  CHECK_EQ(json::get_string(c, "code").value_or(""), std::string("0x00000000"));
+  CHECK_EQ(json::get_string(c, "module").value_or(""),
+           std::string("BlackOps3.exe"));
+  CHECK(json::member(report.document, "minidump_b64")->IsNull());
+  // Without the note, exit code 0 is no crash.
+  CHECK(!collect_crashes(ctx, true, 0u).crashed);
+  fs::remove_all(home);
+}
+
+TEST_CASE("crash outbox: only a waiting report says 'sent later'") {
+  const auto with = [](std::initializer_list<send_outcome> outcomes) {
+    std::vector<send_result> out;
+    for (const send_outcome outcome : outcomes) {
+      send_result result;
+      result.outcome = outcome;
+      out.push_back(result);
+    }
+    return out;
+  };
+  CHECK(!reports_wait(with({send_outcome::rejected})));
+  CHECK(!reports_wait(with({send_outcome::sent, send_outcome::rejected})));
+  CHECK(reports_wait(with({send_outcome::rejected, send_outcome::retry})));
+  CHECK(reports_wait(with({send_outcome::off})));
+  CHECK(reports_wait({})); // nothing was tried
 }

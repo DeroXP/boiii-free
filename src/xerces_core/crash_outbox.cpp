@@ -286,20 +286,44 @@ crash_base_url_from(std::optional<std::string> value) {
   while (!url.empty() && url.back() == '/') {
     url.pop_back();
   }
+  // Only a backend on this PC: every host Xerces talks to is listed in
+  // docs/ENDPOINTS.md, so an environment variable cannot send the reports
+  // anywhere else.
   const std::string low = lower(url);
-  if (low.starts_with("https://") && low.size() > 8) {
-    return url;
+  std::string rest;
+  if (low.starts_with("https://")) {
+    rest = low.substr(8);
+  } else if (low.starts_with("http://")) {
+    rest = low.substr(7);
+  } else {
+    return std::nullopt;
   }
-  if (low.starts_with("http://")) {
-    std::string host = low.substr(7);
-    host = host.substr(0, host.find('/'));
-    if (host.starts_with("[::1]")) {
-      return url;
+  const std::string authority = rest.substr(0, rest.find_first_of("/?#"));
+  if (authority.find('@') != std::string::npos) {
+    return std::nullopt; // "https://127.0.0.1@elsewhere"
+  }
+  std::string host = authority;
+  std::string port;
+  if (host.starts_with("[")) {
+    const std::size_t close = host.find(']');
+    if (close == std::string::npos) {
+      return std::nullopt;
     }
-    host = host.substr(0, host.find(':'));
-    if (host == "127.0.0.1" || host == "localhost") {
-      return url;
-    }
+    port = host.substr(close + 1);
+    host = host.substr(0, close + 1);
+  } else if (const std::size_t colon = host.find(':');
+             colon != std::string::npos) {
+    port = host.substr(colon);
+    host = host.substr(0, colon);
+  }
+  if (!port.empty() && (port[0] != ':' || port.size() < 2 ||
+                        !std::ranges::all_of(port.substr(1), [](char c) {
+                          return c >= '0' && c <= '9';
+                        }))) {
+    return std::nullopt;
+  }
+  if (host == "127.0.0.1" || host == "localhost" || host == "[::1]") {
+    return url;
   }
   return std::nullopt;
 }
@@ -488,10 +512,21 @@ std::string report_from_pending(const pending_entry &pending,
   in.game_log = log_lines(game_log, crash_game_log_lines);
   in.map = crash_map(in.game_log, in.crash.phase, facts);
   in.console = pending.crash.console;
+  // The names the game knew: its own (which launcher.json often does not
+  // hold) and the players it was in a match with.
+  for (const auto &name : pending.crash.names) {
+    if (std::ranges::find(in.player_names, name) == in.player_names.end()) {
+      in.player_names.push_back(name);
+    }
+  }
   if (!pending.dump_file.empty()) {
-    std::string dump = read_bytes(pending.dump_file, crash_minidump_cap);
+    const std::string dump = read_bytes(pending.dump_file, crash_minidump_cap);
+    std::vector<std::string> words = in.player_names;
+    words.push_back(in.user_name);
+    // Masked before it is queued; a file that is not a minidump is left out
+    // (the server would refuse the whole report).
     if (dump.size() <= crash_minidump_cap) {
-      in.minidump = std::move(dump);
+      in.minidump = mask_minidump(dump, words).value_or("");
     }
   }
   return build_crash_report(in);
@@ -651,6 +686,14 @@ std::vector<send_result> send_outbox(const fs::path &crash_dir,
                                      const send_options &options,
                                      const crash_transport &transport) {
   std::vector<send_result> out;
+  // The outbox's limits hold when sending too: a report older than 7 days
+  // is removed, not sent, even when no crash queued one since.
+  prune_outbox(crash_dir,
+               options.now != 0
+                   ? options.now
+                   : std::chrono::duration_cast<std::chrono::seconds>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count());
   for (const outbox_entry &entry : list_outbox(crash_dir)) {
     send_result result;
     result.report_id = entry.report_id;
@@ -704,6 +747,14 @@ std::vector<send_result> send_outbox(const fs::path &crash_dir,
     }
   }
   return out;
+}
+
+bool reports_wait(const std::vector<send_result> &results) {
+  return results.empty() ||
+         std::ranges::any_of(results, [](const send_result &result) {
+           return result.outcome == send_outcome::retry ||
+                  result.outcome == send_outcome::off;
+         });
 }
 
 std::optional<std::int64_t>

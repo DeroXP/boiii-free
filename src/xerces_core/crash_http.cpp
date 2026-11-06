@@ -67,6 +67,18 @@ bool local_host(const std::wstring &host) {
   return host == L"127.0.0.1" || host == L"localhost" || host == L"::1" ||
          host == L"[::1]";
 }
+
+// The Xerces backend's host (crash_default_base without "https://").
+bool backend_host(const std::wstring &host) {
+  std::wstring low = host;
+  for (wchar_t &c : low) {
+    if (c >= L'A' && c <= L'Z') {
+      c = static_cast<wchar_t>(c - L'A' + L'a');
+    }
+  }
+  constexpr std::string_view scheme = "https://";
+  return low == wide(crash_default_base.substr(scheme.size()));
+}
 } // namespace
 
 http_response winhttp_send(const http_request &request) {
@@ -85,6 +97,11 @@ http_response winhttp_send(const http_request &request) {
     return out;
   }
   const bool secure = parts.nScheme == INTERNET_SCHEME_HTTPS;
+  // The backend (docs/ENDPOINTS.md) or this PC, nowhere else.
+  if (!local_host(host) && !backend_host(host)) {
+    out.error = "crash reports go to the Xerces backend or this PC only";
+    return out;
+  }
   if (!secure && !local_host(host)) {
     out.error = "plain http is only for local addresses";
     return out;

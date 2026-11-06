@@ -25,7 +25,7 @@ struct http_request {
   std::string url;
   std::vector<std::pair<std::string, std::string>> headers;
   std::string body;
-  int timeout_ms = 15000; // the whole exchange
+  int timeout_ms = 15000; // each step of the exchange
 };
 struct http_response {
   bool reached = false; // an answer came back (any status)
@@ -37,16 +37,19 @@ struct http_response {
 using crash_transport = std::function<http_response(const http_request &)>;
 
 // WinHTTP: https:// with the system's TLS, or http:// to a local address
-// only (127.0.0.1, ::1, localhost), for tests against a local backend.
+// only (127.0.0.1, ::1, localhost), for tests against a local backend. Any
+// other host than crash_default_base's and the local ones is refused.
+// timeout_ms applies to each step (name lookup, connect, send, answer).
 http_response winhttp_send(const http_request &request);
 
 // gzip (RFC 1952) of bytes, through zlib; empty on failure.
 std::string gzip_bytes(std::string_view bytes);
 
 // ---------------------------------------------------------------- where
-// The base URL: XERCES_CRASH_URL when it is set (https://, or http:// to a
-// local address), else crash_default_base; without a trailing '/'. nullopt
-// when the override is set to anything else: nothing is sent then.
+// The base URL: XERCES_CRASH_URL when it is set, else crash_default_base;
+// without a trailing '/'. The override is for tests against a backend on this
+// PC: http:// or https:// to 127.0.0.1, localhost or [::1] only. nullopt when
+// it is set to anything else (another host, user info): nothing is sent then.
 std::optional<std::string> crash_base_url();
 // Same rule for a given value (tests).
 std::optional<std::string>
@@ -146,6 +149,8 @@ struct send_options {
   // Asked before every report, so turning the setting off stops a send that
   // is under way.
   std::function<bool()> enabled;
+  // Seconds since 1970 for the outbox's age limit; 0: the clock.
+  std::int64_t now = 0;
 };
 
 enum class send_outcome {
@@ -166,13 +171,18 @@ struct send_result {
   std::string error;
 };
 
-// Sends the outbox, oldest first. A report the server took (or had) is
-// removed; one it refused is removed; on anything else the rest wait for the
-// next try (the first failure stops the run). A 413 is tried once more
-// without the minidump.
+// Sends the outbox, oldest first, after pruning it (prune_outbox): a report
+// older than 7 days is removed, never sent. A report the server took (or
+// had) is removed; one it refused is removed; on anything else the rest wait
+// for the next try (the first failure stops the run). A 413 is tried once
+// more without the minidump.
 std::vector<send_result> send_outbox(const std::filesystem::path &crash_dir,
                                      const send_options &options,
                                      const crash_transport &transport);
+
+// Whether a run left reports for a later try: one waits (retry, off), or
+// nothing was tried. Not after reports were only sent or refused.
+bool reports_wait(const std::vector<send_result> &results);
 
 // DELETE {base}/v1/crashes: every report of this install. The count the
 // server deleted, or nullopt with error filled in.

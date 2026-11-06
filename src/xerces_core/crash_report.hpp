@@ -59,10 +59,12 @@ std::string new_report_id();
 // 32 lower-case hex digits and nothing else.
 bool valid_report_id(std::string_view id);
 
-// What the client's crash handler writes next to its stacks-only dump.
+// What the client's crash handler writes next to its stacks-only dump, or
+// its fatal-error dialog without a dump (kind unknown_exit).
 struct pending_crash {
   std::string report_id;
   std::string created_utc;
+  crash_kind kind = crash_kind::exception;
   std::uint32_t code = 0;              // the exception code
   std::string module;                  // empty when the address is in no module
   std::optional<std::uint64_t> offset; // in the module's image space
@@ -73,6 +75,9 @@ struct pending_crash {
   std::vector<std::string> flags;      // the game's own flags (names only)
   std::string game_log;                // file name of the game's session log
   std::string journal;                 // the journal as it was (JSON text)
+  // The player names the game knew (its own, the players it was in a match
+  // with): words the report hides. Never sent.
+  std::vector<std::string> names;
 };
 std::string pending_crash_to_json(const pending_crash &value);
 std::optional<pending_crash> parse_pending_crash(std::string_view text);
@@ -183,21 +188,42 @@ struct crash_redaction {
 std::string redact_crash_text(std::string_view text,
                               const crash_redaction &redaction, bool json);
 
+// Every whole-word copy of a name (two characters or more, ASCII case
+// ignored) becomes <player>; a colour code before it ("^1Name") still starts
+// a word. The client runs this on the console lines it keeps.
+std::string redact_player_names(std::string_view text,
+                                const std::vector<std::string> &names);
+
+// A stacks-only minidump as it may leave the PC. The name after every
+// "X:\Users\" (UTF-16 module paths, ASCII PDB paths) is overwritten with
+// '_', as the backend does; so is every copy of a word (the Windows user
+// name, player names; three characters or more, ASCII case ignored, UTF-16
+// or UTF-8) inside the module names, the PDB records and the memory the dump
+// holds (the stacks). Lengths stay, so the dump still opens. The rest of the
+// stack memory is raw: it can hold bits of what the game was doing. nullopt
+// when the bytes are not a minidump.
+std::optional<std::string> mask_minidump(std::string_view dump,
+                                         const std::vector<std::string> &words);
+
 // The last max_bytes of text, starting at a line, as valid UTF-8.
 std::string tail_text(std::string_view text, std::size_t max_bytes);
 
 // The report body (contract xerces.crash/1), compact JSON.
 std::string build_crash_report(const crash_report_input &input);
 
-// What launcher.json says about sending (default on), and the words the
-// config gives for redaction: the player name, favourites' names and
-// addresses, recent servers.
+// What launcher.json says about sending, one rule for the launcher, the
+// client and xerces_cli: no file (empty text) is the default, on; a file that
+// is not JSON is off, since the person may have turned sending off in the
+// file that broke; otherwise its send_crash_reports (on when missing).
+// And the words the config gives for redaction: the player name,
+// favourites' names and addresses, recent servers.
 bool crash_reports_enabled(std::string_view launcher_json);
 crash_redaction redaction_from_config(std::string_view launcher_json);
 
 // The line the crash dialog adds about the report. started_by_launcher:
 // XERCES_HOME is set, so the client wrote the pending report. send: the
-// setting is on. launcher_open: Xerces.exe runs on this home.
+// setting is on. launcher_open: Xerces.exe runs on this home. dump: the
+// report has the stacks-only dump (a fatal error's has none).
 std::string crash_report_note(bool started_by_launcher, bool send,
-                              bool launcher_open);
+                              bool launcher_open, bool dump = true);
 } // namespace xerces_core
