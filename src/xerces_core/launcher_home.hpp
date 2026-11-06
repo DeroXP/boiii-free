@@ -88,6 +88,22 @@ std::wstring launcher_instance_name(const std::filesystem::path &home);
 // A Xerces.exe runs on this home (its mutex exists).
 bool launcher_running(const std::filesystem::path &home);
 
+// Two paths name the same file or folder, compared as launcher_home_hash
+// compares homes (absolute, normalised, without case or a trailing
+// separator). Links are not followed.
+bool same_path(const std::filesystem::path &a, const std::filesystem::path &b);
+
+// The OneDrive folder that holds path, or nothing. roots are the folders
+// OneDrive syncs (onedrive_roots()), compared as same_path compares. On
+// 2026-11-06 the game crashed at every start from a OneDrive folder: Windows
+// refused boiii.start next to boiii.exe (docs/TESTING.md, "OneDrive crash").
+std::optional<std::filesystem::path>
+onedrive_folder_of(const std::filesystem::path &path,
+                   const std::vector<std::filesystem::path> &roots);
+// The folders of the OneDrive, OneDriveConsumer and OneDriveCommercial
+// environment variables that are set.
+std::vector<std::filesystem::path> onedrive_roots();
+
 // Holds the per-home mutex for a read, change and write of launcher.json
 // (xerces_cli's edits), so a Xerces.exe started meanwhile waits for it (up to
 // 30 s) instead of reading the config that is about to be replaced and

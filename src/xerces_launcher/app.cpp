@@ -211,6 +211,27 @@ HWND find_home_window(std::uintptr_t tag) {
   return search.found;
 }
 
+// The program file of the process that owns a window, or nothing.
+std::optional<fs::path> window_program(HWND window) {
+  DWORD pid = 0;
+  GetWindowThreadProcessId(window, &pid);
+  HANDLE process =
+      pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)
+          : nullptr;
+  if (!process) {
+    return std::nullopt;
+  }
+  std::wstring buffer(32768, L'\0');
+  DWORD size = DWORD(buffer.size());
+  const BOOL got = QueryFullProcessImageNameW(process, 0, buffer.data(), &size);
+  CloseHandle(process);
+  if (!got) {
+    return std::nullopt;
+  }
+  buffer.resize(size);
+  return fs::path(buffer);
+}
+
 Rml::Input::KeyIdentifier key_by_name(const std::string &name) {
   static const std::map<std::string, Rml::Input::KeyIdentifier> keys = {
       {"up", Rml::Input::KI_UP},         {"down", Rml::Input::KI_DOWN},
@@ -1229,6 +1250,25 @@ int app::run() {
         }
       }
       if (!taken_over) {
+        // A copy of Xerces in another folder shares the home: started while
+        // the other runs, it only brought that window forward, so on
+        // 2026-11-06 a tester who had moved Xerces out of OneDrive went on
+        // launching the copy in OneDrive. Say so (not in scripted checks,
+        // where nobody would close the box).
+        const std::optional<fs::path> other_program =
+            other ? window_program(other) : std::nullopt;
+        if (other_program && !paths.program.empty() &&
+            !xerces_core::same_path(*other_program, paths.program) &&
+            opts_.script.empty() && opts_.seconds <= 0) {
+          const std::wstring text =
+              L"Xerces is already open from another folder:\n\n" +
+              other_program->wstring() +
+              L"\n\nOnly one Xerces runs at a time, so that window comes to "
+              L"the front and this one closes. To use this copy, close that "
+              L"Xerces first, then start this one again.";
+          MessageBoxW(nullptr, text.c_str(), L"Xerces",
+                      MB_OK | MB_ICONINFORMATION);
+        }
         if (other) {
           if (IsIconic(other)) {
             ShowWindow(other, SW_RESTORE);
@@ -1383,6 +1423,17 @@ int app::run() {
   }
   apply_look();
   mark("first screen loaded");
+  // The game crashed at every start from a OneDrive folder on 2026-11-06
+  // (launcher_home.hpp, onedrive_folder_of).
+  if (!paths.program.empty() &&
+      xerces_core::onedrive_folder_of(paths.program,
+                                      xerces_core::onedrive_roots())) {
+    log_warn("launcher.install.onedrive", generic(paths.program.parent_path()));
+    notify(tr("Xerces is in a OneDrive folder, where the game can fail to "
+              "start. Move the Xerces folder out of OneDrive, for example to "
+              "C:\\Games\\Xerces."),
+           true);
+  }
 
   if (!opts_.script.empty()) {
     std::ifstream in(widen(opts_.script));

@@ -948,6 +948,52 @@ Run 2 (5ae63145):
       again. It stays off by default.
 - [ ] Two PCs (`docs/TWO_PC_TEST.md`), PresentMon, a person playing the beta.
 
+### OneDrive crash (2026-11-06)
+
+You played the beta zip (9bcbe8ab) unzipped into
+`C:\Users\Ginld\OneDrive\Documents\My Games\xerces-0.1.0-beta.1`. Every launch
+crashed about 8 s in, while launching: modded, the culprit search's tests and
+vanilla alike.
+
+- **The crash.** All 34 dumps in `%LOCALAPPDATA%\boiii\minidumps` (15:03 to
+  15:11) hold `weakly_canonical: Access is denied.` for `boiii.start` next to
+  `boiii.exe`. The game opens that file through `_fsopen`; Xerces' path hook
+  (`patches.cpp` `fsopen_adjustpath`, `path::normalize`) resolved it with the
+  throwing `std::filesystem::weakly_canonical`, and the exception ended the game.
+  Why Windows refused the file in OneDrive is not known (the file was gone
+  afterwards). Copied to `C:\Games\xerces-0.1.0-beta.1`, the same zip started
+  and loaded a map.
+- **The flood.** The crash handler resumes the game after a crash (Rip to
+  `reset_state`), which Windows cannot do for a C++ exception: it raised
+  STATUS_NONCONTINUABLE_EXCEPTION (0xC0000025), which came back to the handler.
+  Each of the 6 launches wrote 3 to 13 dumps, zips and crash reports, about 3 s
+  apart, until the game ended (exit code 1). The first report of each launch
+  has 0xE06D7363, the rest 0xC0000025. More than 20 reached the backend; its
+  per-install limit answered 429 to the rest, which waited in the outbox.
+- **A second copy.** Started from `C:\Games` while the copy in OneDrive was
+  open, Xerces.exe only brought the open window forward (one launcher per
+  home), so two more launches still ran from OneDrive.
+
+Fixed on `launcher/onedrive-fix`:
+
+- `path::normalize` and the folders it compares with use the `error_code`
+  overloads: a path Windows will not resolve goes to the game's call as it
+  came, and the game log gets one `path.unresolved` line per game.
+- A noncontinuable exception gets the crash dialog in the handler instead of
+  the resume; at most three crash reports per game (a server plays on after a
+  crash).
+- Home warns for 8 s when Xerces.exe is in a OneDrive folder
+  (`launcher.install.onedrive`, `onedrive_folder_of`, unit-tested).
+- A second copy of Xerces.exe started from another folder says which folder
+  the open one is in.
+- [ ] The fixed client from a OneDrive folder in the game: does the game start
+      when Windows refuses `boiii.start`?
+
+In the same play from `C:\Games`, `zm_mw4_shipment` with DS4C, Classic
+Viewmodel FOV and Hyperdimension Neptunia ran out of zone memory while loading
+(`loader.out_of_memory`, exit 0xFFFFFFFF): the known DS4C limit
+(KNOWN_ISSUES.md). Larger zone memory was off.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The

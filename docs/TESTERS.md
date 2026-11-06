@@ -26,8 +26,11 @@ KNOWN_ISSUES.txt lists what we already know about.
    hash it prints with the one sent with the link. If they differ, do not use
    the zip, and tell us.
 2. Unzip the whole zip into a folder of its own, for example `C:\Games\Xerces`.
-   Not into the Black Ops III folder, and keep the files together: Xerces.exe
-   needs boiii.exe, data and compat next to it.
+   Not into the Black Ops III folder, and not into a folder OneDrive syncs
+   (Documents and Desktop often are: their path then has `OneDrive` in it),
+   where the game can fail to start. Keep the files together: Xerces.exe needs
+   boiii.exe, data and compat next to it. If you move the folder later, close
+   Xerces first: only one Xerces runs at a time.
 3. Start **Xerces.exe**, and only Xerces.exe. It starts the game (boiii.exe)
    itself, with the mods you picked. Do not start boiii.exe or BlackOps3.exe
    yourself while you test: boiii.exe started on its own does not find Xerces'
@@ -99,7 +102,7 @@ Open an issue at <https://github.com/DeroXP/boiii-free/issues>, or tell us in
 the tester channel. Please include:
 
 - the Xerces version (About, or the top of the game's main menu), for example
-  `Xerces 0.1.0-beta.1 (3f09512d)`;
+  `Xerces 0.1.0-beta.2 (3f09512d)`;
 - what you did, what you expected and what happened;
 - the mods you had on, in their order, the mode and the map;
 - Diagnostics > Copy report, pasted in;

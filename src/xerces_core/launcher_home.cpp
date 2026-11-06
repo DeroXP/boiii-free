@@ -217,6 +217,59 @@ bool launcher_running(const fs::path &home) {
   return GetLastError() == ERROR_ACCESS_DENIED;
 }
 
+namespace {
+// The form same_path compares: absolute, normalised, lower-case, without a
+// trailing separator ("C:\" keeps its own).
+std::wstring folded(const fs::path &path) {
+  std::error_code ec;
+  fs::path absolute = fs::absolute(path, ec);
+  if (ec) {
+    absolute = path;
+  }
+  std::wstring text = absolute.lexically_normal().wstring();
+  while (text.size() > 3 && (text.back() == L'\\' || text.back() == L'/')) {
+    text.pop_back();
+  }
+  for (wchar_t &c : text) {
+    c = static_cast<wchar_t>(std::towlower(c));
+  }
+  return text;
+}
+} // namespace
+
+bool same_path(const fs::path &a, const fs::path &b) {
+  return folded(a) == folded(b);
+}
+
+std::optional<fs::path> onedrive_folder_of(const fs::path &path,
+                                           const std::vector<fs::path> &roots) {
+  const std::wstring inside = folded(path);
+  for (const fs::path &root : roots) {
+    if (root.empty()) {
+      continue;
+    }
+    const std::wstring base = folded(root);
+    const bool under = inside.size() > base.size() &&
+                       inside.starts_with(base) &&
+                       (base.back() == L'\\' || inside[base.size()] == L'\\');
+    if (under || inside == base) {
+      return root;
+    }
+  }
+  return std::nullopt;
+}
+
+std::vector<fs::path> onedrive_roots() {
+  std::vector<fs::path> out;
+  for (const wchar_t *name :
+       {L"OneDrive", L"OneDriveConsumer", L"OneDriveCommercial"}) {
+    if (const auto folder = env_path(name); folder && !folder->empty()) {
+      out.push_back(*folder);
+    }
+  }
+  return out;
+}
+
 launcher_home_lock::launcher_home_lock(const fs::path &home) {
   const std::wstring name = launcher_instance_name(home);
   HANDLE mutex = CreateMutexW(nullptr, TRUE, name.c_str());

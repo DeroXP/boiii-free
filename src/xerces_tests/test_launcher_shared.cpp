@@ -650,6 +650,32 @@ TEST_CASE("shared launcher: the child's environment") {
   CHECK_EQ(empty.size(), std::size_t(2));
 }
 
+TEST_CASE("shared launcher: a folder in OneDrive") {
+  const std::vector<fs::path> roots = {fs::path(L"C:\\Users\\p\\OneDrive"),
+                                       fs::path(L"D:\\Work OneDrive\\")};
+  // The beta's folder on 2026-11-06, as Explorer and as the game wrote it.
+  const fs::path documents =
+      L"C:\\Users\\p\\OneDrive\\Documents\\My Games\\xerces-0.1.0-beta.1";
+  REQUIRE(onedrive_folder_of(documents, roots).has_value());
+  CHECK(same_path(*onedrive_folder_of(documents, roots), roots[0]));
+  CHECK(onedrive_folder_of(fs::path(L"c:/users/P/onedrive/Desktop/x"), roots)
+            .has_value());
+  CHECK(onedrive_folder_of(fs::path(L"D:\\Work OneDrive\\Xerces"), roots)
+            .has_value());
+  CHECK(onedrive_folder_of(roots[0], roots).has_value());
+  // A sibling whose name starts the same is not inside.
+  CHECK(!onedrive_folder_of(fs::path(L"C:\\Users\\p\\OneDriveOld\\x"), roots)
+             .has_value());
+  CHECK(!onedrive_folder_of(fs::path(L"C:\\Games\\Xerces"), roots).has_value());
+  CHECK(!onedrive_folder_of(documents, {}).has_value());
+  CHECK(!onedrive_folder_of(documents, {fs::path()}).has_value());
+
+  CHECK(same_path(fs::path(L"C:\\Games\\Xerces\\Xerces.exe"),
+                  fs::path(L"c:/games/xerces/./Xerces.exe")));
+  CHECK(!same_path(fs::path(L"C:\\Games\\Xerces\\Xerces.exe"),
+                   fs::path(L"C:\\Users\\p\\OneDrive\\Xerces.exe")));
+}
+
 TEST_CASE("shared launcher: one launcher per home") {
   const fs::path home = fresh("instance");
   CHECK_EQ(launcher_home_hash(home), launcher_home_hash(home / ""));

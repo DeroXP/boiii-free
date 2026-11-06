@@ -829,6 +829,7 @@
   "Xerces draws at": "",
   "Xerces is a modified version of Ezz BOIII, itself based on BOIII by momo5502. The Xerces contributors have changed it since November 2026.": "",
   "Xerces is free software: you can redistribute it and change it under the terms of the GNU General Public License, version 3, as published by the Free Software Foundation. It comes with ABSOLUTELY NO WARRANTY, to the extent permitted by law; the licence has the details.": "",
+  "Xerces is in a OneDrive folder, where the game can fail to start. Move the Xerces folder out of OneDrive, for example to C:\\Games\\Xerces.": "",
   "Xerces is still reading your mods. Try again in a moment.": "",
   "Xerces looks in the Workshop folder, the game's mods folder and its usermaps folder. Subscribe to mods in Steam, then rescan.": "",
   "Xerces looks in the folder you saved and in every Steam library. It only reads the game folder; nothing in it is changed.": "",

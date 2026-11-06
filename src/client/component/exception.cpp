@@ -938,8 +938,16 @@ std::string find_culprit(const std::vector<resolved_frame> &frames) {
 // launcher sends both when the game has closed. Upstream's dump and zip in
 // the minidumps folder stay as they are, for local use. Returns the report
 // id; empty when nothing was written.
+// Xerces: at most three reports from one game. A server drops the map after
+// a crash and plays on, so one fault it meets again and again would
+// otherwise send a report each time (and the server limits each PC anyway).
+bool take_report_slot() {
+  static std::atomic<int> taken{0};
+  return taken.fetch_add(1) < 3;
+}
+
 std::string begin_pending_report(const LPEXCEPTION_POINTERS exceptioninfo) {
-  if (!crash_reports_on()) {
+  if (!crash_reports_on() || !take_report_slot()) {
     return {};
   }
   const std::string id = xerces_core::new_launch_id();
@@ -1008,7 +1016,7 @@ void finish_pending_report(const std::string &id, const resolved_frame &crash,
 // raised the error. Without it "Restart game", which ends this process with
 // code 0, would read as a clean exit and nothing would be reported.
 void write_fatal_report() {
-  if (!crash_reports_on()) {
+  if (!crash_reports_on() || !take_report_slot()) {
     return;
   }
   xerces_core::pending_crash note;
@@ -1134,6 +1142,18 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
   exception_data.scripts = describe_scripts();
 
   write_minidump(exceptioninfo);
+
+  // Xerces: Windows cannot resume a C++ exception (0xE06D7363) or any other
+  // that it marks noncontinuable. Asked to, it raises
+  // STATUS_NONCONTINUABLE_EXCEPTION, which came back here: on 2026-11-06 one
+  // crash wrote 13 dumps and 13 crash reports, 3 s apart, until the game
+  // ended (docs/TESTING.md, "OneDrive crash"). Such a crash gets the dialog
+  // here instead, as reset_state would show it; a server ends, as it cannot
+  // drop the map from here.
+  if (exceptioninfo->ExceptionRecord->ExceptionFlags &
+      EXCEPTION_NONCONTINUABLE) {
+    display_error_dialog(); // ends the process
+  }
   exceptioninfo->ContextRecord->Rip = get_reset_state_stub();
 
   return EXCEPTION_CONTINUE_EXECUTION;

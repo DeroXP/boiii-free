@@ -41,6 +41,11 @@ to report these again, but tell us if you see them somewhere else or worse.
   (Windows 11, RTX 5070 Ti): without mods and with three Workshop mods, on a
   custom map, with the recovery after a crash, and with a crash report sent. It
   has not met other hardware, other mods or a person playing for long yet.
+- **Keep Xerces out of OneDrive.** Unzipped into a folder OneDrive syncs
+  (`...\OneDrive\Documents\...`), the first beta zip crashed at every start,
+  with mods or without. This build no longer crashes there that way and warns
+  on Home, but it has not been tried in a OneDrive folder yet: unzip it to a
+  folder such as `C:\Games\Xerces`.
 - **Some crashes are not explained yet.** In our tests the game sometimes closed
   while a map was starting, with no crash report, and ran fine the next time.
   Once in 12 quits with mods the game crashed while closing; the next start of
