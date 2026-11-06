@@ -1339,6 +1339,8 @@ carried over.
 One action map for keyboard (Enter, Esc, `/` search, Q and E tabs, Ctrl+Z undo)
 and controller (A, B, Y, LB, RB, D-pad and sticks for spatial focus), read
 through XInput and friendly to Steam Input. Every screen works without a mouse.
+Up and Down scroll a screen where no control lies that way; Down past a screen's
+end, or Up from the tabs, reaches the footer's About link.
 
 ### 7.5 Localization and accessibility
 

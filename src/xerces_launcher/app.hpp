@@ -128,6 +128,10 @@ private:
   void wire_shell(Rml::ElementDocument *doc);
   void run_posted();
   bool on_key(Rml::Input::KeyIdentifier key, int modifiers, bool priority);
+  // A key neither the screen nor RmlUi took (on_key's second pass).
+  bool after_key(Rml::Input::KeyIdentifier key, int modifiers);
+  // Focuses the footer's About link; false when it cannot take focus.
+  bool focus_footer(view &v);
   hit_region hit_test(int x, int y);
   void load_language();
   void close_dialog(int choice);

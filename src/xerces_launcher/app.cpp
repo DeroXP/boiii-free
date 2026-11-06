@@ -937,7 +937,7 @@ void app::inject_key(Rml::Input::KeyIdentifier key, int modifiers) {
 }
 
 bool app::on_key(Rml::Input::KeyIdentifier key, int modifiers, bool priority) {
-  if (!priority || !context_) {
+  if (!context_) {
     return true;
   }
   // RmlUi's modifier state includes Caps, Num and Scroll Lock; with Num Lock
@@ -945,6 +945,9 @@ bool app::on_key(Rml::Input::KeyIdentifier key, int modifiers, bool priority) {
   // Screens get the same masked value.
   modifiers &= Rml::Input::KM_CTRL | Rml::Input::KM_SHIFT |
                Rml::Input::KM_ALT | Rml::Input::KM_META;
+  if (!priority) {
+    return after_key(key, modifiers);
+  }
   if (dialog_open_) {
     if (key == Rml::Input::KI_ESCAPE) {
       close_dialog(-1);
@@ -1012,6 +1015,14 @@ bool app::on_key(Rml::Input::KeyIdentifier key, int modifiers, bool priority) {
       return false;
     }
   }
+  // Nothing lies above the header, so Up from the tabs wraps round to the
+  // footer's About link: a controller reaches it from every screen, also
+  // where the screen keeps Down on its last row (Settings).
+  if (modifiers == 0 && key == Rml::Input::KI_UP && v && v->doc && focus &&
+      focus->GetOwnerDocument() == v->doc && inside(focus, "header") &&
+      focus_footer(*v)) {
+    return false;
+  }
   if (key == Rml::Input::KI_ESCAPE && v && v->doc && inside(focus, "content")) {
     if (Rml::Element *tab = v->doc->GetElementById("tab-" + current_)) {
       tab->Focus(true);
@@ -1019,6 +1030,43 @@ bool app::on_key(Rml::Input::KeyIdentifier key, int modifiers, bool priority) {
     }
   }
   return true;
+}
+
+bool app::after_key(Rml::Input::KeyIdentifier key, int modifiers) {
+  // Neither the screen nor RmlUi took the key. For Up or Down inside the
+  // screen that means spatial navigation found nothing that way: it never
+  // leaves #content (a scroll container), and RmlUi has no keyboard
+  // scrolling. So the screen scrolls a step towards what is left to read
+  // (most of Diagnostics is text, not buttons), and Down at the end goes on
+  // to the footer's About link, which a controller could not reach otherwise
+  // (DESIGN.md 7.4).
+  const bool down = key == Rml::Input::KI_DOWN;
+  if (dialog_open_ || modifiers != 0 || (!down && key != Rml::Input::KI_UP)) {
+    return true;
+  }
+  view *v = find(current_);
+  Rml::Element *focus = context_->GetFocusElement();
+  if (!v || !v->doc || !focus || focus->GetOwnerDocument() != v->doc ||
+      !inside(focus, "content") || is_text_field(focus)) {
+    return true;
+  }
+  Rml::Element *content = v->doc->GetElementById("content");
+  if (!content) {
+    return true;
+  }
+  const float top = content->GetScrollTop();
+  const float room = content->GetScrollHeight() - content->GetClientHeight();
+  if (down ? top < room - 1.f : top > 0.f) {
+    content->SetScrollTop(top +
+                          (down ? 0.3f : -0.3f) * content->GetClientHeight());
+    return false;
+  }
+  return !(down && focus_footer(*v));
+}
+
+bool app::focus_footer(view &v) {
+  Rml::Element *about = v.doc ? v.doc->GetElementById("shell-about") : nullptr;
+  return about && about->IsVisible(true) && about->Focus(true);
 }
 
 hit_region app::hit_test(int x, int y) {

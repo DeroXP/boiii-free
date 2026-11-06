@@ -244,8 +244,6 @@ public:
     if (Rml::Element *content = doc ? doc->GetElementById("content") : nullptr) {
       content->SetScrollTop(0);
     }
-    nudge_ = 0;
-    nudge_from_ = nullptr;
     // Files outside the services' counters: the journal, the logs and the
     // crash folder can change while another screen is up.
     refresh_launch();
@@ -254,16 +252,6 @@ public:
   }
 
   void update(double now) override {
-    if (nudge_ != 0) {
-      Rml::Element *content = doc ? doc->GetElementById("content") : nullptr;
-      if (content && owner_->current() == id() && !owner_->dialog_open() &&
-          owner_->context()->GetFocusElement() == nudge_from_) {
-        content->SetScrollTop(content->GetScrollTop() +
-                              float(nudge_) * content->GetClientHeight() * 0.3f);
-      }
-      nudge_ = 0;
-      nudge_from_ = nullptr;
-    }
     services &svc = owner_->svc();
     const bool busy = svc.detecting() || svc.catalog().scanning;
     bool dirty = false;
@@ -323,20 +311,9 @@ public:
                             (key == Rml::Input::KI_NEXT ? page : -page));
       return true;
     }
-    // Most of this screen is text, not buttons. Up and Down still move focus
-    // (spatial navigation runs after this); when there is no button left in
-    // that direction the focus stays put, and update() scrolls instead, so a
-    // controller can read to the end of the page.
-    if (key == Rml::Input::KI_DOWN || key == Rml::Input::KI_UP) {
-      Rml::Element *focus = owner_->context()->GetFocusElement();
-      for (Rml::Element *e = focus; e; e = e->GetParentNode()) {
-        if (e == content) {
-          nudge_from_ = focus;
-          nudge_ = key == Rml::Input::KI_DOWN ? 1 : -1;
-          break;
-        }
-      }
-    }
+    // Most of this screen is text, not buttons. Up and Down move focus by
+    // spatial navigation; with no button left that way the app scrolls the
+    // page instead (app::after_key), so a controller reads to the end.
     return false;
   }
 
@@ -1071,9 +1048,6 @@ private:
   std::uint64_t seen_game_ = 0, seen_config_ = 0, seen_signatures_ = 0,
                 seen_catalog_ = 0, seen_journal_ = 0;
   double catalog_at_ = -1;
-  // A pending Up/Down from key(): scroll if focus did not move (-1, 0, 1).
-  int nudge_ = 0;
-  Rml::Element *nudge_from_ = nullptr;
   std::vector<std::string> shown_diag_codes_, shown_diag_text_;
   std::vector<xerces_core::crash_entry> crash_entries_;
 
