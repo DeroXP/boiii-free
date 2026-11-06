@@ -1273,7 +1273,9 @@ boot, home and mods screens: https://claude.ai/artifact/ALqqCpC4HVuemFTfDFoz3r
   `#161616`, rule `#2B2B2B`, text `#FFFFFF`, text-2 `#A6A6A6`, accent `#FF4A1C`,
   text on accent `#000000`, accent as text `#FF6A42`. Light: background
   `#FFFFFF`, text `#000000`, text-2 `#595959`, rule `#D4D4D4`, accent as text
-  `#C2330B`. High contrast: black and white, accent `#FFD400`, 2 px rules.
+  `#C2330B`. High contrast: black and white, accent `#FFD400`, 2 px rules. A
+  primary button under the pointer turns `#FF6A42` (dark), `#E8401A` (light) or
+  white (high contrast), keeping its black text at 4.5:1 or more.
 - Type: Inter Tight (display 700 to 900, body 400 to 500) and IBM Plex Mono
   (data, labels, key hints), both SIL OFL and bundled unmodified. Scale 12, 14,
   16, 20, 28, 40, 64, 80.
@@ -1284,8 +1286,10 @@ boot, home and mods screens: https://claude.ai/artifact/ALqqCpC4HVuemFTfDFoz3r
 - Focus: 2 px accent outline, 3 px offset, always visible for keyboard and
   controller.
 - Tokens live in `data/xerces/ui/tokens.json` and generate the launcher styles
-  and the in-game Lua colour table. A lint checks every text and background pair
-  for 4.5:1 contrast.
+  and the in-game Lua colour table. A lint (`tools/ci/check_contrast.py`) checks
+  every text and background pair for 4.5:1 contrast: the listed pairs, and each
+  stylesheet rule that sets a background token against its text colour, hover
+  and focus states included.
 
 ### 7.3 Screens
 
