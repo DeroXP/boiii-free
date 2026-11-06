@@ -421,8 +421,9 @@ time and SHA-256 with `compat/builds.json`:
 - **Supported**: launch.
 - **Newer than any supported build**: "Steam updated Black Ops III (build
   24901234). Xerces supports build 24784313. Play through Steam until a Xerces
-  update supports the new build. Xerces will tell you when it does." No download
-  offers, no file changes.
+  update supports the new build. Xerces does not check for updates yet: the
+  tester channel announces the next zip." (Until the update client of 16.2
+  exists; it then says so itself.) No download offers, no file changes.
 - **Unknown or modified**: the same message, plus "Verify the game files in
   Steam".
 
@@ -784,7 +785,7 @@ together.
    `loader.asset.override`, `loader.gsc.chain.bound`, `loader.ready`) with the
    `plan_id`.
 
-#### Zone memory (opt-in, built 2026-11-05, not yet run in the game)
+#### Zone memory (opt-in, built 2026-11-05, five game runs the same day)
 
 - Why: the engine's DB (fastfile) stack keeps blocks 5 and 6 of every loaded
   zone in a fixed 2 GiB PMem pool, "main". DS4C's zones take about 450 MiB of
@@ -814,18 +815,20 @@ together.
   whether a launch had the flag. Safe mode and every "find the culprit" test
   leave it out, and a crash with it makes the setting a suspect of its own
   (5.6).
-- Why opt-in: none of it has run in the game. Risks (reverse-engineering
-  verdict, 2026-11-05): Arxan guards may cover these bytes, repair them or use
-  them (a crash before the menu, or hooks that are never hit); no committed pool
-  has used offsets above 2 GiB before, and code inside the encrypted function or
-  the second `.text` could keep such offsets in 32 bits (a crash after the zone
+- Why opt-in: it has run in the game five times only (2026-11-05: BACKROOMZ and
+  Super Mario 64 with DS4C, alone and stacked, and Cheese Cube; all loaded and
+  went back to the menu, docs/TESTING.md). Risks (reverse-engineering verdict,
+  2026-11-05): Arxan guards may cover these bytes, repair them or use them (a
+  crash before the menu, or hooks that are never hit); no committed pool has
+  used offsets above 2 GiB before, and code inside the encrypted function or the
+  second `.text` could keep such offsets in 32 bits (a crash after the zone
   allocation); the streamer may use the extra budget; commit grows by what the
   map uses (about 1.2 GiB more for BACKROOMZ); a Steam update turns the feature
-  off (signature miss). It stays opt-in until the one-run test in
-  docs/TESTING.md passes. If the hooks are never reached, the remaining options
-  are replacing the main pool's reservation after start-up and before the first
-  zone loads, or having the launcher explain the overflow instead of loading the
-  map.
+  off (signature miss). The one-run test in docs/TESTING.md passed (as five
+  runs); whether the setting becomes the default is still open. If the hooks are
+  never reached, the remaining options are replacing the main pool's reservation
+  after start-up and before the first zone loads, or having the launcher explain
+  the overflow instead of loading the map.
 
 ### 5.5 Unload and reload
 
@@ -2359,6 +2362,25 @@ GitHub Releases (D11), each with the installer, a portable zip,
 automatic archives leave them out, which matters for the GPL), and notes from
 `CHANGELOG.md` (Keep a Changelog format). PDBs are archived privately for every
 release from v1.0.
+
+Beta packages for testers (2026-11-05) come first, as a zip by private link:
+
+- `VERSION` is the one place the version is set (`0.1.0-beta.1`). premake writes
+  it, the commit and whether the tree had changes into
+  `build\src\xerces_version.h`; all three programs show "Xerces <version>
+  (<commit>)" (About, the menu watermark, the console title, the crash report)
+  and carry it in their `VERSIONINFO`.
+- `tools\release.ps1` refuses a tree with changes, warns when the commit is not
+  on origin, builds and tests, and writes `dist\xerces-<version>\` (the three
+  programs, `data\`, `compat\`, `LICENSE`, `THIRD_PARTY_NOTICES.txt`,
+  `SOURCE.txt`, `README.txt` from `docs/TESTERS.md`, `KNOWN_ISSUES.txt` from
+  `docs/KNOWN_ISSUES.md`, `SHA256SUMS.txt`), its zip, and the PDBs in a separate
+  zip. `tools\release\notices.py` makes the notices from the licence files and
+  the build's link lines, and fails on a library it does not know.
+- Xerces.exe passes the `data\` next to it to the game as `XERCES_DATA_PATH`, as
+  development builds pass the repository's.
+- Upstream's publish workflows are removed; CI builds `boiii.exe` on push and
+  `tools/ci/check_switches.py` keeps the updater and the `-beta` download off.
 
 ### 16.2 Updates
 
