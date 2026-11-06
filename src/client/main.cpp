@@ -1,19 +1,14 @@
 #include <std_include.hpp>
 
-#include <curl/curl.h>
-
 #include <loader/component_loader.hpp>
 #include <loader/loader.hpp>
 
 #include <utils/com.hpp>
-#include <utils/cryptography.hpp>
 #include <utils/finally.hpp>
 #include <utils/flags.hpp>
 #include <utils/hook.hpp>
-#include <utils/http.hpp>
 #include <utils/io.hpp>
 #include <utils/nt.hpp>
-#include <utils/progress_ui.hpp>
 
 #include <steam/steam.hpp>
 #include <steam/voice.hpp>
@@ -24,7 +19,6 @@
 #include "xerces/runtime.hpp"
 
 #include <shlobj.h>
-#include <tlhelp32.h>
 
 namespace {
 volatile bool g_call_tls_callbacks = false;
@@ -119,384 +113,17 @@ void remove_crash_file() {
   utils::io::remove_file(game_path);
 }
 
-struct patch_install_cancelled : std::exception {};
-
-constexpr uint32_t LEGACY_CLIENT_CHECKSUM = 0x888C368;
-constexpr uint32_t SUPPORTED_CLIENT_CHECKSUM = 0x6531394;
-
-constexpr const char SUPPORTED_CLIENT_PATCH_URL[] =
-    "https://archive.org/download/black-ops-3_20260926/BlackOps3.exe";
-constexpr const char BACKUP_SUPPORTED_CLIENT_PATCH_URL[] =
-    "https://archive.org/download/black-ops-3_20260927/BlackOps3.exe";
-constexpr const char SUPPORTED_CLIENT_PATCH_SHA1[] =
-    "9D03F81086112113BFB1DD22B8538B9398AC3B9B";
-
-enum class client_binary_state : uint8_t {
-  supported,
-  legacy,
-  incompatible,
-  unreadable,
-};
-
-std::optional<uint32_t> get_pe_checksum(const std::filesystem::path &file) {
-  std::ifstream stream(file, std::ios::binary);
-  if (stream.is_open()) {
-    IMAGE_DOS_HEADER dos_header{};
-    stream.read(reinterpret_cast<char *>(&dos_header), sizeof(dos_header));
-    if (stream && dos_header.e_magic == IMAGE_DOS_SIGNATURE) {
-      stream.seekg(dos_header.e_lfanew, std::ios::beg);
-
-      uint32_t signature = 0;
-      stream.read(reinterpret_cast<char *>(&signature), sizeof(signature));
-      if (stream && signature == IMAGE_NT_SIGNATURE) {
-        IMAGE_FILE_HEADER file_header{};
-        stream.read(reinterpret_cast<char *>(&file_header),
-                    sizeof(file_header));
-        if (stream) {
-          WORD optional_magic = 0;
-          stream.read(reinterpret_cast<char *>(&optional_magic),
-                      sizeof(optional_magic));
-          if (stream) {
-            stream.seekg(-static_cast<std::streamoff>(sizeof(optional_magic)),
-                         std::ios::cur);
-
-            if (optional_magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
-              IMAGE_OPTIONAL_HEADER64 optional_header{};
-              stream.read(reinterpret_cast<char *>(&optional_header),
-                          sizeof(optional_header));
-              if (stream) {
-                return optional_header.CheckSum;
-              }
-            }
-
-            if (optional_magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
-              IMAGE_OPTIONAL_HEADER32 optional_header{};
-              stream.read(reinterpret_cast<char *>(&optional_header),
-                          sizeof(optional_header));
-              if (stream) {
-                return optional_header.CheckSum;
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return std::nullopt;
-}
-
-bool has_expected_client_patch_hash(const std::filesystem::path &file) {
-  std::ifstream stream(file, std::ios::binary);
-  return stream.is_open() && utils::cryptography::sha1::compute(stream, true) ==
-                                 SUPPORTED_CLIENT_PATCH_SHA1;
-}
-
-client_binary_state
-classify_client_binary(const std::filesystem::path &client_binary) {
-  const std::optional<uint32_t> checksum = get_pe_checksum(client_binary);
-  if (!checksum.has_value()) {
-    return client_binary_state::unreadable;
-  }
-
-  if (*checksum == SUPPORTED_CLIENT_CHECKSUM) {
-    return client_binary_state::supported;
-  }
-
-  if (*checksum == LEGACY_CLIENT_CHECKSUM) {
-    return client_binary_state::legacy;
-  }
-
-  return client_binary_state::incompatible;
-}
-
-std::vector<uint32_t> get_running_client_binary_process_ids() {
-  std::vector<uint32_t> pids{};
-  const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-  if (snapshot == INVALID_HANDLE_VALUE) {
-    return pids;
-  }
-
-  auto _ = utils::finally([&]() { CloseHandle(snapshot); });
-
-  PROCESSENTRY32W process_entry{};
-  process_entry.dwSize = sizeof(process_entry);
-  const DWORD self_pid = GetCurrentProcessId();
-
-  if (Process32FirstW(snapshot, &process_entry) != 0) {
-    while (Process32NextW(snapshot, &process_entry) != 0) {
-      if (process_entry.th32ProcessID != self_pid &&
-          _wcsicmp(process_entry.szExeFile, L"BlackOps3.exe") == 0) {
-        pids.emplace_back(process_entry.th32ProcessID);
-      }
-    };
-  }
-
-  return pids;
-}
-
-bool is_client_binary_process_running() {
-  return !get_running_client_binary_process_ids().empty();
-}
-
-void close_running_client_binary_processes() {
-  const std::vector<uint32_t> pids = get_running_client_binary_process_ids();
-  for (const uint32_t pid : pids) {
-    const HANDLE process =
-        OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);
-    if (process == nullptr) {
-      throw std::runtime_error(
-          "Failed to access the running BlackOps3.exe process before "
-          "installing the patch.");
-    }
-
-    auto _ = utils::finally([&]() { CloseHandle(process); });
-
-    if (TerminateProcess(process, 0) == 0) {
-      const DWORD error = GetLastError();
-      throw std::runtime_error(
-          std::string("Failed to close the running BlackOps3.exe process "
-                      "before installing the patch (error ") +
-          std::to_string(error) + ").");
-    }
-
-    const DWORD wait_result = WaitForSingleObject(process, 15000);
-    if (wait_result != WAIT_OBJECT_0) {
-      throw std::runtime_error(
-          "BlackOps3.exe did not close in time for the patch install.");
-    }
-  }
-}
-
-constexpr const char MANUAL_CLIENT_PATCH_MESSAGE[] =
-    "Incompatible game version detected:\n"
-    "The installed BlackOps3.exe version is not compatible with this "
-    "BOIII build.\n"
-    "This usually happens because Black Ops 3 was updated and BOIII "
-    "needs the older compatible BlackOps3.exe version.\n"
-    "To fix this, download the compatible BlackOps3.exe and replace the "
-    "one in your game directory.\n"
-    "You can find a download link under Settings => Patches.";
-
-std::string get_client_patch_prompt_message(const client_binary_state /*state*/,
-                                            const bool close_running_game) {
-  const char *close_message =
-      close_running_game
-          ? "\n\nBlack Ops 3 is already running. BOIII will close it when "
-            "the patch is ready, then continue launch."
-          : "";
-
-  return std::string(
-             "The installed BlackOps3.exe version is not compatible with "
-             "this BOIII build.\n\n"
-             "This usually means Black Ops 3 was updated and BOIII needs "
-             "the older compatible BlackOps3.exe version.\n\n"
-             "BOIII can download and install the compatible BlackOps3.exe "
-             "automatically before launch.") +
-         close_message +
-         "\n\nPress OK to download or cancel to attempt to proceed with "
-         "current BlackOps3.exe.";
-}
-
-bool prompt_to_install_client_patch(const client_binary_state state,
-                                    const bool close_running_game) {
-  return !game::is_headless() &&
-         MessageBoxA(
-             nullptr,
-             get_client_patch_prompt_message(state, close_running_game).c_str(),
-             "BOIII Patch Installer",
-             MB_OKCANCEL | MB_ICONQUESTION | MB_SETFOREGROUND | MB_TOPMOST) ==
-             IDOK;
-}
-
-std::string format_download_size(const size_t bytes) {
-  const double kilobytes = static_cast<double>(bytes) / 1024.0;
-  const double megabytes = kilobytes / 1024.0;
-  const double gigabytes = megabytes / 1024.0;
-
-  if (gigabytes >= 1.0) {
-    return std::format("{:.2f} GB", gigabytes);
-  }
-  if (megabytes >= 1.0) {
-    return std::format("{:.2f} MB", megabytes);
-  }
-  if (kilobytes >= 1.0) {
-    return std::format("{:.2f} KB", kilobytes);
-  }
-  return std::format("{} B", bytes);
-}
-
-void install_supported_client_binary(
-    const std::string_view &url, const std::filesystem::path &client_binary,
-    const bool allow_close_running_client_binary) {
-  utils::progress_ui progress(false);
-  progress.set_title("BOIII Patch Installer");
-  progress.set_line(1, "Downloading compatible BlackOps3.exe...");
-  progress.set_line(2, "Preparing download...");
-  progress.show(true);
-
-  const std::filesystem::path temp_binary =
-      std::filesystem::path(client_binary.string() + ".boiii_download");
-  const std::filesystem::path backup_binary =
-      std::filesystem::path(client_binary.string() + ".boiii_backup");
-
-  auto cleanup_temp =
-      utils::finally([&]() { utils::io::remove_file(temp_binary); });
-
-  std::ofstream temp_stream(temp_binary, std::ios::binary | std::ios::trunc);
-  if (!temp_stream.is_open()) {
-    throw std::runtime_error("Failed to create the temporary patch file in "
-                             "your game directory.");
-  }
-
-  std::chrono::steady_clock::time_point last_progress_update =
-      std::chrono::steady_clock::time_point{};
-  bool has_total_size = false;
-  size_t latest_total_size = 0;
-  const int32_t curl_code = utils::http::get_data_stream(
-      url, {},
-      [&](const size_t downloaded, const size_t total_size) {
-        if (progress.is_cancelled()) {
-          throw patch_install_cancelled{};
-        }
-
-        latest_total_size = total_size;
-
-        const std::chrono::steady_clock::time_point now =
-            std::chrono::steady_clock::now();
-        if (last_progress_update == std::chrono::steady_clock::time_point{} ||
-            (now - last_progress_update) >= 125ms) {
-          if (total_size > 0) {
-            if (!has_total_size) {
-              progress.set_marquee(false);
-              has_total_size = true;
-            }
-
-            progress.set_progress(downloaded, total_size);
-            progress.set_line(2, "Downloaded " +
-                                     format_download_size(downloaded) + " / " +
-                                     format_download_size(total_size));
-          } else {
-            progress.set_line(2,
-                              "Downloaded " + format_download_size(downloaded));
-          }
-
-          last_progress_update = now;
-        }
-      },
-      [&](const char *data, const size_t size) {
-        temp_stream.write(data, static_cast<std::streamsize>(size));
-        if (!temp_stream || !temp_stream.is_open()) {
-          throw std::runtime_error(
-              "Failed while writing the downloaded BlackOps3.exe patch.");
-        }
-      });
-
-  temp_stream.flush();
-  temp_stream.close();
-
-  if (progress.is_cancelled()) {
-    throw patch_install_cancelled{};
-  }
-
-  if (curl_code != CURLE_OK) {
-    throw std::runtime_error("Failed to download the compatible BlackOps3.exe "
-                             "patch. Please try again later.");
-  }
-
-  progress.set_marquee(false);
-  progress.set_progress(latest_total_size > 0 ? latest_total_size : 1,
-                        latest_total_size > 0 ? latest_total_size : 1);
-  progress.set_line(1, "Verifying downloaded BlackOps3.exe...");
-  progress.set_line(2, temp_binary.filename().string());
-
-  const std::optional<uint32_t> downloaded_checksum =
-      get_pe_checksum(temp_binary);
-  if (!has_expected_client_patch_hash(temp_binary) || !downloaded_checksum ||
-      *downloaded_checksum != SUPPORTED_CLIENT_CHECKSUM) {
-    throw std::runtime_error(
-        "The downloaded BlackOps3.exe patch did not match the BOIII-"
-        "compatible version that this build expects.");
-  }
-
-  if (is_client_binary_process_running()) {
-    if (!allow_close_running_client_binary) {
-      throw std::runtime_error(
-          "Black Ops 3 is still running, so BOIII cannot replace "
-          "BlackOps3.exe.");
-    }
-
-    progress.set_line(1, "Closing running BlackOps3.exe...");
-    progress.set_line(2, "Waiting for Black Ops 3 to exit...");
-    close_running_client_binary_processes();
-  }
-
-  utils::io::remove_file(backup_binary);
-  const bool moved_original = MoveFileExW(
-      client_binary.wstring().c_str(), backup_binary.wstring().c_str(),
-      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
-  if (!moved_original) {
-    throw std::runtime_error("Failed to move your current BlackOps3.exe out of "
-                             "the way before installing the patch.");
-  }
-
-  bool installed = false;
-  const auto restore_backup = utils::finally([&]() {
-    if (!installed) {
-      MoveFileExW(backup_binary.wstring().c_str(),
-                  client_binary.wstring().c_str(),
-                  MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
-    }
-  });
-
-  progress.set_line(1, "Replacing BlackOps3.exe...");
-  progress.set_line(2, client_binary.string());
-
-  if (MoveFileExW(temp_binary.wstring().c_str(),
-                  client_binary.wstring().c_str(),
-                  MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == 0) {
-    throw std::runtime_error(
-        "Failed to replace BlackOps3.exe with the downloaded patch.");
-  }
-
-  const client_binary_state installed_state =
-      classify_client_binary(client_binary);
-  if (installed_state != client_binary_state::supported) {
-    throw std::runtime_error("BlackOps3.exe was replaced, but the new file is "
-                             "still not compatible with this BOIII build.");
-  }
-
-  installed = true;
-  utils::io::remove_file(backup_binary);
-
-  progress.set_line(1, "BlackOps3.exe updated successfully.");
-  progress.set_line(2, "Continuing launch...");
-  std::this_thread::sleep_for(350ms);
-}
-
-void ensure_compatible_client_binary(
-    const std::filesystem::path &client_binary) {
-  const client_binary_state state = classify_client_binary(client_binary);
-  switch (state) {
-  case client_binary_state::legacy:
-  case client_binary_state::incompatible: {
-    const bool close_running_game = is_client_binary_process_running();
-    if (prompt_to_install_client_patch(state, close_running_game)) {
-      try {
-        install_supported_client_binary(SUPPORTED_CLIENT_PATCH_URL,
-                                        client_binary, close_running_game);
-      } catch (...) {
-        install_supported_client_binary(BACKUP_SUPPORTED_CLIENT_PATCH_URL,
-                                        client_binary, close_running_game);
-      }
-    }
-    break;
-  }
-  default: {
-    break;
-  }
-  }
-}
+// Xerces (D9): upstream offered to download another BlackOps3.exe from
+// archive.org and put it in place of yours. Xerces never downloads or replaces
+// game files; like the launcher's pre-flight check (DESIGN.md 4.2), this
+// message says what to do instead.
+constexpr const char UNSUPPORTED_BUILD_MESSAGE[] =
+    "Xerces does not support this Black Ops III build, or its files have "
+    "changed.\n\n"
+    "If Steam just updated the game, play through Steam until a Xerces "
+    "update supports the new build. Otherwise verify the game files in "
+    "Steam, then start again.\n\n"
+    "Xerces never downloads or replaces game files.";
 
 PIMAGE_TLS_CALLBACK *get_tls_callbacks() {
   const utils::nt::library game{};
@@ -896,108 +523,6 @@ inline bool initial_update_required() {
       launcher::get_launcher_ui_file().generic_wstring());
 }
 
-std::wstring quote_process_argument(const std::wstring_view argument) {
-  // The engine doesn't run +set or +exec when they're quoted, so only quote
-  // what needs it
-  if (!argument.empty() &&
-      argument.find_first_of(L" \t\"") == std::wstring_view::npos) {
-    return std::wstring{argument};
-  }
-
-  std::wstring result{L"\""};
-  size_t backslashes = 0;
-
-  for (const wchar_t character : argument) {
-    if (character == L'\\') {
-      ++backslashes;
-    } else {
-      if (character == L'\"') {
-        result.append((backslashes * 2) + 1, L'\\');
-        result.push_back(character);
-      } else {
-        result.append(backslashes, L'\\');
-        result.push_back(character);
-      }
-      backslashes = 0;
-    }
-  }
-
-  result.append(backslashes * 2, L'\\');
-  result.push_back(L'\"');
-  return result;
-}
-
-bool launch_beta_server_if_needed() {
-  // Xerces: -beta downloaded boiii-beta.exe from upstream's server and ran it
-  // without verification (docs/DESIGN.md D9). Xerces never does that.
-  constexpr bool upstream_beta_download_enabled = false;
-  if (upstream_beta_download_enabled && utils::flags::has_flag("beta")) {
-    const utils::nt::library self =
-        utils::nt::library::get_by_address(launch_beta_server_if_needed);
-    const std::filesystem::path target =
-        game::get_game_path() / "versions" / "boiii-beta.exe";
-    std::error_code error;
-    if (!std::filesystem::equivalent(self.get_path(), target, error)) {
-      const bool target_exists = utils::io::file_exists(target);
-      const std::optional<std::string> data =
-          !utils::flags::has_flag("noupdate") || !target_exists
-              ? utils::http::get_data("https://r2.ezz.lol/boiii/beta/boiii.exe")
-              : std::nullopt;
-      if (data.has_value()) {
-        utils::io::create_directory(target.parent_path());
-        std::filesystem::path temporary = target;
-        temporary += "." + std::to_string(GetCurrentProcessId()) + ".new";
-        if (utils::io::write_file_executable(temporary, *data)) {
-          if (MoveFileExW(temporary.wstring().c_str(), target.wstring().c_str(),
-                          MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) ==
-              0) {
-            utils::io::remove_file(temporary);
-          }
-        }
-      }
-
-      if (!utils::io::file_exists(target)) {
-        throw std::runtime_error("Failed to download the beta server binary");
-      }
-
-      int argument_count = 0;
-      LPWSTR *arguments =
-          CommandLineToArgvW(GetCommandLineW(), &argument_count);
-      if (arguments == nullptr) {
-        throw std::runtime_error("Failed to read the server command line");
-      }
-
-      std::wstring command_line = quote_process_argument(target.wstring());
-      for (int index = 1; index < argument_count; ++index) {
-        command_line.push_back(L' ');
-        command_line += quote_process_argument(arguments[index]);
-      }
-      LocalFree(reinterpret_cast<void *>(arguments));
-
-      STARTUPINFOW startup_info{};
-      PROCESS_INFORMATION process_info{};
-      startup_info.cb = sizeof(startup_info);
-      const DWORD creation_flags =
-          utils::flags::has_flag("noconsole") ? 0 : CREATE_NEW_CONSOLE;
-      const std::wstring target_path = target.wstring();
-      const std::wstring working_directory = game::get_game_path().wstring();
-
-      if (CreateProcessW(target_path.c_str(), command_line.data(), nullptr,
-                         nullptr, FALSE, creation_flags, nullptr,
-                         working_directory.c_str(), &startup_info,
-                         &process_info) == 0) {
-        throw std::runtime_error("Failed to launch the beta server binary");
-      }
-
-      CloseHandle(process_info.hThread);
-      CloseHandle(process_info.hProcess);
-      return true;
-    }
-  }
-
-  return false;
-}
-
 int main(int argc, char *argv[]) {
   if (handle_process_runner()) {
     return 0;
@@ -1047,10 +572,6 @@ int main(int argc, char *argv[]) {
       const bool is_server =
           utils::flags::has_flag("dedicated") || (!has_client && has_server);
 
-      if (is_server && launch_beta_server_if_needed()) {
-        return 0;
-      }
-
       if (!is_server && !launcher::is_game_process_running()) {
         updater::update(initial_update_required());
       }
@@ -1074,8 +595,6 @@ int main(int argc, char *argv[]) {
         if (!launch && !launcher::run()) {
           return 0;
         }
-
-        ensure_compatible_client_binary(client_binary);
       }
 
       if (!component_loader::activate(is_server)) {
@@ -1088,11 +607,11 @@ int main(int argc, char *argv[]) {
       }
 
       if (is_server != game::is_server()) {
-        throw std::runtime_error(MANUAL_CLIENT_PATCH_MESSAGE);
+        throw std::runtime_error(UNSUPPORTED_BUILD_MESSAGE);
       }
 
       if (!is_server && !game::is_client()) {
-        throw std::runtime_error(MANUAL_CLIENT_PATCH_MESSAGE);
+        throw std::runtime_error(UNSUPPORTED_BUILD_MESSAGE);
       }
 
       patch_imports();
@@ -1102,8 +621,6 @@ int main(int argc, char *argv[]) {
       }
 
       premature_shutdown = false;
-    } catch (patch_install_cancelled &) {
-      return 0;
     } catch (std::exception &e) {
       game::show_error(e.what());
       return 1;

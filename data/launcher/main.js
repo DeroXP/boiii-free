@@ -160,14 +160,6 @@
       libraryViewMode = "list";
   } catch (e) {}
 
-  var versionDropdown = document.getElementById("versionDropdown");
-  var verDropDisplay = document.getElementById("verDropDisplay");
-  var verDropText = document.getElementById("verDropText");
-  var versionOptions = document.getElementById("versionOptions");
-  var _versionsData = {};
-  var _selectedVersion = "latest";
-  var _latestVersionTag = "";
-
   var workshopBrowseGrid = document.getElementById("workshopBrowseGrid");
   var workshopViewToggleBtn = document.getElementById("workshopViewToggleBtn");
   var workshopSearchInput = document.getElementById("workshopSearchInput");
@@ -3068,21 +3060,6 @@
       playBtn.disabled = true;
       var opts = window.getSelectedLaunchOption();
 
-      var selectedVersion = _selectedVersion || "latest";
-      var exeName = "";
-      var exeUrl = "";
-
-      if (selectedVersion !== "latest" && _versionsData[selectedVersion]) {
-        exeName = _versionsData[selectedVersion].name;
-        exeUrl = _versionsData[selectedVersion].url;
-        if (
-          selectedVersion !== "beta" &&
-          opts.toLowerCase().indexOf("-noupdate") === -1
-        ) {
-          opts = (opts + " -noupdate").trim();
-        }
-      }
-
       var launchOptionTokens = opts.toLowerCase().split(/\s+/);
       var hasKeepLauncher =
         launchOptionTokens.indexOf("keep-launcher") !== -1 ||
@@ -3094,16 +3071,7 @@
           "A workshop download is in progress. Keep the launcher open while you play?",
           function () {
             try {
-              if (exeName && exeUrl) {
-                getExternal().launchGame(
-                  window.getPlayerName(),
-                  opts,
-                  exeName,
-                  exeUrl
-                );
-              } else {
-                getExternal().launchGame(window.getPlayerName(), opts);
-              }
+              getExternal().launchGame(window.getPlayerName(), opts);
             } catch (e2) {}
           }
         );
@@ -3111,24 +3079,11 @@
       }
 
       if (keepLauncher) {
-        if (exeName && exeUrl) {
-          getExternal().launchGame(
-            window.getPlayerName(),
-            opts,
-            exeName,
-            exeUrl
-          );
-        } else {
-          getExternal().launchGame(window.getPlayerName(), opts);
-        }
+        getExternal().launchGame(window.getPlayerName(), opts);
         return;
       }
 
-      if (exeName && exeUrl) {
-        getExternal().runGame(window.getPlayerName(), opts, exeName, exeUrl);
-      } else {
-        getExternal().runGame(window.getPlayerName(), opts);
-      }
+      getExternal().runGame(window.getPlayerName(), opts);
     } catch (e) {}
   };
 
@@ -4515,183 +4470,6 @@
       loadFriendIdentity();
     }
   }, 5000);
-
-  function versionTagFromStored(value) {
-    if (!value) return value;
-    var tag = value;
-    if (tag.indexOf("boiii-") === 0) tag = tag.substring("boiii-".length);
-    if (tag.slice(-4) === ".exe") tag = tag.slice(0, -4);
-    return tag;
-  }
-
-  function selectVersion(value, label) {
-    _selectedVersion = value;
-    if (verDropText) verDropText.textContent = label;
-    if (versionOptions) {
-      var opts = versionOptions.querySelectorAll(".version-selector-option");
-      for (var i = 0; i < opts.length; i++) {
-        if (opts[i].getAttribute("data-value") === value) {
-          opts[i].className = "version-selector-option selected";
-        } else {
-          opts[i].className = "version-selector-option";
-        }
-      }
-    }
-    if (versionDropdown)
-      versionDropdown.className = "version-selector-container";
-
-    try {
-      var ex = getExternal();
-      if (ex && ex.setSelectedVersion) {
-        ex.setSelectedVersion(value);
-      }
-    } catch (e) {}
-  }
-
-  function addVersionOption(value, label, prepend) {
-    if (!versionOptions) return;
-    var div = document.createElement("div");
-    div.className = "version-selector-option";
-    div.setAttribute("data-value", value);
-    div.textContent = label;
-    div.onclick = function () {
-      selectVersion(value, label);
-    };
-    if (prepend && versionOptions.firstChild) {
-      versionOptions.insertBefore(div, versionOptions.firstChild);
-    } else {
-      versionOptions.appendChild(div);
-    }
-  }
-
-  if (verDropDisplay) {
-    verDropDisplay.onclick = function () {
-      if (!versionDropdown) return;
-      if (versionDropdown.className.indexOf("open") !== -1) {
-        versionDropdown.className = "version-selector-container";
-      } else {
-        versionDropdown.className = "version-selector-container open";
-      }
-    };
-  }
-
-  function getLatestLabel() {
-    return _latestVersionTag
-      ? _latestVersionTag + " (Latest)"
-      : "Latest (Auto-update)";
-  }
-
-  if (versionOptions) {
-    var defaultOpt = versionOptions.querySelector(".version-selector-option");
-    if (defaultOpt) {
-      defaultOpt.onclick = function () {
-        selectVersion("latest", getLatestLabel());
-      };
-    }
-  }
-
-  document.addEventListener("click", function (e) {
-    if (versionDropdown && versionDropdown.className.indexOf("open") !== -1) {
-      var target = e.target || e.srcElement;
-      var inside = false;
-      while (target) {
-        if (target === versionDropdown) {
-          inside = true;
-          break;
-        }
-        target = target.parentNode;
-      }
-      if (!inside) {
-        versionDropdown.className = "version-selector-container";
-      }
-    }
-  });
-
-  try {
-    var sv =
-      getExternal() &&
-      getExternal().getSelectedVersion &&
-      getExternal().getSelectedVersion();
-    if (sv) {
-      _selectedVersion = versionTagFromStored(sv);
-
-      var initialLabel = getLatestLabel();
-      if (_selectedVersion === "beta") initialLabel = "Beta (Experimental)";
-      else if (_selectedVersion !== "latest") initialLabel = _selectedVersion;
-      selectVersion(_selectedVersion, initialLabel);
-    }
-  } catch (e) {}
-
-  function fetchReleases() {
-    if (!versionOptions) return;
-
-    var url = "https://api.github.com/repos/Ezz-lol/boiii-free/releases";
-    var xhr = new XMLHttpRequest();
-    xhr.open("GET", url, true);
-    xhr.onreadystatechange = function () {
-      if (xhr.readyState !== 4) return;
-
-      if (xhr.status === 200) {
-        try {
-          var releases = JSON.parse(xhr.responseText);
-          if (releases && Array.isArray(releases) && releases.length) {
-            _latestVersionTag = releases[0].tag_name;
-            var defaultOptEl = versionOptions.querySelector(
-              '.version-selector-option[data-value="latest"]'
-            );
-            if (defaultOptEl) {
-              defaultOptEl.textContent = getLatestLabel();
-            }
-          }
-          if (releases && Array.isArray(releases)) {
-            for (var i = 0; i < releases.length; i++) {
-              var rel = releases[i];
-              var tagName = rel.tag_name;
-              var assets = rel.assets || [];
-              var boiiiAsset = null;
-              for (var j = 0; j < assets.length; j++) {
-                if (assets[j].name === "boiii.exe") {
-                  boiiiAsset = assets[j];
-                  break;
-                }
-              }
-              if (boiiiAsset) {
-                _versionsData[tagName] = {
-                  url: boiiiAsset.browser_download_url,
-                  name: "versions/boiii-" + tagName + ".exe",
-                };
-                // The newest release is already represented by the Latest
-                // entry, so skip adding it a second time as its own row.
-                if (tagName !== _latestVersionTag) {
-                  addVersionOption(tagName, tagName);
-                }
-              }
-            }
-          }
-          // After loading all versions, ensure UI reflects saved selection
-          var label = getLatestLabel();
-          if (_selectedVersion === "beta") label = "Beta (Experimental)";
-          else if (_selectedVersion !== "latest") label = _selectedVersion;
-          selectVersion(_selectedVersion, label);
-        } catch (e) {
-          console.error("Error parsing releases:", e);
-        }
-      } else {
-        console.error("Error fetching releases:", xhr.status, xhr.statusText);
-      }
-    };
-    xhr.send();
-  }
-
-  // Beta build - added first and prepended so it stays pinned at the top
-  // of the list regardless of when the releases fetch below resolves.
-  _versionsData["beta"] = {
-    url: "https://r2.ezz.lol/boiii/beta/boiii.exe",
-    name: "versions/boiii-beta.exe",
-  };
-  addVersionOption("beta", "Beta (Experimental)", true);
-
-  fetchReleases();
 
   var creditsPopup = document.getElementById("creditsPopup");
   var versionDisplay = document.getElementById("versionDisplay");

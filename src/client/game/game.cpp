@@ -4,9 +4,6 @@
 #include "log.hpp"
 
 #include <utils/finally.hpp>
-#include <utils/flags.hpp>
-#include <utils/io.hpp>
-#include <utils/properties.hpp>
 
 #include <combaseapi.h>
 
@@ -47,22 +44,6 @@ const std::filesystem::path &get_appdata_path() {
   return appdata_path;
 }
 
-bool is_beta() {
-  static const bool beta = [] {
-    const bool dedicated =
-        utils::flags::has_flag("dedicated") ||
-        (!utils::io::file_exists("BlackOps3.exe") &&
-         utils::io::file_exists("BlackOps3_UnrankedDedicatedServer.exe"));
-    if (utils::flags::has_flag("beta") && dedicated) {
-      return true;
-    }
-    const std::optional<std::string> selected =
-        utils::properties::load("selectedVersion");
-    return selected && *selected == "beta";
-  }();
-  return beta;
-}
-
 const std::filesystem::path &get_data_path() {
   static const std::filesystem::path data_path = []() -> std::filesystem::path {
     // Xerces: development builds have no updater to install the data folder,
@@ -78,7 +59,10 @@ const std::filesystem::path &get_data_path() {
         return result;
       }
     }
-    return get_appdata_path() / (is_beta() ? "beta_data" : "data");
+    // Xerces (D9): no beta channel. Upstream read beta_data instead when the
+    // old launcher's version picker was set to its beta build or a dedicated
+    // server had -beta; both are gone.
+    return get_appdata_path() / "data";
   }();
   return data_path;
 }

@@ -92,7 +92,7 @@ int32_t parse_flags(int argc, char *argv[]) {
       .default_value(false)
       .implicit_value(true);
   program.add_argument("-beta", "--beta")
-      .help("Launch a dedicated server on the beta update channel")
+      .help("Ignored: Xerces removed upstream's beta update channel (D9)")
       .default_value(false)
       .implicit_value(true);
   program.add_argument("-nosteam", "--nosteam")
