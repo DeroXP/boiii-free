@@ -11,3 +11,4 @@ nul
 /**/*.cscasm
 /**/*.luac
 /**/*.aps
+/dist/
