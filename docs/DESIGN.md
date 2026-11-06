@@ -1355,8 +1355,12 @@ end, or Up from the tabs, reaches the footer's About link.
 ### 7.5 Localization and accessibility
 
 Strings in `data/xerces/i18n/<lang>.json` with named placeholders, plus a
-pseudo-locale that exposes truncation. UI scale 75 to 200 percent; light, dark
-and high-contrast themes; reduced motion.
+pseudo-locale that exposes truncation. `tools/i18n/extract_strings.py` writes
+the template every language starts from: the documents' text, and every string
+the C++ passes to `tr()`, directly, through a screen's helpers, or marked with
+`xerces_core::ui_text()` where a message is made elsewhere; CI fails when the
+template is stale. UI scale 75 to 200 percent; light, dark and high-contrast
+themes; reduced motion.
 
 ### 7.6 In-game Xerces menu
 
