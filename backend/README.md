@@ -1,9 +1,9 @@
 # Xerces backend
 
 The online half of Xerces: accounts, friends, presence, game invites and short
-pack share codes for the launcher. Self-hosted and offline play never need it.
-It is a small FastAPI service on PostgreSQL, built to run as one replica on
-Railway.
+pack share codes for the launcher, and the crash reports testers' launchers
+send. Self-hosted and offline play never need it. It is a small FastAPI service
+on PostgreSQL, built to run as one replica on Railway.
 
 ## What it does
 
@@ -19,6 +19,10 @@ Railway.
 - Pack share codes: `XRC-` plus 8 characters for a validated pack (64 KB at
   most, no local file paths), kept 90 days.
 - Your data: export everything stored about you, or delete the account at once.
+- Crash reports: a launcher with "Send crash reports" on sends one after a game
+  it started crashes. They are keyed to a random install id, never to an
+  account, kept 90 days, and read by the project owner with
+  `scripts/crashes.py`. See [Crash reports](#crash-reports).
 
 ## What it does not do yet
 
@@ -66,6 +70,12 @@ Outside production the interactive docs are served at `/docs`.
 | GET    | `/v1/packs/{code}`                  | no          | the pack, or 404                                             |
 | DELETE | `/v1/packs/{code}`                  | yes         | owner only, 204                                              |
 | WS     | `/v1/ws`                            | first frame | presence and pushes                                          |
+| POST   | `/v1/crashes`                       | install id  | 201 `{"id", "duplicate": false}`, 200 for a resent report    |
+| DELETE | `/v1/crashes`                       | install id  | `{"deleted": n}`: every report of that install               |
+| GET    | `/v1/admin/crashes`                 | admin token | reports, newest first, metadata only                         |
+| GET    | `/v1/admin/crashes/{id}`            | admin token | one report in full, without the minidump's bytes             |
+| GET    | `/v1/admin/crashes/{id}/minidump`   | admin token | the minidump, `application/octet-stream`                     |
+| GET    | `/v1/admin/crash-groups`            | admin token | reports grouped by signature                                 |
 
 Every error has the same shape, `{"error": {"code": "...", "message": "..."}}`.
 Friend requests, blocks and reports answer the same way whether or not the user
@@ -125,6 +135,115 @@ The server pushes:
 | 4401       | Token invalid or expired, signed out or password changed. Refresh, then reconnect. |
 | 4410       | Account deleted.                                                                   |
 
+## Crash reports
+
+The launcher and the backend share one contract, `xerces.crash/1`. The launcher
+sends a report when a game it started ends in a crash and its "Send crash
+reports" setting is on (it is on by default; with it off nothing is sent). Full
+crash dumps stay on the PC; a report carries at most a stacks-only minidump.
+
+```text
+POST /v1/crashes
+Content-Type: application/json
+Content-Encoding: gzip                 (optional)
+X-Xerces-Install: <32 lower-case hex>  (random, kept in <home>\config\install_id)
+User-Agent: Xerces/<version>
+```
+
+The body is one JSON object: `schema` (`"xerces.crash/1"`), `report_id` (32
+lower-case hex, made by the launcher), `created_utc`, `xerces` (`version`,
+`commit`, `dirty`), `game` (`build`, `steam_build`), `system` (`windows`, `cpu`,
+`logical_cpus`, `ram_mib`, `gpus`, `display`), `launch` (`mode`, `map`,
+`plan_id`, `mods`, `flags`, `safe_mode`), `crash` (`kind`, `code`, `exit_code`,
+`module`, `offset`, `thread`, `frames`, `phase`), `logs` (`journal`,
+`game_log_tail`, `launcher_log_tail`, `console_tail`) and `minidump_b64`. Only
+`schema`, `report_id`, `created_utc`, `xerces.version` and `crash.kind` are
+required; any other part may be missing or null, and unknown fields are ignored
+(and not stored). `crash.kind` is `exception`, `fail_fast`, `out_of_memory` or
+`unknown_exit`; `code`, `exit_code` and `offset` are hex numbers written
+`0x...`.
+
+| Answer | When                                                                                     |
+| ------ | ---------------------------------------------------------------------------------------- |
+| 201    | stored: `{"id": "<server id>", "duplicate": false}`                                      |
+| 200    | a `report_id` the server already has: `{"id": "<its server id>", "duplicate": true}`     |
+| 400    | not valid: bad JSON, a missing or wrong field, a missing or malformed `X-Xerces-Install` |
+| 408    | the body took over 30 seconds to arrive                                                  |
+| 413    | the body is over 4 MiB (after gzip decoding too), or the minidump over 2 MiB             |
+| 415    | not `application/json` in UTF-8, or a `Content-Encoding` other than gzip                 |
+| 429    | over a rate limit; `Retry-After` says when to try again                                  |
+| 503    | 8 big uploads are already being read; try again after `Retry-After`                      |
+
+Limits: names and other short strings 256 characters (versions, hashes and
+phases 64), each log tail 64 KiB, at most 32 frames, 512 mods, 64 flags and 16
+GPUs, the journal 256 KB and 32 levels deep. Sending the same `report_id` again
+never stores a second copy, also when two copies arrive at once, so a launcher
+can retry until it gets an answer. Every report counts against the limits per
+install and per address, rejected and repeated ones too; only stored ones count
+against the limit for all senders together.
+
+Privacy:
+
+- The launcher redacts before sending (profile paths, user names, server
+  addresses, favourite names; no player name, Steam id or XUID). The server
+  checks again: in every string, keys included, a Windows profile path such as
+  `C:\Users\Bob\...` becomes `C:\Users\<user>\...`, and `/home/<name>` (Proton)
+  becomes `/home/<user>`. `Public` and `Default` stay. In the minidump, which is
+  binary, each such name's characters are overwritten with `_` in place, so its
+  offsets stay valid. Debuggers find modules by file name, size and time stamp,
+  so this costs nothing; point the symbol path at the release PDBs.
+- No IP address is stored or logged. It is used only in memory, as an HMAC, for
+  the per-address rate limits. The user agent and the install id are not logged
+  either, and the user agent is not stored.
+- `DELETE /v1/crashes` with the same `X-Xerces-Install` header deletes every
+  report of that install, minidumps included, and answers `{"deleted": n}`. The
+  launcher offers it as "Delete my crash reports".
+- Reports are deleted 90 days after the server received them.
+
+Each report gets a signature that groups the same crash: the first 16 hex
+characters of the SHA-256 of `kind`, `module`, `offset` and the first three
+`frames`, each lower-cased with leading zeros dropped from hex numbers (`0x0010`
+counts as `0x10`), joined with `|`; missing parts count as empty. For example
+`exception|blackops3.exe|0x1a2b|blackops3.exe+0x1a2b|boiii.exe+0x20|ntdll.dll+0x30`.
+
+### Reading crash reports
+
+The admin routes are for the project owner only. They need
+`Authorization: Bearer <XERCES_ADMIN_TOKEN>`; while that variable is unset on
+the server they answer 404 like any unknown path. Tokens are compared in
+constant time, and 10 wrong ones from one address in 15 minutes lock that
+address out for a while.
+
+- `GET /v1/admin/crashes`: newest first, metadata only, as
+  `{"items": [...], "next_cursor": ...}`. Filters: `since` (an ISO time),
+  `signature`, `version`; `limit` 1 to 200 (50 by default); pass `next_cursor`
+  back as `cursor` for the next page.
+- `GET /v1/admin/crashes/{id}`: the whole report as stored, with `has_minidump`
+  and `minidump_size` but without the minidump.
+- `GET /v1/admin/crashes/{id}/minidump`: the minidump file.
+- `GET /v1/admin/crash-groups`: per signature the count, installs, first and
+  last time seen, versions, top 5 mods and maps and the newest report's id, most
+  frequent first. Takes `since` and `limit` (1 to 500, 100 by default).
+
+`scripts/crashes.py` reads them for you. It needs only Python, no packages. Set
+the two variables in the shell first; the token is the one on Railway:
+
+```text
+cd backend
+set XERCES_BACKEND_URL=https://boiii-free-production.up.railway.app
+set XERCES_ADMIN_TOKEN=<the value of XERCES_ADMIN_TOKEN on Railway>
+python scripts/crashes.py groups --since 7d
+python scripts/crashes.py list --signature <signature> --all
+python scripts/crashes.py show <id>
+python scripts/crashes.py minidump <id>
+```
+
+`groups` is where to start: the most frequent crashes first, with a sample
+report id. `show` prints that report with its logs; `--json` prints the raw
+JSON. `minidump` saves `<id>.dmp` in the current folder for WinDbg or Visual
+Studio. The script sends the token only over HTTPS (plain HTTP only to
+`127.0.0.1` or `localhost`, for local tests).
+
 ## Rate limits
 
 Counted in memory, per account, or per client address where nobody is signed in.
@@ -146,6 +265,10 @@ logged.
 | Wrong password on `/v1/me` | 5 per 15 minutes per account                                   |
 | WebSocket sign-ins         | 10 per minute per account, and per address for those that fail |
 | WebSocket messages         | 10 per second per account, then close 1008                     |
+| Crash reports              | 20 per hour per install id, 60 per hour per address            |
+| Crash reports, all senders | 2000 stored per day together, so a flood cannot fill the disk  |
+| Deleting crash reports     | 10 per hour per address                                        |
+| Wrong admin tokens         | 10 per 15 minutes per address                                  |
 
 Login attempts and password checks are counted before the password is hashed and
 given back unless it was wrong, so successful logins and attempts that end in a
@@ -197,13 +320,15 @@ per-username limits do not depend on any of this.
   Changes to one account's sessions take turns (a row lock), so a revocation
   never misses a token issued at the same moment, and a login or password change
   that checked the old password fails once a new one is set.
-- Request bodies over 128 KB are refused before parsing. Responses are marked as
-  never to be cached (`no-store`) or sniffed (`nosniff`). There is no CORS,
-  since the launcher is a desktop client.
+- Request bodies over 128 KB are refused before parsing, except crash reports,
+  which may be 4 MiB (8 read at a time, each within 30 seconds). Responses are
+  marked as never to be cached (`no-store`) or sniffed (`nosniff`). There is no
+  CORS, since the launcher is a desktop client.
 - Stored: username, password hash, optional email, privacy settings, the time of
   the last password change, friends, pending requests, blocks, reports, invites
-  and packs, and for 90 days the names of deleted accounts. Never stored or
-  logged: IP addresses, user agents and tokens. Presence lives in memory only.
+  and packs, and for 90 days the names of deleted accounts and crash reports
+  (keyed to an install id, not an account). Never stored or logged: IP
+  addresses, user agents and tokens. Presence lives in memory only.
 - Logs are JSON lines on stdout with event names, and user ids on account events
   such as logins. They never contain tokens, passwords, emails or addresses.
   Sockets are logged with a connection count only, so the logs keep nobody's
@@ -219,7 +344,8 @@ per-username limits do not depend on any of this.
   account: written on its own just before the deletion, with only the day it
   ends.
 - Every 10 minutes a background task deletes expired invites, friend requests,
-  refresh tokens, packs and held usernames, and reports older than 90 days.
+  refresh tokens, packs and held usernames, and reports and crash reports older
+  than 90 days.
 
 ## Local development
 
@@ -268,9 +394,11 @@ image's `start.sh` runs `alembic upgrade head`, which fails on a revision that
 image does not know, so the old deployment would never start. While the new
 deployment still runs, open a shell in it (`railway ssh`) and run
 `alembic downgrade <revision>` with the head revision of the image you go back
-to (`0001` to undo `0002`), then roll back. Downgrading 0002 deletes the friend
-requests that were hidden from their recipients, since 0001 could only show
-them, and keeps the names held for deleted accounts for when you upgrade again.
+to (`0001` to undo `0002`, `0002` to undo `0003`), then roll back. Downgrading
+0002 deletes the friend requests that were hidden from their recipients, since
+0001 could only show them, and keeps the names held for deleted accounts for
+when you upgrade again. Downgrading 0003 drops the crash report tables, and
+every crash report with them.
 
 ## Environment variables
 
@@ -282,6 +410,7 @@ them, and keeps the names held for deleted accounts for when you upgrade again.
 | `XERCES_TOKEN_KEY_ID`            | required       | throwaway in development   | key id written into each token header                                       |
 | `XERCES_TOKEN_EXTRA_PUBLIC_KEYS` | optional       | none                       | JSON object of old key ids to PEM public keys, accepted during a rotation   |
 | `XERCES_RATE_LIMIT_SECRET`       | required       | throwaway in development   | at least 32 characters; keys the HMAC of client addresses                   |
+| `XERCES_ADMIN_TOKEN`             | for crashes    | unset: admin routes 404    | at least 32 characters; the bearer token of the `/v1/admin` routes          |
 | `XERCES_TRUST_PROXY`             | `1`            | `0`                        | take the client address from `X-Forwarded-For` (uvicorn trusts it too)      |
 | `XERCES_PROXY_HOPS`              | optional       | `0`                        | `0`: first `X-Forwarded-For` entry; `N`: the Nth from the right             |
 | `XERCES_ARGON2_TIME_COST`        | optional       | `2`                        | Argon2id iterations                                                         |
@@ -290,8 +419,8 @@ them, and keeps the names held for deleted accounts for when you upgrade again.
 | `PORT`                           | set by Railway | `8080`                     | port uvicorn listens on                                                     |
 
 In production the service refuses to start when the signing key, key id or
-rate-limit secret is missing, or when `DATABASE_URL` is missing or points at
-SQLite.
+rate-limit secret is missing, when `DATABASE_URL` is missing or points at
+SQLite, or when `XERCES_ADMIN_TOKEN` is set but shorter than 32 characters.
 
 `DATABASE_URL` can hold the password as Railway writes it: the app encodes `@`,
 `:`, `/`, `?` and `#` in the user name and password itself. Only a `%` must be
@@ -323,7 +452,10 @@ it, so these settings are made in the dashboard.
 6. On your PC, in the `backend` folder, run `python scripts/genkey.py`. Paste
    the three lines it prints into the service's variables with the Raw Editor.
    Do not save them anywhere else.
-7. Add `XERCES_ENV=production` and `XERCES_TRUST_PROXY=1`, then deploy. The
+7. Add `XERCES_ENV=production` and `XERCES_TRUST_PROXY=1`. To read crash
+   reports, also run `python scripts/genkey.py --admin` and add the line it
+   prints (`XERCES_ADMIN_TOKEN=...`); keep a copy for `scripts/crashes.py`, for
+   example in your password manager, and nowhere else. Then deploy. The
    container runs the migrations and starts the server; Railway waits for the
    health check to pass before it sends traffic to the new deployment.
 8. In Settings, under Networking, choose Generate Domain. If Railway asks for a
@@ -363,6 +495,10 @@ it, so these settings are made in the dashboard.
 - Point an external uptime check at `/healthz`. Logs are JSON lines, so the
   Railway log view can filter them by `event`.
 - There is no moderation UI yet. Reports stay 90 days in the `reports` table.
+- Crash reports: start with `python scripts/crashes.py groups --since 7d` (see
+  [Reading crash reports](#reading-crash-reports)). To change the admin token,
+  run `genkey.py --admin` again and replace the variable on Railway and in your
+  shell; the old token stops working with the redeploy that follows.
 
 ## Licence
 

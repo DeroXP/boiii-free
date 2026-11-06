@@ -22,7 +22,19 @@ from app.log import configure_logging, log_event
 from app.passwords import PasswordService
 from app.presence import PresenceHub
 from app.ratelimit import RateLimiter
-from app.routers import auth, blocks, friends, health, invites, me, packs, reports, ws
+from app.routers import (
+    admin,
+    auth,
+    blocks,
+    crashes,
+    friends,
+    health,
+    invites,
+    me,
+    packs,
+    reports,
+    ws,
+)
 from app.security import BodySizeLimitMiddleware, RequestLogMiddleware, SecurityHeadersMiddleware
 from app.tasks import cleanup_loop
 from app.tokens import AccessTokens
@@ -106,10 +118,16 @@ def create_app(settings: Settings | None = None, *, tuning: Tuning | None = None
     app.state.services = services
     install_error_handlers(app)
     # Last added runs first: log -> headers -> body limit -> routes.
-    app.add_middleware(BodySizeLimitMiddleware, max_bytes=tuning.max_body_bytes)
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        max_bytes=tuning.max_body_bytes,
+        large_paths={crashes.CRASHES_PATH: tuning.crash_max_body_bytes},
+        large_slots=tuning.crash_upload_slots,
+        large_timeout=tuning.crash_body_timeout,
+    )
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestLogMiddleware)
-    for module in (health, auth, me, friends, blocks, reports, invites, packs, ws):
+    for module in (health, auth, me, friends, blocks, reports, invites, packs, ws, crashes, admin):
         app.include_router(module.router)
     return app
 

@@ -10,9 +10,12 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
+    LargeBinary,
     MetaData,
     String,
     TypeDecorator,
@@ -37,6 +40,7 @@ PRIVACY_INVITES = ("friends", "nobody")
 REPORT_REASONS = ("spam", "harassment", "cheating", "impersonation", "other")
 REPORT_STATUSES = ("open", "closed")
 INVITE_STATUSES = ("pending", "accepted", "declined")
+CRASH_KINDS = ("exception", "fail_fast", "out_of_memory", "unknown_exit")
 
 
 def utcnow() -> datetime:
@@ -218,3 +222,54 @@ class Pack(Base):
     data: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(index=True)
+
+
+class CrashReport(Base):
+    """A crash report sent by a launcher (POST /v1/crashes), kept 90 days.
+
+    Keyed to a random install id, never to an account. No client address is stored. The column
+    names follow the report's fields; `mods`, `system`, `crash` and `logs` hold those parts as
+    sent, after the server's path scrub (app.crashes).
+    """
+
+    __tablename__ = "crash_reports"
+    __table_args__ = (CheckConstraint(_in("kind", CRASH_KINDS), name="kind"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    # The client's own id for the report, so a resend is recognized (idempotency key).
+    report_id: Mapped[str] = mapped_column(String(32), unique=True)
+    install_id: Mapped[str] = mapped_column(String(32), index=True)
+    created_utc: Mapped[datetime]
+    received_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
+    version: Mapped[str] = mapped_column(String(64), index=True)
+    commit: Mapped[str | None] = mapped_column(String(64))
+    dirty: Mapped[bool | None]
+    game_build: Mapped[str | None] = mapped_column(String(64))
+    steam_build: Mapped[int | None] = mapped_column(BigInteger)
+    kind: Mapped[str] = mapped_column(String(16))
+    code: Mapped[str | None] = mapped_column(String(18))
+    module: Mapped[str | None] = mapped_column(String(256))
+    offset: Mapped[str | None] = mapped_column(String(18))
+    signature: Mapped[str] = mapped_column(String(16), index=True)
+    phase: Mapped[str | None] = mapped_column(String(64))
+    mode: Mapped[str | None] = mapped_column(String(2))
+    map: Mapped[str | None] = mapped_column(String(256))
+    plan_id: Mapped[str | None] = mapped_column(String(256))
+    safe_mode: Mapped[bool | None]
+    flags: Mapped[list[str] | None] = mapped_column(JSON)
+    mods: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    system: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    crash: Mapped[dict[str, Any]] = mapped_column(JSON)
+    logs: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class CrashMinidump(Base):
+    """The stacks-only minidump of a report, in its own table so lists never load it."""
+
+    __tablename__ = "crash_minidumps"
+
+    crash_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("crash_reports.id", ondelete="CASCADE"), primary_key=True
+    )
+    size: Mapped[int] = mapped_column(Integer)
+    data: Mapped[bytes] = mapped_column(LargeBinary)

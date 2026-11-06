@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from app.config import Settings
 from app.main import create_app
 from app.models import Base
+from tests.crashdata import crash_report, post_crash
 from tests.helpers import (
     PASSWORD,
     TestUser,
@@ -139,6 +140,33 @@ async def test_rolling_0002_back_and_forward_keeps_hidden_requests_hidden_and_na
         assert again.status_code == 409  # still held
 
 
+async def test_rolling_0003_back_and_forward(tmp_path: Path) -> None:
+    database = tmp_path / "crashes.db"
+    config = _config(database)
+    settings = make_settings(tmp_path, DATABASE_URL=sqlite_url(database))
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with _running(settings) as app, client_for(app) as client:
+        user = await register(client, "keeper")
+        sent = await post_crash(client, crash_report())
+        assert sent.status_code == 201
+
+    await asyncio.to_thread(command.downgrade, config, "0002")
+    engine = sa.create_engine(f"sqlite:///{database.as_posix()}")
+    try:
+        tables = set(sa.inspect(engine).get_table_names())
+        assert not {"crash_reports", "crash_minidumps"} & tables
+        with engine.connect() as connection:  # nothing else was touched
+            assert connection.scalar(sa.text("SELECT username FROM users")) == "keeper"
+    finally:
+        engine.dispose()
+    await asyncio.to_thread(command.upgrade, config, "head")
+
+    async with _running(settings) as app, client_for(app) as client:
+        assert (await client.get("/v1/me", headers=user.headers)).status_code == 200
+        again = await post_crash(client, crash_report())
+        assert again.status_code == 201
+
+
 def test_offline_sql_for_postgres(tmp_path: Path, capsys) -> None:
     config = Config(str(BACKEND / "alembic.ini"))
     config.attributes["database_url"] = "postgresql+asyncpg://user:pass@localhost/xerces"
@@ -150,3 +178,8 @@ def test_offline_sql_for_postgres(tmp_path: Path, capsys) -> None:
     assert "created_at TIMESTAMP WITH TIME ZONE NOT NULL" in sql
     assert "ON DELETE SET NULL" in sql
     assert "ON DELETE CASCADE" in sql
+    assert "CREATE TABLE crash_reports" in sql
+    assert "CREATE TABLE crash_minidumps" in sql
+    assert "data BYTEA NOT NULL" in sql
+    assert "steam_build BIGINT" in sql
+    assert '"offset" VARCHAR(18)' in sql  # a reserved word in PostgreSQL, so quoted

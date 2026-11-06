@@ -7,6 +7,7 @@ test fall back to throwaway secrets and say so loudly.
 
 import base64
 import binascii
+import hashlib
 import json
 import re
 import secrets
@@ -32,6 +33,7 @@ DEV_DATABASE_URL = "sqlite+aiosqlite:///./xerces-dev.db"
 OWASP_MIN_TIME_COST = 2
 OWASP_MIN_MEMORY_KIB = 19456
 MIN_RATE_LIMIT_SECRET_CHARS = 32
+MIN_ADMIN_TOKEN_CHARS = 32
 KEY_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
 _POSTGRES_SCHEMES = frozenset({"postgres", "postgresql", "postgresql+asyncpg"})
 _SQLITE_SCHEMES = frozenset({"sqlite", "sqlite+aiosqlite"})
@@ -65,6 +67,8 @@ class Settings(BaseSettings):
     rate_limit_secret: SecretStr | None = Field(
         default=None, validation_alias="XERCES_RATE_LIMIT_SECRET"
     )
+    # Bearer token for the /v1/admin routes (crash reports). Unset: those routes answer 404.
+    admin_token: SecretStr | None = Field(default=None, validation_alias="XERCES_ADMIN_TOKEN")
     trust_proxy: bool = Field(default=False, validation_alias="XERCES_TRUST_PROXY")
     # Which X-Forwarded-For entry is the client (used only with XERCES_TRUST_PROXY=1): 0 takes the
     # first entry, for an edge that replaces the header; N takes the Nth entry from the right, for
@@ -100,6 +104,11 @@ class Tuning:
     # Requests that may wait for a hash slot; more are turned away with 503 (app.passwords).
     hash_queue: int = 64
     configure_logging: bool = True
+    # POST /v1/crashes: the largest body (before and after gzip decoding), how many such uploads
+    # may be read and handled at once (the rest get 503), and how long reading one may take.
+    crash_max_body_bytes: int = 4 * 1024 * 1024
+    crash_upload_slots: int = 8
+    crash_body_timeout: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -115,6 +124,8 @@ class RuntimeConfig:
     argon2_memory_kib: int
     argon2_parallelism: int
     proxy_hops: int = 0
+    # SHA-256 of XERCES_ADMIN_TOKEN, compared in constant time (app.routers.admin); None when unset.
+    admin_token_hash: bytes | None = None
     warnings: tuple[str, ...] = ()
 
 
@@ -255,6 +266,11 @@ def load_extra_public_keys(raw: str | None, current_kid: str) -> dict[str, Ed255
     return keys
 
 
+def hash_admin_token(token: str) -> bytes:
+    """What an admin token is compared as: equal-length digests, so the compare leaks nothing."""
+    return hashlib.sha256(token.encode("utf-8")).digest()
+
+
 def resolve_database_url(settings: Settings) -> str:
     """The async database URL; also used by migrations/env.py, which needs nothing else."""
     production = settings.env == "production"
@@ -305,6 +321,17 @@ def resolve(settings: Settings) -> RuntimeConfig:
             f"XERCES_RATE_LIMIT_SECRET must be at least {MIN_RATE_LIMIT_SECRET_CHARS} characters."
         )
 
+    admin_token = settings.admin_token.get_secret_value().strip() if settings.admin_token else ""
+    if admin_token and len(admin_token) < MIN_ADMIN_TOKEN_CHARS:
+        message = (
+            f"XERCES_ADMIN_TOKEN must be at least {MIN_ADMIN_TOKEN_CHARS} characters "
+            "(run scripts/genkey.py --admin)."
+        )
+        if production:
+            problems.append(message)
+        else:
+            warnings.append(message)
+
     if settings.argon2_memory_kib < 8 * settings.argon2_parallelism:
         raise ConfigError(
             "XERCES_ARGON2_MEMORY_KIB must be at least 8 times XERCES_ARGON2_PARALLELISM."
@@ -350,5 +377,6 @@ def resolve(settings: Settings) -> RuntimeConfig:
         argon2_memory_kib=settings.argon2_memory_kib,
         argon2_parallelism=settings.argon2_parallelism,
         proxy_hops=settings.proxy_hops,
+        admin_token_hash=hash_admin_token(admin_token) if admin_token else None,
         warnings=tuple(warnings),
     )

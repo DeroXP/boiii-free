@@ -1,6 +1,7 @@
 """Print fresh secrets for the Xerces backend, ready to paste into Railway's variable editor.
 
     python scripts/genkey.py                 # three KEY=value lines on stdout
+    python scripts/genkey.py --admin         # XERCES_ADMIN_TOKEN=... for the admin routes
     python scripts/genkey.py --public -      # PEM public key of a seed read from stdin, for
                                              # XERCES_TOKEN_EXTRA_PUBLIC_KEYS (paste the seed)
     python scripts/genkey.py --public SEED   # the same, with the seed in the command line
@@ -45,7 +46,20 @@ def main() -> int:
         metavar="SEED",
         help="print the public key of this seed; '-' reads it from stdin",
     )
+    parser.add_argument(
+        "--admin",
+        action="store_true",
+        help="print a new XERCES_ADMIN_TOKEN (for the crash-report admin routes)",
+    )
     args = parser.parse_args()
+    if args.admin:
+        print(f"XERCES_ADMIN_TOKEN={b64url(secrets.token_bytes(32))}")
+        print(
+            "# Set it in the service's variables and keep a copy for scripts/crashes.py, "
+            "nowhere else.",
+            file=sys.stderr,
+        )
+        return 0
     if args.public:
         seed = read_seed() if args.public == "-" else args.public
         print(public_pem(seed), end="")

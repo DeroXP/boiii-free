@@ -1,14 +1,14 @@
 """Request and response bodies, and the validators they share.
 
-Request models forbid unknown fields and cap every string, so nothing unbounded reaches the
-database. Validation messages never include the submitted value.
+Request models forbid unknown fields (crash reports ignore them) and cap every string, so nothing
+unbounded reaches the database. Validation messages never include the submitted value.
 """
 
 import re
 import unicodedata
 import uuid
-from datetime import datetime
-from typing import Any, Literal
+from datetime import UTC, datetime
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
@@ -361,3 +361,174 @@ class PackOut(BaseModel):
     pack: dict[str, Any]
     created_at: datetime
     expires_at: datetime
+
+
+# ----------------------------------------------------------------------------- crash reports
+
+# POST /v1/crashes (contract xerces.crash/1). Unlike the other request bodies these ignore unknown
+# fields, so newer launchers can add some, and almost every part may be missing or null.
+CRASH_SCHEMA = "xerces.crash/1"
+CRASH_NAME_MAX = 256
+CRASH_TAIL_MAX = 64 * 1024
+CRASH_FRAMES_MAX = 32
+# Base64 of the largest minidump (2 MiB): 4 characters for every 3 bytes, rounded up.
+CRASH_MINIDUMP_B64_MAX = 4 * -(-(2 * 1024 * 1024) // 3)
+
+_HEX_NUMBER = r"^0x[0-9A-Fa-f]{1,16}$"
+CrashName = Annotated[str, Field(max_length=CRASH_NAME_MAX)]
+CrashShort = Annotated[str, Field(max_length=64)]
+CrashHex = Annotated[str, Field(max_length=18, pattern=_HEX_NUMBER)]
+CrashTail = Annotated[str, Field(max_length=CRASH_TAIL_MAX)]
+
+
+class _Lenient(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+
+class CrashXercesIn(_Lenient):
+    version: CrashShort = Field(min_length=1)
+    commit: CrashShort | None = None
+    dirty: bool | None = None
+
+
+class CrashGameIn(_Lenient):
+    build: CrashShort | None = None
+    steam_build: int | None = Field(default=None, ge=0, le=2**63 - 1)
+
+
+class CrashGpuIn(_Lenient):
+    name: CrashName | None = None
+    driver: CrashName | None = None
+
+
+class CrashSystemIn(_Lenient):
+    windows: CrashName | None = None
+    cpu: CrashName | None = None
+    logical_cpus: int | None = Field(default=None, ge=0, le=65536)
+    ram_mib: int | None = Field(default=None, ge=0, le=2**40)
+    gpus: list[CrashGpuIn] | None = Field(default=None, max_length=16)
+    display: CrashName | None = None
+
+
+class CrashModIn(_Lenient):
+    id: CrashName | None = None
+    name: CrashName | None = None
+    version: CrashName | None = None
+
+
+class CrashLaunchIn(_Lenient):
+    mode: Literal["zm", "mp", "cp"] | None = None
+    map: CrashName | None = None
+    plan_id: CrashName | None = None
+    mods: list[CrashModIn] | None = Field(default=None, max_length=512)
+    flags: list[CrashName] | None = Field(default=None, max_length=64)
+    safe_mode: bool | None = None
+
+
+class CrashDetailsIn(_Lenient):
+    kind: Literal["exception", "fail_fast", "out_of_memory", "unknown_exit"]
+    code: CrashHex | None = None
+    exit_code: CrashHex | None = None
+    module: CrashName | None = None
+    offset: CrashHex | None = None
+    thread: CrashShort | None = None
+    frames: list[CrashName] | None = Field(default=None, max_length=CRASH_FRAMES_MAX)
+    phase: CrashShort | None = None
+
+
+class CrashLogsIn(_Lenient):
+    journal: dict[str, Any] | None = None
+    game_log_tail: CrashTail | None = None
+    launcher_log_tail: CrashTail | None = None
+    console_tail: CrashTail | None = None
+
+
+class CrashReportIn(_Lenient):
+    # "schema" would shadow a BaseModel attribute, hence the alias.
+    schema_: Literal["xerces.crash/1"] = Field(alias="schema")
+    report_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    created_utc: datetime
+    xerces: CrashXercesIn
+    game: CrashGameIn | None = None
+    system: CrashSystemIn | None = None
+    launch: CrashLaunchIn | None = None
+    crash: CrashDetailsIn
+    logs: CrashLogsIn | None = None
+    minidump_b64: str | None = None
+
+    @field_validator("created_utc")
+    @classmethod
+    def _utc(cls, value: datetime) -> datetime:
+        try:
+            return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+        except OverflowError:  # year 1 with a positive offset, say
+            raise ValueError("Out of range.") from None
+
+
+class CrashCreatedOut(BaseModel):
+    id: uuid.UUID
+    duplicate: bool
+
+
+class CrashesDeletedOut(BaseModel):
+    deleted: int
+
+
+class CrashSummaryOut(BaseModel):
+    """One report in the admin list: metadata only, no logs, system details or minidump."""
+
+    id: uuid.UUID
+    report_id: str
+    install_id: str
+    received_at: datetime
+    created_utc: datetime
+    version: str
+    commit: str | None
+    game_build: str | None
+    kind: str
+    code: str | None
+    module: str | None
+    offset: str | None
+    signature: str
+    phase: str | None
+    mode: str | None
+    map: str | None
+    has_minidump: bool
+    minidump_size: int | None
+
+
+class CrashListOut(BaseModel):
+    items: list[CrashSummaryOut]
+    next_cursor: str | None
+
+
+class CountOut(BaseModel):
+    value: str
+    count: int
+
+
+class CrashModCountOut(BaseModel):
+    id: str | None
+    name: str | None
+    count: int
+
+
+class CrashGroupOut(BaseModel):
+    signature: str
+    count: int
+    installs: int
+    first_seen: datetime
+    last_seen: datetime
+    kind: str
+    module: str | None
+    offset: str | None
+    frames: list[str]
+    versions: list[CountOut]
+    top_mods: list[CrashModCountOut]
+    top_maps: list[CountOut]
+    sample_id: uuid.UUID
+
+
+class CrashGroupsOut(BaseModel):
+    reports: int
+    groups: list[CrashGroupOut]

@@ -10,6 +10,8 @@ from sqlalchemy import func, select
 
 from app.main import create_app
 from app.models import (
+    CrashMinidump,
+    CrashReport,
     DeletedUsername,
     FriendRequest,
     Invite,
@@ -66,6 +68,7 @@ async def test_cleanup_deletes_only_expired_rows(app: FastAPI) -> None:
         "packs": 1,
         "reports": 1,
         "deleted_usernames": 1,
+        "crash_reports": 0,
     }
 
     async with sessionmaker() as db:
@@ -101,3 +104,41 @@ async def test_cleanup_loop_keeps_running_and_stops_at_shutdown(tmp_path: Path) 
     finally:
         await lifespan.__aexit__(None, None, None)
     assert task.cancelled()
+
+
+def _crash(received_at, report_id: str) -> CrashReport:
+    return CrashReport(
+        id=uuid.uuid4(),
+        report_id=report_id,
+        install_id="0" * 32,
+        created_utc=received_at,
+        received_at=received_at,
+        version="0.1.0-beta.1",
+        kind="exception",
+        signature="0" * 16,
+        crash={"kind": "exception"},
+    )
+
+
+async def test_crash_reports_are_kept_90_days(app: FastAPI) -> None:
+    now = utcnow()
+    sessionmaker = services_of(app).sessionmaker
+    old = _crash(now - timedelta(days=90, minutes=1), "a" * 32)
+    young = _crash(now - timedelta(days=89, hours=23), "b" * 32)
+    # The client's own clock does not count: a report "made" long ago but just received stays.
+    fresh = _crash(now, "c" * 32)
+    fresh.created_utc = now - timedelta(days=400)
+    async with sessionmaker() as db:
+        db.add_all([old, young, fresh])
+        await db.flush()
+        db.add(CrashMinidump(crash_id=old.id, size=4, data=b"MDMP"))
+        db.add(CrashMinidump(crash_id=young.id, size=4, data=b"MDMP"))
+        await db.commit()
+
+    counts = await run_cleanup(sessionmaker)
+    assert counts["crash_reports"] == 1
+    async with sessionmaker() as db:
+        left = set((await db.scalars(select(CrashReport.report_id))).all())
+        dumps = set((await db.scalars(select(CrashMinidump.crash_id))).all())
+    assert left == {"b" * 32, "c" * 32}
+    assert dumps == {young.id}  # the old report's minidump went with it

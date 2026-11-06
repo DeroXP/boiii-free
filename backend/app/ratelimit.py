@@ -46,6 +46,14 @@ DEFAULT_RULES: Mapping[str, Rule] = {
     "ws_message": Rule(10, 1),  # per user, whichever socket the messages come over
     # Per user, and per hashed address for sockets that do not sign in (refunded when they do).
     "ws_connect": Rule(10, 60),
+    # Crash reports: per install id (a launcher sends its outbox of up to 20 at start), per hashed
+    # address (several testers can share one), and every stored report together, which caps what
+    # a flood can make the database store.
+    "crash_install": Rule(20, HOUR),
+    "crash_address": Rule(60, HOUR),
+    "crash_all": Rule(2000, DAY),
+    "crash_delete": Rule(10, HOUR),  # per hashed address
+    "admin_auth": Rule(10, 15 * 60),  # wrong admin tokens, per hashed address (refunded if right)
 }
 
 

@@ -1,15 +1,17 @@
-"""Request hygiene: body size cap, security headers, request logs and hashed client addresses.
+"""Request hygiene: body size caps, security headers, request logs and hashed client addresses.
 
 All three middlewares are plain ASGI so they see every response, including 4xx errors. A 500 from
 an unhandled exception is sent by Starlette's ServerErrorMiddleware, which sits outside them, so
 app.errors adds the same headers to it and RequestLogMiddleware records it as status 500.
 """
 
+import asyncio
 import hashlib
 import hmac
 import ipaddress
 import logging
 import time
+from collections.abc import Mapping
 
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -76,38 +78,87 @@ def hashed_address(secret: bytes, address: str) -> str:
 
 
 class BodySizeLimitMiddleware:
-    """Reject bodies over `max_bytes` before anything parses them (413)."""
+    """Reject bodies over `max_bytes` before anything parses them (413).
 
-    def __init__(self, app: ASGIApp, max_bytes: int = 128 * 1024) -> None:
+    Paths in `large_paths` (POST /v1/crashes) get their own, larger limit. At most `large_slots`
+    of those are read and handled at once, so a burst of big uploads cannot exhaust memory; the
+    rest are turned away with 503 and Retry-After. Reading one may take `large_timeout` seconds,
+    so slow senders cannot hold the slots (408).
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        max_bytes: int = 128 * 1024,
+        *,
+        large_paths: Mapping[str, int] | None = None,
+        large_slots: int = 8,
+        large_timeout: float = 30.0,
+    ) -> None:
         self.app = app
         self.max_bytes = max_bytes
+        self.large_paths = dict(large_paths or {})
+        self.large_slots = large_slots
+        self.large_timeout = large_timeout
+        self._large_in_flight = 0
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        limit = self.large_paths.get(scope.get("path", ""))
+        if limit is None:
+            await self._handle(scope, receive, send, self.max_bytes, None)
+            return
+        if self._large_in_flight >= self.large_slots:
+            response = error_response(
+                503,
+                "unavailable",
+                "Too many uploads at once. Try again shortly.",
+                headers={"Retry-After": "10"},
+            )
+            await response(scope, receive, send)
+            return
+        self._large_in_flight += 1
+        try:
+            await self._handle(scope, receive, send, limit, self.large_timeout)
+        finally:
+            self._large_in_flight -= 1
+
+    async def _handle(
+        self, scope: Scope, receive: Receive, send: Send, limit: int, timeout: float | None
+    ) -> None:
         for name, value in scope.get("headers", ()):
             if name == b"content-length":
                 try:
                     declared = int(value)
                 except ValueError:
-                    await self._reject(scope, receive, send, 400)
+                    await self._reject(scope, receive, send, 400, limit)
                     return
-                if declared > self.max_bytes:
-                    await self._reject(scope, receive, send, 413)
+                if declared > limit:
+                    await self._reject(scope, receive, send, 413, limit)
                     return
         # Read the body here (bounded) so chunked uploads cannot slip past the limit.
         body = bytearray()
-        while True:
-            message = await receive()
-            if message["type"] != "http.request":
-                return  # client went away
-            body.extend(message.get("body", b""))
-            if len(body) > self.max_bytes:
-                await self._reject(scope, receive, send, 413)
-                return
-            if not message.get("more_body", False):
-                break
+        too_large = False
+        try:
+            async with asyncio.timeout(timeout):
+                while True:
+                    message = await receive()
+                    if message["type"] != "http.request":
+                        return  # client went away
+                    body.extend(message.get("body", b""))
+                    if len(body) > limit:
+                        too_large = True
+                        break
+                    if not message.get("more_body", False):
+                        break
+        except TimeoutError:
+            await self._reject(scope, receive, send, 408, limit)
+            return
+        if too_large:
+            await self._reject(scope, receive, send, 413, limit)
+            return
 
         replayed = False
 
@@ -120,16 +171,25 @@ class BodySizeLimitMiddleware:
 
         await self.app(scope, replay, send)
 
-    async def _reject(self, scope: Scope, receive: Receive, send: Send, status: int) -> None:
+    async def _reject(
+        self, scope: Scope, receive: Receive, send: Send, status: int, limit: int
+    ) -> None:
         if status == 413:
             response = error_response(
-                413,
-                "payload_too_large",
-                f"Request body is larger than {self.max_bytes // 1024} KB.",
+                413, "payload_too_large", f"Request body is larger than {size_text(limit)}."
             )
+        elif status == 408:
+            response = error_response(408, "request_timeout", "The request body came too slowly.")
         else:
             response = error_response(400, "bad_request", "Content-Length is not a number.")
         await response(scope, receive, send)
+
+
+def size_text(limit: int) -> str:
+    """128 KB, 4 MiB: how the limits are written in error messages and the README."""
+    if limit >= 1024 * 1024 and limit % (1024 * 1024) == 0:
+        return f"{limit // (1024 * 1024)} MiB"
+    return f"{limit // 1024} KB"
 
 
 class SecurityHeadersMiddleware:

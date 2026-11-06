@@ -14,7 +14,14 @@ from pydantic import ValidationError
 from sqlalchemy.engine import make_url
 
 import app.main as main_module
-from app.config import ConfigError, Settings, load_private_key, normalize_database_url, resolve
+from app.config import (
+    ConfigError,
+    Settings,
+    hash_admin_token,
+    load_private_key,
+    normalize_database_url,
+    resolve,
+)
 from app.main import create_app
 from app.tokens import AccessTokens
 from tests.helpers import (
@@ -307,3 +314,33 @@ async def test_old_tokens_survive_key_rotation(app_factory: AppFactory, tmp_path
     app3 = await app_factory(settings=unrelated, schema=False)
     async with client_for(app3) as client:
         assert (await client.get("/v1/me", headers=user.headers)).status_code == 401
+
+
+def test_the_admin_token_is_optional_and_long_in_production() -> None:
+    assert resolve(_settings(**_production())).admin_token_hash is None  # admin routes: 404
+    token = "a" * 43
+    config = resolve(_settings(**_production(XERCES_ADMIN_TOKEN=f"  {token}  ")))
+    assert config.admin_token_hash == hash_admin_token(token)
+    assert config.warnings == ()
+    with pytest.raises(ConfigError, match="XERCES_ADMIN_TOKEN must be at least 32"):
+        resolve(_settings(**_production(XERCES_ADMIN_TOKEN="short")))
+    development = resolve(_settings(XERCES_ENV="development", XERCES_ADMIN_TOKEN="short"))
+    assert development.admin_token_hash == hash_admin_token("short")
+    assert any("XERCES_ADMIN_TOKEN" in warning for warning in development.warnings)
+
+
+def test_the_admin_token_never_shows_in_errors_or_reprs() -> None:
+    token = "secret-admin-token-" + "z" * 30
+    settings = _settings(**_production(XERCES_ADMIN_TOKEN=token))
+    assert token not in repr(settings)
+    assert token not in repr(resolve(settings))
+
+
+def test_genkey_prints_an_admin_token() -> None:
+    line = _genkey("--admin")
+    name, _, token = line.partition("=")
+    assert name == "XERCES_ADMIN_TOKEN"
+    assert len(token) >= 43
+    config = resolve(_settings(**_production(XERCES_ADMIN_TOKEN=token)))
+    assert config.admin_token_hash == hash_admin_token(token)
+    assert _genkey("--admin") != line

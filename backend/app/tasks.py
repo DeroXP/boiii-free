@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.log import log_event
 from app.models import (
+    CrashReport,
     DeletedUsername,
     FriendRequest,
     Invite,
@@ -23,13 +24,15 @@ if TYPE_CHECKING:
     from app.deps import Services
 
 REPORT_RETENTION = timedelta(days=90)
+# Counted from when the server received a report: the client's own clock is not trusted for it.
+CRASH_RETENTION = timedelta(days=90)
 
 
 async def run_cleanup(
     sessionmaker: async_sessionmaker[AsyncSession], now: datetime | None = None
 ) -> dict[str, int]:
     """Delete expired invites, friend requests, refresh tokens, packs and held names of deleted
-    accounts, and old reports."""
+    accounts, old reports and old crash reports (their minidumps go with them)."""
     now = now or utcnow()
     statements = {
         "invites": delete(Invite).where(Invite.expires_at < now),
@@ -38,6 +41,9 @@ async def run_cleanup(
         "packs": delete(Pack).where(Pack.expires_at < now),
         "reports": delete(Report).where(Report.created_at < now - REPORT_RETENTION),
         "deleted_usernames": delete(DeletedUsername).where(DeletedUsername.expires_at < now),
+        "crash_reports": delete(CrashReport).where(
+            CrashReport.received_at < now - CRASH_RETENTION
+        ),
     }
     counts: dict[str, int] = {}
     async with sessionmaker() as db:
