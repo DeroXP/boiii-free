@@ -1215,7 +1215,7 @@ check.
 | `parties`, `party_members` (M5)   | leader, members, expiry                                                                            | while active, 24 h after the last activity         |
 | `servers` (M6)                    | listing fields, server key fingerprint, last heartbeat                                             | while heartbeating                                 |
 | `sync_blobs` (M8)                 | user, kind, ETag, blob (size cap)                                                                  | until deletion                                     |
-| `crash_reports` (M8, opt-in only) | scrubbed bundle                                                                                    | 30 days                                            |
+| `crash_reports` (beta, see 10.10) | random install id, versions, crash details, scrubbed logs, stacks-only minidump; no address        | 90 days                                            |
 
 Presence lives only in memory in the WebSocket hub.
 
@@ -1238,8 +1238,9 @@ rest follows in M5 to M8.
   listings).
 - M8: `sync/{kind}` (GET and PUT with ETag and If-Match; kinds: packs, profiles,
   portable settings, never local paths or credentials; last writer wins with a
-  conflict prompt; off by default; included in export, deleted with the account)
-  and `crash` (opt-in bundle upload).
+  conflict prompt; off by default; included in export, deleted with the
+  account).
+- Beta: `crashes` (crash reports from launchers, 10.10).
 
 ### 10.4 Security
 
@@ -1390,6 +1391,31 @@ local PostgreSQL 16, plus a smoke test against a real uvicorn server. Not
 verified before the first deploy: the Docker build (no Docker on the build PC),
 how Railway's edge fills `X-Forwarded-For` (the README's forged-header check),
 and the Markdown formatting check (no Node on the build PC).
+
+### 10.10 Crash reports (beta)
+
+Decided 2026-11-05 for the first beta: launchers send crash reports to the
+backend by themselves while the launcher setting "Send crash reports" is on,
+which it is by default. With it off nothing is sent, and testers attach the
+diagnostics bundle to a GitHub issue instead. Full dumps stay local (5.10); a
+report carries at most a stacks-only minidump. This replaces "Telemetry: none"
+(D21) for crashes.
+
+- `POST /v1/crashes` takes the contract `xerces.crash/1` (`backend/README.md`
+  has its fields and answers). A report is keyed to a random install id sent in
+  `X-Xerces-Install`, never to an account. A resent `report_id` is not stored
+  twice.
+- `DELETE /v1/crashes` with the same header deletes every report of that install
+  ("Delete my crash reports" in the launcher).
+- The server stores and logs no address, checks again that no `C:\Users\<name>`
+  path survives (in the minidump by overwriting the name in place), caps sizes
+  (4 MiB body, 2 MiB minidump) and limits reports per install, per address and
+  in total.
+- Reports are grouped by a signature (SHA-256 of kind, module, offset and the
+  first three frames). You read them through `/v1/admin` routes guarded by
+  `XERCES_ADMIN_TOKEN` (they answer 404 while it is unset), with
+  `backend/scripts/crashes.py`.
+- They are kept 90 days from receipt, then the cleanup task deletes them.
 
 ---
 
