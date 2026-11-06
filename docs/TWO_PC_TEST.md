@@ -44,10 +44,13 @@ Same network, no mods enabled on either PC (Xerces > Mods).
 3. H: start a match on a stock map (The Giant). Expected: J goes along.
 4. J: leave to the menu, then join H again while H is in the match. Expected: J
    joins the running match.
-5. H: leave to the main menu. Within about 15 s a toast says the lobby is closed
-   to direct connect.
+5. H: end the match, back in the lobby press DIRECT CONNECT again (it reads
+   CLOSED; a toast says so).
 6. J: join H again. Expected: a message that H is in the menus with the lobby
    closed, naming the DIRECT CONNECT button.
+7. H: open the lobby again, then leave it for the game's main menu. Note whether
+   a "Closed to direct connect" toast appears within about 15 s (it should when
+   the game no longer has a lobby for H).
 
 ## 2. A joiner missing one stacked mod
 

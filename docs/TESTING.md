@@ -746,8 +746,11 @@ DESIGN.md 11.10; the steps for you and the friend with the beta zip are in
 it has run on two PCs.
 
 - [ ] LAN, vanilla to vanilla: J joins H's open lobby, then H's running match,
-      by address. A lobby H left closes to direct connect within about 15 s, and
-      J then gets the message that H is in the menus.
+      by address. With the lobby closed again, J gets the message that H is in
+      the menus.
+- [ ] Leaving the lobby for the main menu closes it to direct connect within
+      about 15 s (whether BO3 keeps H's party lobby in the main menu is not
+      known; if it does, the lobby stays open there).
 - [ ] A joiner missing one stacked mod gets one dialog naming it with its
       Workshop page; Yes opens it in Steam. After subscribing, J's game loads
       H's mods and joins again by itself, once.
