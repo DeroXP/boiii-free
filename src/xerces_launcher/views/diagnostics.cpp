@@ -402,7 +402,7 @@ private:
         true);
     row("Home folder", utf8(paths.home), true);
     if (!svc.config_error().empty()) {
-      row("Settings file", svc.config_error(), false, true);
+      row("Settings file", owner_->tr(svc.config_error()), false, true);
     } else if (!svc.config_load_problem().empty()) {
       // Broken at start-up, written again since: the settings are safe now.
       row("Settings file",
@@ -704,7 +704,8 @@ private:
     xerces.fields = {
         {"Version", services::version()},
         {"Build", paths.dev_data ? "development checkout" : "release"},
-        {"Dry launch", svc.dry_launch() ? "yes (the game is never started)" : "no"},
+        {"Dry launch",
+         svc.dry_launch() ? "yes (the game is never started)" : "no"},
         {"Windows", windows_version()},
         {"Home folder", utf8(paths.home)},
         {"Data folder", utf8(paths.data)},
@@ -715,11 +716,16 @@ private:
                          ? std::string("follows Windows")
                          : std::to_string(config.ui_scale_percent) + " %"},
         {"Reduced motion", config.reduced_motion ? "on" : "off"},
-        {"Settings file", !svc.config_error().empty() ? svc.config_error()
-                          : !svc.config_load_problem().empty()
-                              ? "reset to defaults at start-up, saved since: " +
-                                    svc.config_load_problem()
-                              : std::string("read")},
+        {"Settings file",
+         !svc.config_error().empty()
+             ? svc.config_error() +
+                   (svc.config_error_detail().empty()
+                        ? std::string()
+                        : " (" + svc.config_error_detail() + ")")
+         : !svc.config_load_problem().empty()
+             ? "reset to defaults at start-up, saved since: " +
+                   svc.config_load_problem()
+             : std::string("read")},
     };
     sections.push_back(std::move(xerces));
 

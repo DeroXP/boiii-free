@@ -87,10 +87,11 @@ bool dry_launch_from_environment();
 std::optional<std::string> read_text_file(const std::filesystem::path &path);
 // Writes through <path>.tmp and a rename, so a reader never sees half a
 // file; creates the folder. The temporary file goes when anything fails.
-// why, when given, receives the reason in words for the player (the file is
-// named, not its folder), and is cleared when the write worked.
+// why, when given, receives the reason as one fixed sentence (ui_text) a
+// screen translates; detail, the file's name and the system's message, for
+// the log. Both are cleared when the write worked.
 bool write_text_file(const std::filesystem::path &path, std::string_view text,
-                     std::string *why = nullptr);
+                     std::string *why = nullptr, std::string *detail = nullptr);
 
 std::string path_utf8(const std::filesystem::path &path); // '\' kept
 std::filesystem::path path_from_utf8(std::string_view text);

@@ -567,7 +567,7 @@ private:
           owner_->notify(owner_->tr("Larger zone memory is off."));
         } else {
           owner_->notify(owner_->tr("The config could not be saved:") + " " +
-                             owner_->svc().config_error(),
+                             owner_->tr(owner_->svc().config_error()),
                          true);
         }
       } else {
@@ -587,7 +587,7 @@ private:
                          owner_->tr(off.size() == 1 ? "is off." : "are off."));
         } else {
           owner_->notify(owner_->tr("The config could not be saved:") + " " +
-                             svc.config_error(),
+                             owner_->tr(svc.config_error()),
                          true);
         }
       }

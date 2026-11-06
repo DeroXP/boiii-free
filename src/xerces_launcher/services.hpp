@@ -69,8 +69,12 @@ public:
   std::uint64_t config_rev() const { return config_rev_; }
   // What is wrong with launcher.json now: why the last save failed, or, until
   // a save works, why the file could not be read at start-up. Empty when the
-  // file holds the settings the launcher uses.
+  // file holds the settings the launcher uses. A failed save's reason is a
+  // fixed sentence: screens pass it to tr().
   std::string config_error() const { return config_error_; }
+  // The file and the system's message for a failed save (for the log and the
+  // copied report, in English); empty otherwise.
+  std::string config_error_detail() const { return config_error_detail_; }
   // Why launcher.json could not be read at start-up (defaults were used and
   // the file was kept as launcher.json.broken); empty when it was read. Stays
   // for the session, also after the file has been written again.
@@ -211,6 +215,7 @@ private:
 
   xerces_core::launcher_config config_;
   std::string config_error_;
+  std::string config_error_detail_;
   std::string config_load_problem_;
   std::uint64_t config_rev_ = 1;
 

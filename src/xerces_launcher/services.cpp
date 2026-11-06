@@ -109,9 +109,10 @@ bool services::save_config() {
   // valid settings again.
   const bool ok = xerces_core::write_text_file(
       paths_.config_file(), xerces_core::launcher_config_to_json(config_),
-      &config_error_);
+      &config_error_, &config_error_detail_);
   if (!ok) {
-    log_error("launcher.config.write", config_error_);
+    log_error("launcher.config.write",
+              config_error_ + " (" + config_error_detail_ + ")");
   }
   return ok;
 }
