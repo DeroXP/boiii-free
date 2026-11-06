@@ -1,12 +1,13 @@
 // Thread-local storage support for tlsdll.dll (docs/DESIGN.md 16.5).
 //
-// Clean-room implementation, written for Xerces on 2026-11-05 from the PE/COFF
-// specification's description of the TLS directory and Microsoft's
-// documentation of _tls_index, _tls_used, IMAGE_TLS_DIRECTORY64 and the .tls
-// and .CRT$XL* sections. It replaces a file taken from the Microsoft C runtime
-// sources, which this program cannot distribute; of that file only the
-// comments, pragmas and section names were read. Part of Xerces, licensed under
-// the GNU General Public License version 3 (see LICENSE).
+// Clean-room implementation, written for Xerces on 2026-11-05 without reading
+// the code of the file it replaces, from the documented PE/COFF TLS ABI (the
+// TLS directory, IMAGE_TLS_DIRECTORY64, _tls_index, _tls_used and the .tls and
+// .CRT$XL* sections). The replaced file came from the Microsoft C runtime
+// sources, which this program cannot distribute; of it only the comments,
+// pragmas and section names were seen. Provenance: docs/DESIGN.md 16.5. Part of
+// Xerces, licensed under the GNU General Public License version 3 (see
+// LICENSE).
 //
 // The compiler and linker expect the symbols below from a C runtime. Defining
 // them here means the DLL does not take them from Microsoft's runtime library:
