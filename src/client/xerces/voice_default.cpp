@@ -1,23 +1,24 @@
 #include <std_include.hpp>
 
-// xerces_voice_default: voice chat starts as push-to-talk in a Xerces install
-// (docs/DESIGN.md 10.5; the rule is xerces_core/voice_default.hpp). The game
-// keeps the choice in the player's profile, which only the game's Lua can
-// change, and reads the profile after this runs. So this decides from
-// config.cfg as the client starts, and
-// data/ui_scripts/xerces_voice/__init__.lua sets the profile setting when the
-// front end loads, then turns the archived dvar on so it is never set again.
+// xerces_voice_default: voice chat starts as push-to-talk on a new game
+// profile (docs/DESIGN.md 10.5; the rule is xerces_core/voice_default.hpp).
+// The game keeps the choice in the player's profile, which only the game's
+// Lua can change, and reads the profile after this runs. So this decides as
+// the client starts, from whether the game has made a profile yet, and
+// data/ui_scripts/xerces_voice/__init__.lua sets the profile setting at the
+// first front end of the session.
 //
-// The decision reads the file here rather than at the dvars_loaded step,
-// because that step runs only when config.cfg exists, and a new install has
-// none. The client has not written the file yet: it saves only after loading
-// it (dvars.cpp), and it runs with the game folder as its working folder.
+// The decision is made here rather than at the dvars_loaded step, because
+// that step runs only when config.cfg exists, and a new install has none. It
+// does not use config.cfg at all: the profile that holds the player's choice
+// is what says whether there is a choice to keep. The client runs with the
+// game folder as its working folder (players_dir is relative, like
+// dvars::CONFIG_FILE_PATH), and the game reads or makes its profile only
+// after this runs.
 
-#include <component/dvars.hpp>
 #include <component/scheduler.hpp>
 #include <game/utils.hpp>
 #include <loader/component_loader.hpp>
-#include <utils/io.hpp>
 
 #include <xerces_core/voice_default.hpp>
 
@@ -25,9 +26,12 @@
 
 namespace xerces_voice_default {
 namespace {
-const std::string applied_name(xerces_core::voice_default_dvar);
-const std::string due_name(xerces_core::voice_due_dvar);
-game::EngineDependentDvarMut applied_dvar;
+const std::string state_name(xerces_core::voice_state_dvar);
+// Where the client sends the game's players folder (component/path.cpp).
+const std::filesystem::path players_dir("boiii_players");
+game::EngineDependentDvarMut state_dvar;
+
+int value(xerces_core::voice_state state) { return static_cast<int>(state); }
 } // namespace
 
 class component final : public client_component {
@@ -35,42 +39,51 @@ class component final : public client_component {
 
 public:
   void post_unpack() override {
-    std::string saved_config; // stays empty when there is no file
-    utils::io::read_file(dvars::CONFIG_FILE_PATH, &saved_config);
-    const bool due = xerces_core::voice_push_to_talk_due(saved_config);
+    using xerces_core::game_profile;
+    using xerces_core::voice_state;
 
-    // Registered before config.cfg runs, so its saved line sets this dvar.
-    applied_dvar = game::register_dvar_bool(
-        applied_name.c_str(), false, game::dvarFlags_e::ARCHIVE,
-        "On once Xerces has started voice chat as push-to-talk on this "
-        "install; the game's Push to talk option is the player's from then "
-        "on.");
-    game::register_dvar_bool(
-        due_name.c_str(), due, game::dvarFlags_e::NONE,
-        "On while Xerces still has to set push-to-talk this session (read by "
-        "the front end's Lua).");
+    const game_profile profile = xerces_core::find_game_profile(players_dir);
+    const voice_state state = xerces_core::voice_start_state(profile);
 
-    if (!due) {
+    state_dvar = game::register_dvar_int(
+        state_name.c_str(), value(state), value(voice_state::keep),
+        value(voice_state::not_set), game::dvarFlags_e::NONE,
+        "Xerces' push-to-talk default this session (read by the front end's "
+        "Lua): 0 the profile keeps its setting, 1 still to set, 2 set, 3 "
+        "tried and not set.");
+
+    if (state != voice_state::due) {
       xerces_runtime::log_info(
           "xerces.voice.kept",
-          "voice chat keeps the player's own push-to-talk setting");
+          profile == game_profile::found
+              ? "voice chat keeps the game profile's own push-to-talk setting"
+              : "voice chat keeps the game's setting: boiii_players could not "
+                "be read");
       return;
     }
-    xerces_runtime::log_info(
-        "xerces.voice.default_due",
-        "voice chat will start as push-to-talk (set when the front end loads)");
+    xerces_runtime::log_info("xerces.voice.default_due",
+                             "no game profile yet: voice chat will start as "
+                             "push-to-talk (set at the first front end)");
 
-    // The Lua turns the archived dvar on once the profile says push-to-talk.
+    // The Lua moves the state on once, at the first front end.
     scheduler::schedule(
         [] {
-          if (!applied_dvar || !applied_dvar.get_bool()) {
-            return scheduler::cond_continue;
+          const int now = state_dvar ? state_dvar.get_int() : -1;
+          if (now == value(voice_state::set)) {
+            xerces_runtime::log_info(
+                "xerces.voice.push_to_talk",
+                "voice chat set to push-to-talk; the game's option is the "
+                "player's from now on");
+            return scheduler::cond_end;
           }
-          xerces_runtime::log_info(
-              "xerces.voice.push_to_talk",
-              "voice chat set to push-to-talk; the game's option keeps the "
-              "player's choice from now on");
-          return scheduler::cond_end;
+          if (now == value(voice_state::not_set)) {
+            xerces_runtime::log_warn(
+                "xerces.voice.not_set",
+                "voice chat could not be set to push-to-talk; the game's own "
+                "setting stays, and Xerces does not try again this session");
+            return scheduler::cond_end;
+          }
+          return scheduler::cond_continue;
         },
         scheduler::main, 1s);
   }

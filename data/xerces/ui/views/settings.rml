@@ -280,13 +280,13 @@
 		<div class="set-head">
 			<div class="set-num">06</div>
 			<div class="set-title">Privacy</div>
-			<div class="set-desc">What leaves this PC: nothing.</div>
+			<div class="set-desc">What Xerces sends: nothing.</div>
 		</div>
 		<div class="set-body">
 			<div class="statement">
 				<p>Xerces sends no telemetry. Nothing about you, this PC or your games is sent anywhere.</p>
 				<p>If the game crashes, a crash report would only ever be uploaded when you agree to it for that one crash. Uploading is not built yet, so today nothing is uploaded at all.</p>
-				<p>In the game, voice chat starts as push-to-talk: other players hear you only while you hold B. The game's options change it.</p>
+				<p>Voice chat in the game reaches the other players. Xerces starts a new game profile on push-to-talk (talk key B unless you rebind it) and leaves a profile you already have as it is. Not yet checked in the game.</p>
 			</div>
 			<div class="field">
 				<div class="field-text">

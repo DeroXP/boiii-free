@@ -1696,14 +1696,14 @@ must say in `PRIVACY.md`:
   from hardware ids, survives reinstalls and is sent to every server you join
   (upstream behaviour, fenced). Xerces' backend never stores it and never uses
   it to authenticate anything; Xerces bans use Xerces accounts.
-- **Voice.** `beta` adds voice chat. Xerces starts it as push-to-talk (decided
-  2026-11-05; built the same day, not yet run in the game), says that audio
-  reaches other players, and accepts voice only from authenticated session peers
-  (11.2). The launcher's Settings, Privacy, says it in one line (not the
-  first-run privacy step: in the pseudo-locale its Finish button already sits at
-  the bottom edge of the default window).
+- **Voice.** `beta` adds voice chat. Xerces starts it as push-to-talk on a new
+  game profile (decided 2026-11-05; built the same day, not yet run in the
+  game), says that audio reaches other players, and accepts voice only from
+  authenticated session peers (11.2). The launcher's Settings, Privacy, says it
+  in one line (not the first-run privacy step: in the pseudo-locale its Finish
+  button already sits at the bottom edge of the default window).
   - The game keeps the choice in the player's profile, not in a dvar: the "Push
-    to talk" switch in its voice options is the profile setting
+    to talk" switch in its voice options is the "user" profile setting
     `snd_voicechat_open_mic` (1 open mic, 0 push-to-talk;
     `data/ui_scripts/lua_fixes`). No dvar has that name (looked up in the dvar
     pool of a game dump), so `config.cfg` never holds it. The engine's
@@ -1711,17 +1711,26 @@ must say in `PRIVACY.md`:
   - The talk key is the `+talk` bind, B in the game's default bindings
     (`boiii_players\bindings_0.cfg`). Players change it in the game's key
     bindings or with `bind <key> +talk` in the console.
-  - The profile cannot say whether the player ever chose, so Xerces keeps the
-    archived dvar `xerces_voice_default_applied` in `config.cfg`. While it is
-    absent or off, the client (`src/client/xerces/voice_default.cpp`, the rule
-    in `xerces_core/voice_default`) sets `xerces_voice_ptt_due`, and the front
-    end's Lua (`data/ui_scripts/xerces_voice`) sets push-to-talk in the profile
-    and turns the archived dvar on. From then on the switch is the player's and
-    Xerces never changes it. The client reads `config.cfg` as it starts, not at
-    the `dvars_loaded` step, which runs only when the file exists.
-  - Limits: a player who chose an open mic in BOIII gets push-to-talk once, at
-    Xerces' first start; deleting `config.cfg` sets it again at the next start;
-    a profile reset while `config.cfg` stays gets the game's own default.
+  - The profile cannot say whether the player ever chose, so Xerces sets
+    push-to-talk only where there is no choice to keep: when the game has no
+    profile yet. The client (`src/client/xerces/voice_default.cpp`, the rule in
+    `xerces_core/voice_default`) looks for the game's user profile,
+    `boiii_players\user_settings_<n>.cgp`, as it starts, before the game reads
+    or makes it. With none there it sets the session dvar `xerces_voice_ptt` to
+    1, and at the first front end the Lua (`data/ui_scripts/xerces_voice`) marks
+    the attempt as made, sets push-to-talk in the profile and reads it back. It
+    tries once a session, so a choice made in the options after a failed attempt
+    is not overwritten. Any profile already there, from BOIII or an earlier
+    start, keeps its own setting, and `config.cfg` plays no part. The client
+    decides at `post_unpack`, not at the `dvars_loaded` step, which runs only
+    when `config.cfg` exists.
+  - Limits: an existing BOIII profile keeps the game's own setting; the player
+    turns on Push to talk in the game's voice options. If the one attempt fails
+    (`xerces.voice.not_set` in the game log), or the first session runs with
+    `-nouiscripts`, the profile the game saves keeps the game's setting. A
+    profile that is deleted or reset is a new one and starts as push-to-talk
+    again. The game's own `players` folder, which the client does not use, is
+    never touched.
 - **Discord.** Presence is off until you turn it on.
 - **Deletion.** Self-serve and immediate in the live database. Backups roll off
   on published schedules (30-day lifecycle on the dump bucket; Railway's own
