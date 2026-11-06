@@ -291,8 +291,8 @@
 				<button id="send-crash-reports" class="toggle" data-class-on="send_crash_reports" data-event-click="toggle('crash')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="send_crash_reports">On</span><span class="toggle-state" data-if="!send_crash_reports">Off</span></button>
 			</div>
 			<div class="statement">
-				<p>A crash report holds the crash's code and thread stacks (no memory contents), the game mode, map and mods, the Xerces and game versions, this PC's Windows version, CPU, graphics card and driver, RAM and display, and the last lines of the game's and Xerces' logs, with your user name, folders and server addresses removed. It is tied to a random id kept in your Xerces folder, never to your name or your hardware, and the server deletes it after 90 days.</p>
-				<p>Never sent: usage data or analytics, your player name, Steam id or game identity, full crash dumps, your settings, packs or files.</p>
+				<p>A crash report holds the crash's code, the game mode, map and mods, the Xerces and game versions, this PC's Windows version, CPU, graphics card and driver, RAM and display, the last lines of the game's and Xerces' logs (without chat), and a small dump of the threads' stacks. Your user name, player names, folders and server addresses are removed; the rest of the stack memory is raw and can hold bits of what the game was doing. It is tied to a random id kept in your Xerces folder, never to your name or your hardware, and the server deletes it after 90 days.</p>
+				<p>Never sent: usage data or analytics, your Steam id or game identity, full crash dumps, your settings, packs or files.</p>
 			</div>
 			<div class="field">
 				<div class="field-text">
@@ -312,7 +312,7 @@
 				<div class="field-text">
 					<div class="field-name">What Xerces keeps</div>
 					<div class="set-value">{{home_path}}</div>
-					<div class="field-help">Settings, logs, caches and crash dumps, all on this PC. Crash reports wait in its crash folder until they are sent.</div>
+					<div class="field-help">Settings, logs and caches, all on this PC; crash reports wait in its crash folder until they are sent. Full crash dumps stay in the game client's minidumps folder (%LOCALAPPDATA%\boiii\minidumps).</div>
 				</div>
 				<button id="open-home" class="small-button" data-event-click="act('open home')"><span>Open folder</span></button>
 			</div>

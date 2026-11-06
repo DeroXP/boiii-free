@@ -432,11 +432,12 @@ bool crash_reports_on() {
 // Xerces: what happens to this crash's report (docs/CRASH_REPORTS.md), for
 // the dialog: the launcher sends it when the game closes or when Xerces
 // opens next or, with the setting off, how to report it by hand.
-std::string crash_report_note() {
+std::string crash_report_note(bool dump = true) {
   const bool by_launcher = xerces_runtime::started_by_launcher();
   return xerces_core::crash_report_note(
       by_launcher, by_launcher && crash_reports_on(),
-      by_launcher && xerces_core::launcher_running(xerces_runtime::home()));
+      by_launcher && xerces_core::launcher_running(xerces_runtime::home()),
+      dump);
 }
 
 void display_error_dialog() {
@@ -951,27 +952,17 @@ std::string begin_pending_report(const LPEXCEPTION_POINTERS exceptioninfo) {
   return id;
 }
 
-void finish_pending_report(const std::string &id, const resolved_frame &crash,
-                           const std::vector<resolved_frame> &frames) {
-  if (id.empty()) {
-    return;
-  }
-  xerces_core::pending_crash note;
-  note.report_id = id;
+std::string frame_text(const resolved_frame &frame) {
+  return xerces_core::crash_frame(
+      frame.module_name == "unknown" ? "" : frame.module_name, frame.rva);
+}
+
+// The note's common part: the thread, the journal's phase, the console's
+// last lines (the names the game knows already replaced), the flags, the
+// game log's name, the journal, and those names for the report to hide.
+void write_pending_note(xerces_core::pending_crash note) {
   note.created_utc = xerces_core::json_log::now_utc();
-  note.code = exception_data.code;
-  if (crash.module_name != "unknown") {
-    note.module = crash.module_name;
-    note.offset = crash.rva;
-  }
   note.thread = thread_role();
-  for (const resolved_frame &frame : frames) {
-    if (note.frames.size() == xerces_core::crash_frame_cap) {
-      break;
-    }
-    note.frames.push_back(xerces_core::crash_frame(
-        frame.module_name == "unknown" ? "" : frame.module_name, frame.rva));
-  }
   note.phase = xerces_runtime::journal_phase_for_crash();
   note.console =
       xerces_runtime::console_last_lines(xerces_core::crash_console_lines);
@@ -980,9 +971,62 @@ void finish_pending_report(const std::string &id, const resolved_frame &crash,
   note.game_log = xerces_runtime::log_file_name();
   note.journal = xerces_runtime::read_file(xerces_runtime::home() / "logs" /
                                            "journal.json");
+  note.names = xerces_runtime::player_names();
   xerces_runtime::write_file(xerces_runtime::home() / "crash" / "pending" /
-                                 (id + ".json"),
+                                 (note.report_id + ".json"),
                              xerces_core::pending_crash_to_json(note));
+}
+
+void finish_pending_report(const std::string &id, const resolved_frame &crash,
+                           const std::vector<resolved_frame> &frames) {
+  if (id.empty()) {
+    return;
+  }
+  xerces_core::pending_crash note;
+  note.report_id = id;
+  note.code = exception_data.code;
+  if (crash.module_name != "unknown") {
+    note.module = crash.module_name;
+    note.offset = crash.rva;
+  }
+  for (const resolved_frame &frame : frames) {
+    if (note.frames.size() == xerces_core::crash_frame_cap) {
+      break;
+    }
+    note.frames.push_back(frame_text(frame));
+  }
+  write_pending_note(std::move(note));
+}
+
+// Xerces: a fatal engine error (Com_Error FATAL, Sys_Error) ends the game
+// though no exception ran. Its note has no dump (kind unknown_exit); the
+// module and offset are the first frame outside the client, the code that
+// raised the error. Without it "Restart game", which ends this process with
+// code 0, would read as a clean exit and nothing would be reported.
+void write_fatal_report() {
+  if (!crash_reports_on()) {
+    return;
+  }
+  xerces_core::pending_crash note;
+  note.report_id = xerces_core::new_launch_id();
+  note.kind = xerces_core::crash_kind::unknown_exit;
+  void *stack[xerces_core::crash_frame_cap]{};
+  const USHORT count = RtlCaptureStackBackTrace(
+      1, static_cast<DWORD>(std::size(stack)), stack, nullptr);
+  const auto client = reinterpret_cast<uint64_t>(
+      utils::nt::library::get_by_address(
+          reinterpret_cast<const void *>(&write_fatal_report))
+          .get_ptr());
+  for (USHORT i = 0; i < count; ++i) {
+    const resolved_frame frame = resolve_address(stack[i]);
+    note.frames.push_back(frame_text(frame));
+    if (!note.offset && frame.module_name != "unknown" &&
+        frame.module_base != client) {
+      note.module = frame.module_name;
+      note.offset = frame.rva;
+    }
+  }
+  write_pending_note(std::move(note));
 }
 
 bool is_harmless_error(const LPEXCEPTION_POINTERS exceptioninfo) {
@@ -1182,11 +1226,14 @@ void WINAPI set_unhandled_exception_filter_stub(LPTOP_LEVEL_EXCEPTION_FILTER) {
 }
 
 void show_fatal_error(const std::string &message) {
+  // Xerces: before the other threads are suspended, while their locks can
+  // still be released.
+  write_fatal_report();
   if (!game::quiet_crash() && !game::is_headless()) {
     utils::thread::suspend_other_threads();
     show_mouse_cursor();
     if (ask_restart(error_help::strip_colors(message) + "\n\n" +
-                        crash_report_note(),
+                        crash_report_note(false),
                     L"The game hit an error and has to close.")) {
       restart_game();
     }

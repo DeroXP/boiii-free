@@ -184,14 +184,14 @@
 							<span class="fr-point-n">01</span>
 							<div class="fr-point-text">
 								<div class="fr-point-title">Crash reports are sent</div>
-								<div class="fr-point-body">After a crash, Xerces sends a report to the Xerces server so the developer can fix it: the crash's code and thread stacks (no memory contents), the mods, map and versions, and this PC's Windows, CPU, graphics card and RAM. Log lines go with your user name, folders and server addresses removed. The server keeps reports 90 days.</div>
+								<div class="fr-point-body">After a crash, Xerces sends a report to the Xerces server so the developer can fix it: the crash's code, the mods, map and versions, this PC's Windows, CPU, graphics card and RAM, log lines without chat, and a small dump of the threads' stacks. Your user name, player names, folders and server addresses are removed; the rest of the stack memory is raw and can hold bits of what the game was doing. The server keeps reports 90 days.</div>
 							</div>
 						</div>
 						<div class="fr-point">
 							<span class="fr-point-n">02</span>
 							<div class="fr-point-text">
 								<div class="fr-point-title">Never sent</div>
-								<div class="fr-point-body">No usage data or analytics, no player name, Steam id or game identity, no full crash dumps, settings, packs or files. They stay in your Xerces folder.</div>
+								<div class="fr-point-body">No usage data or analytics, no Steam id or game identity, no full crash dumps, settings, packs or files. Full dumps stay on this PC in the game client's minidumps folder, the rest in your Xerces folder.</div>
 								<div class="fr-point-path">{{home_path}}</div>
 							</div>
 						</div>

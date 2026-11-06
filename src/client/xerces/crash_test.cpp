@@ -9,6 +9,9 @@
 //                                handler runs (kind "exception")
 //   xerces_crash_test fastfail   __fastfail: Windows ends the game at once
 //                                with 0xC0000409 and no dump ("fail_fast")
+//   xerces_crash_test fatal      a fatal engine error (Com_Error): the
+//                                fatal-error dialog, a note without a dump
+//                                ("unknown_exit")
 
 #include <component/command.hpp>
 #include <game/game.hpp>
@@ -28,6 +31,11 @@ constexpr std::string_view flag = "-xerces-crash-test";
                                ")");
   if (kind == "fastfail") {
     __fastfail(FAST_FAIL_FATAL_APP_EXIT);
+  }
+  if (kind == "fatal") {
+    // Never returns: the dialog ends the process (exception.cpp).
+    game::com::Com_Error(game::errorParm::FATAL,
+                         "xerces_crash_test: a fatal error on purpose");
   }
   volatile int *nowhere = nullptr;
   *nowhere = 0x58455243; // "XERC"

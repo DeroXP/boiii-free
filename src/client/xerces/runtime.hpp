@@ -112,6 +112,27 @@ std::optional<std::uint32_t> exit_code();
 // game log when a map fails or the game ends without quitting (DESIGN.md
 // 5.10), because the console window dies with the process. Safe to call from
 // any thread and during shutdown.
+// The last lines come with every name note_player_name knows replaced by
+// <player>.
 void console_append(std::string_view text);
 std::vector<std::string> console_last_lines(std::size_t count);
+
+// While one lives on a thread, what that thread prints stays out of the
+// console tail. chat.cpp puts one around each chat line: it holds another
+// player's name and what they wrote, which neither the game log nor a crash
+// report keeps (docs/CRASH_REPORTS.md).
+class console_private_line {
+public:
+  console_private_line();
+  ~console_private_line();
+  console_private_line(const console_private_line &) = delete;
+  console_private_line &operator=(const console_private_line &) = delete;
+};
+
+// The player names the game knows, in memory only (at most 64): its own
+// (name.cpp) and the players in the match (chat.cpp). The console tail and
+// crash reports hide them. player_names() never waits long: the crash
+// handler calls it.
+void note_player_name(std::string_view name);
+std::vector<std::string> player_names();
 } // namespace xerces_runtime

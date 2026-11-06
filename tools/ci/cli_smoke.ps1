@@ -315,11 +315,16 @@ try {
   $savedUrl = $env:XERCES_CRASH_URL
   try {
     $env:XERCES_CRASH_URL = 'http://127.0.0.1:9'
-    $crashSent = Invoke-XcliJson 2 crash send --json
+    $crashSent = Invoke-XcliJson 5 crash send --json # 5: waits for a later try
     Check (@($crashSent.queued) -contains $reportId -and @($crashSent.sent)[0].outcome -eq 'retry' -and $crashSent.outbox_left -eq 1) `
       "crash send: queued, kept after no answer $($crashSent | ConvertTo-Json -Compress -Depth 4)"
     $env:XERCES_CRASH_URL = 'http://example.org'
-    Invoke-Xcli 1 crash send | Out-Null # neither https nor local: nothing is sent
+    Invoke-Xcli 1 crash send | Out-Null # not local: nothing is sent
+    $env:XERCES_CRASH_URL = 'https://evil.example'
+    Invoke-Xcli 1 crash send | Out-Null # https too: only this PC replaces the backend
+    $crashRefused = Invoke-XcliJson 1 crash send --json
+    Check ($crashRefused.error -match 'local address' -and @($crashRefused.sent).Count -eq 0) `
+      "crash send --json: a remote XERCES_CRASH_URL is refused $($crashRefused | ConvertTo-Json -Compress -Depth 4)"
   } finally {
     $env:XERCES_CRASH_URL = $savedUrl
   }

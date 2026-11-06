@@ -142,6 +142,10 @@ void services::load_config() {
                         ? "launcher.json could not be read"
                         : parsed.diags.items().front().message;
     log_warn("launcher.config.broken", config_error_);
+    // The rule the game client follows too: a file that is not JSON sends
+    // no crash reports until the switch is turned on again, since it may
+    // have said off (an empty file is no file: on).
+    parsed.value.send_crash_reports = xerces_core::crash_reports_enabled(*text);
   }
   config_ = std::move(parsed.value);
 }
@@ -826,7 +830,9 @@ void services::drain_crash_events() {
     if (fresh && event.dry) {
       log_info("launcher.crash.dry",
                "--dry-launch: crash reports are queued, never sent");
-    } else if (fresh && sent == 0 && crash_state_->send_enabled) {
+    } else if (fresh && sent == 0 && crash_state_->send_enabled &&
+               xerces_core::reports_wait(event.sent)) {
+      // Not after the server refused the report: that notice says so.
       crash_notices_.push_back(
           notice(crash_notice::kind::later, event.collected->queued.size()));
     }

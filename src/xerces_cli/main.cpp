@@ -274,7 +274,8 @@ The commands on <home> refuse, with exit 1 and before doing anything, an
 option or word they do not take; a flag never takes a value (--json=1).
 
 Exit codes: 0 ok, 1 error, 2 validation or conflict failures,
-            3 Xerces not running, 4 signature failures.
+            3 Xerces not running, 4 signature failures,
+            5 crash send: reports wait for a later try.
 )";
   return exit_ok;
 }

@@ -1264,7 +1264,8 @@ int cmd_sig_report(const arguments &args) {
 // sends, for games xerces_cli started. list shows the outbox and the
 // client's pending crashes; send turns pending crashes into reports (and,
 // with --exit-code, a crash the client wrote nothing for), then sends the
-// outbox when "Send crash reports" is on.
+// outbox when "Send crash reports" is on. send exits 5 (exit_queued) when
+// reports still wait in the outbox for a later try.
 int cmd_crash(const arguments &args, const std::string &action) {
   if (action != "list" && action != "send") {
     std::cerr << "Use crash list or crash send. Try --help.\n";
@@ -1280,9 +1281,9 @@ int cmd_crash(const arguments &args, const std::string &action) {
   const fs::path crash_dir = home.paths.crash;
   const std::string config_text =
       read_text_file(home.paths.config_file()).value_or("");
-  // No launcher.json yet means the default: on.
-  const bool enabled =
-      config_text.empty() || crash_reports_enabled(config_text);
+  // The rule the launcher and the game client follow: no launcher.json
+  // yet is on, a broken one off.
+  const bool enabled = crash_reports_enabled(config_text);
   const std::optional<std::string> base = crash_base_url();
 
   if (action == "list") {
@@ -1325,8 +1326,8 @@ int cmd_crash(const arguments &args, const std::string &action) {
     std::cout << "Send crash reports: " << (enabled ? "on" : "off") << "\n";
     std::cout << "Sends to: "
               << (base ? *base
-                       : std::string("nothing (XERCES_CRASH_URL is neither "
-                                     "https:// nor a local address)"))
+                       : std::string("nothing (XERCES_CRASH_URL is not a "
+                                     "local address)"))
               << "\n";
     std::cout << "Queued in " << utf8(crash_dir / "outbox") << ": "
               << outbox.size() << "\n";
@@ -1414,14 +1415,19 @@ int cmd_crash(const arguments &args, const std::string &action) {
     options.user_agent = std::string("Xerces/") + xerces_version_text;
     sent = send_outbox(crash_dir, options, winhttp_send);
   }
-  bool failed = false;
-  for (const auto &result : sent) {
-    failed = failed || result.outcome == send_outcome::retry;
-  }
+  // Reports that wait for a later try (no answer, rate limited); the ones
+  // the server refused are gone.
+  const bool waiting = enabled && base && !list_outbox(crash_dir).empty();
+  const char *const refused_url =
+      "XERCES_CRASH_URL must be a local address (127.0.0.1, localhost or "
+      "[::1]); nothing was sent.";
   if (as_json) {
     rapidjson::Document doc(rapidjson::kObjectType);
     auto &alloc = doc.GetAllocator();
     json::set(doc, "send_crash_reports", enabled, alloc);
+    if (enabled && !base) {
+      json::set(doc, "error", refused_url, alloc);
+    }
     json::set(doc, "crashed", collected.crashed, alloc);
     json::set(doc, "queued", json::string_array(collected.queued, alloc),
               alloc);
@@ -1442,7 +1448,7 @@ int cmd_crash(const arguments &args, const std::string &action) {
     json::set(doc, "outbox_left",
               static_cast<std::int64_t>(list_outbox(crash_dir).size()), alloc);
     std::cout << json::pretty(doc) << "\n";
-    return failed ? exit_failed : exit_ok;
+    return enabled && !base ? exit_error : waiting ? exit_queued : exit_ok;
   }
   for (const auto &id : collected.queued) {
     std::cout << "queued   " << id << "\n";
@@ -1457,8 +1463,7 @@ int cmd_crash(const arguments &args, const std::string &action) {
     return exit_ok;
   }
   if (!base) {
-    std::cerr << "XERCES_CRASH_URL must be https:// or a local http:// "
-                 "address; nothing was sent.\n";
+    std::cerr << refused_url << "\n";
     return exit_error;
   }
   for (const auto &result : sent) {
@@ -1479,6 +1484,6 @@ int cmd_crash(const arguments &args, const std::string &action) {
   if (sent.empty() && collected.queued.empty()) {
     std::cout << "Nothing to send.\n";
   }
-  return failed ? exit_failed : exit_ok;
+  return waiting ? exit_queued : exit_ok;
 }
 } // namespace xerces_cli

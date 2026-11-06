@@ -2,6 +2,7 @@
 
 #include "runtime.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <fstream>
@@ -13,6 +14,7 @@
 
 #include <game/game.hpp>
 
+#include <xerces_core/crash_report.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/launch.hpp>
 #include <xerces_core/text_tail.hpp>
@@ -319,6 +321,27 @@ std::atomic<std::uint32_t> exit_code_value{0};
 
 std::mutex console_mutex;
 xerces_core::text_tail console_tail; // a fixed buffer, no destructor work
+
+// What this thread prints stays out of the tail (console_private_line).
+thread_local int private_lines = 0;
+
+constexpr std::size_t names_kept = 64;
+std::mutex names_mutex;
+// Never freed: read during shutdown, after other statics may be gone.
+std::vector<std::string> *const known_names = new std::vector<std::string>();
+
+std::string without_colour_codes(std::string_view text) {
+  std::string out;
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    if (text[i] == '^' && i + 1 < text.size() && text[i + 1] >= '0' &&
+        text[i + 1] <= '9') {
+      ++i;
+    } else {
+      out.push_back(text[i]);
+    }
+  }
+  return out;
+}
 } // namespace
 
 void note_quit_requested() { quit_seen = true; }
@@ -345,19 +368,70 @@ std::optional<std::uint32_t> exit_code() {
 }
 
 void console_append(std::string_view text) {
+  if (private_lines > 0) {
+    return;
+  }
   std::lock_guard lock(console_mutex);
   console_tail.append(text);
 }
 
 std::vector<std::string> console_last_lines(std::size_t count) {
-  // A crash can come while another thread holds the lock: never wait long.
-  std::unique_lock lock(console_mutex, std::defer_lock);
+  std::vector<std::string> lines;
+  {
+    // A crash can come while another thread holds the lock: never wait long.
+    std::unique_lock lock(console_mutex, std::defer_lock);
+    for (int attempt = 0; attempt < 50 && !lock.try_lock(); ++attempt) {
+      Sleep(2);
+    }
+    if (!lock.owns_lock()) {
+      return {};
+    }
+    lines = console_tail.last_lines(count);
+  }
+  const std::vector<std::string> names = player_names();
+  if (!names.empty()) {
+    for (std::string &line : lines) {
+      line = xerces_core::redact_player_names(line, names);
+    }
+  }
+  return lines;
+}
+
+console_private_line::console_private_line() { ++private_lines; }
+console_private_line::~console_private_line() { --private_lines; }
+
+void note_player_name(std::string_view name) {
+  std::vector<std::string> forms{without_colour_codes(name)};
+  if (forms.front() != name) {
+    forms.emplace_back(name);
+  }
+  std::lock_guard lock(names_mutex);
+  for (std::string &form : forms) {
+    while (!form.empty() && form.back() == ' ') {
+      form.pop_back();
+    }
+    while (!form.empty() && form.front() == ' ') {
+      form.erase(form.begin());
+    }
+    if (form.size() < 2 ||
+        std::ranges::find(*known_names, form) != known_names->end()) {
+      continue;
+    }
+    if (known_names->size() >= names_kept) {
+      known_names->erase(known_names->begin());
+    }
+    known_names->push_back(std::move(form));
+  }
+}
+
+std::vector<std::string> player_names() {
+  std::unique_lock lock(names_mutex, std::defer_lock);
   for (int attempt = 0; attempt < 50 && !lock.try_lock(); ++attempt) {
     Sleep(2);
   }
   if (!lock.owns_lock()) {
     return {};
   }
-  return console_tail.last_lines(count);
+  return *known_names;
 }
 } // namespace xerces_runtime

@@ -26,6 +26,7 @@ enum exit_code {
   exit_failed = 2, // validation or conflict failures
   exit_not_running = 3,
   exit_signatures = 4,
+  exit_queued = 5, // crash send: reports wait for a later try
 };
 
 struct arguments {
