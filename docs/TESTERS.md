@@ -86,13 +86,10 @@ hash, sent with the link, shows that the zip is the one we made.
   reports still waiting are removed. "Delete my crash reports" there deletes
   what this PC sent. With them off, report crashes on GitHub (Reporting bugs,
   below; Settings > Privacy has the link).
-- **In this beta the Xerces server does not take crash reports yet,** so none is
-  sent: they wait in `crash\outbox` in your Xerces folder. At every start, after
-  a crash, and every hour while Xerces is open with reports waiting, Xerces asks
-  the server whether it takes them yet (a request with no report and no id in
-  it); once it does, the waiting reports go. Xerces keeps at most 20 and removes
-  those older than 7 days without sending them. Until one has been sent, "Delete
-  my crash reports" says the server has no reports from this PC, which is true.
+- **A report goes out when the game has closed:** right away while Xerces is
+  open, or at its next start. When the server cannot be reached, it waits in
+  `crash\outbox` in your Xerces folder and goes later; Xerces keeps at most 20
+  and removes those older than 7 days without sending them.
 - Xerces also keeps crash bundles on your PC (Diagnostics, Crash bundles; "Make
   a bundle" makes one any time). Attach one to a bug report if we ask.
 

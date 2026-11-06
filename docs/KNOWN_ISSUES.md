@@ -37,13 +37,21 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## The game and Xerces
 
-- **This zip has not been run in the game yet.** It was checked with tests and
-  dry runs only (Xerces.exe with the game launch left out). The issues here come
-  from playing earlier builds.
+- **Tested on one PC only.** This zip ran in the game on 2026-11-06 on one PC
+  (Windows 11, RTX 5070 Ti): without mods and with three Workshop mods, on a
+  custom map, with the recovery after a crash, and with a crash report sent. It
+  has not met other hardware, other mods or a person playing for long yet.
 - **Some crashes are not explained yet.** In our tests the game sometimes closed
-  while a map was starting, with no crash report, and ran fine the next time. If
-  it happens to you, report it (README.txt, Reporting bugs) and say what you did
+  while a map was starting, with no crash report, and ran fine the next time.
+  Once in 12 quits with mods the game crashed while closing; the next start of
+  Xerces then offers safe mode, and launching normally is fine. If either
+  happens to you, report it (README.txt, Reporting bugs) and say what you did
   just before.
+- **The two experimental display settings do not help yet.** In our tests on one
+  PC, "Flip-model presentation (experimental)" changed nothing measurable in
+  borderless, and "Precise FPS limit (experimental)" held about 235 FPS at a 240
+  limit with slightly less even frames. Leave both off unless we ask you to test
+  them.
 - **Joining another tester's game is not tested yet.** Opening a lobby to direct
   connect, the router's port (UPnP) and the address it shows, joining by address
   (Servers), the dialogs that name a mod or map you lack, the network password
@@ -56,15 +64,10 @@ to report these again, but tell us if you see them somewhere else or worse.
   lobby or quitting the game closes it. After a crash with the lobby open the
   router keeps forwarding the port until the lobby is opened and closed again
   (README.txt, Playing with other testers).
-- **Crash reports wait on your PC.** The Xerces server does not take crash
-  reports yet, so none is sent: they stay in `crash\outbox` in your Xerces
-  folder, and Xerces asks the server at every start, after a crash and every
-  hour whether it takes them yet (README.txt, When the game crashes). Reports
-  older than 7 days are removed unsent.
-- **Crash reports have not been tried with a real crash in the game yet.** The
-  game's part (its crash dialog, the small stack dump, leaving chat and names
-  out) was checked with tests and stand-in crashes only. If the crash dialog or
-  a report in `crash\outbox` looks wrong, tell us.
+- **Crash reports are new.** Two real crashes went from the game to the Xerces
+  server in our tests, but leaving chat and names out of a report was checked
+  with tests only, not with other players in a match. If the crash dialog or a
+  report looks wrong, tell us.
 - **Push-to-talk on a new game profile is not checked in the game yet.** If a
   new profile starts on open mic, turn on Push to talk in the game's voice
   options, and tell us.

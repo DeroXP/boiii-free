@@ -891,6 +891,63 @@ nothing was sent to the Railway service.
       folder; About shows the BETA badge and the commit; no warning or error in
       the log.
 
+### Beta game session (2026-11-06)
+
+With your go-ahead ("Yes, run it now"), run by Claude with the PC otherwise
+idle: `C:\Users\Ginld\XercesDev\bench\20261106-beta\session.ps1` and
+`session2.ps1` (logs next to them), `game-bench.ps1` (new: `-BinDir` for an
+unzipped package, `-HoldMouseDuringLoad`), `m1-check.ps1 -Live`. The game's
+`config.ini` and `config.cfg` were backed up first and were byte for byte the
+same afterwards (the borderless runs put `config.ini` back after each run).
+
+Run 1 (d399e946) found a crash in every run, 2 s after the menu or a map load:
+chat.cpp's `note_client_names` (crash-report redaction) passed a null name to a
+string. `utils::string::va` returns null for an empty result, so an empty player
+slot crashed it. Because the crash handler had run, every quit then failed
+m1-check's clean_exit check. Fixed in 5ae63145 (empty names are skipped); the
+package was rebuilt from it (`dist\xerces-0.1.0-beta.1.zip`, 9.4 MB, SHA-256
+`2f6b5edcf43042d4336386fde3b7fb7f0452cbc68ce0d7bc06cc993ab36c94ac`). Run 1's
+crash report reached the backend (server id
+`fefaa15c-67f8-4458-9abe-b36205734574`).
+
+Run 2 (5ae63145):
+
+- [x] The unzipped package (`C:\Users\Ginld\XercesBeta`, started through its own
+      `xerces_cli.exe` with a fresh home): vanilla Cheese Cube loaded, played
+      and returned to the menu (292 FPS mean over 30 s); with the D3 stack too
+      (315 FPS). No crash, no dialog.
+- [x] The menu crash's trigger (mouse-move messages with both buttons down,
+      posted to the game window every 100 ms from its creation until 3 s after
+      the menu, 145-151 posts): no crash in the package or the repo build; the
+      package's run logged `xerces.input.active_device_dropped` once (the repo
+      run's posts missed the window where the primary client is -1).
+- [x] A forced crash (`-xerces-crash-test`, `xerces_crash_test`) with "Send
+      crash reports" on: the dialog is titled "Xerces"; the pending note and the
+      620 KB stack dump were written; `xerces_cli crash send` sent it and the
+      live backend answered 201 (server id
+      `8394abfa-e6ce-48a2-be17-17f42748545e`).
+- [x] `m1-check.ps1 -Live`: vanilla, crash, restart, safeoff, reopen, dvars, cli
+      and cliapply pass; modded failed once on "quitting leaves clean_exit": a
+      0-byte dump was written as that game quit (a crash while shutting down;
+      its log had rotated out). Six more modded quits with crash reports on
+      (`quit-repro.ps1`) all ended at clean_exit. So 1 of 12 modded quits; cause
+      unknown (KNOWN_ISSUES).
+- [x] Flip model, borderless, uncapped (`b0` vs `b0flip`, 3 runs each, A-B-B-A):
+      `xerces.flip_model` applied FLIP_DISCARD with tearing in every flip run,
+      no black screen or crash. No measurable gain: 312.5 vs 310.6 FPS (-0.6%, p
+      0.84), p99 4.08 vs 4.33 ms (p 0.25), 1% low 210.5 vs 209.4. Whether the
+      borderless window got independent flip needs PresentMon (an elevated
+      terminal).
+- [x] Precise limiter, borderless, `com_maxfps 240` (`b240` vs `b240p`): worse.
+      239.9 vs 234.6 FPS (-2.2%, p 0.008), p99 6.12 vs 6.52 ms (+6.6%, p 0.007),
+      1% low 145.3 vs 142.8, 0.1% low 110.2 vs 114.2 (p 0.21). Its own stats:
+      55% of frames released within 100 us of the deadline, p99 340 us late.
+      Each next deadline counts from the late release, so the lateness adds up
+      every frame (235 instead of 240). Next step: count from the previous
+      deadline and resync only after a frame a whole period late, then measure
+      again. It stays off by default.
+- [ ] Two PCs (`docs/TWO_PC_TEST.md`), PresentMon, a person playing the beta.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The
