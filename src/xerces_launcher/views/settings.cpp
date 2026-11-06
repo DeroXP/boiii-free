@@ -21,6 +21,9 @@
 // - FPS limit, FOV, V-Sync, FPS counter: dvars confirmed in the client
 //   (com_maxfps, cg_fov_default, r_vsync, com_drawFPS_PC), kept in
 //   config.dvars and passed as "+set <dvar> <value>".
+// - Precise FPS limit (experimental): the client's -xerces-precise-limiter
+//   (src/client/xerces/frame_pacing.cpp), in config.extra_flags. Safe mode
+//   leaves it out (xerces_core::preview_launch).
 
 #include <RmlUi/Core.h>
 #include <RmlUi/Core/Elements/ElementFormControl.h>
@@ -33,6 +36,7 @@
 #include <optional>
 
 #include <xerces_core/db_pool.hpp>
+#include <xerces_core/frame_pacing.hpp>
 #include <xerces_core/settings_options.hpp>
 
 #include "../app.hpp"
@@ -138,6 +142,7 @@ public:
     model.Bind("nocinematics", &nocinematics_);
     model.Bind("cinematics_note", &cinematics_note_);
     model.Bind("db_pool", &db_pool_);
+    model.Bind("precise_limiter", &precise_limiter_);
     model.Bind("close_on_launch", &close_on_launch_);
     model.Bind("flags", &flags_);
     model.Bind("flags_hint", &flags_hint_);
@@ -296,6 +301,7 @@ private:
         {"game-files"},
         {"display-game", "display-windowed", "display-borderless"},
         {"fps-field", "fps-slider"},
+        {"precise-limiter"},
         {"fov-field", "fov-slider"},
         {"vsync-game", "vsync-on", "vsync-off"},
         {"drawfps-game", "drawfps-on", "drawfps-off"},
@@ -632,6 +638,8 @@ private:
                          "in the game's Quick Settings.")
             : std::string();
     db_pool_ = core::has_flag(c.extra_flags, core::db_pool::flag_name);
+    precise_limiter_ =
+        core::has_flag(c.extra_flags, core::frame_pacing::flag_name);
     close_on_launch_ = c.close_on_launch;
     if (keep(text_field::flags)) {
       flags_ = core::join_flags(c.extra_flags);
@@ -927,6 +935,15 @@ private:
                 on ? owner_->tr("Larger zone memory is on (-xerces-db-pool). "
                                 "Turn it off if the game crashes.")
                    : owner_->tr("Xerces no longer passes -xerces-db-pool."));
+    } else if (key == "precise_limiter") {
+      const bool on =
+          !core::has_flag(c.extra_flags, core::frame_pacing::flag_name);
+      set_flags(
+          core::with_flag(c.extra_flags, core::frame_pacing::flag_name, on),
+          std::string("precise_limiter ") + (on ? "on" : "off"),
+          on ? owner_->tr("Precise FPS limit is on (-xerces-precise-limiter). "
+                          "Turn it off if the game stutters.")
+             : owner_->tr("Xerces no longer passes -xerces-precise-limiter."));
     } else if (key == "close") {
       c.close_on_launch = !c.close_on_launch;
       save(std::string("close_on_launch ") + (c.close_on_launch ? "on" : "off"),
@@ -1331,7 +1348,7 @@ private:
   Rml::Vector<dvar_row> others_;
 
   bool nointro_ = true, nocinematics_ = false, close_on_launch_ = false;
-  bool db_pool_ = false;
+  bool db_pool_ = false, precise_limiter_ = false;
   // The game's own config.cfg has boiii_skipIntro / boiii_skipCinematics on.
   bool game_skips_intro_ = false, game_skips_cinematics_ = false;
   Rml::String intro_note_, cinematics_note_;

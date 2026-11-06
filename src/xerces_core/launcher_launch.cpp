@@ -14,6 +14,7 @@
 #include <cwctype>
 
 #include "db_pool.hpp"
+#include "frame_pacing.hpp"
 #include "ipc.hpp"
 #include "journal.hpp"
 #include "json.hpp"
@@ -77,10 +78,13 @@ launch_outcome preview_launch(const launch_inputs &in) {
     // experimental larger zone memory is a suspect of its own (the journal
     // says whether the crashed launch had it), so none of them has it,
     // whatever the settings say: the tests then compare like with like. The
-    // plan is checked against the stock pool too.
+    // plan is checked against the stock pool too. The experimental precise
+    // frame limiter stays off as well, so they run the engine's own pacing.
     followup = *in.config;
     followup->extra_flags =
         with_flag(std::move(followup->extra_flags), db_pool::flag_name, false);
+    followup->extra_flags = with_flag(std::move(followup->extra_flags),
+                                      frame_pacing::flag_name, false);
   }
   const launcher_config &config = followup ? *followup : *in.config;
   launch_options options;

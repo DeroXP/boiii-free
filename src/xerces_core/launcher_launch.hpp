@@ -84,7 +84,9 @@ struct launch_inputs {
   // A launch that judges a crash: safe mode, or a culprit-search test (5.6).
   // It leaves the experimental larger zone memory (-xerces-db-pool) out
   // whatever the settings say, so safe mode and every test run on the same
-  // stock pool, and a crash the setting causes is never blamed on a mod.
+  // stock pool, and a crash the setting causes is never blamed on a mod. The
+  // experimental precise frame limiter (-xerces-precise-limiter) stays out
+  // too.
   bool crash_followup = false;
   std::optional<std::string> connect; // "+connect host:port" (Servers)
   // Instead of the profile's (a culprit-search test, with crash_followup).

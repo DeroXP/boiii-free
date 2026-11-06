@@ -2066,12 +2066,103 @@ The first load and launcher baseline from existing logs is in
    `d3dcompiler` use and the driver shader cache; keep or drop upstream's
    "reduce stutter" option (it renames `d3dcompiler_46.dll`) based on the
    measurement.
-4. Frame pacing: expose the engine's maximum frame latency; test a waitable swap
-   chain only if the engine's swap effect allows it.
+4. Frame pacing: the precise frame limiter (below; built 2026-11-05, off by
+   default, not yet run in the game). Then expose the engine's maximum frame
+   latency, and test a waitable swap chain only if the engine's swap effect
+   allows it (`perf.swapchain` says discard, 2 buffers).
 5. Opt-in process tweaks after the main menu: timer resolution, priority, P-core
    affinity for the main and render threads on hybrid CPUs like your Core Ultra
    9 285K.
 6. Not pursued: Sleep and Wait hooks (crashed), draw skipping (no gain).
+
+#### Precise frame limiter (item 4)
+
+On only with the launch flag `-xerces-precise-limiter` (Settings, Display,
+"Precise FPS limit (experimental)"), so it can be A/B tested. Safe mode and the
+culprit search's tests leave it out. Code: `src/xerces_core/frame_pacing.*` (the
+schedule and the waits), `src/client/xerces/frame_pacing.*` (the platform),
+calls from `scheduler.cpp` and `client_patches.cpp`; tests in
+`src/xerces_tests/test_frame_pacing.cpp`.
+
+Measured on your PC on 2026-11-05 with the frame probe (Cheese Cube, 3 runs
+each, 3840x2160 windowed): with `com_maxfps 240` the game ran at 239.1 FPS, but
+the median frame was 4.44 ms, p99 6.05 ms (50% above uncapped) and the 1% low
+158.1 FPS (31.5% below uncapped). The main thread's frames spread from 3.75 to
+4.75 ms; the render thread's Presents from 3.0 to 5.0 ms in 0.5 ms steps.
+
+What the engine does (`Com_Frame_Try_Block_Function`, read on the 2026-11-04
+dump of build 0x6531394):
+
+- It reads `com_maxfps` (the dvar with hash 0x29B732E8, default 60, 0 to 1000).
+  `Com_FPSLimit` returns UINT32_MAX (upstream's detour), so `com_maxfps` alone
+  counts.
+- The target is 1000 / `com_maxfps` in whole milliseconds, at least 1; also 1
+  for `com_maxfps 0`.
+- Up to 50 passes: run the event loop, read `Sys_Milliseconds` (`timeGetTime()`
+  minus its first value), move `last` back if the clock went back, and leave
+  when now - `last` >= target. Otherwise call the 1 ms wait at +0x113, which
+  upstream replaced with a high-resolution timer.
+- On the way out, `last` becomes the final reading.
+
+`timeGetTime` moves only when the system timer ticks, so at 240 the target is 4
+ms and frames leave on whole-millisecond steps of a clock read after an
+overshooting 1 ms wait.
+
+Why the pacing does not live only in that wait: the engine checks before it
+waits. A frame whose own work already lasted most of the period never reaches
+the wait. At 240, a frame longer than 3 ms passes the check whenever four of the
+clock's millisecond steps fall inside it, and leaves before 4.17 ms. In the
+fake-clock model, 80% of frames with 3.6 to 4.1 ms of work did.
+
+What the limiter does:
+
+- **At each frame's start** (the existing detour of the same function in
+  `scheduler.cpp`, before the engine's code), it waits until one period, 1000 /
+  `com_maxfps` ms, after it last let a frame go. A high-resolution waitable
+  timer covers the time until 0.3 ms before; then it spins on QPC. One wait is
+  at most 50 ms, so the event loop still runs that often at very low caps.
+- **The engine's check** then normally passes on its first pass. Two of its
+  readings are one period apart plus the event loop's jitter, and a period is
+  never shorter than the target. When the system timer ticks at a fixed interval
+  that divides 1 ms, readings at least `target` ms apart always count `target`
+  steps.
+- **When the check still misses a step**, the engine calls its wait, and the
+  limiter spins until `timeGetTime` moves (at most 1 ms, once a frame). That
+  happens when a period of whole milliseconds (5 ms at 200, 4 ms at 250) meets
+  jitter, or when the clock lags. After that it falls back to upstream's 1 ms
+  wait.
+- **The next frame counts from when this one left**, so a late frame is not
+  followed by short ones that catch up.
+- Frames slower than the period are not held, and with `com_maxfps 0` the
+  engine's wait is upstream's, unchanged.
+- No engine address is added and nothing detours Sleep or WaitFor\*: the waits
+  are calls to the timer, QPC and `timeGetTime` inside two hooks that already
+  exist.
+- Input is read as before: the event loop still runs right before the clock
+  reading that lets the frame go, so queued input reaches the same frame. It
+  only runs less often during a wait.
+- One engine number changes: the function times itself with QPC from its own
+  start into a 32-frame average, and only a performance record reads it
+  (`frameavg`, `framemin` and `framemax`, next to `cameraX` and `disk_bw_kb`).
+  The frame-start wait comes before that timing, so with the flag the record
+  shows each frame's work, not its whole time.
+
+The cost is a spin of up to 0.3 ms a frame (about 5% of one core at 240 FPS in
+the model), and up to 1 ms more in a frame whose check misses a step.
+
+On the fake clock (system timer at 1 or 0.5 ms, event loop jitter of 35 µs, a
+timer that wakes 20 to 150 µs late), frames at 240 leave 4.132 to 4.201 ms
+apart, against 3.01 to 5.14 ms with upstream's wait. The engine measures 4 or 5
+ms, 4.167 on average. At a 1/1024 s timer, about one frame in ten waits for the
+clock's next step (at most 0.98 ms more). At a 15.625 ms timer, neither limiter
+can beat the clock's steps; the limiter then spins at most 1.3 ms a frame.
+
+What to expect in the game: the main thread's frames (the probe's `main.csv`)
+4.17 ms apart. Uncapped, the render thread's Presents also came in 0.5 ms steps
+(3.0 and 3.5 ms), so Present-to-Present times may keep some of that.
+`xerces.frame_pacing.on` is logged at start, and `xerces.frame_pacing.stats`
+every 30 s: frames, paced, late waits, tick waits, missed ticks, upstream waits,
+spin time and `com_maxfps`. The in-game A/B is in docs/TESTING.md (Performance).
 
 ### 12.5 Per-mod profiler
 

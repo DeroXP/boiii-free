@@ -826,6 +826,44 @@ It then sums the frame times instead (for `--warmup-s`).
 - [ ] No frame times have been recorded yet: no probe build, no PresentMon
       capture.
 
+### Precise frame limiter (2026-11-05)
+
+`-xerces-precise-limiter` (DESIGN.md 12.4, Precise frame limiter). Settings,
+Display, "Precise FPS limit (experimental)" adds it to the extra flags.
+
+- [x] (2026-11-05, offline) `test_frame_pacing.cpp`: the engine's loop on a fake
+      clock. At 240, frames leave 4.132 to 4.201 ms apart (upstream's wait: 3.01
+      to 5.14 ms); 200, 250 and 1000 FPS stay within 0.05 ms of their period;
+      `com_maxfps 0` gives exactly upstream's timeline; a 15.625 ms system timer
+      costs at most 1.3 ms of spin a frame.
+- [x] (2026-11-05, dry launches only, home
+      `C:\Users\Ginld\XercesHome-agent-frame-limiter`) The toggle saves
+      `-xerces-precise-limiter` in `launcher.json`, the dry launch logs
+      `-launch -nointro -xerces-precise-limiter`, and turning it off removes it.
+      Safe mode and culprit tests leave it out (unit test).
+- [ ] In the game, with your go-ahead: an A/B at `com_maxfps 240`, windowed, on
+      Cheese Cube, 3 runs a side in A-B-B-A order:
+
+  ```
+  tools\dev\bench\game-bench.ps1 -Variant w240 -Dvars @{com_maxfps='240'} -OutDir C:\Users\Ginld\XercesDev\bench\<session> -Live
+  tools\dev\bench\game-bench.ps1 -Variant w240p -Dvars @{com_maxfps='240'} -ExtraFlags -xerces-precise-limiter -OutDir C:\Users\Ginld\XercesDev\bench\<session> -Live
+  xerces_cli bench compare --a <session>\w240 --b <session>\w240p --source probe
+  ```
+
+  - The game log has `xerces.frame_pacing.on`, then `xerces.frame_pacing.stats`
+    every 30 s: `paced` close to `frames`, `tick_waits` a small share,
+    `tick_missed` 0, `late` rare, `spin_us` about 0.2 to 0.3 ms per frame.
+  - The probe's `main.csv`: most `dt_ms` within 0.1 ms of 4.167 (they spread
+    from 3.75 to 4.75 ms on 2026-11-05).
+  - `frames.csv`: mean 239 to 240 FPS; p99 and the 1% low better than w240's
+    (6.05 ms and 158.1 FPS on 2026-11-05). The render thread may keep its 0.5 ms
+    steps (DESIGN.md 12.4); note how much.
+  - Aiming feels the same or smoother, with no added input lag.
+
+- [ ] In the same session: `com_maxfps` 60, 144 and 0 from the console take
+      effect at the next frame (at 0 the stats show only `upstream_waits`);
+      alt-tab and minimize do not hang the game; quitting is normal.
+
 ### First baseline (2026-11-05, existing logs only)
 
 The baseline is in `C:\Users\Ginld\XercesDev\bench\baseline-20261105\`:
