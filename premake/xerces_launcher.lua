@@ -44,6 +44,7 @@ filter({})
 links({
   "xerces_core",
   "zstd",
+  "zlib",
   "xerces_rmlui",
   "xerces_freetype",
   "advapi32",

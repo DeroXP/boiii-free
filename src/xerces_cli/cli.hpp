@@ -80,6 +80,8 @@ int cmd_plan_apply(const arguments &args);
 int cmd_packs_apply(const arguments &args);
 int cmd_logs_tail(const arguments &args);
 int cmd_sig_report(const arguments &args);
+// crash list | send: the crash reports' outbox (docs/CRASH_REPORTS.md).
+int cmd_crash(const arguments &args, const std::string &action);
 
 // bench_commands.cpp: the offline benchmark (DESIGN.md 12.2, 12.3): bench
 // loads, launcher, analyze and compare; bench run needs the game.

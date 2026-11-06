@@ -170,36 +170,47 @@
 			</div>
 		</div>
 
-		<!-- 04 Privacy (D21, 10.5): the plain statement. -->
+		<!-- 04 Privacy (D21, decided 2026-11-05; 10.5; docs/CRASH_REPORTS.md):
+		     what is sent and what never is on the left, the switch on the
+		     right, so the step fits the default window like the others. -->
 		<div class="fr-panel" data-if="step == 4">
 			<div class="label">Privacy</div>
-			<div class="fr-title">Your data stays here</div>
+			<div class="fr-title">Crash reports, and nothing else</div>
 
-			<div class="fr-points">
-				<div class="fr-point">
-					<span class="fr-point-n">01</span>
-					<div class="fr-point-text">
-						<div class="fr-point-title">No telemetry</div>
-						<div class="fr-point-body">Xerces collects no usage data. There is no analytics and no tracking of any kind.</div>
+			<div class="fr-columns">
+				<div class="fr-col-main">
+					<div class="fr-points">
+						<div class="fr-point">
+							<span class="fr-point-n">01</span>
+							<div class="fr-point-text">
+								<div class="fr-point-title">Crash reports are sent</div>
+								<div class="fr-point-body">After a crash, Xerces sends a report to the Xerces server so the developer can fix it: the crash's code and thread stacks (no memory contents), the mods, map and versions, and this PC's Windows, CPU, graphics card and RAM. Log lines go with your user name, folders and server addresses removed. The server keeps reports 90 days.</div>
+							</div>
+						</div>
+						<div class="fr-point">
+							<span class="fr-point-n">02</span>
+							<div class="fr-point-text">
+								<div class="fr-point-title">Never sent</div>
+								<div class="fr-point-body">No usage data or analytics, no player name, Steam id or game identity, no full crash dumps, settings, packs or files. They stay in your Xerces folder.</div>
+								<div class="fr-point-path">{{home_path}}</div>
+							</div>
+						</div>
 					</div>
 				</div>
-				<div class="fr-point">
-					<span class="fr-point-n">02</span>
-					<div class="fr-point-text">
-						<div class="fr-point-title">Nothing leaves this PC</div>
-						<div class="fr-point-body">Your settings, packs, logs and crash bundles stay in your Xerces folder.</div>
-						<div class="fr-point-path">{{home_path}}</div>
-					</div>
-				</div>
-				<div class="fr-point">
-					<span class="fr-point-n">03</span>
-					<div class="fr-point-text">
-						<div class="fr-point-title">Accounts come later, and are optional</div>
-						<div class="fr-point-body">Xerces accounts, friends and invites arrive in a later version. You never need one to play with mods.</div>
-					</div>
+
+				<div class="fr-col-aside">
+					<div class="label section-label">Your choice</div>
+					<button id="fr-crash" class="fr-toggle" data-class-on="send_crash" data-event-click="act('crash')">
+						<div class="fr-toggle-text">
+							<div class="fr-toggle-name">Send crash reports</div>
+							<div class="fr-toggle-help">Off: nothing is sent. To report a crash, open an issue on GitHub (DeroXP/boiii-free) with Diagnostics &gt; Copy report.</div>
+						</div>
+						<span class="fr-switch"><span class="fr-knob"></span></span>
+					</button>
+					<div class="fr-help">Settings &gt; Privacy has the same switch and deletes the reports this PC sent.</div>
+					<div class="fr-help">Xerces accounts come in a later version and are optional. Playing online still connects you to the servers you join, as the game always has.</div>
 				</div>
 			</div>
-			<div class="fr-help">Playing online still connects you to the servers you join, as the game always has.</div>
 		</div>
 	</div>
 

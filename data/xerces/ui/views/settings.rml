@@ -275,23 +275,44 @@
 		</div>
 	</div>
 
-	<!-- 06 Privacy -->
+	<!-- 06 Privacy (D21, decided 2026-11-05; docs/CRASH_REPORTS.md) -->
 	<div class="set-section" id="section-privacy">
 		<div class="set-head">
 			<div class="set-num">06</div>
 			<div class="set-title">Privacy</div>
-			<div class="set-desc">What leaves this PC: nothing.</div>
+			<div class="set-desc">What leaves this PC: crash reports, while they are on.</div>
 		</div>
 		<div class="set-body">
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Send crash reports</div>
+					<div class="field-help">When the game crashes, Xerces sends a report to the Xerces server, where the developer studies it to fix the crash. Off: nothing is sent, and reports still waiting are removed.</div>
+				</div>
+				<button id="send-crash-reports" class="toggle" data-class-on="send_crash_reports" data-event-click="toggle('crash')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="send_crash_reports">On</span><span class="toggle-state" data-if="!send_crash_reports">Off</span></button>
+			</div>
 			<div class="statement">
-				<p>Xerces sends no telemetry. Nothing about you, this PC or your games is sent anywhere.</p>
-				<p>If the game crashes, a crash report would only ever be uploaded when you agree to it for that one crash. Uploading is not built yet, so today nothing is uploaded at all.</p>
+				<p>A crash report holds the crash's code and thread stacks (no memory contents), the game mode, map and mods, the Xerces and game versions, this PC's Windows version, CPU, graphics card and driver, RAM and display, and the last lines of the game's and Xerces' logs, with your user name, folders and server addresses removed. It is tied to a random id kept in your Xerces folder, never to your name or your hardware, and the server deletes it after 90 days.</p>
+				<p>Never sent: usage data or analytics, your player name, Steam id or game identity, full crash dumps, your settings, packs or files.</p>
+			</div>
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Delete my crash reports</div>
+					<div class="field-help">Deletes every crash report this PC sent from the Xerces server.</div>
+				</div>
+				<button id="delete-crash-reports" class="small-button" data-class-disabled="crash_busy" data-event-click="act('delete crash reports')"><span>Delete</span></button>
+			</div>
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Report a crash yourself</div>
+					<div class="field-help">With crash reports off, open an issue on GitHub (DeroXP/boiii-free) and attach what Diagnostics &gt; Copy report gives you.</div>
+				</div>
+				<button id="report-by-hand" class="small-button" data-event-click="act('report by hand')"><span>Open GitHub issues</span></button>
 			</div>
 			<div class="field">
 				<div class="field-text">
 					<div class="field-name">What Xerces keeps</div>
 					<div class="set-value">{{home_path}}</div>
-					<div class="field-help">Settings, logs, caches and crash reports, all on this PC.</div>
+					<div class="field-help">Settings, logs, caches and crash dumps, all on this PC. Crash reports wait in its crash folder until they are sent.</div>
 				</div>
 				<button id="open-home" class="small-button" data-event-click="act('open home')"><span>Open folder</span></button>
 			</div>

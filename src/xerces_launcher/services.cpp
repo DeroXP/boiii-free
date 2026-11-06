@@ -7,8 +7,11 @@
 #include <exception>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 
 #include <xerces_core/bundle.hpp>
+#include <xerces_core/crash_outbox.hpp>
+#include <xerces_core/crash_report.hpp>
 #include <xerces_core/detect.hpp>
 #include <xerces_core/ipc.hpp>
 #include <xerces_core/json.hpp>
@@ -45,17 +48,59 @@ std::optional<fs::path> env_path(const wchar_t *name) {
 
 std::string now_utc() { return xerces_core::json_log::now_utc(); }
 
+crash_notice notice(crash_notice::kind what, std::size_t count = 0,
+                    std::string server_id = {}, std::string error = {}) {
+  crash_notice out;
+  out.what = what;
+  out.count = count;
+  out.server_id = std::move(server_id);
+  out.error = std::move(error);
+  return out;
+}
+
+std::int64_t unix_now() {
+  return std::chrono::duration_cast<std::chrono::seconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
 // A mode for a log line; never the caller's text, which could hold quotes.
 const char *valid_mode_name(const std::string &mode) {
   return mode == "zm" ? "zm" : mode == "mp" ? "mp" : mode == "cp" ? "cp" : "?";
 }
 } // namespace
 
+// The crash reports' worker owns this; the launcher only reads its events.
+struct services::crash_state {
+  struct event {
+    crash_job job; // what was asked (journal_text cleared)
+    std::optional<xerces_core::collect_result> collected;
+    std::vector<xerces_core::send_result> sent;
+    bool dry = false;
+    std::optional<std::int64_t> deleted;
+    std::string delete_error;
+    std::string error;
+  };
+  std::mutex mutex;
+  std::vector<event> events;
+  std::atomic<bool> send_enabled{true};
+  std::atomic<bool> busy{false};
+};
+
 services::services(launcher_paths paths, poster post, bool dry_launch)
-    : paths_(std::move(paths)), post_(std::move(post)),
-      dry_launch_(dry_launch) {
+    : paths_(std::move(paths)), post_(std::move(post)), dry_launch_(dry_launch),
+      crash_state_(std::make_shared<crash_state>()) {
   load_config();
   reload_signatures();
+  // Crashes the client recorded while no launcher watched (a game restarted
+  // from the crash dialog, one xerces_cli started), and the queue. A game
+  // still running keeps its crashes until it has exited. poll() starts this
+  // once the first detection is done, so the reports carry the game's build.
+  crash_state_->send_enabled = config_.send_crash_reports;
+  crash_job job;
+  job.collect = !game_running();
+  job.send = true;
+  crash_next_ = std::move(job);
   if (const auto text = read_text(paths_.config / "culprit.json")) {
     culprit_ = xerces_core::parse_culprit_progress(*text);
   }
@@ -500,6 +545,20 @@ launch_outcome services::start(const xerces_core::launch_inputs &in) {
 }
 
 void services::poll() {
+  drain_crash_events();
+  // Waits for detection: a report names the game's build.
+  if (crash_next_ && !crash_state_->busy && !detecting_) {
+    crash_job job = std::move(*crash_next_);
+    crash_next_.reset();
+    run_crash_job(std::move(job));
+  }
+  if (crash_retry_ && std::chrono::steady_clock::now() >= crash_retry_at_ &&
+      !crash_state_->busy) {
+    crash_retry_ = false;
+    crash_job job;
+    job.send = true;
+    queue_crash_job(std::move(job));
+  }
   if (!game_process_) {
     watch_run_folder();
     return;
@@ -531,6 +590,14 @@ void services::poll() {
   log_info("launcher.game.exited", "exit code " + std::to_string(code),
            "{\"code\":" + std::to_string(code) + "}");
   reload_signatures();
+  // A crash report, when it was a crash (xerces_core::exit_is_crash decides
+  // on the worker, with the journal as it is now).
+  crash_job job;
+  job.collect = true;
+  job.exit_code = code;
+  job.journal_text = read_text(paths_.journal_file()).value_or("");
+  job.send = true;
+  queue_crash_job(std::move(job));
 }
 
 void services::watch_run_folder() {
@@ -549,6 +616,11 @@ void services::watch_run_folder() {
     ++journal_rev_;
     log_info("launcher.game.gone", "a game this launcher did not start exited");
     reload_signatures();
+    // Its exit code is not known here: only what the client recorded.
+    crash_job job;
+    job.collect = true;
+    job.send = true;
+    queue_crash_job(std::move(job));
   }
   game_was_live_ = live;
   // A culprit test that was still running when this launcher opened.
@@ -591,6 +663,231 @@ fs::path services::make_bundle(std::string *error) const {
     return {};
   }
   log_info("launcher.diag.bundle", utf8(out));
+  return out;
+}
+
+// ------------------------------------------------------------ crash reports
+void services::queue_crash_job(crash_job job) {
+  if (crash_state_->busy || crash_next_) {
+    // One worker at a time: what is asked meanwhile runs after it, merged.
+    crash_job &next = crash_next_ ? *crash_next_ : crash_next_.emplace();
+    next.collect = next.collect || job.collect;
+    if (job.exit_code) {
+      next.exit_code = job.exit_code;
+      next.journal_text = std::move(job.journal_text);
+    }
+    next.send = next.send || job.send;
+    next.remove_remote = next.remove_remote || job.remove_remote;
+    return;
+  }
+  run_crash_job(std::move(job));
+}
+
+void services::run_crash_job(crash_job job) {
+  crash_state_->busy = true;
+  xerces_core::crash_context ctx;
+  ctx.home = paths_.home;
+  ctx.version = xerces_core::xerces_version_text;
+  ctx.commit = xerces_core::xerces_build_commit();
+  ctx.dirty = xerces_core::xerces_build_dirty();
+  if (game_.exe) {
+    ctx.game_checksum = game_.exe->checksum;
+  }
+  ctx.steam_build = game_.steam_build;
+  if (const auto profile = env_path(L"USERPROFILE")) {
+    ctx.profile = utf8(*profile);
+  }
+  if (const auto user = env_path(L"USERNAME")) {
+    ctx.user_name = utf8(*user);
+  }
+  // Only for the report's flags and the words to hide (player name,
+  // favourites); the report never carries the config itself.
+  ctx.config_text = xerces_core::launcher_config_to_json(config_);
+  ctx.journal_text = std::move(job.journal_text);
+  job.journal_text.clear();
+  ctx.system = [] { return xerces_core::collect_crash_system(); };
+  ctx.now_utc = now_utc();
+  ctx.now = unix_now();
+  const bool dry = dry_launch_;
+  std::thread([state = crash_state_, ctx = std::move(ctx), job, dry] {
+    crash_state::event event;
+    event.job = job;
+    event.dry = dry;
+    try {
+      if (job.collect) {
+        event.collected = xerces_core::collect_crashes(
+            ctx, state->send_enabled.load(), job.exit_code);
+      }
+      const fs::path crash_dir = ctx.home / "crash";
+      xerces_core::send_options options;
+      options.user_agent = "Xerces/" + ctx.version;
+      options.base_url = xerces_core::crash_base_url().value_or("");
+      options.enabled = [state] { return state->send_enabled.load(); };
+      if (job.send && !dry && state->send_enabled &&
+          !xerces_core::list_outbox(crash_dir).empty()) {
+        options.install_id = xerces_core::crash_install_id(ctx.home);
+        event.sent = xerces_core::send_outbox(crash_dir, options,
+                                              xerces_core::winhttp_send);
+      }
+      if (job.remove_remote) {
+        // An install without an id never sent a report: nothing to delete.
+        options.install_id = xerces_core::crash_install_id(ctx.home, false);
+        if (dry) {
+          event.delete_error = "dry";
+        } else if (options.install_id.empty()) {
+          event.deleted = 0;
+        } else {
+          event.deleted = xerces_core::delete_remote_reports(
+              options, xerces_core::winhttp_send, &event.delete_error);
+        }
+      }
+    } catch (const std::exception &error) {
+      event.error = xerces_core::json::valid_utf8(error.what(), 512);
+    } catch (...) {
+      event.error = "an unknown error";
+    }
+    {
+      std::lock_guard lock(state->mutex);
+      state->events.push_back(std::move(event));
+    }
+    state->busy = false;
+  }).detach();
+}
+
+void services::drain_crash_events() {
+  std::vector<crash_state::event> events;
+  {
+    std::lock_guard lock(crash_state_->mutex);
+    events.swap(crash_state_->events);
+  }
+  for (const auto &event : events) {
+    if (!event.error.empty()) {
+      log_error("launcher.crash.failed",
+                "Crash reports stopped on an error: " + event.error);
+    }
+    if (event.collected) {
+      for (const auto &id : event.collected->queued) {
+        log_info("launcher.crash.queued", id,
+                 "{\"report_id\":" + xerces_core::json::quote(id) + "}");
+      }
+      if (event.collected->dropped > 0) {
+        log_info("launcher.crash.dropped",
+                 std::to_string(event.collected->dropped) +
+                     " crash(es) not queued: sending is off");
+      }
+      if (event.job.exit_code && event.collected->crashed &&
+          !crash_state_->send_enabled) {
+        crash_notices_.push_back(notice(crash_notice::kind::off));
+      }
+    }
+    std::size_t sent = 0;
+    std::string last_id;
+    bool retry = false;
+    int wait_s = 600;
+    for (const auto &result : event.sent) {
+      log(result.outcome == xerces_core::send_outcome::retry ||
+                  result.outcome == xerces_core::send_outcome::rejected
+              ? xerces_core::log_level::warn
+              : xerces_core::log_level::info,
+          "launcher.crash.send", xerces_core::to_string(result.outcome),
+          "{\"report_id\":" + xerces_core::json::quote(result.report_id) +
+              ",\"outcome\":" +
+              xerces_core::json::quote(xerces_core::to_string(result.outcome)) +
+              ",\"status\":" + std::to_string(result.status) +
+              ",\"server_id\":" + xerces_core::json::quote(result.server_id) +
+              ",\"error\":" +
+              xerces_core::json::quote(
+                  xerces_core::json::valid_utf8(result.error, 256)) +
+              "}");
+      switch (result.outcome) {
+      case xerces_core::send_outcome::sent:
+      case xerces_core::send_outcome::duplicate:
+        ++sent;
+        last_id = result.server_id;
+        break;
+      case xerces_core::send_outcome::rejected:
+        crash_notices_.push_back(
+            notice(crash_notice::kind::rejected, 1, {}, result.error));
+        break;
+      case xerces_core::send_outcome::retry:
+        retry = true;
+        if (result.retry_after) {
+          wait_s = std::max(wait_s, *result.retry_after);
+        }
+        break;
+      case xerces_core::send_outcome::off:
+        break;
+      }
+    }
+    if (sent > 0) {
+      crash_notices_.push_back(notice(crash_notice::kind::sent, sent, last_id));
+    }
+    const bool fresh = event.collected && !event.collected->queued.empty();
+    if (fresh && event.dry) {
+      log_info("launcher.crash.dry",
+               "--dry-launch: crash reports are queued, never sent");
+    } else if (fresh && sent == 0 && crash_state_->send_enabled) {
+      crash_notices_.push_back(
+          notice(crash_notice::kind::later, event.collected->queued.size()));
+    }
+    if (retry) {
+      // While Xerces stays open it tries again in 10 minutes (or when the
+      // server says), and at every start.
+      crash_retry_ = true;
+      crash_retry_at_ =
+          std::chrono::steady_clock::now() + std::chrono::seconds(wait_s);
+    }
+    if (event.job.remove_remote) {
+      if (event.deleted) {
+        log_info("launcher.crash.deleted",
+                 std::to_string(*event.deleted) + " report(s)");
+        crash_notices_.push_back(
+            notice(crash_notice::kind::deleted,
+                   static_cast<std::size_t>(
+                       std::max<std::int64_t>(0, *event.deleted))));
+      } else {
+        log_warn("launcher.crash.delete_failed", event.delete_error);
+        crash_notices_.push_back(notice(crash_notice::kind::delete_failed, 0,
+                                        {}, event.delete_error));
+      }
+    }
+  }
+}
+
+void services::crash_reports_setting_changed() {
+  crash_state_->send_enabled = config_.send_crash_reports;
+  if (!config_.send_crash_reports) {
+    // Off means nothing leaves this PC, also what was waiting.
+    const std::size_t dropped = xerces_core::clear_outbox(paths_.crash);
+    crash_retry_ = false;
+    if (crash_next_) {
+      crash_next_->send = false; // a delete asked for still runs
+    }
+    log_info("launcher.crash.off", "Crash reports off; " +
+                                       std::to_string(dropped) +
+                                       " queued report(s) removed");
+    return;
+  }
+  log_info("launcher.crash.on", "Crash reports on");
+  crash_job job;
+  job.collect = !game_running();
+  job.send = true;
+  queue_crash_job(std::move(job));
+}
+
+void services::delete_crash_reports() {
+  crash_job job;
+  job.remove_remote = true;
+  queue_crash_job(std::move(job));
+}
+
+bool services::crash_reports_busy() const {
+  return crash_state_->busy || crash_next_.has_value();
+}
+
+std::vector<crash_notice> services::take_crash_notices() {
+  std::vector<crash_notice> out;
+  out.swap(crash_notices_);
   return out;
 }
 

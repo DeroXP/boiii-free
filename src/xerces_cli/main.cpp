@@ -235,6 +235,16 @@ Work on <home> as Xerces.exe does (--home <dir>, else XERCES_HOME, else
   logs tail [--role launcher|game|cli] [--lines <n>] [--follow]
                                                    the newest log, one line per
                                                    event; --follow until Ctrl+C
+  crash list [--json]                              the crash reports waiting
+                                                   to be sent, and the game's
+                                                   pending crashes
+  crash send [--exit-code <code>] [--json]         turn the game's pending
+                                                   crashes into reports (with
+                                                   --exit-code, also a crash
+                                                   it wrote nothing for) and
+                                                   send them when "Send crash
+                                                   reports" is on
+                                                   (docs/CRASH_REPORTS.md)
   sig check [--json]                               the game's last signature
                                                    report (exit 4 on a miss)
   bench loads [--logs <dir>]... [--console <dir>]... [--json]
@@ -1377,6 +1387,9 @@ int main(int argc, char **argv) {
     }
     if (group == "diag" && action == "bundle") {
       return cmd_diag_bundle(args);
+    }
+    if (group == "crash") {
+      return cmd_crash(args, action);
     }
     if (group == "status" || group == "load" || group == "reload" ||
         group == "unload") {
