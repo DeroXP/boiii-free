@@ -25,16 +25,15 @@
 #include <game/impl/ugc/ugc.hpp>
 #include <game/ui_scripting/execution.hpp>
 
-#include <condition_variable>
 #include <mutex>
 #include <regex>
 #include <shellapi.h>
 
 #include <frozen/string.h>
-#include <frozen/unordered_map.h>
 #include <frozen/unordered_set.h>
 
 #include <xerces/switches.hpp>
+#include <xerces_core/missing_dlc.hpp>
 
 using namespace game::db;
 using XZoneName = xzone::XZoneName;
@@ -44,67 +43,6 @@ game::EngineDependentDvar workshop_timeout;
 game::EngineDependentDvar workshop_retry_attempts;
 
 utils::hook::detour CL_SetupForNewServerMap_hook;
-
-inline constexpr std::pair<frozen::string, frozen::string> DLC_LINK_ARRAY[] = {
-    {"zm_zod", "https://forum.ezz.lol/topic/6/bo3-dlc"},
-    {"zm_castle", "https://forum.ezz.lol/topic/6/bo3-dlc"},
-    {"zm_island", "https://forum.ezz.lol/topic/6/bo3-dlc"},
-    {"zm_stalingrad", "https://forum.ezz.lol/topic/6/bo3-dlc"},
-    {"zm_genesis", "https://forum.ezz.lol/topic/6/bo3-dlc"},
-    {"zm_cosmodrome", "https://forum.ezz.lol/topic/6/bo3-dlc"},
-    {"zm_theater", "https://forum.ezz.lol/topic/6/bo3-dlc"},
-    {"zm_moon", "https://forum.ezz.lol/topic/6/bo3-dlc"},
-    {"zm_prototype", "https://forum.ezz.lol/topic/6/bo3-dlc"},
-    {"zm_tomb", "https://forum.ezz.lol/topic/6/bo3-dlc"},
-    {"zm_temple", "https://forum.ezz.lol/topic/6/bo3-dlc"},
-    {"zm_sumpf", "https://forum.ezz.lol/topic/6/bo3-dlc"},
-    {"zm_factory", "https://forum.ezz.lol/topic/6/bo3-dlc"},
-    {"zm_asylum", "https://forum.ezz.lol/topic/6/bo3-dlc"}};
-inline constexpr frozen::unordered_map<frozen::string, frozen::string,
-                                       std::size(DLC_LINK_ARRAY)>
-    DLC_LINKS = frozen::make_unordered_map(DLC_LINK_ARRAY);
-std::mutex dlc_mutex;
-std::condition_variable dlc_cv;
-std::string pending_dlc_map;
-std::atomic<bool> dlc_thread_shutdown{false};
-std::thread dlc_popup_thread_obj;
-
-void dlc_popup_thread_func() {
-  while (true) {
-    std::unique_lock lock(dlc_mutex);
-    dlc_cv.wait_for(lock, std::chrono::milliseconds(200), [] {
-      return dlc_thread_shutdown.load() || !pending_dlc_map.empty();
-    });
-    if (dlc_thread_shutdown.load())
-      break;
-    if (pending_dlc_map.empty())
-      continue;
-    std::string map = std::move(pending_dlc_map);
-    pending_dlc_map.clear();
-    lock.unlock();
-
-    if (DLC_LINKS.contains(frozen::string(map.data()))) {
-      const char *link = DLC_LINKS.at(frozen::string(map.data())).data();
-      const std::string map_copy = map;
-      scheduler::once(
-          [map_copy, link] {
-            game::ui::UI_OpenErrorPopupWithMessage(
-                game::LOCAL_CLIENT_0, game::errorCode::UI,
-                utils::string::va(
-                    "Missing DLC map: %s\n\nOpening download page...\n%s",
-                    map_copy.c_str(), link));
-          },
-          scheduler::main);
-      ShellExecuteA(nullptr, "open", link, nullptr, nullptr, SW_SHOWNORMAL);
-    }
-  }
-}
-
-void queue_dlc_popup(const std::string_view &mapname) {
-  std::lock_guard lock(dlc_mutex);
-  pending_dlc_map = mapname;
-  dlc_cv.notify_one();
-}
 
 bool has_mod(const std::string_view &pub_id) {
   for (uint32_t i = 0; i < game::ugc::modsPool.count; ++i) {
@@ -1150,6 +1088,21 @@ void open_workshop_page(const std::string &workshop_id) {
   ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
+// Xerces (D9): upstream opened a "download page" outside Steam when a server
+// played an official Zombies map the game lacks. Xerces says the server uses
+// DLC the player does not own or has not installed, and offers Black Ops III's
+// store page, opened in Steam the way Workshop pages are.
+void explain_missing_dlc(const std::string_view &mapname) {
+  printf("[ Workshop ] The server's map %.*s is not installed (DLC).\n",
+         static_cast<int>(mapname.size()), mapname.data());
+  const xerces_core::dlc_notice notice =
+      xerces_core::missing_dlc_notice(mapname);
+  download_overlay::show_confirmation(notice.title, notice.message, [] {
+    ShellExecuteA(nullptr, "open", xerces_core::bo3_store_page, nullptr,
+                  nullptr, SW_SHOWNORMAL);
+  });
+}
+
 void offer_download(game::ZoneType zoneType, const std::string_view &name,
                     const std::string_view &workshop_id) {
   if constexpr (!xerces_switches::upstream_downloaders) {
@@ -1295,7 +1248,7 @@ bool check_valid_usermap_id(const std::string_view &mapname,
                             const std::string_view &base_uri) {
   if (is_official_map(mapname.data())) {
     if (!DB_ValidFastFile(mapname.data(), 0)) {
-      queue_dlc_popup(mapname);
+      explain_missing_dlc(mapname);
       return false;
     }
   } else {
@@ -1608,8 +1561,6 @@ public:
           "future "
           "use)");
 
-      dlc_popup_thread_obj = std::thread(dlc_popup_thread_func);
-
       command::add("userContentReload", [](const command::params &params) {
         game::ugc::UGC_LoadPools_Impl();
         if (!game::is_server())
@@ -1706,10 +1657,6 @@ public:
   void pre_destroy() override {
     if (game::is_client()) {
       cancel_download();
-      dlc_thread_shutdown = true;
-      dlc_cv.notify_one();
-      if (dlc_popup_thread_obj.joinable())
-        dlc_popup_thread_obj.join();
     }
   }
 };

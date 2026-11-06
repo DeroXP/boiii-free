@@ -96,7 +96,7 @@ answer.
 | D6  | decided       | Backend language                                                                                                            | Python 3.12 + FastAPI + Postgres (slice M5a built, 10.9)                                                                                                                                                                                                                                                                                                                                                                                         |                                                                                               |
 | D7  | M6            | Relay                                                                                                                       | Cloudflare Realtime TURN, coturn on Fly.io or Hetzner as fallback. Your brief asked for a relay on Railway; Railway cannot accept UDP, and a TCP or WebSocket relay there would share the spend limit that also stops the API and database, so I recommend dropping it                                                                                                                                                                           | A WebSocket relay in a separate Railway project with its own spend limit                      |
 | D8  | now (backend) | Railway plan                                                                                                                | Pro ($20/month): native backups, point-in-time recovery, monitors                                                                                                                                                                                                                                                                                                                                                                                | Hobby, plus a nightly `pg_dump` to storage outside Railway                                    |
-| D9  | M0            | Upstream download and swap features                                                                                         | Remove: the archive.org `BlackOps3.exe` download that deletes your exe, the launcher's version picker, the dedicated-server `-beta` self-download (all run executables without verification), and the "download page" popup for official Zombies DLC (replace with "this server uses DLC you don't own" and the Steam store page)                                                                                                                | Keep them                                                                                     |
+| D9  | decided       | Upstream download and swap features                                                                                         | Decided 2026-11-05 as recommended; removed from the code, with no build switch: the archive.org `BlackOps3.exe` download that replaced your exe, the old launcher's version picker and Patches tab, and the dedicated-server `-beta` self-download (all ran executables from outside Steam). The official DLC "download page" popup is now "this server uses DLC you don't own or haven't installed" and the Steam store page                    | Keep them                                                                                     |
 | D10 | M9            | Proprietary upscalers (DLSS, XeSS, FSR 4 binaries)                                                                          | A separately built and distributed optional module, outside the GPL release, with vendor binaries supplied by the user; a legal opinion covering headers, static libraries and DLLs before anything ships                                                                                                                                                                                                                                        | Skip them; ask vendors                                                                        |
 | D11 | M4            | Repo and releases                                                                                                           | Rename `DeroXP/boiii-free` to `DeroXP/xerces` (GitHub redirects the old URL); first bring the fork's published `v0.0.x-alpha` releases into GPL compliance (source with submodules) or withdraw them                                                                                                                                                                                                                                             | Keep the name                                                                                 |
 | D12 | M1            | What v1.0 pulls forward from the "extra features" list                                                                      | Updater client (must replace upstream's before any release), crash journal, safe mode and a basic diagnostics bundle (M1); translatable strings and the high-contrast theme (M3); dry-run, backup and rollback, profiles per game mode, manifest-only dependency resolution (M4)                                                                                                                                                                 | Keep all extras in M8                                                                         |
@@ -222,7 +222,7 @@ What Xerces must change before shipping any build, and when:
 | Problem                                   | Detail                                                                                                                                                                                                                                                                                | When                                                              |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | Updater                                   | In Release builds it replaces the running exe with upstream's `boiii.exe` whenever the hash differs, runs a forced first update **even with `-noupdate`**, and deletes every file under `%LOCALAPPDATA%\boiii` that is not in upstream's manifest. The fork had to stub it (e5968d07) | First commit of M0, before any build is launched                  |
-| Unverified downloads                      | archive.org exe swap, version picker, dedicated `-beta`                                                                                                                                                                                                                               | M0 (D9)                                                           |
+| Unverified downloads                      | archive.org exe swap, version picker, dedicated `-beta`                                                                                                                                                                                                                               | M0 (D9): removed on 2026-11-05                                    |
 | Third-party endpoints                     | Ezz masters (server list, presence, rendezvous), ipify, `r2.ezz.lol`, Ezz Discord app, GitHub API, `steamcommunity.com` scraping, Steam Web API, Steam CM/CDN                                                                                                                         | M0 inventory and D14/D15 switches; a CI lint for hard-coded hosts |
 | First-run detection                       | An inverted check in `find_steam_game_path` (`main.cpp:649-651`) loops forever when the game is outside the default library and the client lives elsewhere                                                                                                                            | M1 (4.7)                                                          |
 | Release logging                           | Release builds write almost no log file                                                                                                                                                                                                                                               | M1 (15.1)                                                         |
@@ -426,10 +426,11 @@ time and SHA-256 with `compat/builds.json`:
 - **Unknown or modified**: the same message, plus "Verify the game files in
   Steam".
 
-This replaces upstream's archive.org patch prompt (D9). `xerces_core/compat`
-implements the check (the most specific matching entry wins; "newer" needs
-Steam's `buildid` from the appmanifest), and `xerces_cli game check` runs it on
-the installed game.
+This replaces upstream's archive.org patch prompt, which is removed (D9); the
+client's own message for a build it cannot load says the same, without a
+download. `xerces_core/compat` implements the check (the most specific matching
+entry wins; "newer" needs Steam's `buildid` from the appmanifest), and
+`xerces_cli game check` runs it on the installed game.
 
 ### 4.3 Signature registry
 
@@ -1327,8 +1328,8 @@ that says what is off until M5; Verify installation is Diagnostics' "Verify with
 Steam"; Credits is About (the footer link), with the licences and credits; asset
 pools and binds are Settings' "Binds and asset pools" (the game's binds.cfg and
 launcher_settings.json). Patches, the version picker and the archive.org exe
-download wait for D9; manage installation and the Workshop downloader are not
-carried over.
+download are removed (D9, 2026-11-05); manage installation and the Workshop
+downloader are not carried over.
 
 ### 7.4 Navigation and input
 
@@ -2433,7 +2434,8 @@ packs), server hosting, privacy, compatibility matrix and changelog.
 M0 inventories every host the client contacts: Ezz masters, ipify, `r2.ezz.lol`,
 Ezz's Discord links, the GitHub API, `steamcommunity.com`, the Steam Web API,
 Steam CM and CDN. D14 and D15 switch the identifying ones off in Xerces builds,
-a CI lint flags new hard-coded hosts, and `PRIVACY.md` lists what remains.
+D9 removed the archive.org and GitHub API downloads, a CI lint flags new
+hard-coded hosts, and `PRIVACY.md` lists what remains.
 
 ---
 
@@ -2500,9 +2502,11 @@ M5a, which you asked for now.
   supervised session (D3) ran on 2026-11-04 (docs/TESTING.md). Stacking works,
   so the D1 decision point is settled: M1 builds on mod-stack. The D14 and D15
   switches are built (`src/client/xerces/switches.hpp`), off by default, and the
-  switch build reached the menu in a game check. Open: D9. Still open from D3:
-  the join test with missing mods, the performance baseline, and a person
-  playing each stacked mod's feature.
+  switch build reached the menu in a game check. D9 is decided and its removals
+  are built (2026-11-05): no archive.org exe swap, version picker or `-beta`
+  self-download, and official DLC maps get the Steam store notice (not yet seen
+  in the game). Still open from D3: the join test with missing mods, the
+  performance baseline, and a person playing each stacked mod's feature.
 - M1, headless part done: the manifest and its validator with the schema
   (`docs/schema/mod-1.schema.json`), legacy manifests, the planner with
   `plan_id` and `content_id`, JSON logs (`docs/schema/log-1.schema.json`), and
@@ -2576,7 +2580,7 @@ M5a, which you asked for now.
   the contrast lint; translatable strings with a template and a pseudo-locale.
   The launcher's settings reach the game: the client applies them again after
   the game loads its own saved config. Every row of the parity table is placed
-  except the two that wait for D9. Checked in dry runs only (`--dry-launch`, a
+  (the two D9 rows are removed). Checked in dry runs only (`--dry-launch`, a
   fake game folder): all screens render with no RmlUi warnings in all three
   themes, and every launch path builds the command line D3 verified; on
   2026-11-05 Launch vanilla, Launch modded, safe mode and the reopened launcher

@@ -214,6 +214,27 @@ fonts, for comparison in a browser (Edge headless:
       `boiii_players\plugins.log` says how many DLLs it left alone;
       `--with-upstream-plugins` builds upstream's loader back in.
 
+### Upstream downloads removed (D9, M0)
+
+Removed on 2026-11-05: the archive.org `BlackOps3.exe` swap, the old launcher's
+version picker and Patches tab, the dedicated server's `-beta` self-download and
+the `beta_data` folder that went with them. Official DLC maps get a notice
+instead of upstream's download page.
+
+- [x] (2026-11-05, branch `launcher/d9-remove`) The default build's `boiii.exe`
+      no longer contains the archive.org URLs, upstream's beta server path,
+      Ezz's DLC forum page or the version picker's callbacks.
+- [ ] Joining a server on one of the game's own maps that your game lacks (a DLC
+      Zombies map you have not installed, for example) shows "DLC needed": the
+      server uses DLC you don't own or haven't installed, with the map's name.
+      Yes opens Black Ops III's store page in the Steam client; No closes the
+      notice. The join stops either way and nothing is downloaded.
+- [ ] A `BlackOps3.exe` the client cannot load (after a Steam update) shows
+      "Xerces does not support this Black Ops III build" with no download offer
+      and leaves the exe as it is (only when Steam updates the game).
+- [ ] Upstream's old launcher (`boiii.exe` without `-launch`) has no version
+      picker and no Patches tab, and PLAY still starts the game.
+
 ### Loader and manifest (M1)
 
 What the game role does since 389dff95 (`src/client/xerces`): it resolves

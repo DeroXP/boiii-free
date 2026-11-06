@@ -270,29 +270,6 @@
                 <button type="button" class="btn-play-large" id="playBtn">
                   &#9654; PLAY
                 </button>
-                <div class="version-selector-wrap">
-                  <span class="version-selector-label">Version:</span>
-                  <div class="version-selector-container" id="versionDropdown">
-                    <button
-                      type="button"
-                      class="version-selector-display"
-                      id="verDropDisplay"
-                    >
-                      <span class="version-selector-text" id="verDropText"
-                        >Latest (Auto-update)</span
-                      >
-                      <span class="version-selector-arrow">&#9660;</span>
-                    </button>
-                    <div class="version-selector-options" id="versionOptions">
-                      <div
-                        class="version-selector-option selected"
-                        data-value="latest"
-                      >
-                        Latest (Auto-update)
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </div>
               <div class="player-section">
                 <div class="player-label">Player Name</div>
@@ -768,9 +745,6 @@
               </button>
               <button type="button" class="settings-tab" data-stab="assetpools">
                 Asset Pools
-              </button>
-              <button type="button" class="settings-tab" data-stab="patches">
-                Patches
               </button>
               <button type="button" class="settings-tab" data-stab="binds">
                 Binds
@@ -2774,54 +2748,6 @@
                       style="width: 100%; margin-top: 12px"
                     >
                       Reset Asset Pool Sizes to Default
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- ═══ PATCHES TAB ═══ -->
-              <div
-                class="settings-tab-content"
-                id="settingsTabPatches"
-                data-stab="patches"
-              >
-                <div class="settings-section">
-                  <div class="settings-section-title">Steam Update Fix</div>
-                  <div
-                    style="
-                      display: flex;
-                      flex-direction: column;
-                      gap: 12px;
-                      padding: 12px 16px;
-                      background: rgba(12, 11, 10, 0.5);
-                      border: 1px solid rgba(68, 65, 63, 0.22);
-                      border-radius: 8px;
-                    "
-                  >
-                    <div>
-                      <div class="settings-row-label">
-                        Previous BlackOps3.exe
-                      </div>
-                      <div class="settings-row-desc" style="margin-top: 4px">
-                        BOIII does not work with the latest Steam update. If you
-                        downloaded the latest update through Steam, use the
-                        button below to get the previous BlackOps3.exe and
-                        replace the one in your game directory.
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      class="btn btn-primary"
-                      style="margin-top: 20px"
-                      onclick="
-                        window
-                          .getExternal()
-                          .openUrl(
-                            'https://archive.org/download/t7_full_game/BlackOps3.exe'
-                          )
-                      "
-                    >
-                      Download Previous BlackOps3.exe
                     </button>
                   </div>
                 </div>
