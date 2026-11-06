@@ -1,0 +1,61 @@
+{
+  "schema": "xerces.crash/1",
+  "report_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "created_utc": "2026-11-05T12:00:00.000Z",
+  "xerces": {
+    "commit": "3f09512d",
+    "dirty": false,
+    "version": "0.1.0-beta.1"
+  },
+  "game": {
+    "build": "0x6531394",
+    "steam_build": 24784313
+  },
+  "system": {
+    "cpu": "Intel(R) Core(TM) Ultra 9 285K",
+    "display": "3840x2160@240",
+    "gpus": [
+      {
+        "driver": "32.0.15.8180",
+        "name": "NVIDIA GeForce RTX 5070 Ti"
+      }
+    ],
+    "logical_cpus": 24,
+    "ram_mib": 65536,
+    "windows": "10.0.26300"
+  },
+  "launch": {
+    "flags": ["-nointro", "-xerces-db-pool"],
+    "map": "zm_castle",
+    "mode": "zm",
+    "mods": [
+      {
+        "id": "ws.1",
+        "name": "DS4C",
+        "version": "1.0.0"
+      }
+    ],
+    "plan_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "safe_mode": false
+  },
+  "crash": {
+    "code": "0xC0000005",
+    "exit_code": "0xC0000005",
+    "frames": ["BlackOps3.exe+0x14224FE5C", "boiii.exe+0x1234"],
+    "kind": "exception",
+    "module": "BlackOps3.exe",
+    "offset": "0x14224FE5C",
+    "phase": "in_game",
+    "thread": "main"
+  },
+  "logs": {
+    "console_tail": "Loading fastfile 'zm_castle'\n",
+    "game_log_tail": "{\"event\":\"loader.map.ready\",\"msg\":\"zm_castle\"}\n",
+    "journal": {
+      "phase": "in_game",
+      "schema": 1
+    },
+    "launcher_log_tail": "{\"event\":\"launcher.start\",\"msg\":\"Xerces\"}\n"
+  },
+  "minidump_b64": "TURNUA=="
+}

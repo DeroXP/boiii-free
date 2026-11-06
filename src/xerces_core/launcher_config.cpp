@@ -12,6 +12,7 @@ const std::set<std::string, std::less<>> known_keys = {
     "close_on_launch", "extra_flags",  "dvars",           "theme",
     "ui_scale_percent", "reduced_motion", "language",     "check_updates",
     "favorites",    "recent_servers",
+    "send_crash_reports",
 };
 
 bool valid_mode(std::string_view mode) {
@@ -170,6 +171,7 @@ launcher_config_result parse_launcher_config(std::string_view text) {
     c.language = *language;
   }
   c.check_updates = bool_of(root, "check_updates", true);
+  c.send_crash_reports = bool_of(root, "send_crash_reports", true);
   if (const auto *favorites = json::member(root, "favorites");
       favorites != nullptr && favorites->IsArray()) {
     for (const auto &item : favorites->GetArray()) {
@@ -271,6 +273,7 @@ std::string launcher_config_to_json(const launcher_config &c) {
   json::set(doc, "reduced_motion", c.reduced_motion, alloc);
   json::set(doc, "language", c.language, alloc);
   json::set(doc, "check_updates", c.check_updates, alloc);
+  json::set(doc, "send_crash_reports", c.send_crash_reports, alloc);
 
   rapidjson::Value favorites(rapidjson::kArrayType);
   for (const auto &server : c.favorites) {
