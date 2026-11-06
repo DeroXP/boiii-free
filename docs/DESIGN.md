@@ -932,10 +932,10 @@ together.
   game never took the journal over (it quit before Xerces' code ran); otherwise
   the journal decides. A game that is still running is never counted as a crash.
 - "Find the culprit" keeps its state in `config\culprit.json` (the crashed mode
-  and stack, the experimental settings it had, the search, the test launch
-  still to be recorded and what its plan loaded), so it spans launcher restarts.
-  The suspects are the whole crashed stack, the dependencies the planner pulled
-  in included. A test asks for some of them as the profile's mods and keeps its
+  and stack, the experimental settings it had, the search, the test launch still
+  to be recorded and what its plan loaded), so it spans launcher restarts. The
+  suspects are the whole crashed stack, the dependencies the planner pulled in
+  included. A test asks for some of them as the profile's mods and keeps its
   map, so it loads what they and the map need. Each split tests the lower part
   first: dependencies sit below the mods that need them, so it loads nothing
   from above. A crash narrows the suspects to what that test loaded; a test that
@@ -957,23 +957,24 @@ together.
   12.4) and flip-model presentation (`-xerces-flip-model`, 12.4 item 4), listed
   in `xerces_core::suspect_settings`. The journal records which a launch had
   (`db_pool`, `precise_limiter`, `flip_model`). Safe mode and every culprit test
-  leave them all out whatever the settings say (`launch_inputs::crash_followup`),
-  so they all run on the stock pool, the engine's own frame limiter and the
-  engine's own swap chain, and a crash or a black screen a setting causes is
-  never narrowed down to a mod. When the crashed launch had any, the safe-mode message
-  names each (a fixed sentence per setting after the phase's), the search can
-  start with one mod (the settings count as one suspect), and its first test
-  runs the whole crashed stack without them: if that runs fine, Home says the
-  setting caused the crash and offers to turn it off (the profile keeps its
-  mods; with several on, the test cannot tell them apart, so Home names them
-  all and turns off just those: "Turn both off", "Turn them all off"; turn one
-  back on to find out which); if it crashes too, the mods are bisected as
-  usual. `culprit.json` keeps the settings as a `settings` list of
-  flag names and the step under its first name, `db_pool`; a file saved before
-  the list existed had only larger zone memory. A stack that only fits with the
-  larger pool also crashes in that first test, so its search can end in "these
-  mods together"; when the crashed launch had larger zone memory, Home then adds
-  that together they may need more zone memory than the stock pool.
+  leave them all out whatever the settings say
+  (`launch_inputs::crash_followup`), so they all run on the stock pool, the
+  engine's own frame limiter and the engine's own swap chain, and a crash or a
+  black screen a setting causes is never narrowed down to a mod. When the
+  crashed launch had any, the safe-mode message names each (a fixed sentence per
+  setting after the phase's), the search can start with one mod (the settings
+  count as one suspect), and its first test runs the whole crashed stack without
+  them: if that runs fine, Home says the setting caused the crash and offers to
+  turn it off (the profile keeps its mods; with several on, the test cannot tell
+  them apart, so Home names them all and turns off just those: "Turn both off",
+  "Turn them all off"; turn one back on to find out which); if it crashes too,
+  the mods are bisected as usual. `culprit.json` keeps the settings as a
+  `settings` list of flag names and the step under its first name, `db_pool`; a
+  file saved before the list existed had only larger zone memory. A stack that
+  only fits with the larger pool also crashes in that first test, so its search
+  can end in "these mods together"; when the crashed launch had larger zone
+  memory, Home then adds that together they may need more zone memory than the
+  stock pool.
 - After **any** crash with mods enabled, the next launch defaults to safe mode
   (all mods off, same game settings) with one-click "Retry with mods", and the
   launcher names the plan that crashed. Other options: report, or "find the

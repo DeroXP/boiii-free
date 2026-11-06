@@ -789,6 +789,25 @@ Run on 2026-11-05 by Claude on your PC while you were away (dry launches only):
       ran fine (the map named as a possible cause), and a test of the map's
       dependency alone each say so. A save that fails (`launcher.json`
       read-only) shows its reason translated in the pseudo-locale.
+- [x] (2026-11-05, launcher/integrate-1: launcher-idle, frame-limiter and
+      flip-model merged on xerces-main; dry launches only, home
+      `C:\Users\Ginld\XercesHome-agent-integrate`, script
+      `C:\Users\Ginld\XercesDev\scratch\integrate\dry-check.ps1`) On a
+      hand-written journal of a modded crash in a match with larger zone memory,
+      the precise FPS limit and flip-model presentation on, Home's safe-mode box
+      showed the phase's sentence for experimental settings and one sentence per
+      setting. "Find the culprit" started a search with the three settings in
+      `culprit.json` (`settings` list, `db_pool` `untested`); test 1 named the
+      three as left out, and its dry launch logged the command without any of
+      the three flags. With the step set to `culprit`, Home said "Found it: the
+      experimental settings that were on: ..." with "Turn them all off", which
+      removed the three flags from `launcher.json` and ended the search; with
+      two on (`-windowed` kept), "Turn both off" removed only those two.
+      Settings > Display shows both toggles with their help texts and each saves
+      its flag. A pad's Up from the Home tab focused the footer's About link,
+      and A opened About. check-screens (dark, light, pseudo) and check-idle
+      pass on the merged build; `xerces_cli plan apply --dry-launch` printed a
+      note for each of the three settings.
 - [ ] The window by hand: drag by the header, snap, resize from the edges,
       minimize, maximize, close; at 150 percent.
 - [ ] A physical controller: A, B, Y, LB/RB and the D-pad on every screen.
