@@ -874,6 +874,22 @@ nothing was sent to the Railway service.
 - [ ] The UPnP retry for a stale "Xerces lobby" mapping and the launcher's
       "waits on this PC" notice: built, not run (a router and a real send are
       needed; dry launchers never send).
+- [x] `tools\release.ps1` on the clean committed tree (it warned that HEAD is
+      not on origin) passed every gate, the fence, licence and Microsoft notice
+      lints among them, and wrote `dist\xerces-0.1.0-beta.1.zip` (232 files, 9.4
+      MB: the old launcher's 1.6 MB is gone), `SHA256SUMS-0.1.0-beta.1.txt` and
+      the symbols zip. `README.txt` and `KNOWN_ISSUES.txt` equal
+      `docs/TESTERS.md` and `docs/KNOWN_ISSUES.md` (CRLF, no byte-order mark);
+      `data\launcher` holds only the one-page `main.html`;
+      `THIRD_PARTY_NOTICES.txt` has the new texts above.
+- [x] The zip unzipped outside the repository, `SHA256SUMS.txt` matching all 232
+      files, its `Xerces.exe --dry-launch` started from another folder on a
+      fresh home: `launcher.start` names the package's `data` as `client_data`,
+      HarfBuzz runs, Skip to Privacy and Finish work, the first scan read 17
+      items, and Launch vanilla logged `launcher.launch.dry`
+      (`-launch -nointro`) with `xerces_data_path` set to the package's `data`
+      folder; About shows the BETA badge and the commit; no warning or error in
+      the log.
 
 ### Voice chat starts as push-to-talk (2026-11-05)
 

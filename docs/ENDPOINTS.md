@@ -45,7 +45,11 @@ and the Patches tab are gone. A data folder that upstream's updater installed
 still has them, with the `api.github.com` request and the archive.org link,
 because nothing replaces those files: upstream's updater is off and Xerces' own
 (D16) is not built yet. Even then `boiii.exe` downloads and runs nothing else:
-its launch handlers ignore the picker's exe arguments and start this build.
+its launch handlers ignore the picker's exe arguments and start this build. The
+tester package (`tools/release.ps1`, 2026-11-06) carries none of the old
+launcher's files: its `data\launcher\main.html` is
+`tools/release/launcher/main.html`, a page with no links, scripts or options
+that only says to start Xerces.exe.
 
 Addresses never appear in Xerces logs (DESIGN.md 15.1). The backend's host
 joined this list on 2026-11-05 for crash reports; accounts and friends follow in
