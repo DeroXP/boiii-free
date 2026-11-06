@@ -1,6 +1,7 @@
 #include "journal.hpp"
 
 #include "db_pool.hpp"
+#include "flip_model.hpp"
 #include "frame_pacing.hpp"
 #include "json.hpp"
 
@@ -91,6 +92,9 @@ const char *setting_on_sentence(std::string_view flag) {
   if (flag == frame_pacing::flag_name) {
     return "The precise FPS limit was on (Settings > Display).";
   }
+  if (flag == flip_model::flag_name) {
+    return "Flip-model presentation was on (Settings > Display).";
+  }
   return "";
 }
 } // namespace
@@ -127,6 +131,7 @@ std::string journal_to_json(const launch_journal &value) {
   json::set(doc, "launch_id", value.launch_id, alloc);
   json::set(doc, "db_pool", value.db_pool, alloc);
   json::set(doc, "precise_limiter", value.precise_limiter, alloc);
+  json::set(doc, "flip_model", value.flip_model, alloc);
   return json::canonical(doc);
 }
 
@@ -167,6 +172,10 @@ std::optional<launch_journal> parse_journal(std::string_view text) {
   if (const auto *limiter = json::member(root, "precise_limiter");
       limiter != nullptr && limiter->IsBool()) {
     out.precise_limiter = limiter->GetBool();
+  }
+  if (const auto *flip = json::member(root, "flip_model");
+      flip != nullptr && flip->IsBool()) {
+    out.flip_model = flip->GetBool();
   }
   return out;
 }
@@ -219,6 +228,7 @@ safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last) {
   out.crashed_started = last->started;
   out.crashed_with_db_pool = last->db_pool;
   out.crashed_with_precise_limiter = last->precise_limiter;
+  out.crashed_with_flip_model = last->flip_model;
   // The experimental settings are as much suspects as the mods (5.4, 12.4):
   // the phase's sentence, then one naming each setting.
   const std::vector<std::string> settings = crashed_settings(out);
@@ -241,12 +251,16 @@ std::vector<std::string> crashed_settings(const safe_mode_decision &decision) {
   if (decision.crashed_with_precise_limiter) {
     out.emplace_back(frame_pacing::flag_name);
   }
+  if (decision.crashed_with_flip_model) {
+    out.emplace_back(flip_model::flag_name);
+  }
   return out;
 }
 
 const std::vector<std::string> &suspect_settings() {
   static const std::vector<std::string> flags{
-      std::string(db_pool::flag_name), std::string(frame_pacing::flag_name)};
+      std::string(db_pool::flag_name), std::string(frame_pacing::flag_name),
+      std::string(flip_model::flag_name)};
   return flags;
 }
 
@@ -257,6 +271,9 @@ const char *setting_name(std::string_view flag) {
   if (flag == frame_pacing::flag_name) {
     return "the precise FPS limit";
   }
+  if (flag == flip_model::flag_name) {
+    return "flip-model presentation";
+  }
   return "";
 }
 
@@ -264,7 +281,7 @@ bool culprit_search_possible(const safe_mode_decision &decision) {
   // The settings are one suspect: the first test leaves them all out.
   return decision.safe_mode &&
          decision.crashed_stack.size() +
-                 (crashed_settings(decision).empty() ? 0 : 1) >=
+                 (decision.crashed_with_settings() ? 1 : 0) >=
              2;
 }
 
@@ -501,6 +518,13 @@ std::optional<culprit_progress> parse_culprit_progress(std::string_view text) {
   culprit_progress out;
   out.mode = json::get_string(root, "mode").value_or("");
   out.crashed_stack = strings_at(root, "crashed_stack");
+  // "settings" is a list of flag names. A development build of flip-model
+  // presentation (never released) kept the step there as a string instead;
+  // a value of another kind is not a search this version can continue.
+  if (const auto *settings = json::member(root, "settings");
+      settings != nullptr && !settings->IsArray()) {
+    return std::nullopt;
+  }
   out.settings = strings_at(root, "settings");
   out.testing = strings_at(root, "testing");
   out.loaded = strings_at(root, "loaded");

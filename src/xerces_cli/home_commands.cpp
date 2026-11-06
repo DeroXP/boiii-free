@@ -763,6 +763,11 @@ int cmd_plan_apply(const arguments &args) {
                      "(-xerces-precise-limiter), which is experimental and "
                      "may be the cause; --mods-off leaves it out too.\n";
       }
+      if (decision.crashed_with_flip_model) {
+        std::cerr << "note: that launch had flip-model presentation "
+                     "(-xerces-flip-model), which is experimental and may be "
+                     "the cause; --mods-off leaves it out too.\n";
+      }
     }
     const auto report =
         read_text_file(home.paths.cache / "signatures-report.json");

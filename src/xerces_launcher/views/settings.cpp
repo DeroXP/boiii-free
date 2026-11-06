@@ -18,6 +18,9 @@
 // - Larger zone memory (experimental): the client's -xerces-db-pool
 //   (src/client/xerces/db_pool.cpp), also in config.extra_flags. Safe mode
 //   leaves it out (xerces_core::preview_launch).
+// - Flip-model presentation (experimental): the client's -xerces-flip-model
+//   (src/client/xerces/flip_model.cpp), also in config.extra_flags. Safe
+//   mode and the culprit search's tests leave it out.
 // - FPS limit, FOV, V-Sync, FPS counter: dvars confirmed in the client
 //   (com_maxfps, cg_fov_default, r_vsync, com_drawFPS_PC), kept in
 //   config.dvars and passed as "+set <dvar> <value>".
@@ -36,6 +39,7 @@
 #include <optional>
 
 #include <xerces_core/db_pool.hpp>
+#include <xerces_core/flip_model.hpp>
 #include <xerces_core/frame_pacing.hpp>
 #include <xerces_core/settings_options.hpp>
 
@@ -136,6 +140,7 @@ public:
     model.Bind("vsync", &vsync_);
     model.Bind("drawfps", &drawfps_);
     model.Bind("others", &others_);
+    model.Bind("flip_model", &flip_model_);
 
     model.Bind("nointro", &nointro_);
     model.Bind("intro_note", &intro_note_);
@@ -300,6 +305,7 @@ private:
         {"player-name"},
         {"game-files"},
         {"display-game", "display-windowed", "display-borderless"},
+        {"flip-model"},
         {"fps-field", "fps-slider"},
         {"precise-limiter"},
         {"fov-field", "fov-slider"},
@@ -640,6 +646,7 @@ private:
     db_pool_ = core::has_flag(c.extra_flags, core::db_pool::flag_name);
     precise_limiter_ =
         core::has_flag(c.extra_flags, core::frame_pacing::flag_name);
+    flip_model_ = core::has_flag(c.extra_flags, core::flip_model::flag_name);
     close_on_launch_ = c.close_on_launch;
     if (keep(text_field::flags)) {
       flags_ = core::join_flags(c.extra_flags);
@@ -944,6 +951,16 @@ private:
           on ? owner_->tr("Precise FPS limit is on (-xerces-precise-limiter). "
                           "Turn it off if the game stutters.")
              : owner_->tr("Xerces no longer passes -xerces-precise-limiter."));
+    } else if (key == "flip_model") {
+      const bool on =
+          !core::has_flag(c.extra_flags, core::flip_model::flag_name);
+      set_flags(
+          core::with_flag(c.extra_flags, core::flip_model::flag_name, on),
+          std::string("flip_model ") + (on ? "on" : "off"),
+          on ? owner_->tr("Flip-model presentation is on (-xerces-flip-model). "
+                          "Turn it off if the picture freezes, goes black or "
+                          "the game crashes.")
+             : owner_->tr("Xerces no longer passes -xerces-flip-model."));
     } else if (key == "close") {
       c.close_on_launch = !c.close_on_launch;
       save(std::string("close_on_launch ") + (c.close_on_launch ? "on" : "off"),
@@ -1348,7 +1365,7 @@ private:
   Rml::Vector<dvar_row> others_;
 
   bool nointro_ = true, nocinematics_ = false, close_on_launch_ = false;
-  bool db_pool_ = false, precise_limiter_ = false;
+  bool db_pool_ = false, precise_limiter_ = false, flip_model_ = false;
   // The game's own config.cfg has boiii_skipIntro / boiii_skipCinematics on.
   bool game_skips_intro_ = false, game_skips_cinematics_ = false;
   Rml::String intro_note_, cinematics_note_;

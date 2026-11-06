@@ -645,6 +645,10 @@ private:
         journal->precise_limiter ? owner_->tr("On (-xerces-precise-limiter)")
                                  : owner_->tr("Off"),
         false, journal->precise_limiter && decision.safe_mode);
+    row("Flip-model presentation",
+        journal->flip_model ? owner_->tr("On (-xerces-flip-model)")
+                            : owner_->tr("Off"),
+        false, journal->flip_model && decision.safe_mode);
     row("Safe mode next",
         owner_->tr(decision.safe_mode ? "Suggested" : "Not needed"), false,
         decision.safe_mode);
@@ -887,6 +891,7 @@ private:
           {"Mods off", journal->safe_mode ? "yes" : "no"},
           {"Larger zone memory", journal->db_pool ? "on" : "off"},
           {"Precise FPS limit", journal->precise_limiter ? "on" : "off"},
+          {"Flip-model presentation", journal->flip_model ? "on" : "off"},
       };
       for (std::size_t i = 0; i < journal->stack.size(); ++i) {
         launch.lines.push_back(two_digits(i + 1) + "  " + journal->stack[i]);

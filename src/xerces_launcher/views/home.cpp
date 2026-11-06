@@ -10,6 +10,7 @@
 
 #include <xerces_core/compat.hpp>
 #include <xerces_core/db_pool.hpp>
+#include <xerces_core/flip_model.hpp>
 #include <xerces_core/frame_pacing.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/launcher_launch.hpp>
@@ -345,9 +346,9 @@ private:
   }
 
   // The culprit search (5.6): one test launch at a time, the result read
-  // from the journal when the game exits. A crashed launch that had an
-  // experimental setting (larger zone memory, the precise FPS limit) is first
-  // run again without it.
+  // from the journal when the game exits. A crashed launch that had
+  // experimental settings (larger zone memory, the precise FPS limit,
+  // flip-model presentation) is first run again without them.
   void refresh_culprit(const xerces_core::safe_mode_decision &decision) {
     const auto &culprit = owner_->svc().culprit();
     can_bisect_ = xerces_core::culprit_search_possible(decision) && !culprit;
@@ -385,6 +386,9 @@ private:
             owner_->tr(flag == xerces_core::frame_pacing::flag_name
                            ? "the precise FPS limit (experimental). The same "
                              "mods ran fine without it. Turn it off?"
+                       : flag == xerces_core::flip_model::flag_name
+                           ? "flip-model presentation (experimental). The "
+                             "same mods ran fine without it. Turn it off?"
                            : "larger zone memory (experimental). The same "
                              "mods ran fine without it. Turn it off?");
       }
@@ -486,6 +490,10 @@ private:
                ? owner_->tr("launch the crashed mods again without the "
                             "precise FPS limit and play to where it crashed. "
                             "Quit normally if it does not crash.")
+           : flag == xerces_core::flip_model::flag_name
+               ? owner_->tr("launch the crashed mods again without flip-model "
+                            "presentation and play to where it crashed. Quit "
+                            "normally if it does not crash.")
                : owner_->tr("launch the crashed mods again without larger "
                             "zone memory and play to where it crashed. Quit "
                             "normally if it does not crash."));
@@ -623,6 +631,8 @@ private:
               std::move(config.extra_flags), flag, false);
           log_info(flag == xerces_core::frame_pacing::flag_name
                        ? "launcher.home.precise_limiter"
+                   : flag == xerces_core::flip_model::flag_name
+                       ? "launcher.home.flip_model"
                        : "launcher.home.db_pool",
                    "off after the culprit search");
         }
@@ -632,6 +642,8 @@ private:
                                                settings_list(off) + "."
                          : flag == xerces_core::frame_pacing::flag_name
                              ? owner_->tr("The precise FPS limit is off.")
+                         : flag == xerces_core::flip_model::flag_name
+                             ? owner_->tr("Flip-model presentation is off.")
                              : owner_->tr("Larger zone memory is off."));
         } else {
           owner_->notify(owner_->tr("The config could not be saved:") + " " +

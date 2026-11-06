@@ -333,6 +333,50 @@ TEST_CASE("safe mode: the larger zone memory step survives between launches") {
   std::string unknown = older;
   unknown.insert(unknown.size() - 1, R"(,"db_pool":"maybe")");
   CHECK(!parse_culprit_progress(unknown).has_value());
+
+  // Saved while the larger zone memory was the only suspect setting: its
+  // "db_pool" state reads as the settings' state, and the setting it named
+  // is the larger zone memory.
+  std::string db_pool_only = older;
+  db_pool_only.insert(db_pool_only.size() - 1, R"(,"db_pool":"untested")");
+  const auto pool_only = parse_culprit_progress(db_pool_only);
+  REQUIRE(pool_only.has_value());
+  CHECK(pool_only->search.testing_settings());
+  CHECK(pool_only->has_setting("xerces-db-pool"));
+  CHECK(!pool_only->has_setting("xerces-flip-model"));
+  // "settings" is a list; a development build kept the step there as a
+  // string, which this version does not continue.
+  std::string unknown_settings = older;
+  unknown_settings.insert(unknown_settings.size() - 1,
+                          R"(,"settings":"maybe")");
+  CHECK(!parse_culprit_progress(unknown_settings).has_value());
+}
+
+TEST_CASE("safe mode: the settings it crashed with survive between launches") {
+  culprit_progress progress;
+  progress.mode = "zm";
+  progress.crashed_stack = {"a", "b"};
+  progress.settings = {"xerces-flip-model"};
+  progress.search = culprit_search(progress.crashed_stack, true);
+  progress.testing = progress.search.next_test();
+  const std::string text = culprit_progress_to_json(progress);
+  // The step keeps its first key; the settings are a list of flag names.
+  CHECK(text.find(R"("db_pool":"untested")") != std::string::npos);
+  CHECK(text.find(R"("settings":["xerces-flip-model"])") != std::string::npos);
+  auto back = parse_culprit_progress(text);
+  REQUIRE(back.has_value());
+  CHECK(back->search.testing_settings());
+  CHECK(back->has_setting("xerces-flip-model"));
+  CHECK(!back->has_setting("xerces-db-pool"));
+  CHECK_EQ(culprit_progress_to_json(*back), text);
+
+  progress.settings = {"xerces-db-pool", "xerces-flip-model"};
+  progress.search.record(false); // ran fine without both
+  back = parse_culprit_progress(culprit_progress_to_json(progress));
+  REQUIRE(back.has_value());
+  CHECK(back->search.settings_culprit());
+  CHECK(back->has_setting("xerces-db-pool"));
+  CHECK(back->has_setting("xerces-flip-model"));
 }
 
 TEST_CASE("config: round trip keeps known and unknown keys") {

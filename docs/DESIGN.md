@@ -341,8 +341,15 @@ Shared targets known on day one: `IDXGISwapChain::Present`/`ResizeBuffers` (and
 `DB_FindXAssetHeader`, `DB_AssetPoolInit`, `DB_LoadXAssets`,
 `FS_BuildOSPathForThread`, `Com_Error`, the `Scr_BeginLoadScripts` call site,
 and the console interceptor. Upstream components that hook these move onto the
-bus with small, mechanical diffs. Demonware's import-table hooks are not moved
-(11.2).
+bus with small, mechanical diffs. Until the bus exists,
+`IDXGISwapChain::Present` has one owner, the download overlay (the frame probe
+and flip model call into it), and with `-xerces-flip-model`
+`IDXGIFactory::CreateSwapChain` and `IDXGISwapChain::ResizeBuffers` are detoured
+by `xerces_flip` (12.4 item 4); a second user goes through them. Demonware's
+import-table hooks are not moved (11.2). A second detour on a taken address
+fails (`MH_ERROR_ALREADY_CREATED`); `utils::hook::detour::create` then leaves
+its detour empty, so clearing it afterwards never removes the first owner's hook
+and its trampoline.
 
 ### 3.5 Paths and data
 
@@ -946,19 +953,22 @@ together.
   (`culprit_search::ran_fine`, kept in `culprit.json`), Home names the map as a
   possible cause and still offers to turn the mod off.
 - Experimental settings in crash recovery: larger zone memory
-  (`-xerces-db-pool`) and the precise frame limiter (`-xerces-precise-limiter`,
-  12.4), listed in `xerces_core::suspect_settings`. The journal records which a
-  launch had. Safe mode and every culprit test leave them all out whatever the
-  settings say (`launch_inputs::crash_followup`), so they all run on the stock
-  pool and the engine's own frame limiter, and a crash a setting causes is never
-  narrowed down to a mod. When the crashed launch had any, the safe-mode message
+  (`-xerces-db-pool`), the precise frame limiter (`-xerces-precise-limiter`,
+  12.4) and flip-model presentation (`-xerces-flip-model`, 12.4 item 4), listed
+  in `xerces_core::suspect_settings`. The journal records which a launch had
+  (`db_pool`, `precise_limiter`, `flip_model`). Safe mode and every culprit test
+  leave them all out whatever the settings say (`launch_inputs::crash_followup`),
+  so they all run on the stock pool, the engine's own frame limiter and the
+  engine's own swap chain, and a crash or a black screen a setting causes is
+  never narrowed down to a mod. When the crashed launch had any, the safe-mode message
   names each (a fixed sentence per setting after the phase's), the search can
   start with one mod (the settings count as one suspect), and its first test
   runs the whole crashed stack without them: if that runs fine, Home says the
   setting caused the crash and offers to turn it off (the profile keeps its
   mods; with several on, the test cannot tell them apart, so Home names them
-  all and turns them all off: "Turn both off"); if it crashes too, the mods are
-  bisected as usual. `culprit.json` keeps the settings as a `settings` list of
+  all and turns off just those: "Turn both off", "Turn them all off"; turn one
+  back on to find out which); if it crashes too, the mods are bisected as
+  usual. `culprit.json` keeps the settings as a `settings` list of
   flag names and the step under its first name, `db_pool`; a file saved before
   the list existed had only larger zone memory. A stack that only fits with the
   larger pool also crashes in that first test, so its search can end in "these
@@ -1989,10 +1999,13 @@ from the async thread, never from the thread that did the work:
   create µs, enable µs). About four QPC calls per detour.
   `utils::hook::get_detour_stats()` and `get_detour_timeline()` read them. This
   decides whether batching enables (12.4) is worth asking for.
-- **`perf.swapchain`**, once, from the overlay's first Present: swap effect,
-  buffer count, flags, windowed, size, refresh rate, the first sync interval and
-  Present flags, and whether the chain answers `IDXGISwapChain1` and
-  `IDXGISwapChain2`.
+- **`perf.swapchain`**, once, from the overlay's first Present: swap effect (the
+  effective one, from `GetDesc`), buffer count, flags, windowed, size, refresh
+  rate, the first sync interval and Present flags, and whether the chain answers
+  `IDXGISwapChain1` and `IDXGISwapChain2`. With `-xerces-flip-model` (12.4
+  item 4) also what became of the chain (`flip_model`: `applied` or the reason
+  it was left alone; `off` without the flag) and the engine's own request
+  (`engine_swap_effect`, `engine_flags`).
 - **`perf.io`** and **`perf.load_step`**: the duration (`ms`), start (`at_ms`
   since process creation and raw `qpc`, to line up with the probe's frames),
   thread (`main`, `render` or an id; `main` is the `post_unpack` thread until
@@ -2010,11 +2023,12 @@ Only with `XERCES_BENCH=1` in the game's environment (the frame probe,
 - The overlay's Present hook (the only one) stamps QPC at its entry, before the
   original Present and after it. Each Present of the game's swap chain becomes a
   16-byte sample in a ring of 2^18 set aside at startup (18 minutes at 240 FPS):
-  entry time, ticks inside the original Present, the overlay's own time in µs,
-  the logical CPU and flags (1 the overlay drew, 2 sync interval > 0, 4 Present
-  did not return `S_OK`, 8 the game window was not in front, 16 first frame of a
-  new swap chain). No locks or allocation on that path; with the probe off the
-  hook pays one relaxed atomic load and a branch.
+  entry time, ticks inside the original Present, the overlay's own time in µs
+  (with flip model, its step before Present too), the logical CPU and flags (1
+  the overlay drew, 2 sync interval > 0, 4 Present did not return `S_OK`, 8 the
+  game window was not in front, 16 first frame of a new swap chain, 32 Present
+  had `DXGI_PRESENT_ALLOW_TEARING`). No locks or allocation on that path; with
+  the probe off the hook pays one relaxed atomic load and a branch.
 - A `scheduler::main` loop with no interval stamps every main frame into a
   second ring (2^17) and checks the foreground window.
 - Runs: console commands `xerces_bench_begin [name]` and `xerces_bench_end`;
@@ -2103,10 +2117,114 @@ The first load and launcher baseline from existing logs is in
    `d3dcompiler` use and the driver shader cache; keep or drop upstream's
    "reduce stutter" option (it renames `d3dcompiler_46.dll`) based on the
    measurement.
-4. Frame pacing: the precise frame limiter (below; built 2026-11-05, off by
-   default, not yet run in the game). Then expose the engine's maximum frame
-   latency, and test a waitable swap chain only if the engine's swap effect
-   allows it (`perf.swapchain` says discard, 2 buffers).
+4. Frame pacing and presentation: the precise frame limiter (below; built
+   2026-11-05, off by default, not yet run in the game); flip-model presentation
+   (below); expose the engine's maximum frame latency; a waitable swap chain
+   (`FRAME_LATENCY_WAITABLE_OBJECT`) only on a flip-model chain, not built.
+
+   Measured on 2026-11-05 with the frame probe (Cheese Cube, 3 runs per setup,
+   100% render resolution, high quality; raw data in
+   `C:\Users\Ginld\XercesDev\bench\20261105-fps2`). The engine's chain is
+   `DXGI_SWAP_EFFECT_DISCARD` (blt), 2 buffers, 3840x2160, windowed, flags 0x2
+   (`ALLOW_MODE_SWITCH`), R8G8B8A8_UNORM, sync interval 0. Uncapped, exclusive
+   fullscreen ran 345.3 FPS against 315.8 windowed (+9.4%, p = 0.024), p99 11.6%
+   lower, 1% low 10.2% higher (p = 0.003); Present blocked a median 1.77 ms
+   windowed and 1.50 ms fullscreen. Borderless (`FullScreenMode 2`) matched
+   windowed: its chain is windowed too. With `com_maxfps 240` windowed ran 239.1
+   FPS but p99 6.05 ms (+50%) and 1% low 158.1 FPS (-31.5%), frame times
+   clustered at whole milliseconds (the engine's limiter; perf plan F1).
+
+   **Flip-model presentation** (built 2026-11-05, opt-in, not yet run in the
+   game). With the launch flag `-xerces-flip-model` (Settings, Display,
+   "Flip-model presentation (experimental)"), `src/client/xerces/flip_model.cpp`
+   creates the engine's chain as `DXGI_SWAP_EFFECT_FLIP_DISCARD`, so windowed
+   and borderless frames are no longer copied into the compositor's surface, and
+   a borderless window can get independent flip as exclusive fullscreen does.
+   - How the engine makes its chain (read on the 2026-11-04 dump; nothing below
+     uses these addresses). BlackOps3.exe imports only `CreateDXGIFactory1` and
+     `D3D11CreateDevice` from DXGI and D3D11. The renderer gets the factory from
+     its device (`IDXGIDevice1`, `IDXGIAdapter1`, `IDXGIFactory1`), fills a
+     `DXGI_SWAP_CHAIN_DESC` (DISCARD, R8G8B8A8_UNORM, usage 0x30, the
+     BackbufferCount setting, `ALLOW_MODE_SWITCH`, windowed) and sends its
+     window `WM_APP + 0x42`; the window procedure calls
+     `IDXGIFactory::CreateSwapChain`. Present (flags 0) and `SetFullscreenState`
+     run there too (`WM_APP + 0x43` and `+ 0x44`); `ResizeBuffers` is called
+     directly with flags 0x2. The executable holds no interface id for
+     `IDXGIFactory2` or `IDXGISwapChain1`, so `CreateSwapChainForHwnd` and
+     `Present1` are never used and not hooked.
+   - Hooks, all on DXGI itself, no game offsets: `IDXGIFactory::CreateSwapChain`
+     (vtable slot 10 of a factory made at `post_unpack`, before the renderer
+     starts) and `IDXGISwapChain::ResizeBuffers` (slot 13 of the download
+     overlay's dummy chain). Present stays the overlay's one detour. Chains are
+     changed only once all three are in place.
+   - Start-up order. The overlay makes its Present hook on the async scheduler
+     thread, queued from its own `post_unpack`. That `post_unpack` runs well
+     before flip model's (same priority, so link order): in the 2026-11-05 bench
+     runs about 130 to 160 ms before, while the setup takes about 16 ms. So in
+     the game the Present hook is normally in place first. The overlay therefore
+     always hands over its dummy chain's ResizeBuffers address (dxgi.dll stays
+     loaded, so the address outlives the dummy), and whichever of the two steps
+     comes second installs the ResizeBuffers detour
+     (`xerces_core::flip_model::arming`, unit-tested in both orders). A detour
+     that fails stays `hook_failed` with its error; it is never reported as
+     `hooks_not_ready` later. (The first build armed in the overlay's step only,
+     which saw the flag as not asked for yet, so in the game it would never have
+     flipped a chain.)
+   - The rules (`src/xerces_core/flip_model.*`, unit-tested): only DISCARD
+     changes, and only with 2 to 16 buffers, no multisampling, a format flip
+     model takes (R8G8B8A8_UNORM, B8G8R8A8_UNORM, R16G16B16A16_FLOAT,
+     R10G10B10A2_UNORM), usage within render target, shader input, back buffer
+     and unordered access, and flags within `ALLOW_MODE_SWITCH`,
+     `FRAME_LATENCY_WAITABLE_OBJECT` and `ALLOW_TEARING`. An sRGB format is
+     skipped, never swapped for the plain one. `ALLOW_MODE_SWITCH` stays;
+     `ALLOW_TEARING` is added when `IDXGIFactory5::CheckFeatureSupport` reports
+     tearing support. Anything else, or DXGI refusing the flip description
+     (FLIP_DISCARD needs Windows 10), leaves the chain as the engine asked.
+   - `ResizeBuffers` on that chain keeps `ALLOW_TEARING` (DXGI refuses a change:
+     the engine's own call, flags 0x2, returns `E_INVALIDARG` on such a chain)
+     and never asks for fewer than 2 buffers. Present with sync interval 0 gets
+     `DXGI_PRESENT_ALLOW_TEARING` only when the chain has the flag and
+     `GetFullscreenState` says it is not in exclusive fullscreen, where DXGI
+     refuses it. If Present still refuses it (`DXGI_ERROR_INVALID_CALL`), the
+     frame is presented again with the engine's flags and the flag is not added
+     again on that chain.
+   - The back buffer after Present. A flip-model Present unbinds buffer 0 from
+     the pipeline. The engine creates its render target view on buffer 0 once
+     per chain or resize, and its render-target setter (0x141CF28D0 on the dump)
+     returns without calling `OMSetRenderTargets` when the target asked for is
+     the one it set last. A frame that starts on the back buffer would then draw
+     into nothing. The dump does not show whether every frame starts on another
+     target, so for the flipped chain the overlay's Present hook reads the bound
+     render targets and depth buffer before the original Present and binds them
+     again after it (UAVs untouched). The engine's cache then stays true. A
+     shader resource view of the back buffer bound at Present stays bound, so
+     only the output-merger targets need this.
+   - The download overlay's ImGui draws before Present into the targets the
+     engine left bound, as before.
+   - Logs: `xerces.flip_model.armed` at start-up once all three detours are in
+     place, with `armed_by` the step that came last (`post_unpack` normally,
+     `present_hook` if the overlay was slower; `xerces.flip_model.waiting` is
+     logged first then); `xerces.flip_model` once for each chain the game makes
+     (what was asked, what was made, the reason, tearing; info when applied,
+     warn when not); `xerces.flip_model.resize_failed` and
+     `xerces.flip_model.tearing_refused` once each if they happen.
+     `perf.swapchain` and the probe's flags show the result (12.2).
+   - Safe mode and the culprit search's tests leave the flag out
+     (`preview_launch`), like the larger zone memory. The journal records it,
+     and the culprit search tests it before blaming a mod (5.6).
+   - Checked offline on 2026-11-05 (no game) with a scratch program
+     (`C:\Users\Ginld\XercesDev\scratch\flip-model\dxgi_check.cpp`, not in the
+     repo) on this PC's RTX 5070 Ti: the detour on a throwaway factory's slot 10
+     sees a chain made the engine's way (the factory from the device's adapter);
+     the engine's description becomes FLIP_DISCARD with flags 0x802; buffer 0
+     takes a render target view and a shader resource view; windowed Present
+     with `DXGI_PRESENT_ALLOW_TEARING` returns `S_OK`; after each Present the
+     bound render target reads back as none, and the rebind restores it; a
+     buffer-0 shader resource view stays bound; `ResizeBuffers` with flags 0x2
+     fails without the detour (`E_INVALIDARG`) and succeeds through it, keeping
+     0x802; a count of 1 becomes 2.
+   - The in-game check is in docs/TESTING.md (Performance instrumentation).
+
 5. Opt-in process tweaks after the main menu: timer resolution, priority, P-core
    affinity for the main and render threads on hybrid CPUs like your Core Ultra
    9 285K.
@@ -2562,14 +2680,15 @@ rates.
 
 ## 14. Display and input
 
-| Item                | Today                                                                          | Xerces                                                                                                                                                         | Milestone                        |
-| ------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| FOV                 | Engine 65 to 120 plus upstream's FOV scale                                     | Slider in the launcher; higher cap where safe; viewmodel FOV                                                                                                   | M3 (slider), M7 (cap, viewmodel) |
-| Ultrawide           | FOV widens already; experimental `-ultrawide`                                  | 16:9 clamp for HUD and menus after fixing upstream's aspect comparison in `render.cpp` and `GfxWindowParms`                                                    | M7                               |
-| Multiple monitors   | Engine `Monitor` setting                                                       | Monitor picker in the launcher                                                                                                                                 | M3                               |
-| Borderless windowed | Engine `FullScreenMode 2`                                                      | Exposed in the launcher                                                                                                                                        | M3                               |
-| Key rebinding       | Engine binds plus upstream persistence                                         | Bind editor in the launcher; fix upstream's filter that drops batches of more than 3 binds within 100 ms; archive yaw and pitch speed; Xerces actions bindable | M3 (editor), M7 (fixes)          |
-| Graphics menu       | Returns early whenever any mod is loaded (compares a function, not its result) | Fixed                                                                                                                                                          | M7                               |
+| Item                | Today                                                                                          | Xerces                                                                                                                                                         | Milestone                           |
+| ------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| FOV                 | Engine 65 to 120 plus upstream's FOV scale                                                     | Slider in the launcher; higher cap where safe; viewmodel FOV                                                                                                   | M3 (slider), M7 (cap, viewmodel)    |
+| Ultrawide           | FOV widens already; experimental `-ultrawide`                                                  | 16:9 clamp for HUD and menus after fixing upstream's aspect comparison in `render.cpp` and `GfxWindowParms`                                                    | M7                                  |
+| Multiple monitors   | Engine `Monitor` setting                                                                       | Monitor picker in the launcher                                                                                                                                 | M3                                  |
+| Borderless windowed | Engine `FullScreenMode 2`                                                                      | Exposed in the launcher                                                                                                                                        | M3                                  |
+| Presentation        | Blt model (`DISCARD`): windowed and borderless frames are copied into the compositor's surface | Opt-in flip model (`-xerces-flip-model`, Settings, Display; 12.4 item 4)                                                                                       | M7 (built, not yet run in the game) |
+| Key rebinding       | Engine binds plus upstream persistence                                                         | Bind editor in the launcher; fix upstream's filter that drops batches of more than 3 binds within 100 ms; archive yaw and pitch speed; Xerces actions bindable | M3 (editor), M7 (fixes)             |
+| Graphics menu       | Returns early whenever any mod is loaded (compares a function, not its result)                 | Fixed                                                                                                                                                          | M7                                  |
 
 ---
 

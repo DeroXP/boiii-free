@@ -524,6 +524,175 @@ TEST_CASE("safe mode: a crash the precise FPS limit causes is not blamed on "
   CHECK(!older->precise_limiter);
 }
 
+TEST_CASE("safe mode: a crash flip model causes is not blamed on a mod") {
+  // Flip-model presentation on with two mods, and the picture goes black or
+  // the game crashes whatever the mods load.
+  launch_journal journal;
+  journal.plan_id = "sha256:abc";
+  journal.stack = {"a", "b"};
+  journal.mode = "zm";
+  journal.flip_model = true;
+  const std::string text = journal_to_json(journal);
+  CHECK(text.find(R"("flip_model":true)") != std::string::npos);
+  const auto back = parse_journal(text);
+  REQUIRE(back.has_value());
+  CHECK(back->flip_model);
+  CHECK(!back->db_pool);
+  CHECK(!back->precise_limiter);
+  CHECK_EQ(journal_to_json(*back), text);
+  const safe_mode_decision decision = decide_safe_mode(back);
+  REQUIRE(decision.safe_mode);
+  CHECK(decision.crashed_with_flip_model);
+  CHECK(!decision.crashed_with_db_pool);
+  CHECK(decision.crashed_with_settings());
+  CHECK((crashed_settings(decision) ==
+         std::vector<std::string>{"xerces-flip-model"}));
+  REQUIRE_EQ(decision.message_parts.size(), std::size_t{2});
+  CHECK_EQ(decision.message_parts[1],
+           "Flip-model presentation was on (Settings > Display).");
+  CHECK(decision.message.find("zone memory") == std::string::npos);
+
+  // Safe mode and every test run without it, so the first test, the whole
+  // stack without it, runs fine: the setting is the culprit, no mod is.
+  culprit_search search(decision.crashed_stack,
+                        decision.crashed_with_settings());
+  CHECK(search.testing_settings());
+  CHECK(search.next_test() == decision.crashed_stack);
+  search.record(false);
+  CHECK(search.done());
+  CHECK(search.settings_culprit());
+  CHECK(!search.culprit().has_value());
+  CHECK_EQ(search.launches(), 1u);
+
+  // One mod and the setting are two suspects.
+  safe_mode_decision one;
+  one.safe_mode = true;
+  one.crashed_stack = {"a"};
+  CHECK(!culprit_search_possible(one));
+  one.crashed_with_flip_model = true;
+  CHECK(culprit_search_possible(one));
+
+  // With larger zone memory too: one suspect, one first test, both named.
+  journal.db_pool = true;
+  const safe_mode_decision both = decide_safe_mode(journal);
+  CHECK(both.crashed_with_db_pool);
+  CHECK(both.crashed_with_flip_model);
+  CHECK((crashed_settings(both) ==
+         std::vector<std::string>{"xerces-db-pool", "xerces-flip-model"}));
+  CHECK((both.message_parts ==
+         std::vector<std::string>{
+             both.message_parts[0],
+             "Larger zone memory was on (Settings > Launch).",
+             "Flip-model presentation was on (Settings > Display)."}));
+  culprit_search two(both.crashed_stack, both.crashed_with_settings());
+  CHECK(two.next_test() == both.crashed_stack);
+  two.record(true); // crashed without them too: the mods are bisected
+  CHECK(two.settings_step() == settings_suspect::cleared);
+  CHECK((two.next_test() == std::vector<std::string>{"b"})); // lower part
+
+  // A journal from before flip model was recorded reads as off.
+  const auto older = parse_journal(
+      R"({"schema":1,"plan_id":"p","stack":["a"],"phase":"in_game",)"
+      R"("started":"","updated":"","safe_mode":false,"mode":"zm",)"
+      R"("launch_id":"","db_pool":false})");
+  REQUIRE(older.has_value());
+  CHECK(!older->flip_model);
+}
+
+TEST_CASE("safe mode: three experimental settings are one suspect") {
+  // Larger zone memory, the precise FPS limit and flip-model presentation all
+  // on, three mods, a crash in a match.
+  launch_journal journal;
+  journal.plan_id = "sha256:abc";
+  journal.stack = {"a", "b", "c"};
+  journal.mode = "zm";
+  journal.phase = launch_phase::in_game;
+  journal.db_pool = journal.precise_limiter = journal.flip_model = true;
+  const auto back = parse_journal(journal_to_json(journal));
+  REQUIRE(back.has_value());
+  CHECK(back->db_pool);
+  CHECK(back->precise_limiter);
+  CHECK(back->flip_model);
+  const safe_mode_decision decision = decide_safe_mode(back);
+  REQUIRE(decision.safe_mode);
+  const std::vector<std::string> settings = crashed_settings(decision);
+  CHECK((settings == std::vector<std::string>{"xerces-db-pool",
+                                              "xerces-precise-limiter",
+                                              "xerces-flip-model"}));
+  CHECK(settings == suspect_settings());
+  // The phase's sentence for settings, then one per setting, in that order;
+  // no part depends on the mods.
+  CHECK((decision.message_parts ==
+         std::vector<std::string>{
+             "The last launch with mods and experimental settings crashed in "
+             "a match. This launch starts with mods and those settings off. "
+             "They may be the cause: find the culprit runs the same mods "
+             "without them first. Or retry with mods, report the crash, or "
+             "turn them off in Settings.",
+             "Larger zone memory was on (Settings > Launch).",
+             "The precise FPS limit was on (Settings > Display).",
+             "Flip-model presentation was on (Settings > Display)."}));
+  for (const auto &flag : settings) {
+    CHECK(std::string(setting_name(flag)).size() > 0);
+  }
+  CHECK(std::string(setting_name("xerces-other")).empty());
+
+  // One mod and the three settings: still something to tell apart, and the
+  // three count once.
+  safe_mode_decision one = decision;
+  one.crashed_stack = {"a"};
+  CHECK(culprit_search_possible(one));
+
+  // The settings caused it: one test, the whole stack without all three.
+  culprit_search found(decision.crashed_stack,
+                       decision.crashed_with_settings());
+  CHECK(found.next_test() == decision.crashed_stack);
+  found.record(false);
+  CHECK(found.settings_culprit());
+  CHECK(!found.culprit().has_value());
+  CHECK_EQ(found.launches(), 1u);
+
+  // A mod caused it ("c", the lowest): the settings step first, then
+  // fix2-redo's search, lower part first.
+  culprit_search mods(decision.crashed_stack, decision.crashed_with_settings());
+  std::vector<std::vector<std::string>> tested;
+  while (!mods.done() && tested.size() < 8) {
+    tested.push_back(mods.next_test());
+    mods.record(std::ranges::find(tested.back(), "c") != tested.back().end());
+  }
+  REQUIRE(tested.size() >= 2);
+  CHECK(tested[0] == decision.crashed_stack);
+  CHECK((tested[1] == std::vector<std::string>{"b", "c"}));
+  CHECK(mods.settings_step() == settings_suspect::cleared);
+  REQUIRE(mods.culprit().has_value());
+  CHECK_EQ(*mods.culprit(), "c");
+  CHECK(mods.ran_fine() == false);
+
+  // culprit.json keeps the three and the step.
+  culprit_progress progress;
+  progress.mode = "zm";
+  progress.crashed_stack = decision.crashed_stack;
+  progress.settings = settings;
+  progress.search = culprit_search(decision.crashed_stack, true);
+  const std::string saved = culprit_progress_to_json(progress);
+  CHECK(saved.find(R"("db_pool":"untested")") != std::string::npos);
+  const auto again = parse_culprit_progress(saved);
+  REQUIRE(again.has_value());
+  CHECK(again->settings == settings);
+  CHECK(again->has_setting("xerces-flip-model"));
+  CHECK(!again->has_setting("xerces-other"));
+  CHECK(again->search.testing_settings());
+
+  // A development build of flip model kept the step under "settings" as a
+  // string: not a search this version continues.
+  std::string string_step = saved;
+  const std::size_t at = string_step.find(R"("settings":[)");
+  REQUIRE(at != std::string::npos);
+  const std::size_t end = string_step.find(']', at);
+  string_step.replace(at, end - at + 1, R"("settings":"untested")");
+  CHECK(!parse_culprit_progress(string_step).has_value());
+}
+
 TEST_CASE(
     "safe mode: a crash that needs no larger zone memory bisects the mods") {
   culprit_search search({"a", "b", "c"}, true);

@@ -648,14 +648,16 @@ bool services::start_culprit() {
   for (const auto &name : culprit_->settings) {
     settings += " and -" + name;
   }
-  log_info(
-      "launcher.culprit.start",
-      std::to_string(culprit_->crashed_stack.size()) +
-          (culprit_->crashed_stack.size() == 1 ? " mod" : " mods") + settings,
-      std::string("{\"db_pool\":") +
-          (decision.crashed_with_db_pool ? "true" : "false") +
-          ",\"precise_limiter\":" +
-          (decision.crashed_with_precise_limiter ? "true" : "false") + "}");
+  log_info("launcher.culprit.start",
+           std::to_string(culprit_->crashed_stack.size()) +
+               (culprit_->crashed_stack.size() == 1 ? " mod" : " mods") +
+               settings,
+           std::string("{\"db_pool\":") +
+               (decision.crashed_with_db_pool ? "true" : "false") +
+               ",\"precise_limiter\":" +
+               (decision.crashed_with_precise_limiter ? "true" : "false") +
+               ",\"flip_model\":" +
+               (decision.crashed_with_flip_model ? "true" : "false") + "}");
   return true;
 }
 
@@ -674,8 +676,8 @@ launch_outcome services::launch_culprit_test() {
   }
   const std::vector<std::string> mods = culprit_->search.next_test();
   // Without the experimental settings, as in safe mode: every test runs on
-  // the stock pool and the engine's own frame pacing, so a crash a setting
-  // causes never narrows the mods.
+  // the stock pool, the engine's own frame pacing and its own swap chain, so
+  // a crash a setting causes never narrows the mods.
   xerces_core::launch_inputs in =
       inputs(culprit_->mode, true, false, std::nullopt, &mods);
   in.crash_followup = true;

@@ -337,3 +337,83 @@ TEST_CASE("culprit: a search in progress keeps what it learned") {
   CHECK_EQ(*search.culprit(), std::string("x.mod"));
   CHECK_EQ(search.launches(), std::size_t(2));
 }
+
+TEST_CASE("culprit: with experimental settings on, the settings are tested "
+          "first and a crashing dependency is still found") {
+  // The three experimental settings on, a map that needs m.dep, and A and B
+  // both needing d.mod. Every test launch leaves the settings out; the first
+  // runs the whole crashed stack. When the settings are not the cause, the
+  // search goes on lower part first, with the map's dependency kept aside.
+  const std::vector<installed_content> catalog = {
+      content_with("a.mod", {"d.mod"}),
+      content_with("b.mod", {"d.mod"}),
+      content_with("c.mod"),
+      content_with("d.mod"),
+      content_with("m.dep"),
+      content_with("the.map", {"m.dep"}, "map")};
+  launcher_config config = profile({"a.mod", "b.mod", "c.mod"}, "the.map");
+  config.extra_flags = {"-xerces-db-pool", "-xerces-precise-limiter",
+                        "-xerces-flip-model"};
+  const game_state game;
+  launch_inputs in;
+  in.config = &config;
+  in.game = &game;
+  in.catalog = &catalog;
+  in.mode = "zm";
+  const launch_outcome crashed = preview_launch(in);
+  REQUIRE(crashed.resolved.has_value());
+  CHECK(crashed.db_pool);
+  CHECK(crashed.precise_limiter);
+  CHECK(crashed.flip_model);
+  launch_journal journal;
+  journal.stack = stack_ids(*crashed.resolved);
+  journal.phase = launch_phase::in_game;
+  journal.mode = "zm";
+  journal.db_pool = crashed.db_pool;
+  journal.precise_limiter = crashed.precise_limiter;
+  journal.flip_model = crashed.flip_model;
+  const safe_mode_decision decision = decide_safe_mode(journal);
+  REQUIRE(decision.safe_mode);
+  REQUIRE_EQ(crashed_settings(decision).size(), std::size_t(3));
+
+  for (const std::string bad : {"settings", "d.mod", "c.mod", "m.dep"}) {
+    culprit_search search(
+        decision.crashed_stack, decision.crashed_with_settings(),
+        culprit_always_loaded(catalog, config, "zm", std::nullopt,
+                              decision.crashed_stack));
+    std::size_t tests = 0;
+    while (!search.done() && tests < 16) {
+      const std::vector<std::string> mods = search.next_test();
+      if (tests == 0) {
+        CHECK(mods == decision.crashed_stack);
+      }
+      in.mods = &mods;
+      in.crash_followup = true;
+      const launch_outcome test = preview_launch(in);
+      ++tests;
+      REQUIRE(test.resolved.has_value());
+      CHECK(!test.db_pool);
+      CHECK(!test.precise_limiter);
+      CHECK(!test.flip_model);
+      for (const auto &flag : suspect_settings()) {
+        CHECK(test.command_line.find(flag) == std::string::npos);
+      }
+      const std::vector<std::string> loaded = stack_ids(*test.resolved);
+      // The settings crash only with the settings on, which no test has.
+      search.record(bad != "settings" && holds(loaded, bad), loaded);
+    }
+    CHECK(search.done());
+    if (bad == "settings") {
+      CHECK(search.settings_culprit());
+      CHECK(!search.culprit().has_value());
+      CHECK_EQ(tests, std::size_t(1));
+      continue;
+    }
+    CHECK(search.settings_step() == settings_suspect::cleared);
+    CHECK_EQ(search.culprit().value_or("none"), bad);
+  }
+  in.mods = nullptr;
+  in.crash_followup = false;
+  // The settings themselves stay on for an ordinary launch.
+  CHECK(preview_launch(in).flip_model);
+}

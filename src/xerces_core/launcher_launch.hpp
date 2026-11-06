@@ -102,11 +102,12 @@ struct launch_outcome {
   diagnostics diags;
   launch_refusal refusal = launch_refusal::none;
   std::optional<plan> resolved; // a modded launch's plan
-  // The command line passes -xerces-db-pool (larger zone memory) or
-  // -xerces-precise-limiter (the precise frame limiter); the journal records
-  // them.
+  // The command line passes -xerces-db-pool (larger zone memory),
+  // -xerces-precise-limiter (the precise frame limiter) or
+  // -xerces-flip-model (flip-model presentation); the journal records them.
   bool db_pool = false;
   bool precise_limiter = false;
+  bool flip_model = false;
 };
 
 struct launch_inputs {
@@ -122,8 +123,9 @@ struct launch_inputs {
   // A launch that judges a crash: safe mode, or a culprit-search test (5.6).
   // It leaves the experimental settings out whatever the settings say: the
   // larger zone memory (-xerces-db-pool), so safe mode and every test run on
-  // the same stock pool, and the precise frame limiter
-  // (-xerces-precise-limiter), so they run the engine's own pacing. The
+  // the same stock pool, the precise frame limiter (-xerces-precise-limiter),
+  // so they run the engine's own pacing, and flip-model presentation
+  // (-xerces-flip-model), so they run the engine's own swap chain. The
   // journal records which of them the crashed launch had, and the culprit
   // search tests the whole stack without them first, so a crash a setting
   // causes is never blamed on a mod.
@@ -142,7 +144,7 @@ launch_outcome preview_launch(const launch_inputs &in);
 // The launch: preview_launch, then the game (found and supported), no game
 // running already, and the client next to the program. Writes the plan file
 // (modded) and the journal (phase launching, the mode, a fresh launch id and
-// whether the command passes -xerces-db-pool),
+// which of the experimental settings' flags the command passes),
 // then starts the client from the game folder with XERCES_HOME,
 // XERCES_DATA_PATH (development builds) and XERCES_LAUNCH_ID set for it alone.
 // If Windows refuses, the old journal is put back. game_running is asked

@@ -14,6 +14,7 @@
 #include <cwctype>
 
 #include "db_pool.hpp"
+#include "flip_model.hpp"
 #include "frame_pacing.hpp"
 #include "ipc.hpp"
 #include "journal.hpp"
@@ -137,11 +138,14 @@ launch_outcome preview_launch(const launch_inputs &in) {
   std::optional<launcher_config> followup;
   if (in.mods_off || in.crash_followup) {
     // Safe mode and the culprit search's tests follow a crash. The
-    // experimental settings (suspect_settings) are suspects of their own (the
-    // journal says which the crashed launch had), so none of them has one,
-    // whatever the settings say: the tests then compare like with like. The
-    // plan is checked against the stock pool, and they run the engine's own
-    // frame pacing.
+    // experimental settings (suspect_settings: larger zone memory, the
+    // precise frame limiter and flip-model presentation) are suspects of
+    // their own (the journal says which the crashed launch had), so none of
+    // these launches has one, whatever the settings say: the tests then
+    // compare like with like, and a crash or a black screen a setting causes
+    // is never blamed on a mod (DESIGN.md 5.6). The plan is checked against
+    // the stock pool, and they run the engine's own frame pacing and swap
+    // chain.
     followup = *in.config;
     for (const auto &flag : suspect_settings()) {
       followup->extra_flags =
@@ -182,6 +186,7 @@ launch_outcome preview_launch(const launch_inputs &in) {
   out.command_line = command.command_line;
   out.db_pool = db_pool::requested(command.args);
   out.precise_limiter = frame_pacing::requested(command.args);
+  out.flip_model = flip_model::requested(command.args);
   if (!command.ok()) {
     out.message = command.diags.items().empty()
                       ? ui_text("The launch command could not be built.")
@@ -345,6 +350,7 @@ launch_outcome launch_game(const launch_inputs &in,
   journal.launch_id = new_launch_id();
   journal.db_pool = out.db_pool;
   journal.precise_limiter = out.precise_limiter;
+  journal.flip_model = out.flip_model;
   if (out.resolved) {
     const plan &resolved = *out.resolved;
     out.plan_file = paths.plans / (plan_file_id(resolved.plan_id) + ".json");

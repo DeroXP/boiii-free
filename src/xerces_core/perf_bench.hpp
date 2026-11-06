@@ -33,6 +33,8 @@ inline constexpr std::uint8_t sync_interval = 2;  // Present's sync interval > 0
 inline constexpr std::uint8_t present_status = 4; // Present returned non-S_OK
 inline constexpr std::uint8_t unfocused = 8; // the game window was not in front
 inline constexpr std::uint8_t new_chain = 16; // first frame of a new swap chain
+// Present had DXGI_PRESENT_ALLOW_TEARING (-xerces-flip-model, flip_model.hpp)
+inline constexpr std::uint8_t tearing = 32;
 } // namespace frame_flag
 
 // Times in a run's CSV files are milliseconds from t0_qpc.
@@ -95,6 +97,13 @@ struct swapchain_info {
   std::uint32_t present_flags = 0;
   bool swapchain1 = false; // QueryInterface answers IDXGISwapChain1
   bool swapchain2 = false; // ... and IDXGISwapChain2 (waitable chains)
+  // -xerces-flip-model (xerces_core/flip_model.hpp): "off" without the flag,
+  // else what became of the chain (flip_model::to_string). The effective
+  // swap effect is swap_effect above (GetDesc); the engine's own request is
+  // known when the CreateSwapChain detour saw the chain made.
+  std::string flip_model = "off";
+  std::optional<std::uint32_t> engine_swap_effect;
+  std::optional<std::uint32_t> engine_flags;
 };
 std::string_view swap_effect_name(std::uint32_t swap_effect);
 std::string swapchain_json(const swapchain_info &info);

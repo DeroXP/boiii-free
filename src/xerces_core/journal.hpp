@@ -40,8 +40,10 @@ struct launch_journal {
   // False in older journals.
   bool db_pool = false;
   // The same for -xerces-precise-limiter, the experimental precise frame
-  // limiter (DESIGN.md 12.4).
+  // limiter (DESIGN.md 12.4), and -xerces-flip-model, the experimental
+  // flip-model presentation (12.4 item 4).
   bool precise_limiter = false;
+  bool flip_model = false;
 };
 
 std::string journal_to_json(const launch_journal &value);
@@ -86,13 +88,16 @@ struct safe_mode_decision {
   launch_phase crashed_in = launch_phase::launching;
   std::string crashed_mode;    // empty when an older journal did not say
   std::string crashed_started; // when the crashed launch started (UTC)
-  // The crashed launch had the larger zone memory (-xerces-db-pool) or the
-  // precise frame limiter (-xerces-precise-limiter): each is a suspect too,
-  // and the culprit search tests them first.
+  // The crashed launch had the larger zone memory (-xerces-db-pool), the
+  // precise frame limiter (-xerces-precise-limiter) or flip-model
+  // presentation (-xerces-flip-model): each is a suspect too, and the culprit
+  // search tests them first.
   bool crashed_with_db_pool = false;
   bool crashed_with_precise_limiter = false;
+  bool crashed_with_flip_model = false;
   bool crashed_with_settings() const {
-    return crashed_with_db_pool || crashed_with_precise_limiter;
+    return crashed_with_db_pool || crashed_with_precise_limiter ||
+           crashed_with_flip_model;
   }
   // What the screens say, made of fixed sentences so that each can be
   // translated as it is: the sentence for the phase (with or without
@@ -119,7 +124,7 @@ std::string safe_mode_text(const safe_mode_decision &decision,
 
 // The experimental settings the crashed launch had, as flag names without
 // the dash (settings_options' with_flag), in this order: "xerces-db-pool",
-// "xerces-precise-limiter".
+// "xerces-precise-limiter", "xerces-flip-model".
 std::vector<std::string> crashed_settings(const safe_mode_decision &decision);
 
 // Every experimental setting that is a crash suspect of its own (5.6), as
@@ -128,8 +133,9 @@ std::vector<std::string> crashed_settings(const safe_mode_decision &decision);
 const std::vector<std::string> &suspect_settings();
 
 // What the screens call a setting of suspect_settings() in a sentence
-// ("larger zone memory", "the precise FPS limit"); fixed text a translation
-// can match. Empty for any other flag.
+// ("larger zone memory", "the precise FPS limit", "flip-model
+// presentation"); fixed text a translation can match. Empty for any other
+// flag.
 const char *setting_name(std::string_view flag);
 
 // Whether "Find the culprit" has something to tell apart after this crash:
@@ -138,9 +144,10 @@ bool culprit_search_possible(const safe_mode_decision &decision);
 
 // The experimental settings (crashed_settings) in a culprit search. Safe
 // mode and every test launch run without them
-// (launch_inputs::crash_followup), so they all see the stock pool and the
-// engine's own frame limiter. When the crashed launch had one, the first test
-// is the whole crashed stack without them.
+// (launch_inputs::crash_followup), so they all see the stock pool, the
+// engine's own frame limiter and its own swap chain. When the crashed launch
+// had one or more, they are one suspect, and the first test is the whole
+// crashed stack without them; it cannot tell them apart.
 enum class settings_suspect {
   none,     // the crashed launch had none of them
   untested, // the next test: the whole crashed stack without them
