@@ -286,6 +286,37 @@ journal_step journal_symbols_step() {
                       xerces_core::launch_phase::launching);
 }
 
+void journal_joined(const std::vector<std::string> &host_stack) {
+  std::lock_guard lock(journal_mutex);
+  decide_journal();
+  if (!journal_owned) {
+    return;
+  }
+  auto journal = xerces_core::parse_journal(read_file(journal_path()));
+  if (!journal || journal->phase == xerces_core::launch_phase::clean_exit ||
+      !journal->launch_id.empty()) {
+    journal_owned = false; // closed, or a newer launch's
+    return;
+  }
+  if (journal->joined && journal->joined_stack == host_stack) {
+    return;
+  }
+  journal->joined = true;
+  journal->joined_stack = host_stack;
+  journal->updated = xerces_core::json_log::now_utc();
+  write_file(journal_path(), xerces_core::journal_to_json(*journal));
+  std::string ids = "[";
+  for (std::size_t i = 0; i < host_stack.size(); ++i) {
+    ids +=
+        (i ? "," : "") + xerces_core::json::quote(
+                             xerces_core::json::valid_utf8(host_stack[i], 64));
+  }
+  log_info("loader.journal.joined",
+           std::to_string(host_stack.size()) +
+               (host_stack.size() == 1 ? " mod" : " mods") + " from the host",
+           "{\"stack\":" + ids + "]}");
+}
+
 // ---------------------------------------------------------------- the exit
 namespace {
 // Plain values: read during shutdown, after other statics may be gone.

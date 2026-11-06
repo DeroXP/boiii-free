@@ -1889,6 +1889,53 @@ signature set, and adds a dedicated-server acceptance test (authenticated join,
 `content_id` check, rcon, bans). Without it, M6 hardens listen servers only and
 dedicated servers keep upstream behaviour.
 
+### 11.10 Joining in the beta (built 2026-11-05, not yet run on two PCs)
+
+You decided that joining another tester's self-hosted game is in the first beta,
+and that a host may open a UDP port on its own router with UPnP while a lobby is
+open. Ezz's social features stay off (D14), the read-only server list stays, and
+nothing touches official matchmaking. Until M6, joins are upstream's plaintext
+direct connect; 11.3 and 11.4 still apply later. The two-PC test is
+`docs/TWO_PC_TEST.md`.
+
+- **Open to direct connect.** The lobby button upstream labelled "PARTY IS OPEN"
+  now reads DIRECT CONNECT: OPEN or CLOSED. Open, a lobby in the menus answers
+  joins by address (`nat.cpp`, `joinable_lobby`), and nothing is sent to Ezz's
+  masters. A match the host runs was already joinable. While it is open the game
+  asks the router to forward its UDP port (`upnp.cpp`) and says what the router
+  answered: forwarded (with the outside address, so the host can share it), a
+  shared or private outside address (carrier-grade NAT or a second router), no
+  UPnP router, or refused. The mapping goes when the host closes the lobby, has
+  had no lobby in the menus for about 15 s, or quits. A crash leaves it on the
+  router until the next time the port is mapped.
+- **What a host advertises.** getinfo and the lobby content carry each mod's and
+  the custom map's short content id (the first 16 hex digits of the catalog's
+  content hash), as `key=id` pairs in getinfo's `contentIds` and in a sixth
+  lobby content field, and getinfo carries `xercesVersion`. Older clients ignore
+  both and older hosts send neither, so their joins work as before. The ids come
+  from `<home>\config\installed.json`, which every launch writes from the
+  launcher's catalog; a game not started by the launcher sends none. The index
+  is as fresh as the plan file.
+- **The joiner's check** (`src/client/xerces/join.cpp`,
+  `xerces_core/join_check.hpp`). Before the host's mods load, everything the
+  host runs that is missing here (main mod, stacked mods, custom map) is named
+  in one dialog that offers each Workshop page in Steam. Items whose content id
+  differs are named in a dialog whose Yes joins anyway. A host on another Xerces
+  version gives a warning toast. A server that switches to a map this PC lacks
+  names it and offers its Workshop page (asked from the server's getinfo);
+  nothing reconnects to download.
+- **A direct connect to a lobby with other mods** loads the host's mods, then
+  connects to the same address again, once per host a minute. Before, it relied
+  on a friend id that a direct connect does not have, and stopped.
+- **The journal** records the host's stack once a join takes it
+  (`launch_journal::joined`). A crash after that does not put the next launch
+  into safe mode or start a culprit search for this plan's mods, unless the host
+  ran this plan's own stack. Home does not yet say that the last launch crashed
+  on another player's game.
+- **Servers** says the host decides which mods load; "Join modded" joins without
+  your mods when your plan has problems or none are enabled; IPv6 addresses are
+  refused for joins (the game's sockets are IPv4 only).
+
 ---
 
 ## 12. Performance (goal 10)

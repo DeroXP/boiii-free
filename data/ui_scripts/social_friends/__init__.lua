@@ -519,7 +519,7 @@ end
 require("ui.uieditor.widgets.Social.Social_Party_PC")
 
 local function partyLabel()
-  return Engine.DvarBool(nil, "friends_open") and "^2PARTY IS OPEN" or "^1PARTY IS CLOSED"
+  return Engine.DvarBool(nil, "friends_open") and "^2DIRECT CONNECT: OPEN" or "^1DIRECT CONNECT: CLOSED"
 end
 
 local function managePartyButton(label, action)

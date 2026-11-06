@@ -13,9 +13,9 @@ end
 
 local function friendsPartyLabel()
   if Engine.DvarBool(nil, "friends_open") then
-    return "^2PARTY IS OPEN"
+    return "^2DIRECT CONNECT: OPEN"
   end
-  return "^1PARTY IS CLOSED"
+  return "^1DIRECT CONNECT: CLOSED"
 end
 
 local function openPopup(name)

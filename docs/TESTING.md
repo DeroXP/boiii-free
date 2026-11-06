@@ -204,9 +204,9 @@ fonts, for comparison in a browser (Edge headless:
       Discord application id.
 - [ ] Joining a server whose mod or map you lack names it and offers to open its
       Workshop page in Steam, which then downloads it.
-- [ ] `friends_open` and inviting a friend say the feature is off in this build.
-      Seen: `friends_open` printed nothing to the console; the message is a
-      toast, not checked on screen.
+- [ ] Inviting a friend says the feature is off in this build. `friends_open` is
+      the lobby's DIRECT CONNECT button since 2026-11-05 (Joining another
+      tester's game, below).
 - [ ] With `premake5 ninja --with-ezz-social --with-upstream-downloaders` the
       client builds and behaves as upstream (only when a comparison is needed).
 - [ ] Plugins (DESIGN.md 5.9, built 2026-11-05): with a DLL in
@@ -737,6 +737,43 @@ Run on 2026-11-05 by Claude (no game running, dry launches only):
       with a valid "é"), and `Xerces.exe --dry-launch` on that home reads its 17
       items instead of ending in `std::terminate`. Its scan event reports 686
       hits, without BlackOps3.exe.
+
+### Joining another tester's game (two PCs, built 2026-11-05)
+
+DESIGN.md 11.10; the steps for you and the friend with the beta zip are in
+`docs/TWO_PC_TEST.md` (H hosts, J joins). Built, unit-tested
+(`src/xerces_tests/test_join.cpp`) and checked with dry launches only; none of
+it has run on two PCs.
+
+- [ ] LAN, vanilla to vanilla: J joins H's open lobby, then H's running match,
+      by address. A lobby H left closes to direct connect within about 15 s, and
+      J then gets the message that H is in the menus.
+- [ ] A joiner missing one stacked mod gets one dialog naming it with its
+      Workshop page; Yes opens it in Steam. After subscribing, J's game loads
+      H's mods and joins again by itself, once.
+- [ ] Several missing items are named in one dialog ("Open their 2 Workshop
+      pages").
+- [ ] The D3 stack on both: J joins H's lobby and match with no "Different
+      versions" dialog and plays with all three mods.
+- [ ] "Different versions" names the item whose files differ, and Yes joins
+      anyway. Needs two versions of one item, for example a copy under `mods\`
+      changed on one PC.
+- [ ] A host on a custom map with map-first: J follows H's `mapScriptsFirst`,
+      also with `xerces_map_scripts_first 0` on J, and plays.
+- [ ] A custom map J lacks: joining H's match or lobby names it with its
+      Workshop page; H switching to it drops J to the menu with "You don't have
+      the map ..." and offers the page, with no reconnect.
+- [ ] Over the internet: opening the lobby maps the UDP port on H's router (the
+      "Router port open" toast shows the address), and J joins with it. Closing
+      the lobby and quitting the game remove the mapping.
+- [ ] The toasts for a router without UPnP, a router that refuses the port, and
+      a shared (carrier-grade NAT) outside address.
+- [ ] A host on another Xerces version gives J the "Xerces versions differ"
+      toast; an older host or BOIII gives none, and joining works.
+- [ ] A crash on H's game with other mods than J's plan: J's next start of
+      Xerces does not offer safe mode for J's own mods (`joined` in J's
+      journal).
+- [ ] Copy report and the console text from both PCs after the test.
 
 ### Conflict system (M2)
 

@@ -38,7 +38,7 @@
 			<div class="label field-label">Server address</div>
 			<input id="address" type="text" class="text mono-field address" maxlength="260" placeholder="host:port" data-value="address" data-event-change="typed()" data-class-invalid="address_problem != ''"/>
 			<div class="field-problem" data-if="address_problem != ''">{{address_problem}}</div>
-			<div class="field-note" data-if="address_problem == ''">For example 192.168.1.20:27017, my-server.lan:27017 or [::1]:27017. Press / or Y to type here.</div>
+			<div class="field-note" data-if="address_problem == ''">For example 192.168.1.20:27017 or my-server.lan:27017. Press / or Y to type here.</div>
 
 			<div class="toolbar join-row">
 				<button id="join-modded" class="primary-button join default-focus" data-event-click="act('join modded')"><span>Join modded</span><span class="key" data-if="enter_modded">Enter</span></button>
@@ -46,6 +46,7 @@
 				<button id="save-address" class="link" data-event-click="act('save address')"><span>Save to favourites</span></button>
 			</div>
 			<div class="join-note">{{join_note}}</div>
+			<div class="join-note">The host decides which mods load: when you join, the game switches to the host's mods if you have them. Join modded only starts the game with yours first.</div>
 
 			<div class="result" data-if="has_result" data-class-failed="!result_ok">
 				<div class="label result-label">{{result_label}}</div>
@@ -114,6 +115,11 @@
 			</div>
 			<div class="aside-note">The public server list stays in the game's own server browser for now. Xerces' own list arrives with its backend (M6).</div>
 			<div class="aside-note quiet">The launcher never fetches a list or pings a server. Joining passes the address to the game, nothing more.</div>
+		</div>
+
+		<div>
+			<div class="panel-head"><span class="panel-title">Hosting</span></div>
+			<div class="aside-note">In your Zombies or Multiplayer lobby, turn DIRECT CONNECT on. Others then join with your address and port, usually 27017. While it is on, the game asks your router to forward that UDP port (UPnP), and it stops when the lobby closes.</div>
 		</div>
 
 		<div>

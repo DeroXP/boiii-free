@@ -34,6 +34,14 @@ struct launch_journal {
   // The game clears it when it takes the journal over, so an id still here
   // means the game never did (see journal_claimable and exit_counts_as_clean).
   std::string launch_id;
+  // The game joined another player's game and took that host's mods
+  // (src/client/xerces/join.cpp). joined_stack is what it ran from then on,
+  // the main mod first, by id where the installed index knows the folder;
+  // empty for a host without mods. A crash after that is not this plan's,
+  // unless the host ran this plan's stack (decide_safe_mode). Written only
+  // when true.
+  bool joined = false;
+  std::vector<std::string> joined_stack;
   // The launch passed -xerces-db-pool, the experimental larger zone memory
   // (DESIGN.md 5.4), so a crash can be traced to it and not only to the mods.
   // False in older journals.
@@ -82,6 +90,10 @@ struct safe_mode_decision {
   launch_phase crashed_in = launch_phase::launching;
   std::string crashed_mode;    // empty when an older journal did not say
   std::string crashed_started; // when the crashed launch started (UTC)
+  // The crash came after the game joined another player's game with other
+  // mods than this plan's (launch_journal::joined): no safe mode, nothing
+  // for the culprit search, since this plan's mods were not running.
+  bool crashed_after_join = false;
   // The crashed launch had the larger zone memory (-xerces-db-pool): it is a
   // suspect too, and the culprit search tests it first.
   bool crashed_with_db_pool = false;

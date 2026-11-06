@@ -80,6 +80,11 @@ private:
 };
 [[nodiscard]] journal_step journal_symbols_step();
 
+// The game joined another player's game and took that host's mods
+// (join.cpp): the journal records the host's stack (ids, main mod first) for
+// the rest of this launch, while the journal is still this launch's.
+void journal_joined(const std::vector<std::string> &host_stack);
+
 // ---------------------------------------------------------------- the exit
 // The engine's quit command ran (loader.cpp wraps it): the player chose to
 // leave, so the launch ended cleanly even if the exit that follows is forced

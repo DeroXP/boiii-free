@@ -30,6 +30,13 @@
 #include <frozen/string.h>
 #include <frozen/unordered_map.h>
 
+#include <xerces/join.hpp>
+#include <xerces/runtime.hpp>
+#include <xerces/switches.hpp>
+#include <xerces_core/join_check.hpp>
+#include <xerces_core/json.hpp>
+#include <xerces_core/version.hpp>
+
 namespace party {
 game::EngineDependentDvarMut cl_connected_to_dedi;
 namespace {
@@ -410,8 +417,8 @@ void connect_in_mode(const game::net::netadr_t &addr, const game::eModes mode,
       return;
     }
     nat::join_match_lobby(addr, lobby == "party" ? [] {
-      printf("Connect failed: Could not join their party.\n");
-      toast::show("Connect failed", "Could not join their party",
+      printf("Connect failed: Could not join their lobby.\n");
+      toast::show("Connect failed", "Could not join their lobby",
                   "t7_icon_connect_overlays");
     } : std::function<void()>(connect_direct));
   };
@@ -523,12 +530,39 @@ void handle_connect_query_response(const bool success,
       is_connecting_to_dedi && info.get("sv_running") == "1"
           ? std::string{}
           : info.get("lobby");
+  // Xerces: the host's Xerces version (getinfo.cpp); hosts that do not say
+  // (BOIII, older Xerces builds) get no warning.
+  const std::string host_xerces = info.get("xercesVersion");
+  if (const std::string warning = xerces_core::xerces_version_warning(
+          host_xerces, xerces_core::xerces_version_text);
+      !warning.empty()) {
+    xerces_runtime::log_warn(
+        "join.xerces_version", "the host runs another Xerces version",
+        "{\"host\":" +
+            xerces_core::json::quote(
+                xerces_core::json::valid_utf8(host_xerces, 32)) +
+            ",\"own\":" +
+            xerces_core::json::quote(xerces_core::xerces_version_text) + "}");
+    toast::warn("Xerces versions differ", warning);
+  }
+
   if (mapname == "core_frontend" && lobby.empty()) {
     printf("Connect failed: The host is in the menus, not in a match.\n");
-    toast::show("Friend in menus",
-                "They are not in a match. Ask them to open their party, then "
-                "join from your friends list.",
-                "t7_icon_connect_overlays");
+    if constexpr (xerces_switches::ezz_social) {
+      toast::show("Friend in menus",
+                  "They are not in a match. Ask them to open their party, "
+                  "then join from your friends list.",
+                  "t7_icon_connect_overlays");
+    } else {
+      // Xerces (D14): no friends list; the host opens the lobby itself.
+      const std::string message = xerces_core::host_in_menus_message();
+      scheduler::once(
+          [message] {
+            game::ui::UI_OpenErrorPopupWithMessage(
+                game::LOCAL_CLIENT_0, game::errorCode::UI, message.c_str());
+          },
+          scheduler::main);
+    }
     return;
   }
   if (mapname.empty()) {
@@ -547,8 +581,10 @@ void handle_connect_query_response(const bool success,
   }
 
   const std::string mod_id = info.get("modId");
+  const std::string mod_title = info.get("modName");
   const std::string mod_stack_list = info.get("modStack");
   const std::string map_scripts_first = info.get("mapScriptsFirst");
+  const std::string content_ids = info.get("contentIds");
 
   const std::string workshop_id = info.get("workshop_id").empty()
                                       ? info.get("usermapId")
@@ -574,15 +610,48 @@ void handle_connect_query_response(const bool success,
         // Always save latest address for mod reconnect (mod unload/reload)
         workshop::set_pending_mod_reconnect(addr_str);
 
-        if (mapname == "core_frontend" ||
-            (workshop::check_valid_usermap_id(mapname, usermap_id, workshop_id,
-                                              base_uri) &&
-             workshop::check_valid_mod_id(mod_id, {}, base_uri) &&
-             workshop::check_valid_mod_stack(mod_stack_list))) {
+        const auto join = [=] {
           mod_stack::set(mod_stack_list);
           mod_stack::follow_host_map_scripts_first(map_scripts_first);
+          // Xerces: in a match the host's mods load now; a lobby in the
+          // menus is checked again when it answers (nat.cpp).
+          if (mapname != "core_frontend") {
+            xerces_join::note_joined(mod_id, mod_stack_list);
+          }
           connect_in_mode(target, mode, mapname, gametype, usermap_id, mod_id,
                           lobby);
+        };
+        if (mapname == "core_frontend") {
+          join();
+          return;
+        }
+
+        if constexpr (!xerces_switches::upstream_downloaders) {
+          // Xerces (D15, DESIGN.md 11.10): everything missing at once with
+          // its Workshop page, and files that differ from the host's, before
+          // the host's mods load. A stock map the game lacks is DLC
+          // (workshop.cpp says so).
+          const bool custom_map = !workshop::is_stock_map(mapname);
+          if (!custom_map && !workshop::check_valid_usermap_id(
+                                 mapname, usermap_id, workshop_id, {})) {
+            return;
+          }
+          xerces_join::host_offer offer;
+          offer.main_mod = mod_id;
+          offer.main_title = mod_title;
+          offer.stack = mod_stack_list;
+          offer.map = custom_map ? mapname : std::string{};
+          offer.map_workshop_id = workshop_id;
+          offer.content_ids = content_ids;
+          xerces_join::check_host(offer, join);
+          return;
+        }
+
+        if (workshop::check_valid_usermap_id(mapname, usermap_id, workshop_id,
+                                             base_uri) &&
+            workshop::check_valid_mod_id(mod_id, {}, base_uri) &&
+            workshop::check_valid_mod_stack(mod_stack_list)) {
+          join();
         } else {
           const char *msg = utils::string::va(
               "Missing or invalid workshop/map dependencies for server %s.",
