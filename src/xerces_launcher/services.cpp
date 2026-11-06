@@ -542,9 +542,11 @@ void services::poll() {
 void services::watch_run_folder() {
   // A game this launcher did not start (started before Xerces was reopened,
   // or restarted from the crash dialog) has no process handle here; it is
-  // seen through its entry in <home>\run, read at most once a second.
+  // seen through its entry in <home>\run, read at most about once a second:
+  // 900 ms, so the launcher's one-second waits while a game runs (app.cpp)
+  // read it on every pass rather than every other one.
   const auto now = std::chrono::steady_clock::now();
-  if (now - last_run_check_ < std::chrono::seconds(1)) {
+  if (now - last_run_check_ < std::chrono::milliseconds(900)) {
     return;
   }
   last_run_check_ = now;

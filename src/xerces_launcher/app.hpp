@@ -117,6 +117,12 @@ public:
   void inject_key(Rml::Input::KeyIdentifier key, int modifiers = 0);
   // Runs task on the UI thread (thread-safe).
   void post(std::function<void()> task);
+  // Asks for a frame (UI thread). The loop draws only when something changed
+  // (DESIGN.md 12.7): input, posted tasks, the services' counters, the
+  // notice, focus, a screen shown, RmlUi's animations. A screen whose
+  // update() changes what it shows for another reason (a timer of its own)
+  // calls this.
+  void redraw() { changed_ = true; }
   double now() const;
   // Escapes text for RML markup (SetInnerRML).
   static std::string escape(const std::string &text);
@@ -126,7 +132,8 @@ private:
   bool load_fonts();
   bool load_view(view &v, const view_info &info);
   void wire_shell(Rml::ElementDocument *doc);
-  void run_posted();
+  // Runs the posted tasks; true when there was one.
+  bool run_posted();
   bool on_key(Rml::Input::KeyIdentifier key, int modifiers, bool priority);
   // A key neither the screen nor RmlUi took (on_key's second pass).
   bool after_key(Rml::Input::KeyIdentifier key, int modifiers);
@@ -135,8 +142,10 @@ private:
   hit_region hit_test(int x, int y);
   void load_language();
   void close_dialog(int choice);
-  void update_notice();
-  void run_script(double seconds);
+  // Shows, changes or clears the footer notice; true when it did.
+  bool update_notice();
+  // Plays the script steps due by `seconds`; true when one ran.
+  bool run_script(double seconds);
   // Focuses the screen's default element, scrolled into view; false when the
   // screen has none.
   bool focus_default(view &v);
@@ -148,9 +157,10 @@ private:
   // Stops the worker, RmlUi, the screens and the window in the order they
   // depend on each other. Safe to call more than once.
   void shutdown();
-  // Counts a presented frame against the window's state; every minute (and
-  // at the end) logs launcher.activity.
-  void count_present(double t, bool front);
+  // Counts a pass of the loop (a wake-up), and the frame when one was
+  // presented, against the window's state; every minute (and at the end)
+  // logs launcher.activity.
+  void count_activity(double t, bool front, bool presented);
   void log_activity(double t);
 
   options opts_;
@@ -177,6 +187,7 @@ private:
   bool notice_error_ = false;
   double notice_until_ = 0;
   bool notice_dirty_ = false;
+  bool changed_ = false; // redraw(): something to draw at the next frame
 
   Rml::ElementDocument *dialog_doc_ = nullptr;
   bool dialog_open_ = false;
@@ -212,9 +223,10 @@ private:
   void *instance_mutex_ = nullptr; // one launcher per home
   std::uintptr_t home_tag_ = 0;    // this home on the window (single instance)
 
-  // Frames presented while the window was in front, behind another window,
-  // minimized, or while a game ran (whatever the window was), and the time
-  // spent in each, since the last launcher.activity line.
+  // Frames presented and passes of the loop while the window was in front,
+  // behind another window, minimized, or while a game ran (whatever the
+  // window was), and the time spent in each, since the last
+  // launcher.activity line.
   enum activity_state {
     state_front,
     state_behind,
@@ -223,10 +235,11 @@ private:
     state_count
   };
   std::array<std::uint64_t, state_count> frames_{};
+  std::array<std::uint64_t, state_count> wakes_{};
   std::array<double, state_count> state_seconds_{};
   double activity_since_ = -1; // start of the counted span; -1 before any
-  double last_frame_at_ = 0;
+  double last_wake_at_ = 0;
   double game_checked_at_ = -1;
-  bool game_seen_ = false; // services::game_running, asked once a second
+  bool game_seen_ = false; // services::game_running, asked about once a second
 };
 } // namespace xerces_launcher

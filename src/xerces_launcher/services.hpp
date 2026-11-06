@@ -142,10 +142,14 @@ public:
   // The game process started by the last launch is still running, or any
   // game announces itself in <home>\run (one this launcher did not start).
   bool game_running() const;
-  // Notices the game exiting (call once per frame): the one this launcher
-  // started, or one only seen in <home>\run. Bumps journal_rev and settles
-  // a culprit test once its game is gone.
+  // Notices the game exiting (call on every pass of the loop): the one this
+  // launcher started, or one only seen in <home>\run (read at most about
+  // once a second). Bumps journal_rev and settles a culprit test once its
+  // game is gone.
   void poll();
+  // The process handle of the game this launcher started, until poll() sees
+  // it exit; null otherwise. The loop waits on it too, so the exit wakes it.
+  void *game_process() const { return game_process_; }
   std::uint64_t journal_rev() const { return journal_rev_; }
 
   // ---------------------------------------------------- journal, safe mode
