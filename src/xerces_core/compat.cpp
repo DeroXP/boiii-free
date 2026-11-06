@@ -155,6 +155,22 @@ const char *to_string(preflight_verdict verdict) {
   return "unknown";
 }
 
+const char *preflight_label(preflight_verdict verdict) {
+  switch (verdict) {
+  case preflight_verdict::supported:
+    return "Supported";
+  case preflight_verdict::upstream_only:
+    return "Upstream only";
+  case preflight_verdict::unsupported:
+    return "Unsupported build";
+  case preflight_verdict::newer:
+    return "Newer than supported";
+  case preflight_verdict::unknown:
+    return "Unknown or modified";
+  }
+  return "Unknown or modified";
+}
+
 std::optional<exe_facts> read_exe_facts(const std::filesystem::path &exe,
                                         std::string *error, hash_cache *cache) {
   const auto fail = [&](std::string why) -> std::optional<exe_facts> {

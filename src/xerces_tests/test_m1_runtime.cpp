@@ -233,6 +233,19 @@ TEST_CASE("safe mode: a crash with mods turns the next launch safe") {
   CHECK(crash.safe_mode);
   CHECK_EQ(crash.crashed_plan_id, "sha256:abc");
   CHECK(crash.message.find("while loading a map") != std::string::npos);
+  // The notice is one fixed sentence per phase, so the launcher can look it
+  // up as it is in a translation (no mod count or other run-time parts).
+  launch_journal bigger = journal;
+  bigger.stack = {"a.mod", "b.mod", "c.mod"};
+  CHECK_EQ(decide_safe_mode(bigger).message, crash.message);
+  CHECK(std::ranges::none_of(crash.message,
+                             [](char c) { return c >= '0' && c <= '9'; }));
+  bigger.db_pool = true;
+  const std::string with_pool = decide_safe_mode(bigger).message;
+  CHECK(with_pool.find("while loading a map") != std::string::npos);
+  CHECK(with_pool.find("larger zone memory") != std::string::npos);
+  bigger.stack = {"a.mod"};
+  CHECK_EQ(decide_safe_mode(bigger).message, with_pool);
 
   journal.phase = launch_phase::clean_exit;
   CHECK(!decide_safe_mode(journal).safe_mode);
@@ -364,7 +377,7 @@ TEST_CASE("safe mode: finding the culprit halves the stack") {
   }
   REQUIRE(search.culprit().has_value());
   CHECK_EQ(*search.culprit(), "c");
-  CHECK_EQ(search.launches(), 3u);
+  CHECK_EQ(search.launches(), 3u); // [c, d] crash, [d] fine, [c] crashes
 
   culprit_search pair({"a", "b", "c", "d"});
   const auto needs_a_and_d = [](const std::vector<std::string> &mods) {

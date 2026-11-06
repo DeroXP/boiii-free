@@ -4,11 +4,13 @@
 
 #include <RmlUi/Core.h>
 
+#include <algorithm>
 #include <cstdio>
 
 #include <xerces_core/compat.hpp>
 #include <xerces_core/db_pool.hpp>
 #include <xerces_core/json.hpp>
+#include <xerces_core/launcher_launch.hpp>
 #include <xerces_core/settings_options.hpp>
 
 #include "../app.hpp"
@@ -85,6 +87,7 @@ public:
     model.Bind("culprit_done", &culprit_done_);
     model.Bind("culprit_found", &culprit_found_);
     model.Bind("culprit_stop", &culprit_stop_);
+    model.Bind("culprit_off", &culprit_off_);
     model.BindEventCallback(
         "pick", [this](Rml::DataModelHandle, Rml::Event &,
                        const Rml::VariantList &args) {
@@ -234,7 +237,8 @@ private:
                                std::to_string(*game.steam_build)
                          : owner_->tr("Build unknown");
       if (game.preflight && !game.preflight->can_launch()) {
-        game_value_ = owner_->tr(xerces_core::to_string(game.preflight->verdict));
+        game_value_ =
+            owner_->tr(xerces_core::preflight_label(game.preflight->verdict));
         game_detail_ = game.preflight->message;
       }
     }
@@ -262,10 +266,13 @@ private:
                        owner_->tr("mods") + ", " +
                        std::to_string(svc.maps().size()) + " " +
                        owner_->tr("maps");
-      char text[96];
-      std::snprintf(text, sizeof(text), "%.1f s, %zu files cached",
-                    catalog.seconds, catalog.cache_hits);
-      catalog_detail_ = catalog.scanned ? text : "";
+      char seconds[32];
+      std::snprintf(seconds, sizeof(seconds), "%.1f s", catalog.seconds);
+      catalog_detail_ = catalog.scanned
+                            ? std::string(seconds) + ", " +
+                                  std::to_string(catalog.cache_hits) + " " +
+                                  owner_->tr("files cached")
+                            : std::string();
     }
     const xerces_core::safe_mode_decision decision = svc.safe_mode();
     // A crash is told apart from the next one by its plan and start time:
@@ -275,7 +282,7 @@ private:
                  ? decision.crashed_plan_id + "\n" + decision.crashed_started
                  : "";
     safe_ = decision.safe_mode && crash_ != dismissed_crash_;
-    safe_text_ = decision.message;
+    safe_text_ = owner_->tr(decision.message);
     safe_value_ = decision.safe_mode ? owner_->tr("Suggested")
                                      : owner_->tr("Off");
     safe_detail_ = decision.safe_mode
@@ -300,6 +307,29 @@ private:
     return out;
   }
 
+  // What stops the mod the search found loading in its profile: the enabled
+  // mods that load it (the culprit itself, or the mods that pull it in as a
+  // dependency), and whether the profile's map needs it too.
+  xerces_core::culprit_remedy
+  remedy_for(const xerces_core::culprit_progress &culprit) const {
+    const services &svc = owner_->svc();
+    const auto found = culprit.search.culprit();
+    if (!found) {
+      return {};
+    }
+    return xerces_core::culprit_remedy_for(
+        svc.catalog().items,
+        xerces_core::profile_request(svc.config(), culprit.mode,
+                                     svc.game().steam_build),
+        *found);
+  }
+
+  bool profile_has_map(const std::string &mode) const {
+    const auto &profiles = owner_->svc().config().profiles;
+    const auto it = profiles.find(mode);
+    return it != profiles.end() && it->second.map.has_value();
+  }
+
   // The culprit search (5.6): one test launch at a time, the result read
   // from the journal when the game exits. A crashed launch that had the
   // larger zone memory is first run again without it.
@@ -310,6 +340,7 @@ private:
     culprit_done_ = culprit_found_ = false;
     culprit_mods_.clear();
     culprit_stop_ = owner_->tr("Stop");
+    culprit_off_ = owner_->tr("Turn it off");
     if (!culprit) {
       return;
     }
@@ -320,17 +351,73 @@ private:
                                  "mods ran fine without it. Turn it off?");
       culprit_mods_ = mod_list(culprit->crashed_stack);
       culprit_stop_ = owner_->tr("Close");
-    } else if (culprit->search.culprit()) {
-      culprit_done_ = culprit_found_ = true;
-      culprit_text_ = owner_->tr("Found it:") + " " +
-                      mod_label(*culprit->search.culprit()) + ". " +
-                      owner_->tr("It crashes the game on its own. Turn it off "
-                                 "in this profile?");
+    } else if (const auto found = culprit->search.culprit()) {
+      const xerces_core::culprit_remedy fix = remedy_for(*culprit);
+      const std::vector<std::string> &off = fix.mods;
+      culprit_done_ = true;
+      // Turning mods off is offered only when that stops it loading.
+      culprit_found_ = fix.mods_enough();
+      // Every test keeps the profile's map, so what the search saw is the
+      // culprit crashing with the map. One the map needs never ran without
+      // it; otherwise the map is cleared once a test ran fine.
+      const auto &always = culprit->search.always();
+      const bool with_map =
+          fix.map || std::ranges::find(always, *found) != always.end();
+      const bool map_untested =
+          !culprit->search.ran_fine() && profile_has_map(culprit->mode);
+      culprit_text_ =
+          owner_->tr("Found it:") + " " + mod_label(*found) + ". " +
+          owner_->tr(with_map ? "It, or the map that needs it, crashes the "
+                                "game."
+                     : map_untested
+                         ? "It crashes the game with the map in this "
+                           "profile. No test ran without a crash, so the "
+                           "map may be the cause instead."
+                         : "It crashes the game on its own.") +
+          " ";
+      if (fix.map) {
+        // Turning mods off would leave it loading with the map.
+        culprit_text_ += owner_->tr(
+            off.empty() ? "Only the map in this profile needs it: pick "
+                          "another map in Mods."
+            : off.size() == 1 && off.front() == *found
+                ? "The map in this profile needs it too: pick another map "
+                  "and turn it off in Mods."
+            : off.size() == 1
+                ? "The map in this profile needs it, and so does the mod "
+                  "below: pick another map and turn that mod off in Mods."
+                : "The map in this profile needs it, and so do the mods "
+                  "below: pick another map and turn those mods off in Mods.");
+        culprit_mods_ = mod_list(off);
+      } else if (off.empty()) {
+        culprit_text_ +=
+            owner_->tr("Nothing in this profile loads it any more.");
+      } else if (off.size() == 1 && off.front() == *found) {
+        culprit_text_ += owner_->tr("Turn it off in this profile?");
+      } else {
+        // A dependency: turning off only it would not stop it loading.
+        culprit_text_ += owner_->tr(
+            off.size() == 1
+                ? "The mod below in this profile loads it. Turn it off?"
+                : "These mods in this profile load it. Turn them off?");
+        culprit_mods_ = mod_list(off);
+        if (off.size() > 1) {
+          culprit_off_ = owner_->tr("Turn them off");
+        }
+      }
+      culprit_stop_ = owner_->tr("Close");
+    } else if (culprit->search.inseparable()) {
+      culprit_done_ = true;
+      culprit_text_ = owner_->tr("No single mod was found: these mods load "
+                                 "with the map in every test, so they cannot "
+                                 "be tested apart.");
+      culprit_mods_ = mod_list(culprit->search.suspects());
       culprit_stop_ = owner_->tr("Close");
     } else if (culprit->search.done()) {
       culprit_done_ = true;
       culprit_text_ = owner_->tr("No single mod crashes alone: the crash needs "
-                                 "these mods together.");
+                                 "these mods together, or it did not happen "
+                                 "again.");
       if (culprit->search.db_pool() == xerces_core::db_pool_suspect::cleared) {
         // They crashed on the stock pool, where the crashed launch had the
         // larger one: together they may simply not fit without it.
@@ -371,13 +458,13 @@ private:
     const launch_outcome outcome =
         owner_->svc().launch(owner_->mode(), modded, mods_off);
     if (outcome.started || outcome.dry_run) {
-      owner_->notify(outcome.message);
+      owner_->notify(owner_->tr(outcome.message));
       if (outcome.started && owner_->svc().config().close_on_launch) {
         owner_->win().request_close();
       }
       return true;
     }
-    owner_->notify(outcome.message, true);
+    owner_->notify(owner_->tr(outcome.message), true);
     return false;
   }
 
@@ -459,28 +546,50 @@ private:
       }
     } else if (action == "culprit test") {
       const launch_outcome outcome = owner_->svc().launch_culprit_test();
-      owner_->notify(outcome.message, !outcome.started && !outcome.dry_run);
+      owner_->notify(owner_->tr(outcome.message),
+                     !outcome.started && !outcome.dry_run);
     } else if (action == "culprit off") {
       const auto &culprit = owner_->svc().culprit();
-      if (culprit && culprit->search.db_pool_culprit()) {
+      // Only what the box offers a button for: a search still running, or
+      // a culprit the map needs too, is left as it is.
+      if (!culprit || !(culprit->search.db_pool_culprit() ||
+                        remedy_for(*culprit).mods_enough())) {
+        return;
+      }
+      if (culprit->search.db_pool_culprit()) {
         // The setting, not a mod: the profile keeps its mods.
         auto &config = owner_->svc().config();
         config.extra_flags =
             xerces_core::with_flag(std::move(config.extra_flags),
                                    xerces_core::db_pool::flag_name, false);
-        owner_->svc().save_config();
         log_info("launcher.home.db_pool", "off after the culprit search");
-        owner_->notify(owner_->tr("Larger zone memory is off."));
-      } else if (culprit && culprit->search.culprit()) {
-        auto &profile = xerces_core::profile_for(owner_->svc().config(),
-                                                 culprit->mode);
-        std::erase(profile.mods, *culprit->search.culprit());
+        if (owner_->svc().save_config()) {
+          owner_->notify(owner_->tr("Larger zone memory is off."));
+        } else {
+          owner_->notify(owner_->tr("The config could not be saved:") + " " +
+                             owner_->tr(owner_->svc().config_error()),
+                         true);
+        }
+      } else {
+        // The culprit, or the enabled mods that pull it in: turning off a
+        // dependency alone would not stop it loading.
+        const std::vector<std::string> off = remedy_for(*culprit).mods;
+        services &svc = owner_->svc();
+        auto &profile = xerces_core::profile_for(svc.config(), culprit->mode);
+        for (const auto &id : off) {
+          std::erase(profile.mods, id);
+        }
         profile.pins.clear();
         profile.pack_name.clear();
         profile.pack_id.clear();
-        owner_->svc().save_config();
-        owner_->notify(mod_label(*culprit->search.culprit()) + " " +
-                       owner_->tr("is off."));
+        if (svc.save_config()) {
+          owner_->notify(mod_list(off) + " " +
+                         owner_->tr(off.size() == 1 ? "is off." : "are off."));
+        } else {
+          owner_->notify(owner_->tr("The config could not be saved:") + " " +
+                             owner_->tr(svc.config_error()),
+                         true);
+        }
       }
       owner_->svc().stop_culprit();
     } else if (action == "culprit stop") {
@@ -514,7 +623,7 @@ private:
   Rml::String safe_text_, safe_value_, safe_detail_, last_server_;
   bool can_bisect_ = false, culprit_on_ = false, culprit_done_ = false,
        culprit_found_ = false;
-  Rml::String culprit_text_, culprit_mods_, culprit_stop_;
+  Rml::String culprit_text_, culprit_mods_, culprit_stop_, culprit_off_;
 };
 } // namespace
 

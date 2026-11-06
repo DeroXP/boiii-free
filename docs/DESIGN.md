@@ -925,8 +925,26 @@ together.
   game never took the journal over (it quit before Xerces' code ran); otherwise
   the journal decides. A game that is still running is never counted as a crash.
 - "Find the culprit" keeps its state in `config\culprit.json` (the crashed mode
-  and stack, the search, the mods of the test launch still to be recorded), so
-  it spans launcher restarts.
+  and stack, the search, the test launch still to be recorded and what its plan
+  loaded), so it spans launcher restarts. The suspects are the whole crashed
+  stack, the dependencies the planner pulled in included. A test asks for some
+  of them as the profile's mods and keeps its map, so it loads what they and the
+  map need. Each split tests the lower part first: dependencies sit below the
+  mods that need them, so it loads nothing from above. A crash narrows the
+  suspects to what that test loaded; a test that runs fine clears what it
+  loaded, and the rest must then crash on its own. The map's dependencies load
+  in every test, so they are tested alone (with the map) when one other suspect
+  is left; suspects that only ever load with the map end the search without a
+  culprit. A culprit that is a dependency is turned off through the enabled mods
+  that pull it in. When the profile's map needs it too, turning mods off would
+  leave it loading, so Home offers no button and says to pick another map
+  (`culprit_remedy_for`).
+- Limit: the map is never a suspect, but every test keeps it. So a culprit the
+  map needs never ran without the map, and Home says "it, or the map that needs
+  it". A map that crashes by itself makes every test crash, and the search ends
+  on the lowest mod, as when that mod crashes; until a test runs fine
+  (`culprit_search::ran_fine`, kept in `culprit.json`), Home names the map as a
+  possible cause and still offers to turn the mod off.
 - Larger zone memory in crash recovery. Safe mode and every culprit test leave
   `-xerces-db-pool` out whatever the settings say
   (`launch_inputs::crash_followup`), so they all run on the stock pool and a
@@ -1274,7 +1292,9 @@ boot, home and mods screens: https://claude.ai/artifact/ALqqCpC4HVuemFTfDFoz3r
   `#161616`, rule `#2B2B2B`, text `#FFFFFF`, text-2 `#A6A6A6`, accent `#FF4A1C`,
   text on accent `#000000`, accent as text `#FF6A42`. Light: background
   `#FFFFFF`, text `#000000`, text-2 `#595959`, rule `#D4D4D4`, accent as text
-  `#C2330B`. High contrast: black and white, accent `#FFD400`, 2 px rules.
+  `#C2330B`. High contrast: black and white, accent `#FFD400`, 2 px rules. A
+  primary button under the pointer turns `#FF6A42` (dark), `#E8401A` (light) or
+  white (high contrast), keeping its black text at 4.5:1 or more.
 - Type: Inter Tight (display 700 to 900, body 400 to 500) and IBM Plex Mono
   (data, labels, key hints), both SIL OFL and bundled unmodified. Scale 12, 14,
   16, 20, 28, 40, 64, 80.
@@ -1285,8 +1305,10 @@ boot, home and mods screens: https://claude.ai/artifact/ALqqCpC4HVuemFTfDFoz3r
 - Focus: 2 px accent outline, 3 px offset, always visible for keyboard and
   controller.
 - Tokens live in `data/xerces/ui/tokens.json` and generate the launcher styles
-  and the in-game Lua colour table. A lint checks every text and background pair
-  for 4.5:1 contrast.
+  and the in-game Lua colour table. A lint (`tools/ci/check_contrast.py`) checks
+  every text and background pair for 4.5:1 contrast: the listed pairs, and each
+  stylesheet rule that sets a background token against its text colour, hover
+  and focus states included.
 
 ### 7.3 Screens
 
@@ -1336,12 +1358,18 @@ downloader are not carried over.
 One action map for keyboard (Enter, Esc, `/` search, Q and E tabs, Ctrl+Z undo)
 and controller (A, B, Y, LB, RB, D-pad and sticks for spatial focus), read
 through XInput and friendly to Steam Input. Every screen works without a mouse.
+Up and Down scroll a screen where no control lies that way; Down past a screen's
+end, or Up from the tabs, reaches the footer's About link.
 
 ### 7.5 Localization and accessibility
 
 Strings in `data/xerces/i18n/<lang>.json` with named placeholders, plus a
-pseudo-locale that exposes truncation. UI scale 75 to 200 percent; light, dark
-and high-contrast themes; reduced motion.
+pseudo-locale that exposes truncation. `tools/i18n/extract_strings.py` writes
+the template every language starts from: the documents' text, and every string
+the C++ passes to `tr()`, directly, through a screen's helpers, or marked with
+`xerces_core::ui_text()` where a message is made elsewhere; CI fails when the
+template is stale. UI scale 75 to 200 percent; light, dark and high-contrast
+themes; reduced motion.
 
 ### 7.6 In-game Xerces menu
 

@@ -1427,7 +1427,7 @@ private:
     history_.record(mode_, before, xc::mods_take(config, mode_));
     if (!svc().save_config()) {
       notify(owner_->tr("The config could not be saved:") + " " +
-                 svc().config_error(),
+                 owner_->tr(svc().config_error()),
              true);
     } else if (!detached.empty()) {
       notify(done + ". " + owner_->tr("Detached from the pack") + " \"" +
@@ -1550,7 +1550,7 @@ private:
     case xc::mods_history::undo_result::done:
       if (!svc().save_config()) {
         notify(owner_->tr("The config could not be saved:") + " " +
-                   svc().config_error(),
+                   owner_->tr(svc().config_error()),
                true);
       } else {
         notify(owner_->tr("Undone"));

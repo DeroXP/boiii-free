@@ -68,6 +68,9 @@ enum class preflight_verdict {
 
 const char *to_string(build_status status);
 const char *to_string(preflight_verdict verdict);
+// The verdict in words for the launcher's screens, which translate it
+// (tools/i18n/extract_strings.py reads the words from here).
+const char *preflight_label(preflight_verdict verdict);
 
 struct preflight_result {
   preflight_verdict verdict = preflight_verdict::unknown;

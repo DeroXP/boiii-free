@@ -12,6 +12,8 @@
 #include <fstream>
 #include <iterator>
 
+#include "ui_text.hpp"
+
 namespace xerces_core {
 namespace fs = std::filesystem;
 
@@ -204,7 +206,20 @@ std::optional<std::string> read_text_file(const fs::path &path) {
                      std::istreambuf_iterator<char>());
 }
 
-bool write_text_file(const fs::path &path, std::string_view text) {
+bool write_text_file(const fs::path &path, std::string_view text,
+                     std::string *why, std::string *detail) {
+  const std::string name = path_utf8(path.filename());
+  // The reason is a fixed sentence, so a screen can translate it; the file
+  // and the system's words go to the detail.
+  const auto fail = [&](const char *reason, std::string what) {
+    if (why) {
+      *why = reason;
+    }
+    if (detail) {
+      *detail = std::move(what);
+    }
+    return false;
+  };
   std::error_code ec;
   fs::create_directories(path.parent_path(), ec);
   fs::path temporary = path;
@@ -212,20 +227,31 @@ bool write_text_file(const fs::path &path, std::string_view text) {
   {
     std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
     if (!out) {
-      return false;
+      return fail(ui_text("A temporary file could not be created in its "
+                          "folder."),
+                  name + ".tmp");
     }
     out.write(text.data(), static_cast<std::streamsize>(text.size()));
-    if (!out.flush()) {
-      out.close();
+    out.close(); // flushes: failbit when the data did not reach the file
+    if (out.fail()) {
       fs::remove(temporary, ec);
-      return false;
+      return fail(ui_text("Writing the temporary file failed (is the disk "
+                          "full?)."),
+                  name + ".tmp");
     }
   }
   fs::rename(temporary, path, ec);
   if (ec) {
     std::error_code ignored;
     fs::remove(temporary, ignored);
-    return false;
+    return fail(ui_text("The old file could not be replaced."),
+                name + ": " + ec.message());
+  }
+  if (why) {
+    why->clear();
+  }
+  if (detail) {
+    detail->clear();
   }
   return true;
 }

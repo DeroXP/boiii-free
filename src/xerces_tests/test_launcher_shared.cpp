@@ -549,6 +549,36 @@ TEST_CASE("shared launcher: text files are written whole") {
   CHECK(read_text_file(file) == std::optional<std::string>("two"));
   CHECK(!fs::exists(root / "sub" / "launcher.json.tmp"));
   CHECK(!read_text_file(root / "missing").has_value());
+
+  // A failed write says why and leaves no .tmp behind (services::save_config
+  // shows it as config_error()). The reason is a fixed sentence a screen can
+  // translate; the detail names the file for the log. A write that works
+  // clears both.
+  std::string why = "an older problem";
+  std::string detail = "an older file";
+  CHECK(write_text_file(file, "three", &why, &detail));
+  CHECK(why.empty());
+  CHECK(detail.empty());
+  // launcher.json cannot be replaced: a folder of that name holds a file.
+  const fs::path blocked = root / "blocked" / "launcher.json";
+  write(blocked / "keep.txt", "x");
+  CHECK(!write_text_file(blocked, "four", &why, &detail));
+  CHECK_EQ(why, std::string("The old file could not be replaced."));
+  CHECK(detail.starts_with("launcher.json: "));
+  CHECK(detail.size() > std::string("launcher.json: ").size());
+  CHECK(fs::exists(blocked / "keep.txt"));
+  CHECK(!fs::exists(root / "blocked" / "launcher.json.tmp"));
+  // The temporary file cannot be made: a folder holds its name.
+  fs::create_directories(root / "tmp" / "launcher.json.tmp");
+  CHECK(
+      !write_text_file(root / "tmp" / "launcher.json", "five", &why, &detail));
+  CHECK_EQ(why,
+           std::string("A temporary file could not be created in its folder."));
+  CHECK_EQ(detail, std::string("launcher.json.tmp"));
+  CHECK(!fs::exists(root / "tmp" / "launcher.json"));
+  // Without a detail, the reason alone.
+  CHECK(!write_text_file(blocked, "six", &why));
+  CHECK_EQ(why, std::string("The old file could not be replaced."));
   std::error_code ec;
   fs::remove_all(root, ec);
 }

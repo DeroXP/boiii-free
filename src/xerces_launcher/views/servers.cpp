@@ -436,7 +436,7 @@ private:
     if (xerces_core::remember_recent_server(config.recent_servers, address) &&
         !svc.save_config()) {
       owner_->notify(owner_->tr("The recent list could not be saved:") + " " +
-                         svc.config_error(),
+                         owner_->tr(svc.config_error()),
                      true);
     } else {
       owner_->notify(result_message_);
@@ -526,7 +526,7 @@ private:
             }
             if (!s.save_config()) {
               owner_->notify(owner_->tr("Favourites could not be saved:") +
-                                 " " + s.config_error(),
+                                 " " + owner_->tr(s.config_error()),
                              true);
               return;
             }
@@ -578,7 +578,7 @@ private:
     }
     if (!svc.save_config()) {
       show_form_problem(owner_->tr("Favourites could not be saved:") + " " +
-                        svc.config_error());
+                        owner_->tr(svc.config_error()));
       return;
     }
     // The literals stay inside tr(): the string template is read from it.
@@ -603,7 +603,7 @@ private:
     case xerces_core::favorite_status::saved:
       if (!svc.save_config()) {
         owner_->notify(owner_->tr("Favourites could not be saved:") + " " +
-                           svc.config_error(),
+                           owner_->tr(svc.config_error()),
                        true);
         return true;
       }
@@ -696,7 +696,7 @@ private:
       xerces_core::forget_recent_server(recent, address);
       if (!svc.save_config()) {
         owner_->notify(owner_->tr("The recent list could not be saved:") + " " +
-                           svc.config_error(),
+                           owner_->tr(svc.config_error()),
                        true);
         return;
       }
@@ -740,7 +740,7 @@ private:
                        if (!svc.save_config()) {
                          owner_->notify(
                              owner_->tr("The recent list could not be saved:") +
-                                 " " + svc.config_error(),
+                                 " " + owner_->tr(svc.config_error()),
                              true);
                          return;
                        }

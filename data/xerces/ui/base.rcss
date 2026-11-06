@@ -15,6 +15,7 @@ body
 	--text: #FFFFFF;
 	--text2: #A6A6A6;
 	--accent: #FF4A1C;
+	--accent-hover: #FF6A42;
 	--on-accent: #000000;
 	--accent-text: #FF6A42;
 }
@@ -27,6 +28,7 @@ body.theme-light
 	--text: #000000;
 	--text2: #595959;
 	--accent: #FF4A1C;
+	--accent-hover: #E8401A;
 	--on-accent: #000000;
 	--accent-text: #C2330B;
 }
@@ -39,6 +41,7 @@ body.theme-contrast
 	--text: #FFFFFF;
 	--text2: #FFFFFF;
 	--accent: #FFD400;
+	--accent-hover: #FFFFFF;
 	--on-accent: #000000;
 	--accent-text: #FFD400;
 }
@@ -226,18 +229,25 @@ body.view-diagnostics #tab-diagnostics .dot
 .page-sub { margin-top: 8dp; font-size: 15dp; line-height: 22dp; color: var(--text2); max-width: 720dp; }
 .section { margin-top: 40dp; }
 .section-label { padding-bottom: 12dp; border-bottom: 1dp var(--text); }
+/* A panel's title and its note or count share a line. When both do not fit
+   (a long translation, the pseudo-locale) the note moves under the title
+   instead of running into it, and either wraps if it is wider than the
+   panel: RmlUi lets a flex item shrink below its text, so the line wraps
+   rather than squeezing them. */
 .panel-head
 {
 	display: flex;
 	flex-direction: row;
+	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
-	gap: 12dp;
+	column-gap: 12dp;
+	row-gap: 4dp;
 	padding-bottom: 12dp;
 	border-bottom: 1dp var(--text);
 }
-.panel-title { font-size: 20dp; line-height: 24dp; font-weight: 700; letter-spacing: -0.4dp; }
-.panel-count { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.panel-title { flex: 0 1 auto; font-size: 20dp; line-height: 24dp; font-weight: 700; letter-spacing: -0.4dp; }
+.panel-count { flex: 0 1 auto; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
 .row
 {
 	display: flex;
@@ -247,6 +257,11 @@ body.view-diagnostics #tab-diagnostics .dot
 	padding: 12dp 0dp;
 	border-bottom: 1dp var(--line);
 }
+/* In a list row the name takes the room that is left and wraps; the short
+   columns beside it (number, version) keep their width, so a long name does
+   not push them past the row's edge. */
+.row .row-name { flex: 1 1 0dp; min-width: 0dp; word-break: break-word; }
+.row .row-n, .row .row-v { flex: 0 0 auto; }
 .empty-note { padding: 12dp 0dp; border-bottom: 1dp var(--line); font-size: 14dp; line-height: 20dp; color: var(--text2); }
 .notice-box
 {
@@ -271,7 +286,7 @@ body.view-diagnostics #tab-diagnostics .dot
 	font-size: 15dp;
 	font-weight: 700;
 }
-.primary-button:hover { background-color: var(--accent-text); }
+.primary-button:hover { background-color: var(--accent-hover); }
 .outline
 {
 	min-height: 48dp;

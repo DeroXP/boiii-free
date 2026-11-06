@@ -15,6 +15,7 @@
 #include <xerces_core/launcher_home.hpp>
 #include <xerces_core/launcher_launch.hpp>
 #include <xerces_core/launcher_state.hpp>
+#include <xerces_core/ui_text.hpp>
 #include <xerces_core/version.hpp>
 
 #include "log.hpp"
@@ -93,20 +94,25 @@ void services::load_config() {
     fs::copy_file(paths_.config_file(),
                   paths_.config / "launcher.json.broken",
                   fs::copy_options::overwrite_existing, ec);
-    config_error_ = parsed.diags.items().empty()
-                        ? "launcher.json could not be read"
-                        : parsed.diags.items().front().message;
-    log_warn("launcher.config.broken", config_error_);
+    config_load_problem_ = parsed.diags.items().empty()
+                               ? "launcher.json could not be read"
+                               : parsed.diags.items().front().message;
+    config_error_ = config_load_problem_;
+    log_warn("launcher.config.broken", config_load_problem_);
   }
   config_ = std::move(parsed.value);
 }
 
 bool services::save_config() {
   ++config_rev_;
-  const bool ok = write_text(paths_.config_file(),
-                             xerces_core::launcher_config_to_json(config_));
+  // A write that worked also ends a problem from start-up: the file holds
+  // valid settings again.
+  const bool ok = xerces_core::write_text_file(
+      paths_.config_file(), xerces_core::launcher_config_to_json(config_),
+      &config_error_, &config_error_detail_);
   if (!ok) {
-    log_error("launcher.config.write", "Could not write launcher.json");
+    log_error("launcher.config.write",
+              config_error_ + " (" + config_error_detail_ + ")");
   }
   return ok;
 }
@@ -543,12 +549,19 @@ void services::watch_run_folder() {
   }
   last_run_check_ = now;
   const bool live = game_running();
-  if (game_was_live_ && !live) {
-    // It exited: its journal may now say it crashed, so Home and
-    // Diagnostics read it again.
+  if (live != game_was_live_) {
+    // Home and Diagnostics read the journal again either way. A game that
+    // appeared (the crash dialog's restart, one started elsewhere) is never
+    // shown as a crash while it runs (5.6); one that exited may have
+    // crashed.
     ++journal_rev_;
+  }
+  if (game_was_live_ && !live) {
     log_info("launcher.game.gone", "a game this launcher did not start exited");
     reload_signatures();
+  } else if (!game_was_live_ && live) {
+    log_info("launcher.game.seen",
+             "a game this launcher did not start is running");
   }
   game_was_live_ = live;
   // A culprit test that was still running when this launcher opened.
@@ -618,9 +631,14 @@ bool services::start_culprit() {
       decision.crashed_mode.empty() ? config_.mode : decision.crashed_mode;
   progress.crashed_stack = decision.crashed_stack;
   // A crashed launch with the larger zone memory has it as a suspect too:
-  // the first test runs the same stack without it.
-  progress.search = xerces_core::culprit_search(decision.crashed_stack,
-                                                decision.crashed_with_db_pool);
+  // the first test runs the same stack without it. Every test keeps the
+  // profile's map, so the map's dependencies load in all of them; the search
+  // splits the other suspects first.
+  progress.search = xerces_core::culprit_search(
+      decision.crashed_stack, decision.crashed_with_db_pool,
+      xerces_core::culprit_always_loaded(catalog_.items, config_, progress.mode,
+                                         game_.steam_build,
+                                         decision.crashed_stack));
   culprit_ = std::move(progress);
   save_culprit();
   log_info("launcher.culprit.start",
@@ -641,7 +659,7 @@ void services::stop_culprit() {
 launch_outcome services::launch_culprit_test() {
   launch_outcome out;
   if (!culprit_ || culprit_->search.done()) {
-    out.message = "There is no test to run.";
+    out.message = xerces_core::ui_text("There is no test to run.");
     out.diags.error("culprit.none", "", out.message);
     return out;
   }
@@ -654,6 +672,14 @@ launch_outcome services::launch_culprit_test() {
   out = start(in);
   if (out.started) {
     culprit_->testing = mods;
+    // What the test really loads: the planner adds what the mods asked for
+    // need, and what the map needs. A crash narrows the suspects to these.
+    culprit_->loaded.clear();
+    if (out.resolved) {
+      for (const auto &entry : out.resolved->stack) {
+        culprit_->loaded.push_back(entry.id);
+      }
+    }
     save_culprit();
   }
   return out;
@@ -663,8 +689,11 @@ void services::settle_culprit_test(bool crashed) {
   if (!culprit_ || culprit_->testing.empty()) {
     return;
   }
-  culprit_->search.record(crashed);
+  // A test saved before "loaded" was kept loaded what it asked for.
+  culprit_->search.record(crashed, culprit_->loaded.empty() ? culprit_->testing
+                                                            : culprit_->loaded);
   culprit_->testing.clear();
+  culprit_->loaded.clear();
   save_culprit();
   log_info("launcher.culprit.result", crashed ? "crashed" : "ran fine",
            "{\"launches\":" + std::to_string(culprit_->search.launches()) +

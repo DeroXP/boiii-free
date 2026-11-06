@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -85,6 +86,8 @@ struct safe_mode_decision {
   // The crashed launch had the larger zone memory (-xerces-db-pool): it is a
   // suspect too, and the culprit search tests it first.
   bool crashed_with_db_pool = false;
+  // What the screens say: one of a fixed set of sentences (per phase, with
+  // or without the larger zone memory), so it can be translated as it is.
   std::string message;
 };
 
@@ -108,24 +111,58 @@ enum class db_pool_suspect {
 
 // "Find the culprit": halve the crashed stack over a few launches, after
 // testing the larger zone memory when the crashed launch had it.
+//
+// The suspects are the whole crashed stack, the dependencies the planner
+// pulled in included, in stack order (highest first). A test asks the
+// planner for some of them as the plan's mods, keeping the profile's map, so
+// it also loads what they need, and what the map needs: those of the map's
+// dependencies that are suspects load in every test ("always"). Every split
+// tests the lower part of the suspects first. The planner puts each
+// dependency below the mods that need it, so the lower part loads nothing
+// from the upper part. A crash narrows the suspects to what the test loaded;
+// a test that runs fine clears what it loaded, and the rest is tested next,
+// as a whole, to see that it crashes without them. So a dependency that
+// crashes is found itself, not blamed on the mod that needs it.
+//
+// The map's dependencies cannot be left out of a test, so they are split
+// off last: when one suspect is left besides them, they are tested alone
+// (with the map). Suspects that only ever load together, with the map, end
+// the search without a culprit (inseparable()). A test that loads every
+// suspect although it did not ask for them all shows which ones the map
+// brings (a map changed during the search, or a search saved without
+// "always"): they join "always", and the next split leaves them aside.
 class culprit_search {
 public:
+  // always: the suspects every test loads, whatever it asks for (the
+  // dependencies of the profile's map); empty when the profile has no map.
   explicit culprit_search(std::vector<std::string> crashed_stack,
-                          bool crashed_with_db_pool = false);
+                          bool crashed_with_db_pool = false,
+                          std::vector<std::string> always = {});
   // A search read back from disk (it spans several launches).
-  culprit_search(std::vector<std::string> suspects, bool testing_second_half,
-                 bool combination, std::size_t launches,
-                 db_pool_suspect db_pool = db_pool_suspect::none);
+  culprit_search(std::vector<std::string> suspects,
+                 std::vector<std::string> cleared, bool combination,
+                 std::size_t launches,
+                 db_pool_suspect db_pool = db_pool_suspect::none,
+                 std::vector<std::string> always = {}, bool ran_fine = false);
 
-  // Mods for the next test launch; empty when the search is over.
+  // Mods for the next test launch, to be asked for as the plan's mods;
+  // empty when the search is over.
   std::vector<std::string> next_test() const;
-  void record(bool crashed);
+  // The result of the test launch of next_test(). loaded: every mod that
+  // launch's plan loaded (the planner adds the dependencies of the mods
+  // asked for, and the map's); empty means next_test() alone.
+  void record(bool crashed, const std::vector<std::string> &loaded = {});
 
   bool done() const;
-  // The one mod that crashes alone, if that is what the search found.
+  // The one mod that crashes alone, if that is what the search found. It
+  // may be a dependency the player never enabled (culprit_switches).
   std::optional<std::string> culprit() const;
-  // The crash needs mods from both halves together (an interaction).
+  // No single mod: the crash needs mods from both parts together, or a test
+  // with every suspect ran fine (the crash did not come back).
   bool needs_combination() const { return combination_; }
+  // No single mod either: the suspects left all load in every test (the
+  // map needs them), so no test can tell them apart.
+  bool inseparable() const;
   // The next test is the whole crashed stack without the larger zone memory.
   bool testing_db_pool() const { return db_pool_ == db_pool_suspect::untested; }
   // The crashed stack ran fine without the larger zone memory.
@@ -133,22 +170,35 @@ public:
   db_pool_suspect db_pool() const { return db_pool_; }
   std::size_t launches() const { return launches_; }
   const std::vector<std::string> &suspects() const { return suspects_; }
-  bool testing_second_half() const { return testing_second_half_; }
+  // Suspects the lower part's test loaded, and it ran fine: the next test
+  // is the rest of the suspects. Empty while a split is still to be tested.
+  const std::vector<std::string> &cleared() const { return cleared_; }
+  const std::vector<std::string> &always() const { return always_; }
+  // A test of the mods ran fine. Every test keeps the profile's map, so
+  // until one does, the map is as much a suspect as the culprit found.
+  bool ran_fine() const { return ran_fine_; }
 
 private:
+  // The suspects a test can leave out (not in always_), in stack order.
+  std::vector<std::string> apart() const;
+
   std::vector<std::string> suspects_;
-  bool testing_second_half_ = false;
+  std::vector<std::string> cleared_;
+  std::vector<std::string> always_;
   bool combination_ = false;
+  bool ran_fine_ = false;
   std::size_t launches_ = 0;
   db_pool_suspect db_pool_ = db_pool_suspect::none;
 };
 // A culprit search in progress, kept in <home>\config\culprit.json between
-// launches: the mode and stack that crashed, the search, and the mods of the
-// test launch whose result is still to be recorded (empty when none).
+// launches: the mode and stack that crashed, the search, and the test launch
+// whose result is still to be recorded (empty when none): the mods it asked
+// for and every mod its plan loaded.
 struct culprit_progress {
   std::string mode;
   std::vector<std::string> crashed_stack;
   std::vector<std::string> testing;
+  std::vector<std::string> loaded;
   culprit_search search{{}};
 };
 

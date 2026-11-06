@@ -242,22 +242,25 @@ TEST_CASE("safe mode: a culprit search survives between launches") {
   progress.mode = "zm";
   progress.crashed_stack = {"a", "b", "c", "d"};
   progress.search = culprit_search(progress.crashed_stack);
+  // The lower part first: it needs nothing from above it.
   progress.testing = progress.search.next_test();
-  CHECK((progress.testing == std::vector<std::string>{"a", "b"}));
-  progress.search.record(false); // a, b ran fine
+  CHECK((progress.testing == std::vector<std::string>{"c", "d"}));
+  progress.search.record(false); // c, d ran fine
   const auto back = parse_culprit_progress(culprit_progress_to_json(progress));
   REQUIRE(back.has_value());
   CHECK_EQ(back->mode, std::string("zm"));
   CHECK(back->crashed_stack == progress.crashed_stack);
   CHECK(back->testing == progress.testing);
   culprit_search search = back->search;
-  CHECK((search.next_test() == std::vector<std::string>{"c", "d"}));
+  CHECK((search.next_test() == std::vector<std::string>{"a", "b"}));
   CHECK_EQ(search.launches(), std::size_t{1});
-  search.record(true); // c, d crash
-  CHECK((search.next_test() == std::vector<std::string>{"c"}));
+  search.record(true); // a, b crash
+  CHECK((search.next_test() == std::vector<std::string>{"b"}));
+  search.record(false);
+  CHECK((search.next_test() == std::vector<std::string>{"a"}));
   search.record(true);
   REQUIRE(search.culprit().has_value());
-  CHECK_EQ(*search.culprit(), std::string("c"));
+  CHECK_EQ(*search.culprit(), std::string("a"));
   CHECK(!parse_culprit_progress("{}").has_value());
 }
 
@@ -278,7 +281,7 @@ TEST_CASE("safe mode: the larger zone memory step survives between launches") {
   back = parse_culprit_progress(culprit_progress_to_json(progress));
   REQUIRE(back.has_value());
   CHECK(back->search.db_pool() == db_pool_suspect::cleared);
-  CHECK((back->search.next_test() == std::vector<std::string>{"a"}));
+  CHECK((back->search.next_test() == std::vector<std::string>{"b"}));
   CHECK_EQ(back->search.launches(), std::size_t{1});
 
   progress.search = culprit_search(progress.crashed_stack, true);
@@ -298,7 +301,19 @@ TEST_CASE("safe mode: the larger zone memory step survives between launches") {
   const auto old = parse_culprit_progress(older);
   REQUIRE(old.has_value());
   CHECK(old->search.db_pool() == db_pool_suspect::none);
-  CHECK((old->search.next_test() == std::vector<std::string>{"a"}));
+  CHECK((old->search.next_test() == std::vector<std::string>{"b"}));
+  // Saved without "ran_fine": no test known to have run fine.
+  CHECK(!old->search.ran_fine());
+  // That search tested the upper half first; "second_half" said it had run
+  // fine, so the other half is what is left to test.
+  std::string half = older;
+  half.replace(half.find(R"("second_half":false)"), 19,
+               R"("second_half":true)");
+  const auto upper_fine = parse_culprit_progress(half);
+  REQUIRE(upper_fine.has_value());
+  CHECK((upper_fine->search.cleared() == std::vector<std::string>{"a"}));
+  CHECK((upper_fine->search.next_test() == std::vector<std::string>{"b"}));
+  CHECK(upper_fine->search.ran_fine()); // the cleared half ran fine
   std::string unknown = older;
   unknown.insert(unknown.size() - 1, R"(,"db_pool":"maybe")");
   CHECK(!parse_culprit_progress(unknown).has_value());

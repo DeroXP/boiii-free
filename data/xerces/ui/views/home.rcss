@@ -128,10 +128,11 @@
 	padding: 12dp 0dp;
 	border-bottom: 1dp var(--line);
 }
-/* The number and tag keep their size; a long name wraps in what is left. */
-.row-n { flex-shrink: 0; width: 20dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
-.row-name { flex: 1 1 0dp; min-width: 0dp; font-size: 14dp; font-weight: 500; line-height: 16dp; }
-.row-v { flex-shrink: 0; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+/* The number and tag keep their size and a long name wraps in what is
+   left: base.rcss's .row rules, shared with every list row. */
+.row-n { width: 20dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.row-name { font-size: 14dp; font-weight: 500; line-height: 16dp; }
+.row-v { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
 .more { min-height: 44dp; font-family: "IBM Plex Mono"; font-size: 12dp; text-decoration: underline; }
 .empty-note { padding: 12dp 0dp; border-bottom: 1dp var(--line); font-size: 14dp; line-height: 20dp; color: var(--text2); }
 
@@ -165,18 +166,7 @@
 
 /* ----------------------------------------------------------------- aside */
 .aside { flex: 1 1 220dp; display: flex; flex-direction: column; gap: 40dp; }
-.panel-head
-{
-	display: flex;
-	flex-direction: row;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12dp;
-	padding-bottom: 12dp;
-	border-bottom: 1dp var(--text);
-}
-.panel-title { font-size: 20dp; line-height: 24dp; font-weight: 700; letter-spacing: -0.4dp; }
-.panel-count { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+/* The panels' heads (.panel-head) are base.rcss's. */
 .friend
 {
 	display: flex;
