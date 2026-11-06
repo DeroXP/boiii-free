@@ -29,6 +29,12 @@ jobs:
       - name: Launcher string template current
         run: python tools/i18n/extract_strings.py --check
 
+      - name: Microsoft notice lint patterns
+        run: python tools/ci/check_microsoft_notices.py --self-test
+
+      - name: Microsoft notice lint
+        run: python tools/ci/check_microsoft_notices.py
+
       - name: Setup LLVM
         uses: ZhongRuoyu/setup-llvm@v0
         with:

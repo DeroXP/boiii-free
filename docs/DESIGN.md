@@ -2436,8 +2436,25 @@ pending fence-review list before anything about it changes.
 - Rewrite `src/common/str.hpp`, which contains GPL-2.0-only kernel code
   (incompatible with GPL-3.0 according to the FSF), and add a CI SPDX scan so
   upstream merges cannot bring such code back.
-- Replace `src/tlsdll/tlssup.cpp` (Microsoft CRT source) with a clean-room
-  version, after the fence review of the loader and TLS helper.
+- Done (2026-11-05): `src/tlsdll/tlssup.cpp` was Microsoft CRT source and is now
+  a clean-room version, after the fence review found the TLS helper to be loader
+  plumbing (`docs/FENCED.md`). It was written from the PE/COFF specification's
+  TLS directory and Microsoft's documentation of `_tls_index`, `_tls_used` and
+  the `.tls` and `.CRT$XL*` sections. Of the old file only its comments, pragmas
+  and section names were read. It defines the same symbols in the same sections
+  (`_tls_index`, the `_tls_start` and `_tls_end` markers, the `__xl_a` and
+  `__xl_z` ends of the callback array, `_tls_used`), and builds the directory at
+  compile time. The Release `tlsdll.dll` built before and after is byte for byte
+  the same except the link timestamp and the PDB id: same TLS directory,
+  sections, exports and imports. In Debug, which links without `/opt:ref`, the
+  old file's unused 4-byte `_tls_array` (only 32-bit x86 code uses it) is gone,
+  so some runtime data sits 4 bytes lower; nothing else differs. Before and
+  after, the DLL's entry point `_DllMainCRTStartup`, and with it part of the
+  static runtime, comes from `libcmt`, because the function of that name in
+  `dllmain.cpp` has C++ linkage and so a different symbol name.
+  `tools/ci/check_microsoft_notices.py` (in CI) fails when a C, C++, assembly,
+  resource or manifest file outside `deps/` carries a Microsoft copyright
+  notice.
 - AGPL-3.0 `sqlite_orm` (if D1 brings it): servers advertise a source link in
   `getInfo`, shown in the browser and on connect, and the docs tell operators of
   modified servers to publish their source.
