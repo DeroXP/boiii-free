@@ -547,12 +547,19 @@ void services::watch_run_folder() {
   }
   last_run_check_ = now;
   const bool live = game_running();
-  if (game_was_live_ && !live) {
-    // It exited: its journal may now say it crashed, so Home and
-    // Diagnostics read it again.
+  if (live != game_was_live_) {
+    // Home and Diagnostics read the journal again either way. A game that
+    // appeared (the crash dialog's restart, one started elsewhere) is never
+    // shown as a crash while it runs (5.6); one that exited may have
+    // crashed.
     ++journal_rev_;
+  }
+  if (game_was_live_ && !live) {
     log_info("launcher.game.gone", "a game this launcher did not start exited");
     reload_signatures();
+  } else if (!game_was_live_ && live) {
+    log_info("launcher.game.seen",
+             "a game this launcher did not start is running");
   }
   game_was_live_ = live;
   // A culprit test that was still running when this launcher opened.
