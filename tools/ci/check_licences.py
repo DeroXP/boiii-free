@@ -5,8 +5,10 @@ usage: python tools/ci/check_licences.py [--self-test]
 Xerces is GPL-3.0 (docs/DESIGN.md 16.5). GPL-2.0-only code cannot be combined
 with it, and src/common/str.hpp once held such code. The scan reads the text
 files under the repository root (EXTENSIONS and NAMES). It skips deps/
-(submodules with their own notices), docs/ (prose about licences), build output
-and node_modules. Each finding has a kind:
+(submodules with their own notices), docs/ (prose about licences), the
+git-ignored output and editor folders at the top (build/, dist/, .vs/, .vscode/;
+dist/ holds the release package, which carries third-party licence texts) and
+node_modules anywhere. Each finding has a kind:
 
 - "spdx": an SPDX licence expression that is not GPL-3.0-compatible, or that
   this script does not know (review it, then add it to COMPATIBLE);
@@ -37,7 +39,9 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SKIP_DIRS = {"deps", "docs", "build", "node_modules", ".git"}
+# Top-level folders that are not scanned. build/, dist/, .vs/ and .vscode/ are
+# git-ignored output (dist/ is tools/release.ps1's package folder).
+SKIP_DIRS = {"deps", "docs", "build", "dist", ".vs", ".vscode", "node_modules", ".git"}
 EXTENSIONS = {
     ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inc", ".ipp",
     ".asm", ".s", ".rc", ".lua", ".py", ".ps1", ".psm1", ".sh", ".bat", ".cmd",
@@ -107,12 +111,9 @@ PERMISSIVE_LINES_BEFORE = 2
 PERMISSIVE_LINES_AFTER = 5
 
 # (path, kind) -> what is planned or was decided.
-KNOWN = {
-    ("src/tlsdll/tlssup.cpp", "microsoft"): (
-        "Microsoft CRT source; a clean-room rewrite is a 16.5 gate, after the "
-        "fence review of the loader and TLS helper"
-    ),
-}
+# src/tlsdll/tlssup.cpp ("microsoft") was the only entry; it went when the file
+# was rewritten clean-room (DESIGN.md 16.5).
+KNOWN: dict[tuple[str, str], str] = {}
 
 RANK = {"ok": 0, "review": 1, "bad": 2}
 
@@ -192,19 +193,23 @@ def problems_in(text: str) -> list[tuple[str, str]]:
     return list(dict.fromkeys(found))
 
 
-def sort_findings(findings: dict[str, list[tuple[str, str]]]) -> tuple[list[str], list[str]]:
-    """Splits findings into known items and problems. KNOWN entries that
-    matched nothing are problems too."""
+def sort_findings(
+    findings: dict[str, list[tuple[str, str]]],
+    table: dict[tuple[str, str], str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Splits findings into known items and problems. Entries of the table
+    (KNOWN by default) that matched nothing are problems too."""
+    table = KNOWN if table is None else table
     known, problems, used = [], [], set()
     for relative, items in findings.items():
         for kind, message in items:
             key = (relative, kind)
-            if key in KNOWN:
+            if key in table:
                 used.add(key)
-                known.append(f"{relative}: {message} (known: {KNOWN[key]})")
+                known.append(f"{relative}: {message} (known: {table[key]})")
             else:
                 problems.append(f"{relative}: {message}")
-    for path, kind in KNOWN:
+    for path, kind in table:
         if (path, kind) not in used:
             problems.append(f"{path}: KNOWN entry for '{kind}' matches nothing; remove it")
     return known, problems
@@ -278,13 +283,21 @@ def self_test() -> int:
 
     # KNOWN excuses one kind in one file; anything else there fails, and an
     # entry that matches nothing fails.
-    tls = "src/tlsdll/tlssup.cpp"
-    known, problems = sort_findings({tls: [("microsoft", "m"), ("gpl2", "g")]})
-    if len(known) != 1 or problems != [f"{tls}: g"]:
+    # A sample table, so this holds while KNOWN is empty.
+    sample = "src/example/vendor.cpp"
+    table = {(sample, "microsoft"): "reviewed"}
+    known, problems = sort_findings({sample: [("microsoft", "m"), ("gpl2", "g")]}, table)
+    if len(known) != 1 or problems != [f"{sample}: g"]:
         failures.append(f"KNOWN by path and kind: known {known}, problems {problems}")
+    known, problems = sort_findings({}, table)
+    if known or len(problems) != len(table):
+        failures.append(f"unused KNOWN entries: known {known}, problems {problems}")
     known, problems = sort_findings({})
     if known or len(problems) != len(KNOWN):
-        failures.append(f"unused KNOWN entries: known {known}, problems {problems}")
+        failures.append(f"unused KNOWN entries (the real table): known {known}, problems {problems}")
+    for folder in ("build", "dist", ".vs", ".vscode"):
+        if folder not in SKIP_DIRS:
+            failures.append(f"output folder {folder}/ is scanned")
 
     for line in failures:
         print(f"self-test: {line}")
