@@ -270,14 +270,14 @@ TEST_CASE("safe mode: the larger zone memory step survives between launches") {
   CHECK((progress.testing == std::vector<std::string>{"a", "b"}));
   auto back = parse_culprit_progress(culprit_progress_to_json(progress));
   REQUIRE(back.has_value());
-  CHECK(back->search.testing_db_pool());
+  CHECK(back->search.testing_settings());
   CHECK(back->testing == progress.testing);
 
   progress.search.record(true); // the stack crashed without it too
   progress.testing.clear();
   back = parse_culprit_progress(culprit_progress_to_json(progress));
   REQUIRE(back.has_value());
-  CHECK(back->search.db_pool() == db_pool_suspect::cleared);
+  CHECK(back->search.settings() == settings_suspect::cleared);
   CHECK((back->search.next_test() == std::vector<std::string>{"a"}));
   CHECK_EQ(back->search.launches(), std::size_t{1});
 
@@ -285,7 +285,7 @@ TEST_CASE("safe mode: the larger zone memory step survives between launches") {
   progress.search.record(false); // it ran fine without it
   back = parse_culprit_progress(culprit_progress_to_json(progress));
   REQUIRE(back.has_value());
-  CHECK(back->search.db_pool_culprit());
+  CHECK(back->search.settings_culprit());
   CHECK(back->search.done());
   CHECK(!back->search.culprit().has_value());
 
@@ -297,11 +297,55 @@ TEST_CASE("safe mode: the larger zone memory step survives between launches") {
       R"("launches":0})";
   const auto old = parse_culprit_progress(older);
   REQUIRE(old.has_value());
-  CHECK(old->search.db_pool() == db_pool_suspect::none);
+  CHECK(old->search.settings() == settings_suspect::none);
+  CHECK(!old->crashed_db_pool);
+  CHECK(!old->crashed_flip_model);
   CHECK((old->search.next_test() == std::vector<std::string>{"a"}));
   std::string unknown = older;
   unknown.insert(unknown.size() - 1, R"(,"db_pool":"maybe")");
   CHECK(!parse_culprit_progress(unknown).has_value());
+
+  // Saved while the larger zone memory was the only suspect setting: its
+  // "db_pool" state reads as the settings' state, and the setting it named
+  // is the larger zone memory.
+  std::string db_pool_only = older;
+  db_pool_only.insert(db_pool_only.size() - 1, R"(,"db_pool":"untested")");
+  const auto earlier = parse_culprit_progress(db_pool_only);
+  REQUIRE(earlier.has_value());
+  CHECK(earlier->search.testing_settings());
+  CHECK(earlier->crashed_db_pool);
+  CHECK(!earlier->crashed_flip_model);
+  std::string unknown_settings = older;
+  unknown_settings.insert(unknown_settings.size() - 1,
+                          R"(,"settings":"maybe")");
+  CHECK(!parse_culprit_progress(unknown_settings).has_value());
+}
+
+TEST_CASE("safe mode: the settings it crashed with survive between launches") {
+  culprit_progress progress;
+  progress.mode = "zm";
+  progress.crashed_stack = {"a", "b"};
+  progress.crashed_flip_model = true;
+  progress.search = culprit_search(progress.crashed_stack, true);
+  progress.testing = progress.search.next_test();
+  const std::string text = culprit_progress_to_json(progress);
+  CHECK(text.find(R"("settings":"untested")") != std::string::npos);
+  CHECK(text.find(R"("crashed_flip_model":true)") != std::string::npos);
+  CHECK(text.find(R"("db_pool")") == std::string::npos);
+  auto back = parse_culprit_progress(text);
+  REQUIRE(back.has_value());
+  CHECK(back->search.testing_settings());
+  CHECK(back->crashed_flip_model);
+  CHECK(!back->crashed_db_pool);
+  CHECK_EQ(culprit_progress_to_json(*back), text);
+
+  progress.crashed_db_pool = true;
+  progress.search.record(false); // ran fine without both
+  back = parse_culprit_progress(culprit_progress_to_json(progress));
+  REQUIRE(back.has_value());
+  CHECK(back->search.settings_culprit());
+  CHECK(back->crashed_db_pool);
+  CHECK(back->crashed_flip_model);
 }
 
 TEST_CASE("config: round trip keeps known and unknown keys") {

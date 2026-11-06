@@ -405,12 +405,12 @@ TEST_CASE(
     return db_pool;
   };
   culprit_search search(decision.crashed_stack, decision.crashed_with_db_pool);
-  CHECK(search.testing_db_pool());
+  CHECK(search.testing_settings());
   CHECK(search.next_test() == decision.crashed_stack);
   while (!search.done()) {
     search.record(crashes(search.next_test(), false));
   }
-  CHECK(search.db_pool_culprit());
+  CHECK(search.settings_culprit());
   CHECK(!search.culprit().has_value());
   CHECK(!search.needs_combination());
   CHECK_EQ(search.launches(), 1u);
@@ -421,6 +421,72 @@ TEST_CASE(
   const safe_mode_decision plain = decide_safe_mode(journal);
   CHECK(!plain.crashed_with_db_pool);
   CHECK(plain.message.find("zone memory") == std::string::npos);
+}
+
+TEST_CASE("safe mode: a crash flip model causes is not blamed on a mod") {
+  // Flip-model presentation on with two mods, and the picture goes black or
+  // the game crashes whatever the mods load.
+  launch_journal journal;
+  journal.plan_id = "sha256:abc";
+  journal.stack = {"a", "b"};
+  journal.mode = "zm";
+  journal.flip_model = true;
+  const std::string text = journal_to_json(journal);
+  CHECK(text.find(R"("flip_model":true)") != std::string::npos);
+  const auto back = parse_journal(text);
+  REQUIRE(back.has_value());
+  CHECK(back->flip_model);
+  CHECK(!back->db_pool);
+  CHECK_EQ(journal_to_json(*back), text);
+  const safe_mode_decision decision = decide_safe_mode(back);
+  REQUIRE(decision.safe_mode);
+  CHECK(decision.crashed_with_flip_model);
+  CHECK(!decision.crashed_with_db_pool);
+  CHECK(decision.crashed_with_settings());
+  CHECK(decision.message.find("flip-model presentation") != std::string::npos);
+  CHECK(decision.message.find("Settings > Display") != std::string::npos);
+  CHECK(decision.message.find("zone memory") == std::string::npos);
+
+  // Safe mode and every test run without it, so the first test, the whole
+  // stack without it, runs fine: the setting is the culprit, no mod is.
+  culprit_search search(decision.crashed_stack,
+                        decision.crashed_with_settings());
+  CHECK(search.testing_settings());
+  CHECK(search.next_test() == decision.crashed_stack);
+  search.record(false);
+  CHECK(search.done());
+  CHECK(search.settings_culprit());
+  CHECK(!search.culprit().has_value());
+  CHECK_EQ(search.launches(), 1u);
+
+  // One mod and the setting are two suspects.
+  safe_mode_decision one;
+  one.safe_mode = true;
+  one.crashed_stack = {"a"};
+  CHECK(!culprit_search_possible(one));
+  one.crashed_with_flip_model = true;
+  CHECK(culprit_search_possible(one));
+
+  // Both experimental settings: one suspect, one first test, both named.
+  journal.db_pool = true;
+  const safe_mode_decision both = decide_safe_mode(journal);
+  CHECK(both.crashed_with_db_pool);
+  CHECK(both.crashed_with_flip_model);
+  CHECK(both.message.find("larger zone memory and flip-model presentation") !=
+        std::string::npos);
+  culprit_search two(both.crashed_stack, both.crashed_with_settings());
+  CHECK(two.next_test() == both.crashed_stack);
+  two.record(true); // crashed without them too: the mods are bisected
+  CHECK(two.settings() == settings_suspect::cleared);
+  CHECK((two.next_test() == std::vector<std::string>{"a"}));
+
+  // A journal from before flip model was recorded reads as off.
+  const auto older = parse_journal(
+      R"({"schema":1,"plan_id":"p","stack":["a"],"phase":"in_game",)"
+      R"("started":"","updated":"","safe_mode":false,"mode":"zm",)"
+      R"("launch_id":"","db_pool":false})");
+  REQUIRE(older.has_value());
+  CHECK(!older->flip_model);
 }
 
 TEST_CASE(
@@ -434,7 +500,7 @@ TEST_CASE(
     tested.push_back(search.next_test());
     search.record(crashes(tested.back()));
   }
-  CHECK(search.db_pool() == db_pool_suspect::cleared);
+  CHECK(search.settings() == settings_suspect::cleared);
   REQUIRE(search.culprit().has_value());
   CHECK_EQ(*search.culprit(), "c");
   REQUIRE(!tested.empty());
@@ -452,7 +518,7 @@ TEST_CASE(
   culprit_search fine({"a"}, true);
   fine.record(false);
   CHECK(fine.done());
-  CHECK(fine.db_pool_culprit());
+  CHECK(fine.settings_culprit());
   CHECK(!fine.culprit().has_value());
 
   safe_mode_decision decision;

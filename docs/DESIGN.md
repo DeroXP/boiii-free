@@ -931,8 +931,8 @@ together.
   game never took the journal over (it quit before Xerces' code ran); otherwise
   the journal decides. A game that is still running is never counted as a crash.
 - "Find the culprit" keeps its state in `config\culprit.json` (the crashed mode
-  and stack, the search, the mods of the test launch still to be recorded), so
-  it spans launcher restarts.
+  and stack, the experimental settings it had, the search, the mods of the test
+  launch still to be recorded), so it spans launcher restarts.
 - Larger zone memory in crash recovery. Safe mode and every culprit test leave
   `-xerces-db-pool` out whatever the settings say
   (`launch_inputs::crash_followup`), so they all run on the stock pool and a
@@ -944,12 +944,17 @@ together.
   stack that only fits with the larger pool also crashes in that first test, so
   its search can end in "these mods together"; Home then adds that together they
   may need more zone memory than the stock pool.
-- Flip-model presentation (12.4 item 4) in crash recovery. Safe mode and every
-  culprit test leave `-xerces-flip-model` out too. Unlike the larger zone memory
-  it is not in the journal and not a suspect of the search: a crash it causes on
-  a modded launch makes safe mode run fine, and the search can then end in
-  "these mods together". Its Settings text says to turn it off if the game
-  crashes; recording it like `db_pool` is open.
+- Flip-model presentation (12.4 item 4) in crash recovery, the same way. Safe
+  mode and every culprit test leave `-xerces-flip-model` out too, the journal
+  records it (`"flip_model"`), and the safe-mode message names it. The two
+  experimental settings are one suspect of the search: its first test runs the
+  whole crashed stack without whichever of them the crashed launch had. If that
+  runs fine, Home names them and offers to turn off just those (the profile
+  keeps its mods); if it crashes too, the mods are bisected. With both on, the
+  search does not tell the two apart; turn one back on to find out.
+  `culprit.json` keeps the step as `"settings"` and which settings the crash had
+  (`crashed_db_pool`, `crashed_flip_model`); a file saved while only the larger
+  zone memory was a suspect has `"db_pool"` instead and reads as that.
 - After **any** crash with mods enabled, the next launch defaults to safe mode
   (all mods off, same game settings) with one-click "Retry with mods", and the
   launcher names the plan that crashed. Other options: report, or "find the
@@ -2175,8 +2180,8 @@ The first load and launcher baseline from existing logs is in
      `xerces.flip_model.tearing_refused` once each if they happen.
      `perf.swapchain` and the probe's flags show the result (12.2).
    - Safe mode and the culprit search's tests leave the flag out
-     (`preview_launch`), like the larger zone memory. The journal does not
-     record it, so the culprit search never suspects it.
+     (`preview_launch`), like the larger zone memory. The journal records it,
+     and the culprit search tests it before blaming a mod (5.6).
    - Checked offline on 2026-11-05 (no game) with a scratch program
      (`C:\Users\Ginld\XercesDev\scratch\flip-model\dxgi_check.cpp`, not in the
      repo) on this PC's RTX 5070 Ti: the detour on a throwaway factory's slot 10

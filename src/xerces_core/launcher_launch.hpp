@@ -66,9 +66,10 @@ struct launch_outcome {
   diagnostics diags;
   launch_refusal refusal = launch_refusal::none;
   std::optional<plan> resolved; // a modded launch's plan
-  // The command line passes -xerces-db-pool (larger zone memory); the
-  // journal records it.
+  // The command line passes -xerces-db-pool (larger zone memory) or
+  // -xerces-flip-model (flip-model presentation); the journal records both.
   bool db_pool = false;
+  bool flip_model = false;
 };
 
 struct launch_inputs {
@@ -82,11 +83,11 @@ struct launch_inputs {
   // crash_followup.
   bool mods_off = false;
   // A launch that judges a crash: safe mode, or a culprit-search test (5.6).
-  // It leaves the experimental larger zone memory (-xerces-db-pool) out
-  // whatever the settings say, so safe mode and every test run on the same
-  // stock pool, and a crash the setting causes is never blamed on a mod.
-  // The experimental flip-model presentation (-xerces-flip-model) is left
-  // out too.
+  // It leaves the experimental settings out whatever the settings say: the
+  // larger zone memory (-xerces-db-pool) and flip-model presentation
+  // (-xerces-flip-model). Safe mode and every test then run on the same
+  // stock pool and the engine's own swap chain, and a crash a setting causes
+  // is never blamed on a mod.
   bool crash_followup = false;
   std::optional<std::string> connect; // "+connect host:port" (Servers)
   // Instead of the profile's (a culprit-search test, with crash_followup).
@@ -102,7 +103,7 @@ launch_outcome preview_launch(const launch_inputs &in);
 // The launch: preview_launch, then the game (found and supported), no game
 // running already, and the client next to the program. Writes the plan file
 // (modded) and the journal (phase launching, the mode, a fresh launch id and
-// whether the command passes -xerces-db-pool),
+// whether the command passes -xerces-db-pool and -xerces-flip-model),
 // then starts the client from the game folder with XERCES_HOME,
 // XERCES_DATA_PATH (development builds) and XERCES_LAUNCH_ID set for it alone.
 // If Windows refuses, the old journal is put back. game_running is asked

@@ -8,6 +8,7 @@
 
 #include <xerces_core/compat.hpp>
 #include <xerces_core/db_pool.hpp>
+#include <xerces_core/flip_model.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/settings_options.hpp>
 
@@ -85,6 +86,7 @@ public:
     model.Bind("culprit_done", &culprit_done_);
     model.Bind("culprit_found", &culprit_found_);
     model.Bind("culprit_stop", &culprit_stop_);
+    model.Bind("culprit_off", &culprit_off_);
     model.BindEventCallback(
         "pick", [this](Rml::DataModelHandle, Rml::Event &,
                        const Rml::VariantList &args) {
@@ -302,7 +304,8 @@ private:
 
   // The culprit search (5.6): one test launch at a time, the result read
   // from the journal when the game exits. A crashed launch that had the
-  // larger zone memory is first run again without it.
+  // experimental settings (larger zone memory, flip-model presentation) is
+  // first run again without them.
   void refresh_culprit(const xerces_core::safe_mode_decision &decision) {
     const auto &culprit = owner_->svc().culprit();
     can_bisect_ = xerces_core::culprit_search_possible(decision) && !culprit;
@@ -310,14 +313,26 @@ private:
     culprit_done_ = culprit_found_ = false;
     culprit_mods_.clear();
     culprit_stop_ = owner_->tr("Stop");
+    culprit_off_ = owner_->tr("Turn it off");
     if (!culprit) {
       return;
     }
-    if (culprit->search.db_pool_culprit()) {
+    if (culprit->search.settings_culprit()) {
       culprit_done_ = culprit_found_ = true;
-      culprit_text_ = owner_->tr("Found it:") + " " +
-                      owner_->tr("larger zone memory (experimental). The same "
-                                 "mods ran fine without it. Turn it off?");
+      std::string what;
+      if (culprit->crashed_db_pool && culprit->crashed_flip_model) {
+        what = owner_->tr("the experimental settings, larger zone memory and "
+                          "flip-model presentation. The same mods ran fine "
+                          "without them. Turn both off?");
+        culprit_off_ = owner_->tr("Turn both off");
+      } else if (culprit->crashed_flip_model) {
+        what = owner_->tr("flip-model presentation (experimental). The same "
+                          "mods ran fine without it. Turn it off?");
+      } else {
+        what = owner_->tr("larger zone memory (experimental). The same "
+                          "mods ran fine without it. Turn it off?");
+      }
+      culprit_text_ = owner_->tr("Found it:") + " " + what;
       culprit_mods_ = mod_list(culprit->crashed_stack);
       culprit_stop_ = owner_->tr("Close");
     } else if (culprit->search.culprit()) {
@@ -331,7 +346,9 @@ private:
       culprit_done_ = true;
       culprit_text_ = owner_->tr("No single mod crashes alone: the crash needs "
                                  "these mods together.");
-      if (culprit->search.db_pool() == xerces_core::db_pool_suspect::cleared) {
+      if (culprit->search.settings() ==
+              xerces_core::settings_suspect::cleared &&
+          culprit->crashed_db_pool) {
         // They crashed on the stock pool, where the crashed launch had the
         // larger one: together they may simply not fit without it.
         culprit_text_ += " " + owner_->tr("They also crashed without larger "
@@ -341,13 +358,25 @@ private:
       }
       culprit_mods_ = mod_list(culprit->search.suspects());
       culprit_stop_ = owner_->tr("Close");
-    } else if (culprit->search.testing_db_pool()) {
-      culprit_text_ =
-          owner_->tr("Test") + " " +
-          std::to_string(culprit->search.launches() + 1) + ": " +
-          owner_->tr("launch the crashed mods again without larger zone "
-                     "memory and play to where it crashed. Quit normally if "
-                     "it does not crash.");
+    } else if (culprit->search.testing_settings()) {
+      std::string what;
+      if (culprit->crashed_db_pool && culprit->crashed_flip_model) {
+        what = owner_->tr("launch the crashed mods again without larger zone "
+                          "memory and flip-model presentation and play to "
+                          "where it crashed. Quit normally if it does not "
+                          "crash.");
+      } else if (culprit->crashed_flip_model) {
+        what = owner_->tr("launch the crashed mods again without flip-model "
+                          "presentation and play to where it crashed. Quit "
+                          "normally if it does not crash.");
+      } else {
+        what = owner_->tr("launch the crashed mods again without larger zone "
+                          "memory and play to where it crashed. Quit normally "
+                          "if it does not crash.");
+      }
+      culprit_text_ = owner_->tr("Test") + " " +
+                      std::to_string(culprit->search.launches() + 1) + ": " +
+                      what;
       culprit_mods_ = mod_list(culprit->search.next_test());
     } else {
       const auto next = culprit->search.next_test();
@@ -462,15 +491,31 @@ private:
       owner_->notify(outcome.message, !outcome.started && !outcome.dry_run);
     } else if (action == "culprit off") {
       const auto &culprit = owner_->svc().culprit();
-      if (culprit && culprit->search.db_pool_culprit()) {
-        // The setting, not a mod: the profile keeps its mods.
+      if (culprit && culprit->search.settings_culprit()) {
+        // The settings, not a mod: the profile keeps its mods. Only the
+        // settings the crashed launch had are turned off.
         auto &config = owner_->svc().config();
-        config.extra_flags =
-            xerces_core::with_flag(std::move(config.extra_flags),
-                                   xerces_core::db_pool::flag_name, false);
+        if (culprit->crashed_db_pool) {
+          config.extra_flags =
+              xerces_core::with_flag(std::move(config.extra_flags),
+                                     xerces_core::db_pool::flag_name, false);
+          log_info("launcher.home.db_pool", "off after the culprit search");
+        }
+        if (culprit->crashed_flip_model) {
+          config.extra_flags =
+              xerces_core::with_flag(std::move(config.extra_flags),
+                                     xerces_core::flip_model::flag_name, false);
+          log_info("launcher.home.flip_model", "off after the culprit search");
+        }
         owner_->svc().save_config();
-        log_info("launcher.home.db_pool", "off after the culprit search");
-        owner_->notify(owner_->tr("Larger zone memory is off."));
+        if (culprit->crashed_db_pool && culprit->crashed_flip_model) {
+          owner_->notify(owner_->tr("Larger zone memory and flip-model "
+                                    "presentation are off."));
+        } else if (culprit->crashed_flip_model) {
+          owner_->notify(owner_->tr("Flip-model presentation is off."));
+        } else {
+          owner_->notify(owner_->tr("Larger zone memory is off."));
+        }
       } else if (culprit && culprit->search.culprit()) {
         auto &profile = xerces_core::profile_for(owner_->svc().config(),
                                                  culprit->mode);
@@ -514,7 +559,7 @@ private:
   Rml::String safe_text_, safe_value_, safe_detail_, last_server_;
   bool can_bisect_ = false, culprit_on_ = false, culprit_done_ = false,
        culprit_found_ = false;
-  Rml::String culprit_text_, culprit_mods_, culprit_stop_;
+  Rml::String culprit_text_, culprit_mods_, culprit_stop_, culprit_off_;
 };
 } // namespace
 

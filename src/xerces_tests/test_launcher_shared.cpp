@@ -406,6 +406,8 @@ TEST_CASE("shared launcher: crash follow-ups leave flip model off") {
   CHECK_EQ(out.command_line,
            std::string("-launch -nointro -windowed -xerces-flip-model "
                        "-xerces-db-pool"));
+  CHECK(out.flip_model); // what the journal records
+  CHECK(out.db_pool);
 
   in.modded = true;
   out = launch_game(in, [] { return false; }, {});
@@ -413,6 +415,7 @@ TEST_CASE("shared launcher: crash follow-ups leave flip model off") {
   CHECK(out.command_line.starts_with(
       "-launch -nointro -windowed -xerces-flip-model -xerces-db-pool "
       "-xerces-plan "));
+  CHECK(out.flip_model);
 
   const std::vector<std::string> half = {"fixture.alpha"};
   in.mods = &half;
@@ -423,6 +426,7 @@ TEST_CASE("shared launcher: crash follow-ups leave flip model off") {
   CHECK(out.command_line.find("xerces-db-pool") == std::string::npos);
   CHECK(
       out.command_line.starts_with("-launch -nointro -windowed -xerces-plan "));
+  CHECK(!out.flip_model);
 
   in.mods = nullptr;
   in.crash_followup = false;
@@ -430,6 +434,7 @@ TEST_CASE("shared launcher: crash follow-ups leave flip model off") {
   out = launch_game(in, [] { return false; }, {});
   REQUIRE(out.dry_run);
   CHECK_EQ(out.command_line, std::string("-launch -nointro -windowed"));
+  CHECK(!out.flip_model);
 
   // Only for those launches: the setting itself stays on.
   CHECK((setup.config.extra_flags ==

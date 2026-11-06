@@ -67,6 +67,7 @@ std::string journal_to_json(const launch_journal &value) {
   json::set(doc, "mode", value.mode, alloc);
   json::set(doc, "launch_id", value.launch_id, alloc);
   json::set(doc, "db_pool", value.db_pool, alloc);
+  json::set(doc, "flip_model", value.flip_model, alloc);
   return json::canonical(doc);
 }
 
@@ -103,6 +104,10 @@ std::optional<launch_journal> parse_journal(std::string_view text) {
   if (const auto *db_pool = json::member(root, "db_pool");
       db_pool != nullptr && db_pool->IsBool()) {
     out.db_pool = db_pool->GetBool();
+  }
+  if (const auto *flip_model = json::member(root, "flip_model");
+      flip_model != nullptr && flip_model->IsBool()) {
+    out.flip_model = flip_model->GetBool();
   }
   return out;
 }
@@ -154,10 +159,24 @@ safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last) {
   out.crashed_mode = last->mode;
   out.crashed_started = last->started;
   out.crashed_with_db_pool = last->db_pool;
+  out.crashed_with_flip_model = last->flip_model;
   const std::string mods = std::to_string(last->stack.size()) +
                            (last->stack.size() == 1 ? " mod" : " mods");
+  // The experimental settings are as much a suspect as the mods (5.4, 5.6,
+  // 12.4 item 4).
+  if (last->db_pool && last->flip_model) {
+    out.message = "The last launch with " + mods +
+                  ", larger zone memory and flip-model presentation (both "
+                  "experimental) crashed " +
+                  describe(last->phase) +
+                  ". This launch starts with mods and both settings off. "
+                  "Either setting may be the cause: find the culprit runs the "
+                  "same mods without them first. Or retry with mods, report "
+                  "the crash, or turn them off in Settings > Launch and "
+                  "Settings > Display.";
+    return out;
+  }
   if (last->db_pool) {
-    // The experimental setting is as much a suspect as the mods (5.4).
     out.message = "The last launch with " + mods +
                   " and larger zone memory (experimental) crashed " +
                   describe(last->phase) +
@@ -168,6 +187,17 @@ safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last) {
                   "off in Settings > Launch.";
     return out;
   }
+  if (last->flip_model) {
+    out.message = "The last launch with " + mods +
+                  " and flip-model presentation (experimental) crashed " +
+                  describe(last->phase) +
+                  ". This launch starts with mods and flip-model "
+                  "presentation off. Flip-model presentation may be the "
+                  "cause: find the culprit runs the same mods without it "
+                  "first. Or retry with mods, report the crash, or turn "
+                  "flip-model presentation off in Settings > Display.";
+    return out;
+  }
   out.message = "The last launch with " + mods + " crashed " +
                 describe(last->phase) +
                 ". This launch starts with mods off. Retry with mods, report "
@@ -176,30 +206,32 @@ safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last) {
 }
 
 bool culprit_search_possible(const safe_mode_decision &decision) {
+  // The experimental settings are one suspect: the first test drops them
+  // all.
   return decision.safe_mode &&
          decision.crashed_stack.size() +
-                 (decision.crashed_with_db_pool ? 1 : 0) >=
+                 (decision.crashed_with_settings() ? 1 : 0) >=
              2;
 }
 
 culprit_search::culprit_search(std::vector<std::string> crashed_stack,
-                               bool crashed_with_db_pool)
+                               bool crashed_with_settings)
     : suspects_(std::move(crashed_stack)),
-      db_pool_(crashed_with_db_pool ? db_pool_suspect::untested
-                                    : db_pool_suspect::none) {}
+      settings_(crashed_with_settings ? settings_suspect::untested
+                                      : settings_suspect::none) {}
 
 culprit_search::culprit_search(std::vector<std::string> suspects,
                                bool testing_second_half, bool combination,
-                               std::size_t launches, db_pool_suspect db_pool)
+                               std::size_t launches, settings_suspect settings)
     : suspects_(std::move(suspects)), testing_second_half_(testing_second_half),
-      combination_(combination), launches_(launches), db_pool_(db_pool) {}
+      combination_(combination), launches_(launches), settings_(settings) {}
 
 std::vector<std::string> culprit_search::next_test() const {
   if (done()) {
     return {};
   }
-  if (db_pool_ == db_pool_suspect::untested) {
-    return suspects_; // the whole crashed stack, without the setting
+  if (settings_ == settings_suspect::untested) {
+    return suspects_; // the whole crashed stack, without the settings
   }
   const std::size_t half = suspects_.size() / 2;
   return testing_second_half_
@@ -214,8 +246,8 @@ void culprit_search::record(bool crashed) {
     return;
   }
   ++launches_;
-  if (db_pool_ == db_pool_suspect::untested) {
-    db_pool_ = crashed ? db_pool_suspect::cleared : db_pool_suspect::culprit;
+  if (settings_ == settings_suspect::untested) {
+    settings_ = crashed ? settings_suspect::cleared : settings_suspect::culprit;
     return;
   }
   const std::vector<std::string> tested = next_test();
@@ -232,26 +264,26 @@ void culprit_search::record(bool crashed) {
 }
 
 bool culprit_search::done() const {
-  if (db_pool_ == db_pool_suspect::untested) {
+  if (settings_ == settings_suspect::untested) {
     return false;
   }
-  return db_pool_ == db_pool_suspect::culprit || combination_ ||
+  return settings_ == settings_suspect::culprit || combination_ ||
          suspects_.size() <= 1;
 }
 
 std::optional<std::string> culprit_search::culprit() const {
-  if (done() && db_pool_ != db_pool_suspect::culprit && !combination_ &&
+  if (done() && settings_ != settings_suspect::culprit && !combination_ &&
       suspects_.size() == 1) {
     return suspects_.front();
   }
   return std::nullopt;
 }
 namespace {
-constexpr std::pair<db_pool_suspect, const char *> db_pool_names[] = {
-    {db_pool_suspect::none, "none"},
-    {db_pool_suspect::untested, "untested"},
-    {db_pool_suspect::cleared, "cleared"},
-    {db_pool_suspect::culprit, "culprit"},
+constexpr std::pair<settings_suspect, const char *> settings_names[] = {
+    {settings_suspect::none, "none"},
+    {settings_suspect::untested, "untested"},
+    {settings_suspect::cleared, "cleared"},
+    {settings_suspect::culprit, "culprit"},
 };
 
 std::vector<std::string> strings_at(const rapidjson::Value &root,
@@ -288,11 +320,13 @@ std::string culprit_progress_to_json(const culprit_progress &value) {
   json::set(doc, "combination", value.search.needs_combination(), alloc);
   json::set(doc, "launches", static_cast<std::int64_t>(value.search.launches()),
             alloc);
-  for (const auto &[state, name] : db_pool_names) {
-    if (state == value.search.db_pool()) {
-      json::set(doc, "db_pool", name, alloc);
+  for (const auto &[state, name] : settings_names) {
+    if (state == value.search.settings()) {
+      json::set(doc, "settings", name, alloc);
     }
   }
+  json::set(doc, "crashed_db_pool", value.crashed_db_pool, alloc);
+  json::set(doc, "crashed_flip_model", value.crashed_flip_model, alloc);
   return json::canonical(doc);
 }
 
@@ -315,21 +349,32 @@ std::optional<culprit_progress> parse_culprit_progress(std::string_view text) {
   if (out.mode.empty() || suspects.empty()) {
     return std::nullopt;
   }
-  // Searches saved before the larger zone memory was a suspect have no
-  // "db_pool"; a value this version does not know ends the search.
-  db_pool_suspect db_pool = db_pool_suspect::none;
-  if (const auto name = json::get_string(root, "db_pool")) {
+  // The experimental settings' step. Searches saved before the larger zone
+  // memory was a suspect have neither key. Those saved before flip model was
+  // one have "db_pool" (the same states) and no crashed_* keys: their one
+  // setting was the larger zone memory. A value this version does not know
+  // ends the search.
+  const bool older = json::member(root, "settings") == nullptr;
+  settings_suspect settings = settings_suspect::none;
+  if (const auto name =
+          json::get_string(root, older ? "db_pool" : "settings")) {
     const auto *known =
-        std::ranges::find_if(db_pool_names, [&](const auto &entry) {
+        std::ranges::find_if(settings_names, [&](const auto &entry) {
           return *name == entry.second;
         });
-    if (known == std::ranges::end(db_pool_names)) {
+    if (known == std::ranges::end(settings_names)) {
       return std::nullopt;
     }
-    db_pool = known->first;
+    settings = known->first;
+  }
+  if (older) {
+    out.crashed_db_pool = settings != settings_suspect::none;
+  } else {
+    out.crashed_db_pool = bool_at(root, "crashed_db_pool");
+    out.crashed_flip_model = bool_at(root, "crashed_flip_model");
   }
   out.search = culprit_search(std::move(suspects), bool_at(root, "second_half"),
-                              bool_at(root, "combination"), launches, db_pool);
+                              bool_at(root, "combination"), launches, settings);
   return out;
 }
 } // namespace xerces_core

@@ -572,6 +572,10 @@ during a measurement window.
     or a black screen there means the new chain was made before the old flip
     chain was gone; note which change did it. If nothing makes a second chain,
     say so here.
+  - If a modded launch with it crashes or is ended in Task Manager: the journal
+    has `"flip_model": true`, the safe-mode message names flip-model
+    presentation, and "Find the culprit" first runs the same mods without it
+    (checked in `test_m1_runtime.cpp` and `test_launcher_shared.cpp` only).
   - Numbers: `xerces_cli bench compare --a <w0> --b <flip>` on the probe CSVs.
     The goal is windowed and borderless close to exclusive fullscreen's 345 FPS
     and its p99 and 1% low (DESIGN.md 12.4 item 4). The flags column has 32 on
