@@ -3,8 +3,9 @@
 // Bounded C-string copies with the strscpy interface (docs/DESIGN.md 16.5).
 // The names and the contract follow the Linux kernel's documented strscpy
 // API; the code was written for Xerces from that contract and from what the
-// callers in src/ need. The file it replaces held GPL-2.0-only kernel code,
-// which cannot be combined with this GPL-3.0 program.
+// callers in src/ need. The file it replaces held kernel code under a licence
+// that cannot be combined with this GPL-3.0 program (docs/DESIGN.md 16.5 names
+// it; tools/ci/check_licences.py fails on its tags in code).
 //
 // For a destination of `count` bytes:
 // - At most count - 1 characters are copied and a NUL always follows them.

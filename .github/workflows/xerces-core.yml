@@ -20,6 +20,9 @@ jobs:
       - name: Host lint
         run: python tools/ci/check_hosts.py
 
+      - name: Licence lint patterns
+        run: python tools/ci/check_licences.py --self-test
+
       - name: Licence lint
         run: python tools/ci/check_licences.py
 

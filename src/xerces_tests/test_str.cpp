@@ -56,6 +56,78 @@ constexpr size_t copied_at_compile_time(const char *src) {
 static_assert(copied_at_compile_time("abc") == 3);
 static_assert(copied_at_compile_time("abcd") == strscpy_truncated);
 static_assert(copied_at_compile_time("") == 0);
+
+// The promise not to read past count bytes, or past a view. Constant
+// evaluation rejects any read outside an array, so each check below stops
+// compiling if the copy reads one byte too many. No source ends in a NUL.
+
+// A C-string source exactly count bytes long: its last byte is read to see
+// that it does not fit, nothing after it.
+constexpr bool c_string_as_long_as_count() {
+  const char src[4] = {'a', 'b', 'c', 'd'};
+  char dst[4] = {};
+  return strscpy(dst, src, 4) == strscpy_truncated && dst[2] == 'c' &&
+         dst[3] == '\0';
+}
+static_assert(c_string_as_long_as_count());
+
+// A count smaller than the destination bounds the source, too.
+constexpr bool c_string_count_below_the_destination() {
+  const char src[2] = {'a', 'b'};
+  char dst[8] = {};
+  return strscpy_pad(dst, src, 2) == strscpy_truncated && dst[0] == 'a' &&
+         dst[1] == '\0';
+}
+static_assert(c_string_count_below_the_destination());
+
+// gsc.hpp and script.cpp pass a view's data with count size + 1: the byte
+// just past the view is read (their views end at a NUL), nothing after it.
+constexpr bool view_data_with_count_size_plus_one() {
+  const char src[5] = {'0', '1', '2', '3', '\0'};
+  const std::string_view view(src, 4);
+  char dst[5] = {};
+  return strscpy(dst, view.data(), view.size() + 1) == 4 && dst[3] == '3' &&
+         dst[4] == '\0';
+}
+static_assert(view_data_with_count_size_plus_one());
+
+// A view exactly as long as the room fits and is read to its end only.
+constexpr bool view_as_long_as_the_room() {
+  const char src[3] = {'a', 'b', 'c'};
+  char dst[4] = {};
+  return strscpy(dst, std::string_view(src, 3)) == 3 && dst[2] == 'c' &&
+         dst[3] == '\0';
+}
+static_assert(view_as_long_as_the_room());
+
+// A view one longer than the room: its last character is read to see that it
+// does not fit.
+constexpr bool view_one_past_the_room() {
+  const char src[4] = {'a', 'b', 'c', 'd'};
+  char dst[4] = {};
+  return strscpy(dst, std::string_view(src, 4)) == strscpy_truncated &&
+         dst[2] == 'c' && dst[3] == '\0';
+}
+static_assert(view_one_past_the_room());
+
+// A view shorter than the room, padded: the rest is zeroed, the source is not
+// read past the view.
+constexpr bool view_shorter_than_the_room_padded() {
+  const char src[2] = {'h', 'i'};
+  char dst[6] = {'x', 'x', 'x', 'x', 'x', 'x'};
+  return strscpy_pad(dst, std::string_view(src, 2)) == 2 && dst[1] == 'i' &&
+         dst[2] == '\0' && dst[5] == '\0';
+}
+static_assert(view_shorter_than_the_room_padded());
+
+// An empty view that starts one past the end of an array: nothing is read.
+constexpr bool empty_view_at_the_end_of_an_array() {
+  const char src[2] = {'a', 'b'};
+  char dst[4] = {'x', 'x', 'x', 'x'};
+  return strscpy(dst, std::string_view(src + 2, 0)) == 0 && dst[0] == '\0' &&
+         dst[1] == 'x';
+}
+static_assert(empty_view_at_the_end_of_an_array());
 } // namespace
 
 TEST_CASE("strscpy: the truncation value is -E2BIG as a size_t") {
@@ -173,22 +245,24 @@ TEST_CASE("strscpy: an empty or null source gives an empty string") {
   CHECK_EQ(buffer[0], '\0');
 }
 
-TEST_CASE("strscpy: the source is not read past count bytes") {
-  // An unterminated source exactly count bytes long: the last byte is read
-  // to see that it does not fit, nothing after it.
+TEST_CASE("strscpy: unterminated sources and views inside a longer string") {
+  // The static_asserts at the top pin that nothing past count bytes, or past
+  // a view, is read. These check the results at run time.
   const char unterminated[4] = {'a', 'b', 'c', 'd'};
   char buffer[4];
   fill(buffer);
   CHECK_EQ(strscpy(buffer, unterminated, sizeof(buffer)), strscpy_truncated);
   CHECK_EQ(std::string(buffer), std::string("abc"));
 
-  // gsc.hpp and script.cpp copy a view's characters with count size + 1.
-  // The view need not end in a NUL: the copy is its characters.
+  // gsc.hpp and script.cpp copy a view's characters with count size + 1,
+  // which also reads the byte just past the view. When that byte is not a
+  // NUL the result says the source was cut, but the copy is still the view's
+  // characters, and no byte after count is written.
   const std::string text = "0123456789";
   const std::string_view part = std::string_view(text).substr(0, 4);
   char out[16];
   fill(out);
-  strscpy(out, part.data(), part.size() + 1);
+  CHECK_EQ(strscpy(out, part.data(), part.size() + 1), strscpy_truncated);
   CHECK_EQ(std::string(out), std::string("0123"));
   CHECK_EQ(out[5], 'x');
 }
