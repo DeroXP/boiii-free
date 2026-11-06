@@ -15,6 +15,7 @@
 #include <xerces_core/launcher_home.hpp>
 #include <xerces_core/launcher_launch.hpp>
 #include <xerces_core/launcher_state.hpp>
+#include <xerces_core/ui_text.hpp>
 #include <xerces_core/version.hpp>
 
 #include "log.hpp"
@@ -657,7 +658,7 @@ void services::stop_culprit() {
 launch_outcome services::launch_culprit_test() {
   launch_outcome out;
   if (!culprit_ || culprit_->search.done()) {
-    out.message = "There is no test to run.";
+    out.message = xerces_core::ui_text("There is no test to run.");
     out.diags.error("culprit.none", "", out.message);
     return out;
   }

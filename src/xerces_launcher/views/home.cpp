@@ -237,7 +237,8 @@ private:
                                std::to_string(*game.steam_build)
                          : owner_->tr("Build unknown");
       if (game.preflight && !game.preflight->can_launch()) {
-        game_value_ = owner_->tr(xerces_core::to_string(game.preflight->verdict));
+        game_value_ =
+            owner_->tr(xerces_core::preflight_label(game.preflight->verdict));
         game_detail_ = game.preflight->message;
       }
     }
@@ -265,10 +266,13 @@ private:
                        owner_->tr("mods") + ", " +
                        std::to_string(svc.maps().size()) + " " +
                        owner_->tr("maps");
-      char text[96];
-      std::snprintf(text, sizeof(text), "%.1f s, %zu files cached",
-                    catalog.seconds, catalog.cache_hits);
-      catalog_detail_ = catalog.scanned ? text : "";
+      char seconds[32];
+      std::snprintf(seconds, sizeof(seconds), "%.1f s", catalog.seconds);
+      catalog_detail_ = catalog.scanned
+                            ? std::string(seconds) + ", " +
+                                  std::to_string(catalog.cache_hits) + " " +
+                                  owner_->tr("files cached")
+                            : std::string();
     }
     const xerces_core::safe_mode_decision decision = svc.safe_mode();
     // A crash is told apart from the next one by its plan and start time:
@@ -278,7 +282,7 @@ private:
                  ? decision.crashed_plan_id + "\n" + decision.crashed_started
                  : "";
     safe_ = decision.safe_mode && crash_ != dismissed_crash_;
-    safe_text_ = decision.message;
+    safe_text_ = owner_->tr(decision.message);
     safe_value_ = decision.safe_mode ? owner_->tr("Suggested")
                                      : owner_->tr("Off");
     safe_detail_ = decision.safe_mode
@@ -423,13 +427,13 @@ private:
     const launch_outcome outcome =
         owner_->svc().launch(owner_->mode(), modded, mods_off);
     if (outcome.started || outcome.dry_run) {
-      owner_->notify(outcome.message);
+      owner_->notify(owner_->tr(outcome.message));
       if (outcome.started && owner_->svc().config().close_on_launch) {
         owner_->win().request_close();
       }
       return true;
     }
-    owner_->notify(outcome.message, true);
+    owner_->notify(owner_->tr(outcome.message), true);
     return false;
   }
 
@@ -511,7 +515,8 @@ private:
       }
     } else if (action == "culprit test") {
       const launch_outcome outcome = owner_->svc().launch_culprit_test();
-      owner_->notify(outcome.message, !outcome.started && !outcome.dry_run);
+      owner_->notify(owner_->tr(outcome.message),
+                     !outcome.started && !outcome.dry_run);
     } else if (action == "culprit off") {
       const auto &culprit = owner_->svc().culprit();
       if (culprit && culprit->search.db_pool_culprit()) {

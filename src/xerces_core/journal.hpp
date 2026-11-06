@@ -86,6 +86,8 @@ struct safe_mode_decision {
   // The crashed launch had the larger zone memory (-xerces-db-pool): it is a
   // suspect too, and the culprit search tests it first.
   bool crashed_with_db_pool = false;
+  // What the screens say: one of a fixed set of sentences (per phase, with
+  // or without the larger zone memory), so it can be translated as it is.
   std::string message;
 };
 

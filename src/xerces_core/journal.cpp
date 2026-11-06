@@ -17,22 +17,71 @@ constexpr std::pair<launch_phase, const char *> phase_names[] = {
     {launch_phase::clean_exit, "clean_exit"},
 };
 
-std::string describe(launch_phase phase) {
+// The safe-mode notice for a crash in a phase, with or without the larger
+// zone memory. Whole sentences, so that the launcher translates each as one
+// string (Home, Servers and Diagnostics show it through app::tr();
+// tools/i18n/extract_strings.py reads the sentences from here).
+const char *safe_mode_message(launch_phase phase, bool db_pool) {
   switch (phase) {
-  case launch_phase::launching:
-    return "while starting";
   case launch_phase::symbols:
-    return "while finding the game's functions";
+    return db_pool
+               ? "The last launch with mods and larger zone memory "
+                 "(experimental) crashed while finding the game's functions. "
+                 "This launch starts with mods and larger zone memory off. "
+                 "Larger zone memory may be the cause: find the culprit runs "
+                 "the same mods without it first. Or retry with mods, report "
+                 "the crash, or turn larger zone memory off in Settings > "
+                 "Launch."
+               : "The last launch with mods crashed while finding the game's "
+                 "functions. This launch starts with mods off. Retry with "
+                 "mods, report the crash, or find the mod that causes it.";
   case launch_phase::frontend:
-    return "in the menus";
+    return db_pool
+               ? "The last launch with mods and larger zone memory "
+                 "(experimental) crashed in the menus. This launch starts "
+                 "with mods and larger zone memory off. Larger zone memory "
+                 "may be the cause: find the culprit runs the same mods "
+                 "without it first. Or retry with mods, report the crash, or "
+                 "turn larger zone memory off in Settings > Launch."
+               : "The last launch with mods crashed in the menus. This launch "
+                 "starts with mods off. Retry with mods, report the crash, or "
+                 "find the mod that causes it.";
   case launch_phase::loading_map:
-    return "while loading a map";
+    return db_pool
+               ? "The last launch with mods and larger zone memory "
+                 "(experimental) crashed while loading a map. This launch "
+                 "starts with mods and larger zone memory off. Larger zone "
+                 "memory may be the cause: find the culprit runs the same "
+                 "mods without it first. Or retry with mods, report the "
+                 "crash, or turn larger zone memory off in Settings > Launch."
+               : "The last launch with mods crashed while loading a map. This "
+                 "launch starts with mods off. Retry with mods, report the "
+                 "crash, or find the mod that causes it.";
   case launch_phase::in_game:
-    return "in a match";
-  case launch_phase::clean_exit:
-    return "after exiting";
+    return db_pool
+               ? "The last launch with mods and larger zone memory "
+                 "(experimental) crashed in a match. This launch starts with "
+                 "mods and larger zone memory off. Larger zone memory may be "
+                 "the cause: find the culprit runs the same mods without it "
+                 "first. Or retry with mods, report the crash, or turn larger "
+                 "zone memory off in Settings > Launch."
+               : "The last launch with mods crashed in a match. This launch "
+                 "starts with mods off. Retry with mods, report the crash, or "
+                 "find the mod that causes it.";
+  case launch_phase::launching:
+  case launch_phase::clean_exit: // not a crash; never asked for
+    break;
   }
-  return "";
+  return db_pool
+             ? "The last launch with mods and larger zone memory "
+               "(experimental) crashed while starting. This launch starts "
+               "with mods and larger zone memory off. Larger zone memory may "
+               "be the cause: find the culprit runs the same mods without it "
+               "first. Or retry with mods, report the crash, or turn larger "
+               "zone memory off in Settings > Launch."
+             : "The last launch with mods crashed while starting. This launch "
+               "starts with mods off. Retry with mods, report the crash, or "
+               "find the mod that causes it.";
 }
 } // namespace
 
@@ -154,24 +203,8 @@ safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last) {
   out.crashed_mode = last->mode;
   out.crashed_started = last->started;
   out.crashed_with_db_pool = last->db_pool;
-  const std::string mods = std::to_string(last->stack.size()) +
-                           (last->stack.size() == 1 ? " mod" : " mods");
-  if (last->db_pool) {
-    // The experimental setting is as much a suspect as the mods (5.4).
-    out.message = "The last launch with " + mods +
-                  " and larger zone memory (experimental) crashed " +
-                  describe(last->phase) +
-                  ". This launch starts with mods and larger zone memory "
-                  "off. Larger zone memory may be the cause: find the "
-                  "culprit runs the same mods without it first. Or retry "
-                  "with mods, report the crash, or turn larger zone memory "
-                  "off in Settings > Launch.";
-    return out;
-  }
-  out.message = "The last launch with " + mods + " crashed " +
-                describe(last->phase) +
-                ". This launch starts with mods off. Retry with mods, report "
-                "the crash, or find the mod that causes it.";
+  // The experimental setting is as much a suspect as the mods (5.4).
+  out.message = safe_mode_message(last->phase, last->db_pool);
   return out;
 }
 

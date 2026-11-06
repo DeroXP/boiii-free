@@ -84,6 +84,10 @@ TEST_CASE("pre-flight: the supported build launches") {
   CHECK(result.message.empty());
   REQUIRE(result.build.has_value());
   CHECK_EQ(result.build->name, std::string("Current"));
+  // Screens show the verdict in words, never its id ("upstream-only").
+  CHECK_EQ(std::string(preflight_label(result.verdict)), "Supported");
+  CHECK_EQ(std::string(preflight_label(preflight_verdict::upstream_only)),
+           "Upstream only");
 }
 
 TEST_CASE("pre-flight: a changed exe is unknown and asks for a Steam verify") {

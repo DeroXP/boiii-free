@@ -670,7 +670,7 @@ void app::show(const std::string &id) {
   // the reason) has nothing to show, whether it was tried here or by the
   // loader in run(): stay where we are.
   if (target->failed || !target->screen->doc) {
-    notify("The " + id + " screen could not be loaded.", true);
+    notify(tr("This screen could not be loaded:") + " " + id, true);
     return;
   }
   if (current_ == id) {

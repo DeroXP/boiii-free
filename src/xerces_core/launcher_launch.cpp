@@ -19,6 +19,7 @@
 #include "json.hpp"
 #include "launch.hpp"
 #include "settings_options.hpp"
+#include "ui_text.hpp"
 #include "version.hpp"
 
 namespace xerces_core {
@@ -142,13 +143,13 @@ launch_outcome preview_launch(const launch_inputs &in) {
     out.plan_id = out.resolved->plan_id;
     if (!out.resolved->ok()) {
       out.diags.append(out.resolved->diags);
-      out.message = "The plan has problems. Open Mods to fix them.";
+      out.message = ui_text("The plan has problems. Open Mods to fix them.");
       out.refusal = launch_refusal::plan;
       return out;
     }
     if (out.resolved->stack.empty()) {
-      out.message = "No mods are enabled for this mode. Enable some in Mods, "
-                    "or launch vanilla.";
+      out.message = ui_text("No mods are enabled for this mode. Enable some "
+                            "in Mods, or launch vanilla.");
       out.diags.error("launch.plan.empty", "", out.message);
       out.refusal = launch_refusal::plan;
       return out;
@@ -161,7 +162,7 @@ launch_outcome preview_launch(const launch_inputs &in) {
   out.db_pool = db_pool::requested(command.args);
   if (!command.ok()) {
     out.message = command.diags.items().empty()
-                      ? "The launch command could not be built."
+                      ? ui_text("The launch command could not be built.")
                       : command.diags.items().front().message;
     out.refusal = launch_refusal::command;
   }
@@ -282,17 +283,18 @@ launch_outcome launch_game(const launch_inputs &in,
   // culprit test refuse there, and a dry launch shows the same refusal.
   if (!game.can_launch()) {
     const std::string why =
-        !game.dir ? "Black Ops III was not found. Set its folder in Settings."
+        !game.dir ? ui_text("Black Ops III was not found. Set its folder in "
+                            "Settings.")
         : game.preflight && !game.preflight->message.empty()
             ? game.preflight->message
         : !game.error.empty()
             ? game.error
-            : std::string("This game build is not supported.");
+            : std::string(ui_text("This game build is not supported."));
     return refuse(launch_refusal::game, "launch.game", why);
   }
   if (game_running && game_running()) {
     return refuse(launch_refusal::running, "launch.running",
-                  "The game is already running.");
+                  ui_text("The game is already running."));
   }
   // A missing client only stops a real launch; a dry one starts nothing, so
   // a checkout without boiii.exe can still check its command lines, and it
@@ -325,7 +327,7 @@ launch_outcome launch_game(const launch_inputs &in,
     out.plan_file = paths.plans / (plan_file_id(resolved.plan_id) + ".json");
     if (!write_text_file(out.plan_file, plan_to_json(resolved, true))) {
       out.diags.warning("launch.plan_file", path_utf8(out.plan_file),
-                        "The plan file could not be written.");
+                        ui_text("The plan file could not be written."));
       emit(log, log_level::warn, "launch.plan_file",
            "The plan file could not be written: " + path_utf8(out.plan_file));
     }
@@ -343,11 +345,12 @@ launch_outcome launch_game(const launch_inputs &in,
   }
   if (in.dry_launch) {
     out.dry_run = true;
-    out.message = would_stop.empty()
-                      ? "Dry launch: the command was written to the log."
-                      : "Dry launch: the command was written to the log (a "
-                        "real launch would stop: " +
-                            would_stop + ").";
+    out.message =
+        would_stop.empty()
+            ? ui_text("Dry launch: the command was written to the log.")
+            : "Dry launch: the command was written to the log (a "
+              "real launch would stop: " +
+                  would_stop + ").";
     emit(log, log_level::info, "launch.dry", out.command_line,
          "{\"plan_id\":" + json::quote(out.plan_id) + "}");
     return out; // no journal: nothing ran that could crash
@@ -409,8 +412,9 @@ launch_outcome launch_game(const launch_inputs &in,
   }
   out.started = true;
   out.pid = started.dwProcessId;
-  out.message = in.modded && !in.mods_off ? "Starting Black Ops III with mods."
-                                          : "Starting Black Ops III.";
+  out.message = in.modded && !in.mods_off
+                    ? ui_text("Starting Black Ops III with mods.")
+                    : ui_text("Starting Black Ops III.");
   emit(log, log_level::info, "launch.started", out.command_line,
        "{\"pid\":" + std::to_string(out.pid) +
            ",\"plan_id\":" + json::quote(out.plan_id) + "}");

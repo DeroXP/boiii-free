@@ -105,22 +105,6 @@ std::string windows_version() {
   return out;
 }
 
-const char *verdict_label(xerces_core::preflight_verdict verdict) {
-  switch (verdict) {
-  case xerces_core::preflight_verdict::supported:
-    return "Supported";
-  case xerces_core::preflight_verdict::upstream_only:
-    return "Upstream only";
-  case xerces_core::preflight_verdict::unsupported:
-    return "Unsupported build";
-  case xerces_core::preflight_verdict::newer:
-    return "Newer than supported";
-  case xerces_core::preflight_verdict::unknown:
-    return "Unknown or modified";
-  }
-  return "Unknown or modified";
-}
-
 const char *phase_label(xerces_core::launch_phase phase) {
   switch (phase) {
   case xerces_core::launch_phase::launching:
@@ -329,10 +313,12 @@ private:
     game_found_ = game.dir.has_value();
     build_ok_ = game.can_launch();
 
-    build_count_ = !game.searched || svc.detecting() ? owner_->tr("looking")
-                   : !game.dir     ? owner_->tr("not found")
-                   : game.preflight ? xerces_core::to_string(game.preflight->verdict)
-                                    : owner_->tr("not checked");
+    build_count_ =
+        !game.searched || svc.detecting() ? owner_->tr("looking")
+        : !game.dir                       ? owner_->tr("not found")
+        : game.preflight
+            ? owner_->tr(xerces_core::preflight_label(game.preflight->verdict))
+            : owner_->tr("not checked");
     if (!game.searched || svc.detecting()) {
       build_value_ = owner_->tr("Looking...");
       build_detail_ = owner_->tr("Reading BlackOps3.exe");
@@ -343,7 +329,8 @@ private:
       build_value_ = owner_->tr("Not found");
       build_detail_ = owner_->tr("Set the game folder in Settings");
     } else if (game.preflight) {
-      build_value_ = owner_->tr(verdict_label(game.preflight->verdict));
+      build_value_ =
+          owner_->tr(xerces_core::preflight_label(game.preflight->verdict));
       build_detail_ =
           game.steam_build
               ? owner_->tr("Steam build") + " " + std::to_string(*game.steam_build)
@@ -603,7 +590,7 @@ private:
     const auto journal = svc.last_journal();
     const xerces_core::safe_mode_decision decision = svc.safe_mode();
     safe_on_ = decision.safe_mode;
-    safe_text_ = decision.message;
+    safe_text_ = owner_->tr(decision.message);
     const bool running = svc.game_running();
     if (!journal) {
       launch_value_ = owner_->tr("None yet");
