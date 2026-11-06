@@ -2,6 +2,7 @@
 
 usage: python -I tools/release/notices.py [--build-dir build] [--third-party DIR]
            [--notices FILE] [--source FILE] [--downloads DIR] [--check]
+           [--licences] [--self-test]
 
 THIRD_PARTY_NOTICES.txt has every library compiled into the shipped programs
 (boiii.exe, Xerces.exe, xerces_cli.exe) with its licence text, read from the
@@ -15,8 +16,15 @@ commits, and the third-party source archives built into Xerces.exe (RmlUi,
 FreeType and, once the launcher builds it, HarfBuzz) with their SHA-256. The
 archives are read from --downloads; a hash docs/TESTING.md lists must match.
 
---check only checks: every linked library is known and every licence file is
-there. Nothing here downloads anything.
+Code under a licence GPL-3.0 cannot take in must not ship (16.5). Every run,
+--check included, reads the tracked text files under src/ and data/ (what the
+programs are built from and what the package carries) and fails on an SPDX tag
+whose only choice is the version-2-only GPL, or a copyright line of the Linux
+kernel. --licences runs this scan alone; it needs no build files.
+
+--check only checks: every linked library is known, every licence file is
+there, and no shipped source has such a licence. --self-test checks the scan
+on samples. Nothing here downloads anything.
 """
 
 import argparse
@@ -49,6 +57,84 @@ SOURCE_DIRS = {
 
 class Problem(Exception):
     pass
+
+
+# The licence scan (16.5). The tag and the version-2 id are written in two
+# parts so that licence scanners reading this file do not take these lines for
+# a tag or a notice.
+SPDX_TAG = "SPDX-License-" "Identifier:"
+SPDX_EXPRESSION = re.compile(re.escape(SPDX_TAG) + r"[ \t]*([^\n]*?)[ \t]*(?:\*/|-->)?[ \t]*$", re.M)
+# The version-2-only GPL: the id with or without "-only". "+" and "-or-later"
+# reach version 3, and the LGPL ids do not match.
+GPL_V2_ONLY = re.compile(r"(?<![\w.-])GPL-" r"2\.0(?:-only)?(?![\w.+-])")
+KERNEL_COPYRIGHT = re.compile(r"Copyright\s*(?:\(c\))?[\s\d,-]*Linus\s+" r"Torvalds", re.I)
+# Text files the scan reads; fonts, images and other binary data are skipped.
+SCANNED_SUFFIXES = {
+    ".c", ".cc", ".cpp", ".h", ".hpp", ".inc", ".rc", ".asm", ".lua", ".gsc", ".csc", ".gsh",
+    ".js", ".html", ".css", ".rml", ".rcss", ".json", ".txt", ".md",
+}
+
+
+def spdx_v2_only(expression: str) -> bool:
+    """True when every OR choice of an SPDX expression needs the version-2-only GPL."""
+    choices = re.split(r"\s+OR\s+", expression.replace("(", " ").replace(")", " ").strip())
+    return all(GPL_V2_ONLY.search(choice) for choice in choices)
+
+
+def licence_problems_in(text: str) -> list[str]:
+    """What in one file's text GPL-3.0 cannot take in, each kind once."""
+    found = []
+    for match in SPDX_EXPRESSION.finditer(text):
+        if spdx_v2_only(match.group(1)):
+            found.append(f"SPDX tag '{match.group(1).strip()}' (version 2 only, GPL-3.0 cannot take it in)")
+    if KERNEL_COPYRIGHT.search(text):
+        found.append("Linux kernel copyright line (kernel code is version 2 only)")
+    return list(dict.fromkeys(found))
+
+
+def licence_problems() -> list[str]:
+    """The licence scan over the tracked text files under src/ and data/."""
+    listed = subprocess.run(["git", "-c", "core.quotepath=off", "ls-files", "-z", "--", "src", "data"],
+                            cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    problems = []
+    for relative in sorted(p for p in listed.split("\0") if p):
+        path = ROOT / relative
+        if path.suffix.lower() not in SCANNED_SUFFIXES or not path.is_file():
+            continue
+        for problem in licence_problems_in(path.read_text(encoding="utf-8", errors="replace")):
+            problems.append(f"{relative}: {problem}")
+    return problems
+
+
+def self_test() -> int:
+    v2 = "GPL-" "2.0"
+    cases = [
+        # (text, problems it must give)
+        (f"// {SPDX_TAG} {v2}\n", 1),
+        (f"/* {SPDX_TAG} {v2}-only */\n", 1),
+        (f"// {SPDX_TAG} MIT AND {v2}\n", 1),
+        (f"-- {SPDX_TAG} ({v2} OR {v2}-only)\n", 1),
+        (" *  Copyright (C) 1991, 1992  Linus " "Torvalds\n", 1),
+        (f"// {SPDX_TAG} {v2}\n *  Copyright (C) 1991, 1992  Linus " "Torvalds\n", 2),
+        (f"// {SPDX_TAG} {v2}+\n", 0),
+        (f"// {SPDX_TAG} {v2}-or-later\n", 0),
+        (f"// {SPDX_TAG} {v2} OR MIT\n", 0),
+        (f"// {SPDX_TAG} L{v2}-only\n", 0),
+        (f"// {SPDX_TAG} LGPL-2.1\n", 0),
+        (f"// {SPDX_TAG} GPL-3.0-or-later\n", 0),
+        (f"/* {SPDX_TAG} BSD-3-Clause */\n", 0),
+        ("// The names follow the Linux kernel's documented strscpy API.\n", 0),
+        ("// Copyright (c) 2022 momo5502\n", 0),
+    ]
+    failures = []
+    for text, wanted in cases:
+        got = licence_problems_in(text)
+        if len(got) != wanted:
+            failures.append(f"{text.strip()!r}: gave {got}, wants {wanted} problem(s)")
+    for line in failures:
+        print(f"self-test: {line}")
+    print(f"notices self-test: {'FAIL' if failures else 'ok'}")
+    return 1 if failures else 0
 
 
 def read(path: pathlib.Path) -> str:
@@ -414,7 +500,7 @@ def source_text(version: str, commit: str, subs: dict, tp: dict[str, pathlib.Pat
                   f"    SHA-256 {digest}", f"    from {url}"]
     lines += [
         "",
-        "How to build: README.md in the repository, section Build. The tools are",
+        "How to build: README.md in the repository, section Building. The tools are",
         "LLVM 23 (clang and LLD), Ninja, premake 5.0.0 and the Visual Studio 2022",
         "Build Tools (Windows SDK, MSVC libraries and ATL).",
         "",
@@ -430,9 +516,22 @@ def main() -> int:
     parser.add_argument("--notices")
     parser.add_argument("--source")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--licences", action="store_true", help="only the licence scan of src/ and data/")
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
+    if args.self_test:
+        return self_test()
     build = pathlib.Path(args.build_dir)
     try:
+        licences = licence_problems()
+        if licences:
+            for line in licences:
+                print(f"notices: licence problem: {line}")
+            raise Problem("the package would ship code GPL-3.0 cannot take in (docs/DESIGN.md 16.5); "
+                          "rewrite or remove it first")
+        if args.licences:
+            print("notices: licence scan of src/ and data/: ok")
+            return 0
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
         commit, dirty = head()
         links = ninja_links(build)

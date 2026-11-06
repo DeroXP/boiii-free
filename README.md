@@ -72,12 +72,17 @@ FreeType 2.14.3 sources in one folder (`rmlui\RmlUi-6.3`,
 [docs/TESTING.md](docs/TESTING.md).
 
 ```
-git clone --recursive https://github.com/DeroXP/boiii-free.git
-cd boiii-free
+git clone --recursive -b xerces-main https://github.com/DeroXP/boiii-free.git xerces
+cd xerces
 tools\build.ps1 -Tests                                 # core, unit tests, CLI checks
 tools\build.ps1 -Client                                # the game client, boiii.exe
 tools\build.ps1 -Launcher -ThirdPartyDir <folder>      # the launcher, Xerces.exe
 ```
+
+Xerces is the `xerces-main` branch; the repository's default branch is the
+fork's earlier multi-mod proof of concept. To rebuild a package, check out the
+commit its `SOURCE.txt` names instead (then
+`git submodule update --init --recursive`).
 
 `-ToolsDir <folder>` finds the tools when they are not on `PATH`. The programs
 land in `build\bin\x64\Release`. Run `Xerces.exe` from there: it finds `data\`
@@ -111,4 +116,5 @@ Xerces is free software under the GNU General Public License, version 3
 exact commit it was built from.
 
 Call of Duty and Black Ops III are trademarks of Activision. Xerces is not made,
-endorsed or supported by Activision or Treyarch, and contains no game files.
+endorsed or supported by Activision or Treyarch, and adds no game data: you play
+with your own copy of the game from Steam.

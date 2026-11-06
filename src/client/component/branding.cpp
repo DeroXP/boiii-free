@@ -42,7 +42,8 @@ void draw_branding() {
   }
 }
 
-const char *get_ingame_console_prefix_stub() { return "EZZ> "; }
+// Xerces: its own name in front of the in-game console's input line.
+const char *get_ingame_console_prefix_stub() { return "Xerces> "; }
 } // namespace
 
 struct component final : client_component {

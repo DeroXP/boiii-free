@@ -11,12 +11,14 @@ to report these again, but tell us if you see them somewhere else or worse.
   own and has not been checked on plain BOIII.
 - **BACKROOMZ and Super Mario 64 with DS4C run out of memory.** DS4C's files
   take about 450 MiB of the memory the game keeps for loaded content, and these
-  two maps need more than is left. The game shows "Black Ops III ran out of
-  memory", names the map and the mods, and closes when you press OK. The Mods
+  two maps need more than is left. With BACKROOMZ the game shows "Black Ops III
+  ran out of memory", names the map and the mods, and closes when you press OK.
+  Super Mario 64 should do the same, but we have not checked that yet. The Mods
   screen warns about maps that will not fit before you launch. Turning on
-  Settings > Launch > "Larger zone memory (experimental)" makes them load: they
-  played that way five times in our tests, which is all the testing that setting
-  has had. Turn it off again if the game crashes with it on.
+  Settings > Launch > "Larger zone memory (experimental)" makes them load: both
+  played that way in our tests, twice each, plus one smaller map. Those five
+  runs are all the testing that setting has had. Turn it off again if the game
+  crashes with it on.
 - **DS4C prints script errors on custom maps.** Lines such as "undefined is not
   a field object" or "has unmatching types" fill the console while you play. The
   game keeps running. They come from DS4C's scripts.
@@ -39,7 +41,13 @@ to report these again, but tell us if you see them somewhere else or worse.
   while a map was starting, with no crash report, and ran fine the next time. If
   it happens to you, report it (README.txt, Reporting bugs) and say what you did
   just before.
-- **The Windows firewall prompt says "BOIII".** The game program is still called
-  boiii.exe. Allow it if you want to host games or join other people's; offline
-  play does not need it.
+- **Joining another tester's game is not tested yet.** Joining by address
+  (Servers), the message that names a mod you lack, and playing a custom map
+  together all need a second PC, and none has been tried with Xerces. Xerces
+  does not open a port on your router either (README.txt, Playing with other
+  testers).
+- **Some names still say BOIII.** The game program is still called boiii.exe, so
+  the Windows firewall prompt says "BOIII", and so does the game's own settings
+  menu ("BOIII SETTINGS"). Allow the firewall prompt if you want to host games
+  or join other people's; offline play does not need it.
 - **Xerces does not update itself.** A new beta comes as a new zip.

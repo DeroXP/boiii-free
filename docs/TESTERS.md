@@ -20,19 +20,26 @@ KNOWN_ISSUES.txt lists what we already know about.
 
 ## Install
 
-1. Unzip the whole zip into a folder of its own, for example `C:\Games\Xerces`.
+1. Check the zip before you unzip it. The private link comes with the zip's
+   SHA-256. In PowerShell, in the folder with the zip, run
+   `Get-FileHash .\xerces-<version>.zip` (with your zip's name) and compare the
+   hash it prints with the one sent with the link. If they differ, do not use
+   the zip, and tell us.
+2. Unzip the whole zip into a folder of its own, for example `C:\Games\Xerces`.
    Not into the Black Ops III folder, and keep the files together: Xerces.exe
    needs boiii.exe, data and compat next to it.
-2. Start **Xerces.exe**, and only Xerces.exe. It starts the game (boiii.exe)
+3. Start **Xerces.exe**, and only Xerces.exe. It starts the game (boiii.exe)
    itself, with the mods you picked. Do not start boiii.exe or BlackOps3.exe
    yourself while you test.
-3. Windows SmartScreen may say "Windows protected your PC", because the beta is
-   not signed yet. Choose "More info", then "Run anyway". SHA256SUMS.txt lists
-   the SHA-256 of every file in the folder if you want to check them first (in
-   PowerShell: `Get-FileHash .\Xerces.exe`).
-4. The first start reads your whole Workshop folder to learn your mods. From an
+4. Windows SmartScreen may say "Windows protected your PC", because the beta is
+   not signed yet. Choose "More info", then "Run anyway".
+5. The first start reads your whole Workshop folder to learn your mods. From an
    SSD that takes seconds; from a hard disk with a big Workshop folder it can
    take several minutes. Later starts reuse what it learned and are quick.
+
+SHA256SUMS.txt in the folder lists the SHA-256 of every file in it, to check
+later that no file has changed. It came in the same zip, so only the zip's own
+hash, sent with the link, shows that the zip is the one we made.
 
 ## Playing
 
@@ -56,15 +63,18 @@ KNOWN_ISSUES.txt lists what we already know about.
 - After a crash with mods on, Home offers to launch with mods off (safe mode),
   and "Find the culprit" tries your mods in smaller groups, one test launch at a
   time, to find the one that crashes.
-- **Crash reports are on by default.** After a crash, Xerces sends a report to
-  the Xerces crash service so we can fix it: the Xerces version and commit, the
-  game build, where the crash happened (the module and offset, the start-up,
-  menu or match phase, the mode and map), the launch options, the list of mods,
-  basic facts about the PC such as the Windows version, the end of the logs with
-  your folder names hidden, and a small crash dump with the threads' stacks. It
-  goes with a random install id, not your Steam account or name, and your IP
-  address is not stored. Reports are kept for 90 days. Turn this off in
-  Settings > Privacy.
+- **Crash reports are on by default.** After a crash, Xerces sends a crash
+  report to the Xerces server so we can fix it: the Xerces version and commit,
+  the game build, where the crash happened (the module and offset, the start-up,
+  menu or match phase), the mode, map and mods, the names of the launch flags,
+  this PC's Windows version, CPU, graphics card and driver, RAM and display, the
+  last lines of the game's and Xerces' logs with your user name, folders and
+  server addresses removed, and a small crash dump with the threads' registers
+  and stacks and no other memory. It goes with a random id kept in your Xerces
+  folder, never your name, Steam account or hardware. The server stores no IP
+  address and deletes reports after 90 days. Turn this off in Settings >
+  Privacy; "Delete my crash reports" there deletes what this PC sent. With it
+  off, report crashes on GitHub (Reporting bugs, below).
 - Xerces also keeps crash bundles on your PC (Diagnostics, Crash bundles; "Make
   a bundle" makes one any time). Attach one to a bug report if we ask.
 
@@ -84,14 +94,20 @@ Never attach game files or files from the Workshop folder.
 
 ## Playing with other testers
 
-- Testers can join each other's games. The host starts a game from Home, then
-  opens it to others in the game's lobby; the others type the host's address in
-  Servers ("Join"). Everyone needs the same mods, in the same order: Xerces
-  names any that are missing and opens them in Steam for you to subscribe.
-  Nothing is downloaded from the host.
-- While you host a game open to others, the game asks your router (UPnP) to
-  forward its port, and closes it again when you stop. If your router has UPnP
-  off, others may not reach you; then someone else hosts.
+Joining another tester's game has not been tested with Xerces yet
+(KNOWN_ISSUES.txt). If you try it, tell us how it went.
+
+- The host launches the game from Home and starts a private match. The others
+  type the host's address and port in Servers, for example `192.168.1.20:27017`,
+  and choose Join. Everyone needs the same mods, in the same order. Nothing is
+  downloaded from the host: a player who lacks a mod should see it named, with
+  its Workshop page to subscribe to in Steam.
+- Xerces does not open a port on your router, and friend invites are off in this
+  build (the Friends screen says why). On the same home network, join with the
+  host's local address. Over the internet, the host forwards UDP port 27017 on
+  the router to their PC (the game takes the next free port, up to 27026, when
+  another program already has 27017), or everyone joins one VPN that puts them
+  on the same network.
 - The first time you host or join, Windows asks whether "BOIII" may use your
   networks. That is Xerces' game client (boiii.exe, it keeps that name for now).
   Allow private networks; offline play does not need it.

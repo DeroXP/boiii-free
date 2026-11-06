@@ -626,6 +626,26 @@ at the old settings.
 Not covered: a heavier map, PresentMon (displayed frames, present mode, CPU and
 GPU busy), more than 3 runs a side.
 
+### Beta package (DESIGN.md 16.1)
+
+`tools\release.ps1` refuses to build while `notices.py --licences` finds code
+GPL-3.0 cannot take in (`src/common/str.hpp` until its rewrite merges) or while
+Settings lacks the crash report controls `README.txt` describes (until
+`launcher/crash-client` merges). Not checked yet, all with the game (ask first),
+from an unzipped package outside the repository:
+
+- [ ] The game reads the package's `data\` (`XERCES_DATA_PATH`): the Xerces
+      menus and `ui_scripts` load with no `%LOCALAPPDATA%\boiii\data`.
+- [ ] The menu watermark and the console title say
+      `Xerces <version> (<commit>)`, the game window's title starts with
+      "Xerces", the splash in the taskbar is "Xerces", and the in-game console's
+      input line starts with `Xerces> `.
+- [ ] A crash leaves `xerces-crash-<time>.zip` in
+      `%LOCALAPPDATA%\boiii\minidumps` with `info.txt` headed "Xerces Crash
+      Dump" and its `Version:` line.
+- [ ] The first host or join shows the firewall prompt for "BOIII"
+      (`KNOWN_ISSUES.md`).
+
 ### Launcher (M3)
 
 `tools\build.ps1 -Launcher` builds `build\bin\x64\Release\Xerces.exe` from the

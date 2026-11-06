@@ -13,8 +13,11 @@
      commit and a clean-tree flag into build\src\xerces_version.h, checked
      here), builds xerces_tests and xerces_cli and runs the unit tests and
      tools\ci\cli_smoke.ps1, then builds Xerces.exe and boiii.exe (Release).
-     tools\ci\check_switches.py must pass first: upstream's updater and the
-     -beta download stay off.
+     Before that: tools\ci\check_switches.py (upstream's updater and the -beta
+     download stay off), check_hosts.py, notices.py --licences (no code
+     GPL-3.0 cannot take in), and README.txt's promises: the crash report
+     switch in Settings > Privacy exists and the crash dialog does not send
+     players to Ezz's Discord.
   3. Stages dist\xerces-<version>\: the three programs, data\ and compat\ (the
      files Git tracks), LICENSE, THIRD_PARTY_NOTICES.txt and SOURCE.txt
      (tools\release\notices.py), README.txt (docs\TESTERS.md) and
@@ -22,7 +25,8 @@
      file. No .lib, .pdb, spike or test programs go in.
   4. Zips the folder, zips the PDBs into symbols-<version>.zip (kept by the
      team, never handed out with the package), and writes
-     dist\SHA256SUMS-<version>.txt for the two zips.
+     dist\SHA256SUMS-<version>.txt for the two zips. The package zip's SHA-256
+     goes out with the private link: README.txt asks testers to check it.
 
   Never launches anything it builds, downloads nothing and pushes nothing.
   LLVM 23, Ninja and premake 5.0.0 come from PATH or -ToolsDir (laid out as
@@ -136,6 +140,27 @@ try {
   Step 'Lints'
   Invoke-Checked 'check_switches.py' { python -I tools\ci\check_switches.py }
   Invoke-Checked 'check_hosts.py' { python -I tools\ci\check_hosts.py }
+  # No code GPL-3.0 cannot take in (DESIGN.md 16.5; src\common\str.hpp held
+  # kernel code until its rewrite).
+  Invoke-Checked 'notices.py --licences' { python -I tools\release\notices.py --licences }
+
+  # README.txt (docs\TESTERS.md) must describe what this build does. It says
+  # crash reports are sent, can be turned off in Settings > Privacy and deleted
+  # from the server there, and that bugs go to GitHub issues. The crash reports
+  # came with launcher/crash-client, which also took dc.ezz.lol out of the
+  # game's crash dialog.
+  Step 'What README.txt promises'
+  $guide = Read-Utf8 (Join-Path $root 'docs\TESTERS.md')
+  $settings = Read-Utf8 (Join-Path $root 'data\xerces\ui\views\settings.rml')
+  if (($guide -match 'Crash reports are on' -or $guide -match 'Settings\s*>\s*Privacy') -and
+      ($settings -notmatch 'id="send-crash-reports"' -or $settings -notmatch 'id="delete-crash-reports"')) {
+    throw ("README.txt (docs\TESTERS.md) says crash reports are on and can be turned off and deleted in " +
+      "Settings > Privacy, but Settings has no such switch: merge the crash reports (launcher/crash-client) " +
+      "first, or change the guide.")
+  }
+  if ((Read-Utf8 (Join-Path $root 'src\client\component\exception.cpp')) -match 'dc\.ezz\.lol') {
+    throw "The game's crash dialog sends players to dc.ezz.lol, while README.txt sends them to GitHub issues."
+  }
 
   Step 'Generating the build files'
   Invoke-Checked 'premake5' { premake5 ninja }
@@ -218,6 +243,9 @@ try {
   Write-Host "  $zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB, $($files.Count + 1) files)"
   Write-Host "  $symbols"
   $zipSums | ForEach-Object { Write-Host "  $_" }
+  # SHA256SUMS.txt inside the zip cannot vouch for the zip; this hash, sent apart
+  # from it, can (README.txt, Install).
+  Write-Host "  Post the zip's SHA-256 with the private link: $(Get-Sha256 $zip)"
   if (-not $onOrigin.Count) { Write-Warning "Not on origin yet: push $commit before handing the package out." }
 } finally {
   Pop-Location

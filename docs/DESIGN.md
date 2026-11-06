@@ -2377,6 +2377,16 @@ Beta packages for testers (2026-11-05) come first, as a zip by private link:
   `docs/KNOWN_ISSUES.md`, `SHA256SUMS.txt`), its zip, and the PDBs in a separate
   zip. `tools\release\notices.py` makes the notices from the licence files and
   the build's link lines, and fails on a library it does not know.
+- Before it builds, `release.ps1` refuses while the tracked sources and data
+  carry code GPL-3.0 cannot take in (`notices.py --licences`: SPDX tags that
+  allow only the version-2-only GPL, Linux kernel copyright lines; 16.5), and
+  while `README.txt` promises what the build lacks: its crash report section
+  needs the "Send crash reports" and "Delete my crash reports" controls in
+  Settings > Privacy (`launcher/crash-client`), and the game's crash dialog must
+  not send players to Ezz's Discord.
+- The package zip's SHA-256 goes out with the private link, apart from the zip;
+  `README.txt` asks testers to check it before unzipping. The `SHA256SUMS.txt`
+  inside cannot vouch for the zip it came in.
 - Xerces.exe passes the `data\` next to it to the game as `XERCES_DATA_PATH`, as
   development builds pass the repository's.
 - Upstream's publish workflows are removed; CI builds `boiii.exe` on push and

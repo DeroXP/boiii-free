@@ -32,6 +32,9 @@ jobs:
       - name: Launcher string template current
         run: python tools/i18n/extract_strings.py --check
 
+      - name: Package licence scan patterns
+        run: python tools/release/notices.py --self-test
+
       - name: Setup LLVM
         uses: ZhongRuoyu/setup-llvm@v0
         with:
