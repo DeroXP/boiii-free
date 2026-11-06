@@ -111,8 +111,9 @@ TEST_CASE("pre-flight: a Steam update past every listed build says so") {
   CHECK_EQ(result.message,
            std::string("Steam updated Black Ops III (build 24901234). Xerces "
                        "supports build 24784313. Play through Steam until a "
-                       "Xerces update supports the new build. Xerces will tell "
-                       "you when it does."));
+                       "Xerces update supports the new build. Xerces does not "
+                       "check for updates yet: the tester channel announces "
+                       "the next zip."));
   // Without Steam's build number an unknown exe cannot be called newer.
   CHECK(preflight_check(updated, std::nullopt, registry).verdict ==
         preflight_verdict::unknown);

@@ -308,7 +308,8 @@ preflight_result preflight_check(const exe_facts &facts,
     result.message = "Steam updated Black Ops III" + this_build + ". " +
                      supports +
                      " Play through Steam until a Xerces update supports the "
-                     "new build. Xerces will tell you when it does.";
+                     "new build. Xerces does not check for updates yet: the "
+                     "tester channel announces the next zip.";
     return result;
   }
   result.verdict = preflight_verdict::unknown;

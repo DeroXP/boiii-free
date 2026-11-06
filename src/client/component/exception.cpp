@@ -35,6 +35,9 @@
 #define SHORTVERSION "0"
 #endif
 #endif
+#ifndef XERCES_VERSION_LABEL
+#define XERCES_VERSION_LABEL "Xerces"
+#endif
 
 #include <CommCtrl.h>
 #include <dbghelp.h>
@@ -613,9 +616,10 @@ std::string generate_crash_info(const LPEXCEPTION_POINTERS exceptioninfo) {
   const resolved_frame crash_frame =
       resolve_address(exceptioninfo->ExceptionRecord->ExceptionAddress);
 
-  line("Ezz Crash Dump");
+  line("Xerces Crash Dump");
   line(std::string{});
-  line("Version: "s + VERSION);
+  // Xerces: "Xerces <version> (<commit>)", the build the report is about.
+  line("Version: "s + XERCES_VERSION_LABEL);
   line("Timestamp: "s + get_timestamp());
   line(utils::string::va(
       "Exception: 0x%08X (%s)", exceptioninfo->ExceptionRecord->ExceptionCode,
@@ -697,13 +701,13 @@ std::string generate_crash_info(const LPEXCEPTION_POINTERS exceptioninfo) {
 void write_minidump(const LPEXCEPTION_POINTERS exceptioninfo) {
   const std::string crash_name =
       (game::get_appdata_path() / "minidumps" /
-       utils::string::va("ezz-crash-%s.zip", get_timestamp().data()))
+       utils::string::va("xerces-crash-%s.zip", get_timestamp().data()))
           .string();
 
   utils::compression::zip::archive zip_file{};
   zip_file.add("crash.dmp", create_minidump(exceptioninfo));
   zip_file.add("info.txt", generate_crash_info(exceptioninfo));
-  if (!zip_file.write(crash_name, "Ezz Crash Dump")) {
+  if (!zip_file.write(crash_name, "Xerces Crash Dump")) {
     utils::io::remove_file(crash_name);
   }
 }

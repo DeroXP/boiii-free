@@ -956,3 +956,85 @@ TEST_CASE("mods info: a folder name outside the code page") {
   CHECK_EQ(info->folder_name,
            std::string("zm_caf\xc3\xa9_\xe6\x97\xa5\xe6\x9c\xac"));
 }
+
+namespace {
+// The parts of a data folder the launcher and the client need.
+void write_data(const fs::path &data, bool client) {
+  write(data / "xerces" / "ui" / "shell.rml", "<rml/>");
+  if (client) {
+    write(data / "ui_scripts" / "frontend_menus" / "x.lua", "");
+    write(data / "scripts" / "x.gsc", "");
+    write(data / "lookup_tables" / "dvar_list.txt", "");
+    write(data / "launcher" / "main.html", "<html/>");
+  }
+}
+} // namespace
+
+TEST_CASE("install: an unzipped package passes its data folder to the game") {
+  const fs::path pkg = fresh("install_package") / "xerces-0.1.0-beta.1";
+  write_data(pkg / "data", true);
+  write(pkg / "compat" / "builds.json", "{}");
+  write(pkg / "LICENSE", "GPL");
+  write(pkg / "THIRD_PARTY_NOTICES.txt", "notices");
+  launcher_paths paths;
+  locate_install(paths, pkg);
+  REQUIRE(paths.client_data.has_value());
+  CHECK(*paths.client_data == pkg / "data");
+  CHECK(paths.client_data_expected == pkg / "data");
+  CHECK(!paths.dev_checkout); // the BETA badge
+  CHECK(paths.data == pkg / "data" / "xerces");
+  CHECK(paths.compat == pkg / "compat");
+  CHECK(paths.client == pkg / "boiii.exe");
+  REQUIRE(paths.licence_file.has_value());
+  CHECK(*paths.licence_file == pkg / "LICENSE");
+  REQUIRE(paths.notices_file.has_value());
+  CHECK(*paths.notices_file == pkg / "THIRD_PARTY_NOTICES.txt");
+  CHECK(missing_client_data(pkg / "data").empty());
+  std::error_code ec;
+  fs::remove_all(pkg.parent_path(), ec);
+}
+
+TEST_CASE("install: a package without the client data passes nothing") {
+  const fs::path pkg = fresh("install_no_client_data");
+  write_data(pkg / "data", false);
+  write(pkg / "data" / "launcher" / "main.css", "");
+  launcher_paths paths;
+  locate_install(paths, pkg);
+  CHECK(!paths.client_data.has_value());
+  CHECK(paths.client_data_expected == pkg / "data");
+  CHECK(!paths.dev_checkout);
+  const std::vector<std::string> missing = missing_client_data(pkg / "data");
+  CHECK_EQ(missing.size(), std::size_t(4));
+  CHECK(std::ranges::find(missing, std::string("launcher/main.html")) !=
+        missing.end());
+  CHECK(std::ranges::find(missing, std::string("ui_scripts")) != missing.end());
+  std::error_code ec;
+  fs::remove_all(pkg, ec);
+}
+
+TEST_CASE("install: a development build passes the repository's data") {
+  const fs::path repo = fresh("install_checkout");
+  write_data(repo / "data", true);
+  write(repo / "premake5.lua", "-- premake");
+  write(repo / "compat" / "builds.json", "{}");
+  write(repo / "LICENSE", "GPL");
+  const fs::path bin = repo / "build" / "bin" / "x64" / "Release";
+  fs::create_directories(bin);
+  launcher_paths paths;
+  locate_install(paths, bin);
+  REQUIRE(paths.client_data.has_value());
+  CHECK(*paths.client_data == repo / "data");
+  CHECK(paths.dev_checkout); // the DEV badge
+  CHECK(paths.data == repo / "data" / "xerces");
+  CHECK(paths.compat == repo / "compat");
+  CHECK(paths.client == bin / "boiii.exe");
+  REQUIRE(paths.licence_file.has_value());
+  CHECK(*paths.licence_file == repo / "LICENSE");
+  // A release package made from it is told apart only by premake5.lua.
+  fs::remove(repo / "premake5.lua");
+  locate_install(paths, bin);
+  CHECK(!paths.dev_checkout);
+  CHECK(paths.client_data.has_value());
+  std::error_code ec;
+  fs::remove_all(repo, ec);
+}

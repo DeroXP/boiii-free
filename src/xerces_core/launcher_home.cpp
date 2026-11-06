@@ -73,6 +73,67 @@ fs::path find_home(const std::optional<fs::path> &home_override) {
   return ec ? home : absolute;
 }
 
+std::vector<std::string> missing_client_data(const fs::path &data_dir) {
+  // A few files and folders every client data folder has; the rest of the
+  // folder comes with them in a package and in the repository.
+  struct need {
+    const char *relative;
+    bool folder;
+  };
+  static constexpr need needs[] = {
+      {"ui_scripts", true},
+      {"scripts", true},
+      {"lookup_tables", true},
+      {"launcher/main.html", false},
+  };
+  std::vector<std::string> missing;
+  std::error_code ec;
+  for (const need &n : needs) {
+    const fs::path path = data_dir / fs::path(n.relative);
+    const bool there =
+        n.folder ? fs::is_directory(path, ec) : fs::is_regular_file(path, ec);
+    if (!there) {
+      missing.emplace_back(n.relative);
+    }
+  }
+  return missing;
+}
+
+void locate_install(launcher_paths &out, const fs::path &exe_dir) {
+  std::error_code ec;
+  out.client_data.reset();
+  out.dev_checkout = false;
+  fs::path root = exe_dir;
+  if (const auto found =
+          find_up(exe_dir, fs::path("data/xerces/ui/shell.rml"))) {
+    root = *found;
+    // A repository checkout: the build sits in <repo>\build\bin\x64\Release.
+    out.dev_checkout = fs::exists(*found / "premake5.lua", ec);
+  }
+  out.data = root / "data" / "xerces";
+  // The client data sits next to the launcher's own (an unzipped package, or
+  // the repository), and is passed whenever it is there (815545d3).
+  out.client_data_expected = root / "data";
+  if (missing_client_data(out.client_data_expected).empty()) {
+    out.client_data = out.client_data_expected;
+  }
+  if (const auto found = find_up(exe_dir, fs::path("compat/builds.json"))) {
+    out.compat = *found / "compat";
+  } else {
+    out.compat = exe_dir / "compat";
+  }
+  out.client = exe_dir / "boiii.exe";
+  out.licence_file.reset();
+  out.notices_file.reset();
+  if (const auto found = find_up(exe_dir, fs::path("LICENSE"))) {
+    out.licence_file = *found / "LICENSE";
+  }
+  if (const auto found =
+          find_up(exe_dir, fs::path("THIRD_PARTY_NOTICES.txt"))) {
+    out.notices_file = *found / "THIRD_PARTY_NOTICES.txt";
+  }
+}
+
 launcher_paths find_paths(const std::optional<fs::path> &home_override,
                           bool create) {
   launcher_paths out;
@@ -91,23 +152,7 @@ launcher_paths find_paths(const std::optional<fs::path> &home_override,
   }
 
   out.program = module_path();
-  const fs::path exe_dir = out.program.parent_path();
-  if (const auto root =
-          find_up(exe_dir, fs::path("data/xerces/ui/shell.rml"))) {
-    out.data = *root / "data" / "xerces";
-    // A repository checkout: the client needs its data folder (815545d3).
-    if (fs::exists(*root / "premake5.lua", ec)) {
-      out.dev_data = *root / "data";
-    }
-  } else {
-    out.data = exe_dir / "data" / "xerces";
-  }
-  if (const auto root = find_up(exe_dir, fs::path("compat/builds.json"))) {
-    out.compat = *root / "compat";
-  } else {
-    out.compat = exe_dir / "compat";
-  }
-  out.client = exe_dir / "boiii.exe";
+  locate_install(out, out.program.parent_path());
   return out;
 }
 

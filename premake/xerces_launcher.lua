@@ -85,13 +85,18 @@ includedirs({
   root_path("deps/zstd/lib"),
   path.join(rmlui, "Include"),
   path.join(rmlui, "Backends"),
+  -- xerces_version.h, which premake5.lua writes from VERSION and git (xerces_core/version.hpp).
+  "%{wks.location}/src",
 })
 files({
   root_path("src/xerces_launcher/**.hpp"),
   root_path("src/xerces_launcher/**.cpp"),
+  -- VERSIONINFO, from xerces_version.h.
+  root_path("src/xerces_launcher/**.rc"),
   path.join(rmlui, "Backends/RmlUi_Platform_Win32.cpp"),
   path.join(rmlui, "Backends/RmlUi_Renderer_DX11.cpp"),
 })
+resincludedirs({ "%{wks.location}/src" })
 -- RmlUi's own backend files (a "C:" in an absolute path would break the filter).
 filter({ "files:**/Backends/**" })
 warnings("Off")

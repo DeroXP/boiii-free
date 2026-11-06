@@ -1333,7 +1333,12 @@ int main(int argc, char **argv) {
     return exit_ok;
   }
   if (args.has("--version")) {
-    std::cout << "xerces_cli " << xerces_version_text << "\n";
+    std::cout << "xerces_cli " << xerces_version_text;
+    if (xerces_commit[0] != '\0') {
+      std::cout << " (" << xerces_commit
+                << (xerces_dirty ? ", with changes" : "") << ")";
+    }
+    std::cout << "\n";
     return exit_ok;
   }
   const std::string group = args.word(0);

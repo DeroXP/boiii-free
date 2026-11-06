@@ -15,15 +15,17 @@ local function headless_includes()
     root_path("src"),
     root_path("deps/rapidjson/include"),
     root_path("deps/zstd/lib"),
+    -- xerces_version.h, which premake5.lua writes from VERSION and git (xerces_core/version.hpp).
+    "%{wks.location}/src",
   })
   defines({ "RAPIDJSON_HAS_STDSTRING", "ZSTD_STATIC_LINKING_ONLY" })
 end
 
--- Crash reports (src/xerces_core/crash_*.cpp): zlib for gzip bodies, and the
--- build's version.h (premake writes it to build\src) for the git commit.
+-- Crash reports (src/xerces_core/crash_*.cpp): zlib for gzip bodies. The
+-- commit they name comes from xerces_version.h (headless_includes).
 -- WinHTTP, DXGI and BCrypt are system libraries named by #pragma there.
 local function crash_report_includes()
-  includedirs({ root_path("deps/zlib"), "%{wks.location}/src" })
+  includedirs({ root_path("deps/zlib") })
   defines({ "ZLIB_CONST" })
 end
 
@@ -61,8 +63,14 @@ links({ "xerces_core", "zstd", "zlib", "advapi32", "minhook" })
 project("xerces_cli")
 console_app()
 language("C++")
-files({ root_path("src/xerces_cli/**.hpp"), root_path("src/xerces_cli/**.cpp") })
+files({
+  root_path("src/xerces_cli/**.hpp"),
+  root_path("src/xerces_cli/**.cpp"),
+  -- VERSIONINFO, from xerces_version.h.
+  root_path("src/xerces_cli/**.rc"),
+})
 headless_includes()
+resincludedirs({ "%{wks.location}/src" })
 links({ "xerces_core", "zstd", "zlib", "advapi32" })
 
 group("")

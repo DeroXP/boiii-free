@@ -624,7 +624,7 @@ void app::wire_shell(Rml::ElementDocument *doc) {
     version->SetInnerRML(escape(services::version()));
   }
   if (Rml::Element *badge = doc->GetElementById("shell-badge")) {
-    badge->SetInnerRML(services_->paths().dev_data ? "DEV" : "BETA");
+    badge->SetInnerRML(services_->paths().dev_checkout ? "DEV" : "BETA");
   }
 }
 
@@ -925,6 +925,25 @@ bool app::open_folder(const fs::path &dir) {
   const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(
       nullptr, L"explore", dir.wstring().c_str(), nullptr, nullptr,
       SW_SHOWNORMAL));
+  return result > 32;
+}
+
+bool app::open_text_file(const fs::path &file) {
+  std::error_code ec;
+  if (!fs::is_regular_file(file, ec)) {
+    return false;
+  }
+  const std::wstring quoted = L"\"" + file.wstring() + L"\"";
+  log_info("launcher.file.open", generic(file));
+  auto result = reinterpret_cast<INT_PTR>(
+      ShellExecuteW(nullptr, L"open", L"notepad.exe", quoted.c_str(), nullptr,
+                    SW_SHOWNORMAL));
+  if (result <= 32) {
+    const std::wstring select = L"/select," + quoted;
+    result = reinterpret_cast<INT_PTR>(
+        ShellExecuteW(nullptr, L"open", L"explorer.exe", select.c_str(),
+                      nullptr, SW_SHOWNORMAL));
+  }
   return result > 32;
 }
 

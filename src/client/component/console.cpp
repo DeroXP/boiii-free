@@ -17,6 +17,9 @@
 #define SHORTVERSION "0"
 #endif
 #endif
+#ifndef XERCES_VERSION_LABEL
+#define XERCES_VERSION_LABEL "Xerces"
+#endif
 
 #include <utils/concurrency.hpp>
 #include <utils/flags.hpp>
@@ -1378,9 +1381,10 @@ void sys_create_console_stub(const HINSTANCE h_instance) {
   char text[CONSOLE_BUFFER_SIZE]{0};
 
   const char *class_name = "BOIII WinConsole";
-  const char *window_name = game::is_server()
-                                ? "BOIII V" SHORTVERSION " - Server"
-                                : "BOIII V" SHORTVERSION " - Console";
+  // Xerces: its own version in the title; tools find the window by its class.
+  const char *window_name = game::is_server() ? XERCES_VERSION_LABEL " - Server"
+                                              : XERCES_VERSION_LABEL
+                                " - Console";
 
   WNDCLASSA wnd_class{};
   wnd_class.style = 0;
@@ -1634,7 +1638,7 @@ struct component final : generic_component {
   DEFINE_COMPONENT_NAME("console");
 
   component() {
-    SetConsoleTitleA("EZZ BOIII V" SHORTVERSION);
+    SetConsoleTitleA(XERCES_VERSION_LABEL);
 
     if (game::is_headless()) {
       if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
@@ -1642,7 +1646,7 @@ struct component final : generic_component {
         AttachConsole(GetCurrentProcessId());
       }
 
-      SetConsoleTitleA("EZZ BOIII V" SHORTVERSION);
+      SetConsoleTitleA(XERCES_VERSION_LABEL);
       ShowWindow(GetConsoleWindow(),
                  hide_external_console() ? SW_HIDE : SW_SHOW);
 

@@ -61,8 +61,9 @@ void show() {
     const auto y_pixels = GetSystemMetrics(SM_CYFULLSCREEN);
 
     if (image) {
+      // Xerces: the taskbar shows this title while the game starts.
       window = CreateWindowExA(WS_EX_APPWINDOW, "Black Ops III Splash Screen",
-                               "EZZ BOIII", WS_POPUP | WS_SYSMENU,
+                               "Xerces", WS_POPUP | WS_SYSMENU,
                                (x_pixels - 320) / 2, (y_pixels - 100) / 2, 320,
                                100, nullptr, nullptr, self, nullptr);
 

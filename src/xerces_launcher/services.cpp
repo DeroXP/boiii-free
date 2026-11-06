@@ -125,6 +125,10 @@ services::~services() {
 
 std::string services::version() { return xerces_core::xerces_version_text; }
 
+std::string services::version_label() {
+  return xerces_core::xerces_version_label;
+}
+
 // ------------------------------------------------------------------- config
 void services::load_config() {
   const auto text = read_text(paths_.config_file());
@@ -707,8 +711,8 @@ void services::run_crash_job(crash_job job) {
   xerces_core::crash_context ctx;
   ctx.home = paths_.home;
   ctx.version = xerces_core::xerces_version_text;
-  ctx.commit = xerces_core::xerces_build_commit();
-  ctx.dirty = xerces_core::xerces_build_dirty();
+  ctx.commit = xerces_core::xerces_report_commit;
+  ctx.dirty = xerces_core::xerces_dirty;
   if (game_.exe) {
     ctx.game_checksum = game_.exe->checksum;
   }

@@ -103,6 +103,9 @@ public:
   // steam:// links are opened; anything else is refused and logged.
   bool open_url(const std::string &url);
   bool open_folder(const fs::path &dir);
+  // Opens a text file that exists (LICENSE has no extension, so Notepad, not
+  // the file's association); shows it in Explorer if Notepad cannot start.
+  bool open_text_file(const fs::path &file);
   // Windows' folder picker over the launcher window; nullopt if cancelled.
   std::optional<fs::path> pick_folder(const std::string &title);
   // Windows' file pickers; filter like L"Xerces pack (*.xpack)|*.xpack".

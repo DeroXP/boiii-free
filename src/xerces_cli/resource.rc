@@ -1,0 +1,46 @@
+#pragma code_page(65001)
+
+// xerces_cli.exe's version resource, as Xerces.exe's
+// (src/xerces_launcher/resource.rc).
+
+#include "winres.h"
+#include "xerces_version.h"
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION XERCES_VERSION_RC
+ PRODUCTVERSION XERCES_VERSION_RC
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+#ifdef XERCES_PRERELEASE
+ FILEFLAGS VS_FF_PRERELEASE
+#else
+ FILEFLAGS 0x0L
+#endif
+#endif
+ FILEOS 0x40004L
+ FILETYPE VFT_APP
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Xerces contributors"
+            VALUE "FileDescription", "Xerces command line"
+            VALUE "FileVersion", XERCES_VERSION_FILE
+            VALUE "InternalName", "xerces_cli"
+            VALUE "LegalCopyright", "Copyright (C) 2022-2026 the BOIII and Xerces contributors. GPL-3.0, no warranty. Modified from BOIII by Ezz and momo5502."
+            VALUE "OriginalFilename", "xerces_cli.exe"
+            VALUE "ProductName", "Xerces"
+            VALUE "ProductVersion", XERCES_VERSION
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

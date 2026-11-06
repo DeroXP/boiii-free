@@ -167,6 +167,8 @@ std::string system_info_json() {
   rapidjson::Document doc(rapidjson::kObjectType);
   auto &alloc = doc.GetAllocator();
   json::set(doc, "xerces", xerces_version_text, alloc);
+  json::set(doc, "xerces_commit", xerces_commit, alloc);
+  json::set(doc, "xerces_dirty", xerces_dirty, alloc);
 
   // RtlGetVersion tells the truth where GetVersionEx is shimmed.
   using rtl_get_version = LONG(WINAPI *)(OSVERSIONINFOW *);

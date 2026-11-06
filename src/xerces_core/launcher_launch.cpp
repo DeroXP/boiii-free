@@ -389,15 +389,15 @@ launch_outcome launch_game(const launch_inputs &in,
       read_text_file(paths.journal_file());
   write_text_file(paths.journal_file(), journal_to_json(journal));
 
-  // The game role finds <home> and, in a development build, its data folder
-  // through the environment it inherits, and the launch id that lets it take
-  // this journal over. Only the child gets them: nothing else this program
-  // opens (Steam, Explorer) may carry the launch id.
+  // The game role finds <home> and its data folder (next to Xerces.exe, or
+  // the repository's) through the environment it inherits, and the launch id
+  // that lets it take this journal over. Only the child gets them: nothing
+  // else this program opens (Steam, Explorer) may carry the launch id.
   environment_changes changes = {
       {L"XERCES_HOME", paths.home.wstring()},
       {L"XERCES_LAUNCH_ID", utf16(journal.launch_id)}};
-  if (paths.dev_data) {
-    changes.emplace_back(L"XERCES_DATA_PATH", paths.dev_data->wstring());
+  if (paths.client_data) {
+    changes.emplace_back(L"XERCES_DATA_PATH", paths.client_data->wstring());
   }
   std::wstring environment;
   if (wchar_t *current = GetEnvironmentStringsW()) {

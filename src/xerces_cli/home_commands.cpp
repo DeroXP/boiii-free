@@ -1381,8 +1381,8 @@ int cmd_crash(const arguments &args, const std::string &action) {
   crash_context ctx;
   ctx.home = home.paths.home;
   ctx.version = xerces_version_text;
-  ctx.commit = xerces_build_commit();
-  ctx.dirty = xerces_build_dirty();
+  ctx.commit = xerces_report_commit;
+  ctx.dirty = xerces_dirty;
   ctx.config_text = config_text;
   const auto env = [](const char *name) {
     char *value = nullptr;

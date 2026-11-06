@@ -1,7 +1,7 @@
 // RmlUi 6.3's Samples/basic/harfbuzz/src/FontFaceHandleHarfBuzz.cpp (MIT
 // licence: Copyright (c) 2008-2014 CodePoint Ltd, Shift Technology Ltd, and
 // contributors; Copyright (c) 2019-2026 The RmlUi Team, and contributors. The
-// licence text is in data/xerces/licenses/RmlUi.txt.) Copied for Xerces.exe
+// licence text is RmlUi's LICENSE.txt, next to this file.) Copied for Xerces.exe
 // (docs/DESIGN.md 7.1) with three changes, marked "Xerces:":
 // - HarfBuzz reads FreeType's hinted advances, the ones RmlUi's FreeType
 //   engine uses, because the glyph images are hinted too (FreeTypeInterface).

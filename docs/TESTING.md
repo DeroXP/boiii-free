@@ -381,8 +381,11 @@ each one does not cover is said under its item.
       first run posted WM_COMMAND to the box, which did not close it; map-check
       now clicks the button.) Not run yet: Super Mario 64 and a fitting map on
       this build.
-- [ ] Out of memory (DESIGN.md 5.6, feature `oom_report`; built 2026-11-05):
-      DS4C alone, then `map zm_backrooms`, through
+- [ ] Out of memory (DESIGN.md 5.6, feature `oom_report`; built 2026-11-05), the
+      rest of this run: the BACKROOMZ part passed on 24bd2f9b (the item above).
+      Still to do: `zm_supermario64` the same way, then a map that fits with
+      DS4C, and whether the next launcher start offers safe mode. The run: DS4C
+      alone, then `map zm_backrooms`, through
       `tools\dev\session\map-check.ps1 -Map zm_backrooms -Stack 3171632315 -Live`.
       The run should end `crash_load` with the dialog "Black Ops III ran out of
       memory" captured (`dialog-load.png`), naming `zm_backrooms` and DS4C
@@ -438,7 +441,10 @@ extra).
       reproduced with DS4C alone and none with Solo Easter Eggs + FOV: DS4C's
       perk scripts replaced the maps' own (SANCTUM, KABOOM), and DS4C's zones
       leave too little zone memory for the two biggest maps (below). With no
-      mods every map played.
+      mods every map played, RETURN TO HOGWARTZ only on the second try: its
+      first load without mods (11:23, `results.jsonl` row 14) ended the game 4.2
+      s in with no dump and no report (`crash_load`); the next (11:25) played.
+      Not explained.
 - [x] With map-first (17a929d2's code, the build before its review fixes and the
       build after): SANCTUM and KABOOM play with DS4C alone (15 and 36
       `loader.script.map_first` decisions, all perk scripts); with the stack,
@@ -455,11 +461,18 @@ extra).
       (`loader.exit.unexpected`, 0xFFFFFFFF while `loading_map`) and the crash
       handler leaves a dump. Not fixed: these two maps cannot load with DS4C
       unless the pool grows.
-- [ ] Larger zone memory (`-xerces-db-pool`, DESIGN.md 5.4 Zone memory; built
-      2026-11-05, never run in the game). One run, with your go-ahead, DS4C
-      alone on BACKROOMZ:
-      `tools\dev\session\map-check.ps1 -Map zm_backrooms -Stack 3171632315 -ExtraFlags -xerces-db-pool -Live`.
-      In the game log (`<home>\logs\<date>-<time>-game-<pid>.jsonl`, copied to
+- [x] (2026-11-05 15:01-15:10, `results.jsonl` rows 57-61) Larger zone memory
+      ran in the game five times: DS4C alone on BACKROOMZ and on Super Mario 64,
+      then the stack on BACKROOMZ, Super Mario 64 and Cheese Cube. Every run
+      logged `xerces.db_pool.installed` and `xerces.db_pool` (main pool 4096
+      MiB, the first `main` call 0x80000000 given 0x100000000, page budget 8192
+      MiB, read back 4096 MiB), loaded the map (27-47 s), played 30 s and went
+      back to the menu, with no `loader.exit.unexpected` and no dump. The main
+      pool held 2459 MiB in BACKROOMZ and 2110-2111 MiB in Super Mario 64, more
+      than the stock 2048; Cheese Cube stayed within it (1572 MiB). What was
+      checked, as planned before the runs (DS4C alone on BACKROOMZ:
+      `tools\dev\session\map-check.ps1 -Map zm_backrooms -Stack 3171632315 -ExtraFlags -xerces-db-pool -Live`),
+      in the game log (`<home>\logs\<date>-<time>-game-<pid>.jsonl`, copied to
       the run's folder):
   - `xerces.db_pool.installed` with both addresses. Without it,
     `xerces.db_pool.off` says why (a signature or byte check failed) and the run
@@ -500,7 +513,15 @@ extra).
       no exit record) while two full client builds and a 60 GB hash ran in the
       background; the same build passed twice once the machine was idle. Not
       explained; the client now logs an uncaught C++ exception as
-      `loader.terminate` before the fail-fast (none was logged since).
+      `loader.terminate` before the fail-fast. None has been logged since, but
+      the game has failed since: in the first frame-time session (In-game frame
+      times, below), a run with no mods was gone 17 s after the menu with no
+      report and no exit record (17:04, `w240`, the same signs as above), and at
+      17:13 Cheese Cube with the stack crashed while starting (`s240`): an
+      access violation in the game's code under a scheduler callback, reading
+      0xFFFFFFFFFFFFFFFF at BlackOps3.exe + 0x14221A349 (report and dump in
+      `C:\Users\Ginld\XercesDev\dumps\bench-20261105`). The next runs of both
+      variants were measured. Neither is explained.
 
 ### Menu crash at the first main frame (2026-11-05)
 
@@ -738,6 +759,26 @@ at the old settings.
 
 Not covered: a heavier map, PresentMon (displayed frames, present mode, CPU and
 GPU busy), more than 3 runs a side.
+
+### Beta package (DESIGN.md 16.1)
+
+`tools\release.ps1` refuses to build while `notices.py --licences` finds code
+GPL-3.0 cannot take in (`src/common/str.hpp` until its rewrite merges) or while
+Settings lacks the crash report controls `README.txt` describes (until
+`launcher/crash-client` merges). Not checked yet, all with the game (ask first),
+from an unzipped package outside the repository:
+
+- [ ] The game reads the package's `data\` (`XERCES_DATA_PATH`): the Xerces
+      menus and `ui_scripts` load with no `%LOCALAPPDATA%\boiii\data`.
+- [ ] The menu watermark and the console title say
+      `Xerces <version> (<commit>)`, the game window's title starts with
+      "Xerces", the splash in the taskbar is "Xerces", and the in-game console's
+      input line starts with `Xerces> `.
+- [ ] A crash leaves `xerces-crash-<time>.zip` in
+      `%LOCALAPPDATA%\boiii\minidumps` with `info.txt` headed "Xerces Crash
+      Dump" and its `Version:` line.
+- [ ] The first host or join shows the firewall prompt for "BOIII"
+      (`KNOWN_ISSUES.md`).
 
 ### Launcher (M3)
 
