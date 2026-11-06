@@ -82,10 +82,29 @@ void map_port(const uint16_t port, const callback &done) {
     if (!local.empty() && create_nat(nat, mappings)) {
       const CComBSTR protocol(L"UDP");
       const CComBSTR client(widen(local).c_str());
-      const CComBSTR description(L"Xerces lobby (Black Ops III)");
+      constexpr const wchar_t *ours = L"Xerces lobby (Black Ops III)";
+      const CComBSTR description(ours);
       CComPtr<IStaticPortMapping> mapping;
-      const auto added = mappings->Add(port, protocol, port, client,
-                                       VARIANT_TRUE, description, &mapping);
+      auto added = mappings->Add(port, protocol, port, client, VARIANT_TRUE,
+                                 description, &mapping);
+      if (FAILED(added) || !mapping) {
+        // A game that crashed with its lobby open left its mapping behind
+        // (static, no lease). When the router still holds one of ours on
+        // this port (say, for this PC's previous address), it is replaced;
+        // a mapping anything else made is left alone.
+        CComPtr<IStaticPortMapping> existing;
+        CComBSTR existing_description;
+        if (SUCCEEDED(mappings->get_Item(port, protocol, &existing)) &&
+            existing &&
+            SUCCEEDED(existing->get_Description(&existing_description)) &&
+            existing_description && wcscmp(existing_description, ours) == 0) {
+          existing.Release();
+          mapping.Release();
+          if (SUCCEEDED(mappings->Remove(port, protocol)))
+            added = mappings->Add(port, protocol, port, client, VARIANT_TRUE,
+                                  description, &mapping);
+        }
+      }
       if (SUCCEEDED(added) && mapping) {
         out.value = result::mapped;
         BSTR external_raw{};

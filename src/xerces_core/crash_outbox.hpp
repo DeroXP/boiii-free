@@ -21,7 +21,7 @@
 namespace xerces_core {
 // ------------------------------------------------------------- transport
 struct http_request {
-  std::string method; // POST, DELETE
+  std::string method; // GET, POST, DELETE
   std::string url;
   std::vector<std::pair<std::string, std::string>> headers;
   std::string body;
@@ -144,6 +144,10 @@ collect_result collect_crashes(const crash_context &ctx, bool send_enabled,
 struct send_options {
   std::string base_url;
   std::string install_id;
+  // When install_id is empty: makes it (crash_install_id(home)) once the
+  // server has said it takes crash reports, so an install none of whose
+  // reports reached such a server has no id. An empty result: off.
+  std::function<std::string()> make_install_id;
   std::string user_agent; // Xerces/<version>
   bool gzip = true;
   // Asked before every report, so turning the setting off stops a send that
@@ -159,8 +163,20 @@ enum class send_outcome {
   rejected,  // 400, 413 (even without the dump) or 422: removed, never sent
   retry,     // no answer, 429, 5xx, anything else: kept for later
   off,       // sending is off: kept, not sent
+  not_taken, // the server does not take crash reports yet: kept, not sent
 };
 const char *to_string(send_outcome outcome);
+
+// GET {base}/v1/crashes, asked before a run sends anything: whether the
+// server takes crash reports. 404 means it does not (yet): that server has
+// no crash routes, as the backend had none before they were deployed, so a
+// report would only be turned away. A 2xx, or 405 (the route is there, for
+// POST and DELETE only), means it does. Anything else, or no answer: ask
+// again later. Only the User-Agent header goes with it.
+enum class service_answer { takes_reports, not_yet, no_answer };
+service_answer ask_service(const send_options &options,
+                           const crash_transport &transport,
+                           http_response *response = nullptr);
 
 struct send_result {
   std::string report_id;
@@ -172,16 +188,20 @@ struct send_result {
 };
 
 // Sends the outbox, oldest first, after pruning it (prune_outbox): a report
-// older than 7 days is removed, never sent. A report the server took (or
-// had) is removed; one it refused is removed; on anything else the rest wait
-// for the next try (the first failure stops the run). A 413 is tried once
-// more without the minidump.
+// older than 7 days is removed, never sent. Before the first report it asks
+// the server whether it takes crash reports (ask_service): when it does not
+// yet, or does not answer, nothing is sent and the one result says so
+// (not_taken, retry). A report the server took (or had) is removed; one it
+// refused is removed; on anything else the rest wait for the next try (the
+// first failure stops the run). A 413 is tried once more without the
+// minidump.
 std::vector<send_result> send_outbox(const std::filesystem::path &crash_dir,
                                      const send_options &options,
                                      const crash_transport &transport);
 
-// Whether a run left reports for a later try: one waits (retry, off), or
-// nothing was tried. Not after reports were only sent or refused.
+// Whether a run left reports for a later try: one waits (retry, off,
+// not_taken), or nothing was tried. Not after reports were only sent or
+// refused.
 bool reports_wait(const std::vector<send_result> &results);
 
 // DELETE {base}/v1/crashes: every report of this install. The count the

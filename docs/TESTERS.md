@@ -30,7 +30,8 @@ KNOWN_ISSUES.txt lists what we already know about.
    needs boiii.exe, data and compat next to it.
 3. Start **Xerces.exe**, and only Xerces.exe. It starts the game (boiii.exe)
    itself, with the mods you picked. Do not start boiii.exe or BlackOps3.exe
-   yourself while you test.
+   yourself while you test: boiii.exe started on its own does not find Xerces'
+   data and behaves like BOIII (KNOWN_ISSUES.txt).
 4. Windows SmartScreen may say "Windows protected your PC", because the beta is
    not signed yet. Choose "More info", then "Run anyway".
 5. The first start reads your whole Workshop folder to learn your mods. From an
@@ -63,30 +64,35 @@ hash, sent with the link, shows that the zip is the one we made.
 - After a crash with mods on, Home offers to launch with mods off (safe mode),
   and "Find the culprit" tries your mods in smaller groups, one test launch at a
   time, to find the one that crashes.
-- **Crash reports are on by default.** When the game crashes, Xerces sends a
-  crash report to the Xerces server so we can fix it, as soon as the game has
+- **Crash reports are on by default.** When the game crashes, Xerces makes a
+  crash report for the Xerces server so we can fix it, as soon as the game has
   closed (or the next time you open Xerces). A report holds the crash's code and
   where it happened (the module and offset, the start-up, menu or match phase),
   the mode, map and mods, the names of the launch flags, the Xerces version and
   commit and the game build, this PC's Windows version, CPU, graphics card and
   driver, RAM and display, the last lines of the game's and Xerces' logs
-  (without chat), and a small dump of the threads' stacks. Your user name,
-  player names, folders and server addresses are removed; the rest of the stack
-  memory is raw and can hold bits of what the game was doing. Never sent: usage
-  data, your Steam id or game identity, full crash dumps, your settings, packs
-  or files. A report goes with a random id kept in your Xerces folder, never
-  your name, Steam account or hardware; the server stores no IP address and
-  deletes reports after 90 days.
-- Turn crash reports off in Settings > Privacy: nothing is sent then, and
+  (without chat), and a small dump of the threads' stacks.
+- What is taken out: in the logs, your Windows user name, player names and
+  server addresses, and your user folder is written as `%USERPROFILE%`. Other
+  folder paths stay, such as the game's, the Workshop's and the Xerces folder's.
+  In the stack dump only your user name and the player names are masked: the
+  paths of the loaded programs stay, and the rest of its stack memory is raw and
+  can hold bits of what the game was doing (a path, a name, an address). Never
+  sent: usage data, your Steam id or game identity, full crash dumps, your
+  settings, packs or files. A report goes with a random id kept in your Xerces
+  folder, never your name, Steam account or hardware. The server is to store no
+  IP address and to delete reports after 90 days.
+- Turn crash reports off in Settings > Privacy: no report is sent then, and
   reports still waiting are removed. "Delete my crash reports" there deletes
   what this PC sent. With them off, report crashes on GitHub (Reporting bugs,
   below; Settings > Privacy has the link).
-- In this beta the Xerces server does not take crash reports yet. Until it does,
-  they wait in `crash\outbox` in your Xerces folder: Xerces tries again every 10
-  minutes while it is open and at every start, keeps at most 20, and removes
-  those older than 7 days without sending them. Leaving crash reports on does no
-  harm meanwhile, and "Delete my crash reports" has nothing on the server to
-  delete yet.
+- **In this beta the Xerces server does not take crash reports yet,** so none is
+  sent: they wait in `crash\outbox` in your Xerces folder. At every start, after
+  a crash, and every hour while Xerces is open with reports waiting, Xerces asks
+  the server whether it takes them yet (a request with no report and no id in
+  it); once it does, the waiting reports go. Xerces keeps at most 20 and removes
+  those older than 7 days without sending them. Until one has been sent, "Delete
+  my crash reports" says the server has no reports from this PC, which is true.
 - Xerces also keeps crash bundles on your PC (Diagnostics, Crash bundles; "Make
   a bundle" makes one any time). Attach one to a bug report if we ask.
 
@@ -120,7 +126,9 @@ how it went.
   IP address with the port instead. On the same home network, share your PC's
   local address (`ipconfig`, the IPv4 Address) with port 27017. Press the button
   again to close the lobby; the router stops forwarding the port then, or when
-  you quit the game.
+  you quit the game. If the game crashes while the lobby is open, the router
+  keeps forwarding the port: open and close the lobby again, or remove the
+  "Xerces lobby (Black Ops III)" entry in the router's settings.
 - **Joining.** In Xerces, Servers, type the host's address and port, for example
   `192.168.1.20:27017`, then Join vanilla. The host decides which mods load:
   your game loads the host's mods, in the host's order, if you have them. A mod
@@ -157,6 +165,25 @@ how it went.
   already have, from BOIII or an earlier start, keeps its own setting; change it
   in the game's voice options. This is not yet checked in the game either.
 
+## What goes over the network
+
+- **Crash reports**, while they are on (When the game crashes, above), and the
+  question whether the server takes them yet.
+- **The server list.** The game client, like BOIII, asks Ezz's public master
+  servers (`master.ezz.lol`, `m.ezz.lol`) for the list of public servers
+  whenever its main menu loads or its server browser opens, and then contacts
+  each server on the list for its players and ping. Crash reports off or on,
+  this happens. Xerces builds leave out BOIII's friend presence, invites and
+  Discord status, so your friend code is not sent there.
+- **Steam.** Your mods come through your Steam client. The game client also asks
+  Steam's web API (`api.steampowered.com`) for details and preview pictures of
+  Workshop items it shows that ship none (their ids only).
+- **Playing together.** Servers you join, and players who join your lobby, see
+  your IP address. While your lobby is open the game asks your router to forward
+  its port (UPnP). Voice chat reaches the other players.
+- Links you click (GitHub issues, Black Ops III's store page, the licence) open
+  in your browser or in Steam.
+
 ## What Xerces leaves on your PC
 
 - `%LOCALAPPDATA%\Xerces`: Xerces' settings, logs, caches, crash bundles and the
@@ -170,6 +197,11 @@ how it went.
 - A Windows firewall rule for boiii.exe, if you allowed it.
 - A DirectX graphics preference for boiii.exe (Windows Settings > System >
   Display > Graphics), so laptops run the game on the faster graphics card.
+- After a crash while you hosted a lobby: the router's forwarding of the game's
+  UDP port ("Xerces lobby (Black Ops III)"), until the lobby is opened and
+  closed again or you remove it in the router.
+- If you started boiii.exe yourself and it showed BOIII's old launcher:
+  `%LOCALAPPDATA%\EZZ BOIII`, that launcher's browser data.
 
 To remove Xerces, delete its folder and `%LOCALAPPDATA%\Xerces`. Leave
 `%LOCALAPPDATA%\boiii` and `boiii_players` if you also play BOIII.

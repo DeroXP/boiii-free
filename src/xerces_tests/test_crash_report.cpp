@@ -626,7 +626,13 @@ TEST_CASE("crash outbox: sent, duplicate, refused and retried reports") {
   queue('4', R"({"n":4})", 4);
   queue('5', R"({"n":5})", 5);
   std::vector<http_request> seen;
+  int asked = 0;
   const crash_transport fake = [&](const http_request &request) {
+    if (request.method == "GET") {
+      // A server with crash routes: POST and DELETE only there.
+      ++asked;
+      return reply(405, R"({"error":"method_not_allowed"})");
+    }
     seen.push_back(request);
     const std::string body = gunzip(request.body);
     if (body.find("\"n\":1") != std::string::npos) {
@@ -661,6 +667,7 @@ TEST_CASE("crash outbox: sent, duplicate, refused and retried reports") {
   CHECK(results[4].outcome == send_outcome::retry);
   CHECK(results[4].retry_after == std::optional<int>(60));
   REQUIRE_EQ(seen.size(), std::size_t{6}); // the 413 was tried twice
+  CHECK_EQ(asked, 1);                      // asked once, before the first
   const auto &first = seen.front();
   CHECK_EQ(first.method, std::string("POST"));
   CHECK_EQ(first.url, std::string("https://x.example.org/v1/crashes"));
@@ -1014,5 +1021,103 @@ TEST_CASE("crash outbox: only a waiting report says 'sent later'") {
   CHECK(!reports_wait(with({send_outcome::sent, send_outcome::rejected})));
   CHECK(reports_wait(with({send_outcome::rejected, send_outcome::retry})));
   CHECK(reports_wait(with({send_outcome::off})));
+  CHECK(reports_wait(with({send_outcome::not_taken})));
   CHECK(reports_wait({})); // nothing was tried
+}
+
+TEST_CASE("crash outbox: a server without crash routes is sent nothing") {
+  // The deployed backend had no crash routes when the beta went out: it
+  // answers 404 there. Reports then wait, unsent, and no install id is made.
+  const fs::path home = fs::temp_directory_path() / "xerces_crash_not_taken";
+  fs::remove_all(home);
+  const fs::path crash = home / "crash";
+  REQUIRE(
+      enqueue_report(crash, std::string(32, '1'), R"({"n":1})", now_seconds()));
+  REQUIRE(
+      enqueue_report(crash, std::string(32, '2'), R"({"n":2})", now_seconds()));
+  std::vector<http_request> seen;
+  int get_status = 404;
+  const crash_transport fake = [&](const http_request &request) {
+    seen.push_back(request);
+    if (request.method == "GET") {
+      return reply(get_status, R"({"error":"not_found"})");
+    }
+    return reply(201, R"({"id":"srv","duplicate":false})");
+  };
+  int made = 0;
+  send_options options;
+  options.base_url = "https://x.example.org";
+  options.make_install_id = [&] {
+    ++made;
+    return crash_install_id(home);
+  };
+  options.user_agent = "Xerces/test";
+  options.enabled = [] { return true; };
+
+  auto results = send_outbox(crash, options, fake);
+  REQUIRE_EQ(results.size(), std::size_t{1});
+  CHECK(results[0].outcome == send_outcome::not_taken);
+  CHECK_EQ(results[0].status, 404);
+  CHECK(reports_wait(results));
+  REQUIRE_EQ(seen.size(), std::size_t{1}); // the question, no report
+  CHECK_EQ(seen[0].method, std::string("GET"));
+  CHECK_EQ(seen[0].url, std::string("https://x.example.org/v1/crashes"));
+  CHECK(seen[0].body.empty());
+  REQUIRE_EQ(seen[0].headers.size(), std::size_t{1});
+  CHECK_EQ(seen[0].headers[0].first, std::string("User-Agent"));
+  CHECK_EQ(made, 0);
+  CHECK(crash_install_id(home, false).empty());
+  CHECK_EQ(list_outbox(crash).size(), std::size_t{2});
+
+  // No answer, or a server error: nothing is sent either, tried later.
+  seen.clear();
+  get_status = 503;
+  results = send_outbox(crash, options, fake);
+  REQUIRE_EQ(results.size(), std::size_t{1});
+  CHECK(results[0].outcome == send_outcome::retry);
+  CHECK_EQ(seen.size(), std::size_t{1});
+  CHECK_EQ(made, 0);
+  const crash_transport down = [&](const http_request &request) {
+    seen.push_back(request);
+    http_response out;
+    out.error = "no route";
+    return out;
+  };
+  seen.clear();
+  results = send_outbox(crash, options, down);
+  REQUIRE_EQ(results.size(), std::size_t{1});
+  CHECK(results[0].outcome == send_outcome::retry);
+  CHECK_EQ(seen.size(), std::size_t{1});
+  CHECK_EQ(list_outbox(crash).size(), std::size_t{2});
+
+  // Once the server takes them (405 on GET: the route is there), the id is
+  // made once and both reports go with it.
+  seen.clear();
+  get_status = 405;
+  results = send_outbox(crash, options, fake);
+  REQUIRE_EQ(results.size(), std::size_t{2});
+  CHECK(results[0].outcome == send_outcome::sent);
+  CHECK(results[1].outcome == send_outcome::sent);
+  CHECK_EQ(made, 1);
+  const std::string id = crash_install_id(home, false);
+  CHECK(valid_report_id(id));
+  REQUIRE_EQ(seen.size(), std::size_t{3});
+  for (std::size_t i = 1; i < seen.size(); ++i) {
+    CHECK_EQ(seen[i].method, std::string("POST"));
+    bool has_id = false;
+    for (const auto &[key, value] : seen[i].headers) {
+      has_id = has_id || (key == "X-Xerces-Install" && value == id);
+    }
+    CHECK(has_id);
+  }
+  CHECK(list_outbox(crash).empty());
+
+  // A 2xx answer to the question counts too (a server that answers GET).
+  CHECK(ask_service(options, [](const http_request &) {
+          return reply(200, "{}");
+        }) == service_answer::takes_reports);
+  CHECK(ask_service(options, [](const http_request &) {
+          return reply(429, "{}", 60);
+        }) == service_answer::no_answer);
+  fs::remove_all(home);
 }

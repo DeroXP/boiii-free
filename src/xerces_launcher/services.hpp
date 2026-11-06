@@ -56,6 +56,7 @@ struct crash_notice {
   enum class kind {
     sent,          // reports reached the server; server_id is the last one's
     later,         // queued; sent at a later try
+    waiting,       // queued; the server does not take crash reports yet
     off,           // the game crashed with sending off: nothing was sent
     rejected,      // the server refused a report; it was removed
     deleted,       // the server deleted this install's reports (count)

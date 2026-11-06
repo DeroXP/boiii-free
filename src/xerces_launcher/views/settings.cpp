@@ -885,6 +885,11 @@ private:
         owner_->notify(owner_->tr("The crash report could not be sent now. "
                                   "Xerces sends it later."));
         break;
+      case crash_notice::kind::waiting:
+        owner_->notify(owner_->tr("Crash report saved. The Xerces server does "
+                                  "not take crash reports yet, so it waits on "
+                                  "this PC (7 days at most)."));
+        break;
       case crash_notice::kind::off:
         owner_->notify(owner_->tr("The game crashed. Crash reports are off, so "
                                   "nothing was sent. To report it, open an "
@@ -1074,7 +1079,7 @@ private:
            c.send_crash_reports
                ? owner_->tr("Crash reports are on: after a crash, Xerces "
                             "sends a report.")
-               : owner_->tr("Crash reports are off: nothing is sent, and "
+               : owner_->tr("Crash reports are off: no report is sent, and "
                             "reports still waiting were removed."));
       svc().crash_reports_setting_changed();
     } else if (key == "updates") {

@@ -18,9 +18,19 @@ archives are read from --downloads; a hash docs/TESTING.md lists must match.
 
 THIRD_PARTY_NOTICES.txt is the package's one copy of these licence texts, and
 About points to it. HarfBuzz's entry has its COPYING, the COPYING of each part
-under other licences in its src/ (src/ms-use; any other fails the run) and the
-Unicode License V3 for its generated Unicode tables, which no HarfBuzz file
-holds: tools/release/licences/Unicode-License-V3.txt.
+under other licences in its src/ (src/ms-use; any other fails the run), the
+headers of the files it compiles that are under another licence (UCDN in
+hb-ucd.cc, fasthash in hb-algs.hh), the copyright lines of its files that
+COPYING does not list, and the Unicode License V3 for its generated Unicode
+tables, which no HarfBuzz file holds: tools/release/licences/Unicode-License-V3.txt.
+
+The compiled files of HarfBuzz, RmlUi and FreeType are read for licence grants
+other than their library's own (GRANTS): each must be known (HARFBUZZ_,
+RMLUI_ and FREETYPE_FILE_LICENCES, with its text or why none is needed), or the
+run fails. RmlUi's entry so has Include/RmlUi/Core/Containers/LICENSE.txt
+(robin_hood, itlib), FreeType's the BDF and PCF drivers' licences and the one
+of its hash functions. Dear ImGui's has the licences of the two fonts in
+imgui_draw.cpp and of the stb parts it keeps.
 
 Code under a licence GPL-3.0 cannot take in must not ship (16.5). Every run,
 --check included, reads the tracked text files under src/ and data/ (what the
@@ -34,6 +44,7 @@ on samples. Nothing here downloads anything.
 """
 
 import argparse
+import fnmatch
 import hashlib
 import os
 import pathlib
@@ -162,6 +173,39 @@ def self_test() -> int:
             failures.append("HarfBuzz texts: an unknown src/other/LICENSE.txt passed")
         except Problem:
             pass
+    # Licence grants in compiled files: a known one gives its text once, an
+    # unknown one fails; holders COPYING does not name are listed.
+    with tempfile.TemporaryDirectory() as temp:
+        folder = pathlib.Path(temp) / "lib-1.0"
+        (folder / "src").mkdir(parents=True)
+        old_mit = "/*\n * Copyright (C) 2020  Listed Person\n * Permission is hereby granted, without written " \
+                  "agreement and without\n * license or royalty fees, to use\n */\n"
+        (folder / "src/main.cc").write_text('#include "a.hh"\n#include "b.hh"\n' + old_mit, encoding="utf-8")
+        (folder / "src/a.hh").write_text("/*\n * Copyright (C) 2012 Someone Else\n *\n * Permission to use, copy, "
+                                         "modify, and/or distribute this\n * software for any purpose with or "
+                                         "without fee\n */\n", encoding="utf-8")
+        (folder / "src/b.hh").write_text(old_mit.replace("2020  Listed Person", "2016  New Holder"),
+                                         encoding="utf-8")
+        (folder / "src/c.hh").write_text("/* Redistribution and use in source and binary forms */\n",
+                                         encoding="utf-8")
+        files = include_closure(folder, [folder / "src/main.cc"], [folder / "src"])
+        if sorted(p.name for p in files) != ["a.hh", "b.hh", "main.cc"]:
+            failures.append(f"include closure: {[p.name for p in files]}")
+        known = {"src/a.hh": ("a.hh, ISC", lambda f: comment_with(f / "src/a.hh", "permission to use"), "")}
+        try:
+            texts = file_licence_texts(folder, files, {"Old MIT"}, known)
+            if len(texts) != 1 or "Someone Else" not in texts[0][1]:
+                failures.append(f"file licences: {texts}")
+        except Problem as problem:
+            failures.append(f"file licences: {problem}")
+        try:
+            file_licence_texts(folder, [*files, folder / "src/c.hh"], {"Old MIT"}, known)
+            failures.append("file licences: an unknown BSD file passed")
+        except Problem:
+            pass
+        lines = unlisted_copyright_lines(folder, files, "Copyright (C) 2020  Listed Person\n", {"src/a.hh"})
+        if lines != ["src/b.hh: Copyright (C) 2016  New Holder"]:
+            failures.append(f"copyright lines: {lines}")
     for line in failures:
         print(f"self-test: {line}")
     print(f"notices self-test: {'FAIL' if failures else 'ok'}")
@@ -203,8 +247,10 @@ HARFBUZZ_PART_LICENCES = {
 # come under; this copy of the Unicode License V3 does (unicode.org/license.txt).
 UNICODE_LICENCE = ROOT / "tools/release/licences/Unicode-License-V3.txt"
 HARFBUZZ_NOTE = (
-    "HarfBuzz is under the \"Old MIT\" licence (COPYING, first below). Two parts built into "
-    "Xerces.exe are under other licences. The Universal Shaping Engine tables "
+    "HarfBuzz is under the \"Old MIT\" licence (COPYING, first below). Parts built into "
+    "Xerces.exe are under other licences. UCDN (hb-ucd.cc) is under the ISC licence and "
+    "fasthash (in hb-algs.hh) under the MIT licence, their headers below; the copyright lines "
+    "of HarfBuzz files that COPYING does not list follow them. The Universal Shaping Engine tables "
     "(hb-ot-shaper-use-table.hh, hb-ot-shaper-vowel-constraints.cc) are generated from "
     "Microsoft's data in HarfBuzz's src/ms-use, under the MIT licence of src/ms-use/COPYING. "
     "The tables of character properties, scripts, emoji and shaping classes (hb-ucd-table.hh, "
@@ -234,8 +280,11 @@ def harfbuzz_licence_files(folder: pathlib.Path) -> list[str]:
 
 
 def harfbuzz_texts(folder: pathlib.Path) -> list[tuple[str | None, str]]:
-    """HarfBuzz's licence texts: COPYING, every part's COPYING under src/, and the
-    Unicode License V3. A licence file under src/ this script does not know fails."""
+    """HarfBuzz's licence texts: COPYING, every part's COPYING under src/, the
+    licences in the headers of compiled files that are not HarfBuzz's own, the
+    copyright lines COPYING does not list, and the Unicode License V3. A licence
+    file under src/, or a compiled file under a licence, this script does not
+    know fails."""
     found = harfbuzz_licence_files(folder)
     unknown = [f for f in found if f not in HARFBUZZ_PART_LICENCES]
     if unknown:
@@ -244,9 +293,238 @@ def harfbuzz_texts(folder: pathlib.Path) -> list[tuple[str | None, str]]:
     missing = [f for f in HARFBUZZ_PART_LICENCES if f not in found]
     if missing:
         raise Problem(f"{folder}: licence files expected and not there: {', '.join(missing)}")
-    texts: list[tuple[str | None, str]] = [(None, read(folder / "COPYING"))]
+    copying = read(folder / "COPYING")
+    texts: list[tuple[str | None, str]] = [(None, copying)]
     texts += [(title, read(folder / relative)) for relative, title in sorted(HARFBUZZ_PART_LICENCES.items())]
+    compiled = include_closure(folder, [folder / "src/harfbuzz.cc"], [folder / "src"])
+    texts += file_licence_texts(folder, compiled, {"Old MIT"}, HARFBUZZ_FILE_LICENCES)
+    lines = unlisted_copyright_lines(folder, compiled, copying,
+                                     skip={p for p, (title, _, _) in HARFBUZZ_FILE_LICENCES.items() if title})
+    if lines:
+        texts.append(("Copyright lines in HarfBuzz's source files that COPYING does not list "
+                      "(the same \"Old MIT\" licence)", "\n".join(lines)))
     texts.append(("Unicode License V3 (the Unicode data in HarfBuzz's generated tables)", read(UNICODE_LICENCE)))
+    return texts
+
+
+# Licence grants, found by their wording in a file's text with the comment marks
+# and line breaks folded into single spaces (folded()). A compiled third-party
+# file whose text grants a licence other than its library's own must be known
+# below (with the text that goes into the notices, or why none is needed), or
+# the run fails: a library update that brings in code under another licence
+# cannot slip through unnoticed.
+GRANTS = {
+    "Old MIT": r"without written agreement and without license or royalty fees",
+    "MIT": r"permission is hereby granted, free of charge",
+    "ISC": r"permission to use, copy, modify, and or distribute this software for any purpose",
+    "X11": r"permission to use, copy, modify, distribute, and sell this software",
+    "BSD": r"redistribution and use in source and binary forms",
+    "Apache": r"licensed under the apache license",
+    "Boost": r"boost software license",
+    "zlib": r"this software is provided 'as-?is'",
+    "public domain": r"public domain",
+    "GPL or LGPL": r"gnu (?:lesser )?general public licen[cs]e",
+}
+SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".inc"}
+
+
+def folded(text: str) -> str:
+    """Text with comment marks and white space folded into single spaces, lower case."""
+    return re.sub(r"[\s*/#;!]+", " ", text).lower()
+
+
+def grants_in(text: str) -> set[str]:
+    flat = folded(text)
+    return {name for name, wording in GRANTS.items() if re.search(wording, flat)}
+
+
+def comment_with(path: pathlib.Path, wording: str) -> str:
+    """The first /* ... */ block of a file that has wording (folded), without the comment marks."""
+    for match in re.finditer(r"/\*(.*?)\*/", read(path), flags=re.S):
+        if wording in folded(match.group(1)):
+            lines = [re.sub(r"^\s*\* ?", "", line).rstrip() for line in match.group(1).splitlines()]
+            return "\n".join(lines).strip("\n")
+    raise Problem(f"no comment with '{wording}' in {path}")
+
+
+def readme_licence(path: pathlib.Path) -> str:
+    """The License part of a FreeType driver's README: from 'License' to 'Credits'."""
+    match = re.search(r"^License\n\*+\n(.*?)\n(?:Credits\n\*+|\Z)", read(path), flags=re.S | re.M)
+    if not match:
+        raise Problem(f"no License part in {path}")
+    return match.group(1).strip("\n")
+
+
+def include_closure(folder: pathlib.Path, sources: list[pathlib.Path],
+                    roots: list[pathlib.Path]) -> list[pathlib.Path]:
+    """The sources and every file they #include "..." (or <...> under a root), inside folder."""
+    seen: set[pathlib.Path] = set()
+    todo = [s.resolve() for s in sources if s.is_file()]
+    base = folder.resolve()
+    while todo:
+        path = todo.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for name in re.findall(r'^\s*#\s*include\s*["<]([^">]+)[">]', text, flags=re.M):
+            for where in [path.parent, *roots]:
+                candidate = (where / name).resolve()
+                if candidate.is_file() and candidate.is_relative_to(base):
+                    todo.append(candidate)
+                    break
+    return sorted(seen)
+
+
+def file_licence_texts(folder: pathlib.Path, files: list[pathlib.Path], own: set[str],
+                       known: dict[str, tuple[str | None, object, str]]) -> list[tuple[str, str]]:
+    """The notices' texts for the files of a library that grant a licence other than its own.
+
+    known: a glob relative to folder -> (title, a function giving the text, why), or
+    (None, None, why there is no text to add: covered by another entry, not compiled
+    in this configuration, no notice asked). A file under another licence that no
+    glob matches fails the run."""
+    texts: dict[str, str] = {}
+    unknown = []
+    for path in files:
+        if path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        other = grants_in(path.read_text(encoding="utf-8", errors="replace")) - own
+        if not other:
+            continue
+        relative = path.resolve().relative_to(folder.resolve()).as_posix()
+        match = next((v for pattern, v in known.items() if fnmatch.fnmatchcase(relative, pattern)), None)
+        if match is None:
+            unknown.append(f"{relative} ({', '.join(sorted(other))})")
+            continue
+        title, text, _ = match
+        if title and title not in texts:
+            texts[title] = text(folder)
+    if unknown:
+        raise Problem(f"{folder.name}: compiled files under a licence with no notice "
+                      "(add them to tools/release/notices.py): " + ", ".join(unknown))
+    return list(texts.items())
+
+
+def unlisted_copyright_lines(folder: pathlib.Path, files: list[pathlib.Path], copying: str,
+                             skip: set[str]) -> list[str]:
+    """'file: Copyright line' for the copyright holders in files that copying does not name."""
+    def holder(line: str) -> str:
+        return re.sub(r"[^a-z]", "", re.sub(r"^.*?copyright\s*(?:©|\(c\))?\s*[\d,\s-]*", "", line,
+                                            flags=re.I).lower())
+    listed = [holder(line) for line in copying.splitlines() if re.match(r"\s*Copyright\b", line)]
+    listed = [h for h in listed if h]
+    out = []
+    for path in files:
+        relative = path.resolve().relative_to(folder.resolve()).as_posix()
+        if any(fnmatch.fnmatchcase(relative, pattern) for pattern in skip):
+            continue
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            match = re.search(r"Copyright\s*(?:©|\(C\)|\(c\))?\s*\d{4}[^\n]*", line)
+            if not match:
+                continue
+            text = match.group(0).strip(" *")
+            name = holder(text)
+            if name and not any(name in h or h in name for h in listed):
+                out.append(f"{relative}: {text}")
+    return list(dict.fromkeys(out))
+
+
+# HarfBuzz files built into Xerces.exe whose headers grant another licence.
+HARFBUZZ_FILE_LICENCES = {
+    "src/hb-ucd.cc": ("src/hb-ucd.cc (UCDN, the Unicode character database lookups), ISC",
+                      lambda f: comment_with(f / "src/hb-ucd.cc", "permission to use, copy, modify"), ""),
+    "src/hb-algs.hh": ("src/hb-algs.hh (fasthash, by Zilong Tan), MIT",
+                       lambda f: comment_with(f / "src/hb-algs.hh", "permission is hereby granted, free of charge"),
+                       ""),
+    "src/hb-unicode-emoji-table.hh": (None, None, "Unicode data: the Unicode License V3 entry"),
+}
+# RmlUi Core keeps two libraries of its own under Include/RmlUi/Core/Containers,
+# whose licences are in that folder's LICENSE.txt.
+RMLUI_FILE_LICENCES = {
+    "Include/RmlUi/Core/Containers/*": (
+        "Include/RmlUi/Core/Containers/LICENSE.txt (robin_hood and itlib, part of RmlUi Core)",
+        lambda f: read(f / "Include/RmlUi/Core/Containers/LICENSE.txt"), ""),
+}
+# FreeType's LICENSE.TXT names the parts under other licences; this is where
+# each one's text is, or why none goes in.
+FREETYPE_FILE_LICENCES = {
+    "src/bdf/*": ("src/bdf/README (the BDF driver), X11-style",
+                  lambda f: readme_licence(f / "src/bdf/README"), ""),
+    "src/pcf/pcfutil.c": ("src/pcf/pcfutil.c (part of the PCF driver), X11 licence of The Open Group",
+                          lambda f: comment_with(f / "src/pcf/pcfutil.c", "the open group"), ""),
+    "src/pcf/*": ("src/pcf/README (the PCF driver), X11-style",
+                  lambda f: readme_licence(f / "src/pcf/README"), ""),
+    "src/base/fthash.c": ("src/base/fthash.c and include/freetype/internal/fthash.h, X11-style",
+                          lambda f: comment_with(f / "src/base/fthash.c", "permission is hereby granted"), ""),
+    "include/freetype/internal/fthash.h": (
+        "src/base/fthash.c and include/freetype/internal/fthash.h, X11-style",
+        lambda f: comment_with(f / "src/base/fthash.c", "permission is hereby granted"), ""),
+    "src/gzip/*": (None, None, "zlib's inflate code: the zlib licence, in the zlib entry"),
+    "src/base/md5.*": (None, None, "public domain; used in debug builds only"),
+    "src/dlg/*": (None, None, "Boost licence; compiled only with FT_DEBUG_LOGGING, which is off"),
+    "include/dlg/*": (None, None, "Boost licence; compiled only with FT_DEBUG_LOGGING, which is off"),
+    "src/autofit/ft-hb*": (None, None, "HarfBuzz code; compiled only with FT_CONFIG_OPTION_USE_HARFBUZZ, which is off"),
+    "src/autofit/hb-script-list.h": (
+        None, None, "HarfBuzz code; included only with FT_CONFIG_OPTION_USE_HARFBUZZ, which is off"),
+}
+
+
+def shipped_projects(links: dict[str, set[str]]) -> set[str]:
+    """The premake projects whose code is in the shipped programs: theirs and what they link."""
+    return set(PROGRAMS) | {lib for libs in links.values() for lib in libs}
+
+
+def compiled_sources(build: pathlib.Path, folder: pathlib.Path, projects: set[str]) -> list[pathlib.Path]:
+    """The files under folder that the ninja files of projects compile (not the spikes')."""
+    rule = re.compile(rf"^build \S+: \S+ (\S*[/\\]{re.escape(folder.name)}[/\\]\S+)$", flags=re.M)
+    out = set()
+    for name in sorted(projects):
+        file = build / f"{name}.ninja"
+        if not file.is_file():
+            continue
+        for match in rule.finditer(file.read_text(encoding="utf-8", errors="replace")):
+            out.add((build / match.group(1)).resolve())
+    return sorted(out)
+
+
+def rmlui_files(build: pathlib.Path, folder: pathlib.Path, projects: set[str]) -> list[pathlib.Path]:
+    """RmlUi's compiled sources, what they include, and its Core headers."""
+    headers = [p for p in (folder / "Include/RmlUi/Core").rglob("*") if p.is_file()]
+    sources = compiled_sources(build, folder, projects)
+    return sorted(set(include_closure(folder, sources, [folder / "Include"])) | {p.resolve() for p in headers})
+
+
+def freetype_files(build: pathlib.Path, folder: pathlib.Path, projects: set[str]) -> list[pathlib.Path]:
+    """FreeType's compiled sources, every file in their folders, and include/."""
+    sources = compiled_sources(build, folder, projects)
+    files = {p.resolve() for s in sources for p in s.parent.iterdir() if p.is_file()}
+    files |= {p.resolve() for p in (folder / "include").rglob("*") if p.is_file()}
+    return sorted(files)
+
+
+# Dear ImGui (boiii.exe) embeds two fonts and three stb libraries.
+def imgui_texts(imgui: pathlib.Path) -> list[tuple[str, str]]:
+    draw = read(imgui / "imgui_draw.cpp")
+    mit = read(imgui / "LICENSE.txt")
+    grant = mit[mit.index("Permission is hereby granted"):]
+    texts = []
+    for font in ("ProggyClean", "ProggyForever"):
+        # The section's comment lines, up to its "MIT License / Copyright ..." line.
+        match = re.search(rf"\[SECTION\] Default font data \({font}[^)]*\)\n(?://[^\n]*\n)*?"
+                          r"// (MIT [Ll]icense / Copyright[^\n]*)", draw)
+        if not match:
+            raise Problem(f"{imgui / 'imgui_draw.cpp'}: no licence line for {font}")
+        holders = match.group(1).split(" / ", 1)[1]
+        copyright_lines = "\n".join(c.strip() if c.strip().startswith("Copyright") else "Copyright " + c.strip()
+                                    for c in holders.split(", Copyright"))
+        texts.append((f"The {font} font, embedded in imgui_draw.cpp, MIT",
+                      f"MIT License\n\n{copyright_lines}\n\n{grant}"))
+    stb = {name: trailing_comment(imgui / name) for name in ("imstb_rectpack.h", "imstb_textedit.h", "imstb_truetype.h")}
+    for text in dict.fromkeys(stb.values()):
+        names = ", ".join(n for n, t in stb.items() if t == text)
+        texts.append((f"{names} (Sean Barrett's stb libraries, as Dear ImGui keeps them), MIT or public domain",
+                      text))
     return texts
 
 
@@ -399,8 +677,12 @@ def entries(links: dict[str, set[str]], tp: dict[str, pathlib.Path], subs: dict,
          f"deps/sqlite ({version('deps/sqlite')})", [(None, read(deps / "sqlite/LICENSE"))],
          "SQLite itself is in the public domain; the licence below is the amalgamation repository's.",
          {"sqlite"}),
-        ("Dear ImGui", "MIT", linked("imgui"), f"deps/imgui ({version('deps/imgui')})",
-         [(None, read(deps / "imgui/LICENSE.txt"))], "", {"imgui"}),
+        ("Dear ImGui", "MIT; embedded fonts MIT; stb parts MIT or public domain", linked("imgui"),
+         f"deps/imgui ({version('deps/imgui')})",
+         [(None, read(deps / "imgui/LICENSE.txt")), *imgui_texts(deps / "imgui")],
+         "imgui_draw.cpp embeds the ProggyClean and ProggyForever fonts, and imstb_rectpack.h, "
+         "imstb_textedit.h and imstb_truetype.h are Sean Barrett's stb libraries; their notices "
+         "follow Dear ImGui's own.", {"imgui"}),
         ("discord-rpc", "MIT", linked("discord-rpc"), f"deps/discord-rpc ({version('deps/discord-rpc')})",
          [(None, read(deps / "discord-rpc/LICENSE"))], "", {"discord-rpc"}),
         ("hksc (Havok Script compiler, Lua)", "Lua licence (MIT-style)", linked("hksc"),
@@ -431,13 +713,15 @@ def entries(links: dict[str, set[str]], tp: dict[str, pathlib.Path], subs: dict,
          [(None, trailing_comment(deps / "stb_image_resize/stb_image_resize2.h"))], "", set()),
         ("sqlite_orm", "GNU AGPL-3.0", includes(r"sqlite_orm"), f"deps/sqlite_orm ({version('deps/sqlite_orm')})",
          [(None, read(deps / "sqlite_orm/LICENSE"))],
-         "GPL-3.0 section 13 allows the combination. If you run a modified dedicated server for "
-         "others, the AGPL asks you to offer its source to them.", set()),
+         "GPL-3.0 section 13 allows the combination. If you run a modified boiii.exe that other "
+         "players connect to over a network (a dedicated server, or a lobby you host for them), "
+         "the AGPL asks you to offer them its source.", set()),
         ("xxHash", "BSD 2-Clause", includes(r"xxhash\.h"), "src/client/launcher/xxhash.h",
          [(None, leading_comment(ROOT / "src/client/launcher/xxhash.h"))], "", set()),
         ("strlcpy (OpenBSD)", "ISC", ["boiii.exe"] if (ROOT / "src/common/str.cpp").is_file() else [],
          "src/common/str.cpp", [(None, leading_comment(ROOT / "src/common/str.cpp"))], "", set()),
     ]
+    shipped = shipped_projects(links)
     if "rmlui" in tp:
         rmlui_engine_licence_matches(tp["rmlui"])
         # RmlUi's HarfBuzz font engine (its Samples/basic/harfbuzz, built as
@@ -446,7 +730,9 @@ def entries(links: dict[str, set[str]], tp: dict[str, pathlib.Path], subs: dict,
         engine = linked("xerces_rmlui_harfbuzz")
         table.append(("RmlUi " + tp["rmlui"].name.split("-", 1)[1], "MIT", linked("xerces_rmlui"),
                       f"{tp['rmlui'].name} (outside the repository; SOURCE.txt)",
-                      [(None, read(tp["rmlui"] / "LICENSE.txt"))],
+                      [(None, read(tp["rmlui"] / "LICENSE.txt")),
+                       *file_licence_texts(tp["rmlui"], rmlui_files(build, tp["rmlui"], shipped),
+                                           set(), RMLUI_FILE_LICENCES)],
                       "RmlUi's HarfBuzz font engine, from RmlUi's Samples/basic/harfbuzz with one file changed "
                       "for Xerces (src/xerces_rmlui_harfbuzz), is part of RmlUi and under the same licence."
                       if engine else "", {"xerces_rmlui", "xerces_rmlui_harfbuzz"}))
@@ -454,17 +740,21 @@ def entries(links: dict[str, set[str]], tp: dict[str, pathlib.Path], subs: dict,
         table.append(("FreeType " + tp["freetype"].name.split("-", 1)[1], "FreeType License (FTL)",
                       linked("xerces_freetype"), f"{tp['freetype'].name} (outside the repository; SOURCE.txt)",
                       [(None, read(tp["freetype"] / "LICENSE.TXT")),
-                       ("docs/FTL.TXT", read(tp["freetype"] / "docs/FTL.TXT"))],
+                       ("docs/FTL.TXT", read(tp["freetype"] / "docs/FTL.TXT")),
+                       *file_licence_texts(tp["freetype"], freetype_files(build, tp["freetype"], shipped),
+                                           set(), FREETYPE_FILE_LICENCES)],
                       "Portions of this software are copyright (c) The FreeType Project (www.freetype.org). "
                       "All rights reserved. FreeType is dual-licensed; Xerces uses it under the FreeType "
-                      "License.", {"xerces_freetype"}))
+                      "License. The BDF and PCF drivers and its hash functions come under X11-style licences "
+                      "(below, after the FTL); its gzip module is zlib's code, under the zlib licence (the "
+                      "zlib entry).", {"xerces_freetype"}))
     # HarfBuzz (launcher/harfbuzz): in whichever project compiles its sources.
     harfbuzz_libs = {lib for libs in links.values() for lib in libs
                      if "harfbuzz" in lib.lower() and lib != "xerces_rmlui_harfbuzz"}
     harfbuzz_in = compiled_into(build, links, tp["harfbuzz"]) if "harfbuzz" in tp else []
     if harfbuzz_in:
         table.append(("HarfBuzz " + tp["harfbuzz"].name.split("-", 1)[1],
-                      "Old MIT; parts MIT (Microsoft) and Unicode License V3", harfbuzz_in,
+                      "Old MIT; parts ISC, MIT and Unicode License V3", harfbuzz_in,
                       f"{tp['harfbuzz'].name} (outside the repository; SOURCE.txt)",
                       harfbuzz_texts(tp["harfbuzz"]), HARFBUZZ_NOTE, harfbuzz_libs))
     fonts = ROOT / "data/xerces/fonts"

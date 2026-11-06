@@ -1,0 +1,48 @@
+<!doctype html>
+<!--
+  The package's data\launcher\main.html (tools\release.ps1 puts it there in
+  place of the old launcher's page). boiii.exe checks that this file exists
+  (main.cpp, initial_update_required) and shows it only when it is started
+  without -launch while XERCES_DATA_PATH names the package's data folder.
+  Xerces.exe always passes -launch. No links, no options, no scripts.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Xerces</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #101114;
+        color: #e8e8ea;
+        font-family: "Segoe UI", sans-serif;
+      }
+      main {
+        max-width: 36em;
+        padding: 4em 3em;
+      }
+      h1 {
+        font-size: 1.6em;
+        font-weight: 600;
+        margin: 0 0 0.8em;
+      }
+      p {
+        line-height: 1.5;
+        color: #b9bac0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Start Xerces.exe</h1>
+      <p>
+        This is the game client of Xerces (boiii.exe). It is started by
+        Xerces.exe, in the same folder, which launches Black Ops III with the
+        mods you picked.
+      </p>
+      <p>Close this window and start Xerces.exe.</p>
+    </main>
+  </body>
+</html>

@@ -13,13 +13,19 @@
      commit and a clean-tree flag into build\src\xerces_version.h, checked
      here), builds xerces_tests and xerces_cli and runs the unit tests and
      tools\ci\cli_smoke.ps1, then builds Xerces.exe and boiii.exe (Release).
-     Before that: tools\ci\check_switches.py (upstream's updater and the -beta
-     download stay off), check_hosts.py, notices.py --licences (no code
-     GPL-3.0 cannot take in), and README.txt's promises: the crash report
-     switch in Settings > Privacy exists and the crash dialog does not send
-     players to Ezz's Discord.
+     Before that, the lints CI runs, since a package is often built from a
+     commit CI has not seen: tools\ci\check_switches.py (upstream's updater
+     and the -beta download stay off), check_fenced.py (no fenced code
+     changed), check_hosts.py, check_licences.py and
+     check_microsoft_notices.py with their self-tests, notices.py
+     --licences (no code GPL-3.0 cannot take in), and README.txt's promises:
+     the crash report switch in Settings > Privacy exists and the crash dialog
+     does not send players to Ezz's Discord.
   3. Stages dist\xerces-<version>\: the three programs, data\ and compat\ (the
-     files Git tracks), LICENSE, THIRD_PARTY_NOTICES.txt and SOURCE.txt
+     files Git tracks; data\launcher, upstream's old launcher page with its
+     "No Steam" option and Ezz links, is replaced by
+     tools\release\launcher\main.html, which only says to start Xerces.exe),
+     LICENSE, THIRD_PARTY_NOTICES.txt and SOURCE.txt
      (tools\release\notices.py), README.txt (docs\TESTERS.md) and
      KNOWN_ISSUES.txt (docs\KNOWN_ISSUES.md), then SHA256SUMS.txt over every
      file. No .lib, .pdb, spike or test programs go in.
@@ -139,7 +145,12 @@ try {
 
   Step 'Lints'
   Invoke-Checked 'check_switches.py' { python -I tools\ci\check_switches.py }
+  Invoke-Checked 'check_fenced.py' { python -I tools\ci\check_fenced.py }
   Invoke-Checked 'check_hosts.py' { python -I tools\ci\check_hosts.py }
+  Invoke-Checked 'check_licences.py --self-test' { python -I tools\ci\check_licences.py --self-test }
+  Invoke-Checked 'check_licences.py' { python -I tools\ci\check_licences.py }
+  Invoke-Checked 'check_microsoft_notices.py --self-test' { python -I tools\ci\check_microsoft_notices.py --self-test }
+  Invoke-Checked 'check_microsoft_notices.py' { python -I tools\ci\check_microsoft_notices.py }
   # No code GPL-3.0 cannot take in (DESIGN.md 16.5; src\common\str.hpp held
   # kernel code until its rewrite).
   Invoke-Checked 'notices.py --licences' { python -I tools\release\notices.py --licences }
@@ -192,10 +203,15 @@ try {
     Copy-Item -LiteralPath (Join-Path $bin $exe) -Destination $stage
   }
   foreach ($file in (git -c core.quotepath=off ls-files -- data compat)) {
+    # Upstream's old launcher page (WebView2, shown by boiii.exe without
+    # -launch) offers "No Steam" and links to Ezz: not in a Xerces package.
+    if ($file -like 'data/launcher/*') { continue }
     $target = Join-Path $stage ($file -replace '/', '\')
     New-Item -ItemType Directory -Force (Split-Path -Parent $target) | Out-Null
     Copy-Item -LiteralPath (Join-Path $root $file) -Destination $target
   }
+  New-Item -ItemType Directory -Force (Join-Path $stage 'data\launcher') | Out-Null
+  Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'release\launcher\main.html') -Destination (Join-Path $stage 'data\launcher\main.html')
   Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $stage
   Invoke-Checked 'notices.py' {
     python -I tools\release\notices.py --notices (Join-Path $stage 'THIRD_PARTY_NOTICES.txt') `
@@ -211,6 +227,13 @@ try {
   foreach ($need in 'data\launcher\main.html', 'data\ui_scripts', 'data\xerces\ui\shell.rml', 'compat\builds.json', 'compat\signatures.json') {
     if (-not (Test-Path (Join-Path $stage $need))) { throw "The package lacks $need" }
   }
+  # Xerces docs and launcher text never offer play without Steam or link
+  # players to Ezz (CLAUDE.md, FENCED.md's content fence). Naming Ezz's
+  # master servers, as Settings > Privacy does, is no link.
+  $offers = @(Get-ChildItem -Recurse -File (Join-Path $stage 'data') |
+      Where-Object { $_.Extension -in '.html', '.js', '.css', '.rml', '.lua', '.json' } |
+      Select-String -Pattern 'nosteam', 'without connecting to Steam', 'https?://[^\s'']*ezz\.lol', 'discord\.gg' -List)
+  if ($offers.Count) { throw "Package data offers play without Steam or links to Ezz: $($offers.Path -join ', ')" }
 
   $files = Get-ChildItem -Recurse -File $stage | Sort-Object FullName
   $sums = foreach ($file in $files) {

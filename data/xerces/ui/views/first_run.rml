@@ -18,7 +18,7 @@
 			<button id="fr-step-3" class="fr-step" data-class-on="step == 3" data-class-done="step > 3" data-event-click="go(3)"><span class="fr-dot"></span><span class="fr-num">03</span><span>Look</span></button>
 			<button id="fr-step-4" class="fr-step" data-class-on="step == 4" data-event-click="go(4)"><span class="fr-dot"></span><span class="fr-num">04</span><span>Privacy</span></button>
 		</div>
-		<button id="fr-skip" class="link fr-skip" data-event-click="act('skip')"><span>Skip setup</span></button>
+		<button id="fr-skip" class="link fr-skip" data-if="step < 4" data-event-click="act('skip')"><span>Skip to Privacy</span></button>
 	</div>
 
 	<div class="fr-body">
@@ -175,7 +175,7 @@
 		     right, so the step fits the default window like the others. -->
 		<div class="fr-panel" data-if="step == 4">
 			<div class="label">Privacy</div>
-			<div class="fr-title">Crash reports, and nothing else</div>
+			<div class="fr-title">What Xerces sends</div>
 
 			<div class="fr-columns">
 				<div class="fr-col-main">
@@ -184,7 +184,7 @@
 							<span class="fr-point-n">01</span>
 							<div class="fr-point-text">
 								<div class="fr-point-title">Crash reports are sent</div>
-								<div class="fr-point-body">After a crash, Xerces sends a report to the Xerces server so the developer can fix it: the crash's code, the mods, map and versions, this PC's Windows, CPU, graphics card and RAM, log lines without chat, and a small dump of the threads' stacks. Your user name, player names, folders and server addresses are removed; the rest of the stack memory is raw and can hold bits of what the game was doing. The server keeps reports 90 days.</div>
+								<div class="fr-point-body">After a crash, Xerces sends a report to the Xerces server so the developer can fix it: the crash's code, the mods, map and versions, this PC's Windows, CPU, graphics card and RAM, log lines without chat, and a small dump of the threads' stacks. Logs lose your user name, player names and server addresses (other folder paths stay); the dump masks names only, and its raw stack memory can hold bits of what the game was doing. The server keeps reports 90 days; in this beta it does not take them yet, so they wait here.</div>
 							</div>
 						</div>
 						<div class="fr-point">
@@ -203,12 +203,12 @@
 					<button id="fr-crash" class="fr-toggle" data-class-on="send_crash" data-event-click="act('crash')">
 						<div class="fr-toggle-text">
 							<div class="fr-toggle-name">Send crash reports</div>
-							<div class="fr-toggle-help">Off: nothing is sent. To report a crash, open an issue on GitHub (DeroXP/boiii-free) with Diagnostics &gt; Copy report.</div>
+							<div class="fr-toggle-help">Off: no report is sent. To report a crash, open an issue on GitHub (DeroXP/boiii-free) with Diagnostics &gt; Copy report.</div>
 						</div>
 						<span class="fr-switch"><span class="fr-knob"></span></span>
 					</button>
 					<div class="fr-help">Settings &gt; Privacy has the same switch and deletes the reports this PC sent.</div>
-					<div class="fr-help">Xerces accounts come in a later version and are optional. Playing online still connects you to the servers you join, as the game always has.</div>
+					<div class="fr-help">Like BOIII, the game gets its server list from Ezz's master servers at each main menu and contacts the servers on it, and asks Steam about Workshop items. Servers and players you play with see your IP address. Xerces accounts come later, optional.</div>
 				</div>
 			</div>
 		</div>

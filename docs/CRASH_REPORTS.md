@@ -9,7 +9,9 @@ report crashes at <https://github.com/DeroXP/boiii-free/issues> with the
 diagnostics bundle (Xerces > Diagnostics > Copy report).
 
 The client and the backend implement this contract exactly. The backend side is
-`backend/` (branch `xerces-design`); the client side is
+`backend/` on branch `launcher/crash-backend`, not deployed yet: the service
+Railway runs (`xerces-design`) has no crash routes, so the client sends no
+report until it has (`GET /v1/crashes` below). The client side is
 `src/xerces_core/crash_report.*` and `crash_outbox.*`, the game's crash handler
 (`src/client/component/exception.cpp`), the launcher (`services.cpp`, Settings,
 first run) and `xerces_cli crash list|send`.
@@ -58,10 +60,12 @@ crash dumps, settings, packs or files. The full dumps stay in
 `%LOCALAPPDATA%\boiii\minidumps` for local use.
 
 Reports are tied to an install id: 32 random hex digits from the system's random
-source in `<home>\config\install_id`, made the first time a report is sent,
-never derived from hardware or accounts. "Delete my crash reports" deletes every
-report of that id. The server keeps reports 90 days and stores no IP address (it
-uses the address in memory for rate limits only).
+source in `<home>\config\install_id`, made when the first report is about to go
+to a server that takes them, never derived from hardware or accounts. An install
+without one never sent a report, so "Delete my crash reports" has nothing to ask
+the server then. "Delete my crash reports" deletes every report of that id. The
+server keeps reports 90 days and stores no IP address (it uses the address in
+memory for rate limits only).
 
 ## How a crash becomes a report
 
@@ -85,10 +89,13 @@ uses the address in memory for rate limits only).
    `out_of_memory` for 0xFFFFFFFF after the out-of-memory box, else
    `unknown_exit`), once per launch.
 3. A worker thread sends the outbox, oldest first: never on the UI thread, never
-   holding up a launch, each step timing out after 15 s. A notice says "Crash
-   report sent" with the server's id, or that it is sent later. A failed send is
-   tried again in 10 minutes while Xerces is open (or after the server's
-   Retry-After), and at every start.
+   holding up a launch, each step timing out after 15 s. Before the first report
+   of a run it asks the server whether it takes crash reports
+   (`GET /v1/crashes`); when it does not yet, nothing is sent, the notice says
+   the report waits on this PC, and the launcher asks again in an hour and at
+   every start. Otherwise a notice says "Crash report sent" with the server's
+   id, or that it is sent later. A failed send is tried again in 10 minutes
+   while Xerces is open (or after the server's Retry-After), and at every start.
 4. The outbox keeps at most 20 reports and none older than 7 days. The limits
    apply when a report is queued and again before every send, so a report older
    than 7 days is removed, never sent.
@@ -116,6 +123,17 @@ replaces it, for local tests only: `http://` or `https://` to 127.0.0.1,
 localhost or `[::1]`; anything else (another host, user info in the address)
 sends nothing. The transport also refuses every host but the backend's and this
 PC's.
+
+### `GET {base}/v1/crashes`
+
+Asked once before a run sends anything, with only the `User-Agent` header (no
+install id, no body): does the server take crash reports? `404` means no (a
+backend without crash routes, as the deployed one was when the beta went out):
+the client sends nothing and asks again later. A `2xx`, or `405` (the path is
+there for POST and DELETE only, which is what the backend on
+`launcher/crash-backend` answers), means yes. Anything else, or no answer, is
+asked again later, as a failed send is. The backend must not answer `404` here
+once it takes reports.
 
 ### `POST {base}/v1/crashes`
 

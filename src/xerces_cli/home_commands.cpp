@@ -1421,12 +1421,15 @@ int cmd_crash(const arguments &args, const std::string &action) {
   if (enabled && base && !list_outbox(crash_dir).empty()) {
     send_options options;
     options.base_url = *base;
-    options.install_id = crash_install_id(ctx.home);
+    // Made only once the server says it takes crash reports.
+    options.make_install_id = [home = ctx.home] {
+      return crash_install_id(home);
+    };
     options.user_agent = std::string("Xerces/") + xerces_version_text;
     sent = send_outbox(crash_dir, options, winhttp_send);
   }
-  // Reports that wait for a later try (no answer, rate limited); the ones
-  // the server refused are gone.
+  // Reports that wait for a later try (no answer, rate limited, a server
+  // that does not take crash reports yet); the ones it refused are gone.
   const bool waiting = enabled && base && !list_outbox(crash_dir).empty();
   const char *const refused_url =
       "XERCES_CRASH_URL must be a local address (127.0.0.1, localhost or "
@@ -1481,6 +1484,7 @@ int cmd_crash(const arguments &args, const std::string &action) {
                   : result.outcome == send_outcome::duplicate ? "had it   "
                   : result.outcome == send_outcome::rejected  ? "refused  "
                   : result.outcome == send_outcome::off       ? "off      "
+                  : result.outcome == send_outcome::not_taken ? "waits    "
                                                               : "later    ")
               << result.report_id;
     if (!result.server_id.empty()) {

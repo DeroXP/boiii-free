@@ -800,7 +800,13 @@ started and nothing was sent to the Railway service.
 - [x] `check-screens.ps1` (dark, light, pseudo): every screen captured, no RmlUi
       warning or error; Settings > Privacy shows the crash report switch,
       "Delete my crash reports", the GitHub link and the voice line.
-      `check-idle.ps1`: every case passes.
+      `check-idle.ps1`: five of six cases pass. Corrected by the review: "a game
+      running, launcher behind" fails on this PC, 2.6 to 3.0 passes a second
+      against a limit of 2 (0 frames), and fails the same way with `xerces-main`
+      0212339c's own build (2.6 a second, 2026-11-06), so it is not from the
+      merges. When launcher-idle was merged the case gave 1.2 to 1.8 (Launcher
+      speed, below). What wakes the loop the extra times behind a running game
+      is not found yet.
 - [x] The MinHook speed check (`test_minhook_threads.cpp`) run as twelve copies
       at once, three times: 36 of 36 passed.
 - [x] Crash report notices from the worker (`crash-wake-idle.ps1`): with 400
@@ -832,6 +838,42 @@ started and nothing was sent to the Railway service.
 - [ ] Everything with the game or a second PC: the two-PC join test
       (`docs/TWO_PC_TEST.md`), the crash report and push-to-talk items above and
       below, and the beta package items above.
+
+Fixes from the two reviews of the candidate (2026-11-06), run by Claude with dry
+launches only (homes `C:\Users\Ginld\XercesHome-agent-integrate2`, `-probe`,
+`-firstrun-en`, `-firstrun-pseudo`); scripts and captures in
+`C:\Users\Ginld\XercesDev\scratch\integrate2\fix`. The game was not started and
+nothing was sent to the Railway service.
+
+- [x] `xerces_tests`: 541 tests pass, one new
+      (`crash outbox: a server without     crash routes is sent nothing`);
+      `cli_smoke.ps1` passes; every lint and self-test as above,
+      `notices.py --self-test` with the new scans.
+- [x] What the backends answer to `GET /v1/crashes`, from their code in a
+      throwaway copy with the backend's test client (no network):
+      `xerces-design` (what Railway runs) 404, `launcher/crash-backend` 405.
+- [x] `xerces_cli crash send` against a stand-in on 127.0.0.1 (`probe_stub.py`):
+      answering as `xerces-design` does, the pending crash was queued, the
+      client asked `GET /v1/crashes` with no install id, got 404, sent nothing,
+      printed `waits` and exited 5, and no `install_id` was made; answering as
+      `crash-backend` does (405, then 201), the report went with a new install
+      id and the outbox emptied.
+- [x] First run on a fresh home: "Skip to Privacy" opens step 04 (logged
+      `launcher.first_run.step 4`), Finish opens Home and saves
+      `first_run_done`; English and pseudo captured. The privacy step, the
+      privacy section of Settings, Home and Friends show the new texts;
+      `check-screens.ps1` (dark, light, pseudo): every screen captured, no RmlUi
+      warning or error.
+- [x] `THIRD_PARTY_NOTICES.txt` (`notices.py`): UCDN's and fasthash's headers
+      and the one copyright line `COPYING` does not list (Elie Roux) in
+      HarfBuzz's entry, `Containers/LICENSE.txt` in RmlUi's, the BDF and PCF
+      drivers' and `fthash.c`'s licences and `pcfutil.c`'s Open Group notice in
+      FreeType's, the ProggyClean and ProggyForever fonts and the stb parts in
+      Dear ImGui's; the scan finds no other compiled third-party file under a
+      licence it does not know.
+- [ ] The UPnP retry for a stale "Xerces lobby" mapping and the launcher's
+      "waits on this PC" notice: built, not run (a router and a real send are
+      needed; dry launchers never send).
 
 ### Voice chat starts as push-to-talk (2026-11-05)
 
@@ -1161,7 +1203,9 @@ with `100`, `150` (every screen) and `pseudo-100` (Home, Mods, Settings),
       review fixes below: now 60.2 and 27.7 ms).
 - [x] About lists HarfBuzz 15.0.0 and RmlUi's HarfBuzz engine, and only in a
       build that has them (captured from both builds after the review, below);
-      `data/xerces/licenses` holds the licence texts.
+      `data/xerces/licenses` holds the licence texts. Since the beta package
+      (launcher/integrate-2) that folder is gone: the texts are in
+      `THIRD_PARTY_NOTICES.txt` (`tools/release/notices.py`), which About opens.
 - [ ] You looking at the text on your display, at your usual scale.
 - [ ] A translation in a script other than Latin, or written right to left.
 
@@ -1208,6 +1252,10 @@ scripts are next to them in `scratch\harfbuzz\fix`.
       (MIT) and the Unicode data (Unicode License V3) built in with it, and
       `data/xerces/licenses/HarfBuzz.txt` has HarfBuzz's `COPYING`, its
       `src/ms-use/COPYING` and the Unicode License V3 (`new\150\about.png`).
+      Since the beta package these texts are HarfBuzz's entry in
+      `THIRD_PARTY_NOTICES.txt` (with UCDN's and fasthash's headers and the
+      copyright lines `COPYING` does not list, since the candidate's review
+      fixes); `data/xerces/licenses` is gone.
 - [x] Kerning seen in the captures: "Yo" in "Your packs" closes as before. Inter
       Tight also kerns some pairs apart: "rf" in "HarfBuzz" on About opens by
       0.64 px at 150 percent and is drawn a pixel wider than RmlUi's FreeType

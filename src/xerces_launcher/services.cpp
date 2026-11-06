@@ -766,7 +766,10 @@ void services::run_crash_job(crash_job job) {
       options.enabled = [state] { return state->send_enabled.load(); };
       if (job.send && !dry && state->send_enabled &&
           !xerces_core::list_outbox(crash_dir).empty()) {
-        options.install_id = xerces_core::crash_install_id(ctx.home);
+        // Made only once the server says it takes crash reports.
+        options.make_install_id = [home = ctx.home] {
+          return xerces_core::crash_install_id(home);
+        };
         event.sent = xerces_core::send_outbox(crash_dir, options,
                                               xerces_core::winhttp_send);
       }
@@ -835,6 +838,7 @@ void services::drain_crash_events() {
     std::size_t sent = 0;
     std::string last_id;
     bool retry = false;
+    bool not_taken = false;
     int wait_s = 600;
     for (const auto &result : event.sent) {
       log(result.outcome == xerces_core::send_outcome::retry ||
@@ -867,6 +871,13 @@ void services::drain_crash_events() {
           wait_s = std::max(wait_s, *result.retry_after);
         }
         break;
+      case xerces_core::send_outcome::not_taken:
+        // The server has no crash routes yet: ask again in an hour (and
+        // at every start); nothing was sent.
+        retry = true;
+        not_taken = true;
+        wait_s = std::max(wait_s, 3600);
+        break;
       case xerces_core::send_outcome::off:
         break;
       }
@@ -881,8 +892,9 @@ void services::drain_crash_events() {
     } else if (fresh && sent == 0 && crash_state_->send_enabled &&
                xerces_core::reports_wait(event.sent)) {
       // Not after the server refused the report: that notice says so.
-      crash_notices_.push_back(
-          notice(crash_notice::kind::later, event.collected->queued.size()));
+      crash_notices_.push_back(notice(not_taken ? crash_notice::kind::waiting
+                                                : crash_notice::kind::later,
+                                      event.collected->queued.size()));
     }
     if (retry) {
       // While Xerces stays open it tries again in 10 minutes (or when the

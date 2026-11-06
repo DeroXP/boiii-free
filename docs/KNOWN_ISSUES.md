@@ -37,6 +37,9 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## The game and Xerces
 
+- **This zip has not been run in the game yet.** It was checked with tests and
+  dry runs only (Xerces.exe with the game launch left out). The issues here come
+  from playing earlier builds.
 - **Some crashes are not explained yet.** In our tests the game sometimes closed
   while a map was starting, with no crash report, and ran fine the next time. If
   it happens to you, report it (README.txt, Reporting bugs) and say what you did
@@ -50,11 +53,18 @@ to report these again, but tell us if you see them somewhere else or worse.
   is checked on the joins Xerces handles but not on the game's own lobby join,
   so close the lobby when you are done. Whether the router's port closes by
   itself when you leave the lobby for the main menu is not seen yet; closing the
-  lobby or quitting the game closes it.
+  lobby or quitting the game closes it. After a crash with the lobby open the
+  router keeps forwarding the port until the lobby is opened and closed again
+  (README.txt, Playing with other testers).
 - **Crash reports wait on your PC.** The Xerces server does not take crash
-  reports yet, so they stay in `crash\outbox` in your Xerces folder and Xerces
-  tries again later (README.txt, When the game crashes). Reports older than 7
-  days are removed unsent.
+  reports yet, so none is sent: they stay in `crash\outbox` in your Xerces
+  folder, and Xerces asks the server at every start, after a crash and every
+  hour whether it takes them yet (README.txt, When the game crashes). Reports
+  older than 7 days are removed unsent.
+- **Crash reports have not been tried with a real crash in the game yet.** The
+  game's part (its crash dialog, the small stack dump, leaving chat and names
+  out) was checked with tests and stand-in crashes only. If the crash dialog or
+  a report in `crash\outbox` looks wrong, tell us.
 - **Push-to-talk on a new game profile is not checked in the game yet.** If a
   new profile starts on open mic, turn on Push to talk in the game's voice
   options, and tell us.
@@ -62,4 +72,9 @@ to report these again, but tell us if you see them somewhere else or worse.
   the Windows firewall prompt says "BOIII", and so does the game's own settings
   menu ("BOIII SETTINGS"). Allow the firewall prompt if you want to host games
   or join other people's; offline play does not need it.
+- **Starting boiii.exe yourself does not go through Xerces.** On its own it does
+  not find Xerces' data and behaves like BOIII: it may ask for the game folder,
+  stop with BOIII's "Missing required data" message, or, if BOIII was installed
+  on this PC, show BOIII's old launcher with BOIII's options and links (which
+  also leaves `%LOCALAPPDATA%\EZZ BOIII` behind). Close it and start Xerces.exe.
 - **Xerces does not update itself.** A new beta comes as a new zip.

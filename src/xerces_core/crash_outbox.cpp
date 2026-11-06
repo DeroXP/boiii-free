@@ -273,6 +273,8 @@ const char *to_string(send_outcome outcome) {
     return "retry";
   case send_outcome::off:
     return "off";
+  case send_outcome::not_taken:
+    return "not_taken";
   }
   return "retry";
 }
@@ -682,6 +684,27 @@ std::optional<std::string> without_minidump(const std::string &body) {
 }
 } // namespace
 
+service_answer ask_service(const send_options &options,
+                           const crash_transport &transport,
+                           http_response *response) {
+  http_request request;
+  request.method = "GET";
+  request.url = options.base_url + "/v1/crashes";
+  // No install id: asking says nothing about this install.
+  request.headers = {{"User-Agent", options.user_agent}};
+  http_response answer = transport(request);
+  const service_answer out =
+      !answer.reached        ? service_answer::no_answer
+      : answer.status == 404 ? service_answer::not_yet
+      : (answer.status >= 200 && answer.status < 300) || answer.status == 405
+          ? service_answer::takes_reports
+          : service_answer::no_answer;
+  if (response) {
+    *response = std::move(answer);
+  }
+  return out;
+}
+
 std::vector<send_result> send_outbox(const fs::path &crash_dir,
                                      const send_options &options,
                                      const crash_transport &transport) {
@@ -694,27 +717,62 @@ std::vector<send_result> send_outbox(const fs::path &crash_dir,
                    : std::chrono::duration_cast<std::chrono::seconds>(
                          std::chrono::system_clock::now().time_since_epoch())
                          .count());
+  bool asked = false;
+  // With the install id once it is known.
+  send_options sending = options;
   for (const outbox_entry &entry : list_outbox(crash_dir)) {
     send_result result;
     result.report_id = entry.report_id;
-    if ((options.enabled && !options.enabled()) || options.install_id.empty() ||
+    const bool no_id = sending.install_id.empty() && !options.make_install_id;
+    if ((options.enabled && !options.enabled()) || no_id ||
         options.base_url.empty()) {
       result.outcome = send_outcome::off;
-      result.error = options.install_id.empty() ? "no install id"
+      result.error = no_id                      ? "no install id"
                      : options.base_url.empty() ? "no address to send to"
                                                 : "sending is off";
       out.push_back(std::move(result));
       break;
+    }
+    if (!asked) {
+      // Once a run, before any report leaves: a server without crash
+      // routes would only turn every report away.
+      asked = true;
+      http_response answer;
+      const service_answer service = ask_service(options, transport, &answer);
+      if (service != service_answer::takes_reports) {
+        result.status = answer.status;
+        result.retry_after = answer.retry_after;
+        if (service == service_answer::not_yet) {
+          result.outcome = send_outcome::not_taken;
+          result.error = "the server does not take crash reports yet";
+        } else {
+          result.outcome = send_outcome::retry;
+          result.error = answer.reached
+                             ? "HTTP " + std::to_string(answer.status)
+                             : answer.error;
+        }
+        out.push_back(std::move(result));
+        break;
+      }
+      if (sending.install_id.empty()) {
+        sending.install_id = options.make_install_id();
+        if (sending.install_id.empty()) {
+          result.outcome = send_outcome::off;
+          result.error = "no install id";
+          out.push_back(std::move(result));
+          break;
+        }
+      }
     }
     std::string body = read_text_file(entry.file).value_or("");
     if (body.empty()) {
       remove_file(entry.file);
       continue;
     }
-    http_response response = post_report(options, transport, body);
+    http_response response = post_report(sending, transport, body);
     if (response.reached && response.status == 413) {
       if (const auto smaller = without_minidump(body)) {
-        response = post_report(options, transport, *smaller);
+        response = post_report(sending, transport, *smaller);
       }
     }
     result.status = response.status;
@@ -753,7 +811,8 @@ bool reports_wait(const std::vector<send_result> &results) {
   return results.empty() ||
          std::ranges::any_of(results, [](const send_result &result) {
            return result.outcome == send_outcome::retry ||
-                  result.outcome == send_outcome::off;
+                  result.outcome == send_outcome::off ||
+                  result.outcome == send_outcome::not_taken;
          });
 }
 

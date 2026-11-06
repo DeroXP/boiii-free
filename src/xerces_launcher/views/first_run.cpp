@@ -6,8 +6,9 @@
 //   03 Look     theme, UI scale and reduced motion, applied live
 //   04 Privacy  what crash reports send and what is never sent, with the
 //               "Send crash reports" switch (D21, decided 2026-11-05)
-// Finish (and "Skip setup") marks the setup done and opens Home. Nothing on
-// this screen blocks: every step can be left as it is.
+// "Skip to Privacy" jumps to step 04, so the privacy statement is seen even
+// when setup is skipped; Finish marks the setup done and opens Home. Nothing
+// on this screen blocks: every step can be left as it is.
 
 #include <RmlUi/Core.h>
 
@@ -340,7 +341,13 @@ private:
     } else if (action == "back") {
       go(step_ - 1);
     } else if (action == "skip") {
-      finish();
+      // Crash reports are on by default (D21), so skipping still shows what
+      // they send: it jumps to the privacy step, whose Finish ends setup.
+      if (step_ < step_count) {
+        go(step_count);
+      } else {
+        finish();
+      }
     } else if (action == "choose") {
       // pick_folder translates its title itself: pass the English key.
       const auto picked = owner_->pick_folder("Choose the Black Ops III folder");

@@ -16,7 +16,7 @@
 <body template="shell">
 <div class="page">
 	<div class="page-title">Friends</div>
-	<div class="page-sub">Friends, presence and invites arrive with Xerces accounts. Until then Xerces sends nothing about you anywhere, and joining a friend works through Servers with their address.</div>
+	<div class="page-sub">Friends, presence and invites arrive with Xerces accounts. Until then Xerces sends nothing about you for them (crash reports are in Settings, Privacy), and joining a friend works through Servers with their address.</div>
 
 	<div class="friends-columns">
 		<div class="friends-column">

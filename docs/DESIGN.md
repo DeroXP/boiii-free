@@ -3480,13 +3480,27 @@ M5a, which you asked for now.
   `tools/release.ps1` with `THIRD_PARTY_NOTICES.txt`, `SOURCE.txt`, `README.txt`
   and `KNOWN_ISSUES.txt` (16.1); joining another tester's game with a lobby open
   to direct connect, the router's port through UPnP and the host's own password
-  check (11.10); push-to-talk on a new game profile (10.5). Checked with unit
-  tests and dry runs only. Open before testers get it: the two-PC test
+  check (11.10); push-to-talk on a new game profile (10.5). After the two
+  reviews of the candidate (2026-11-06): the client asks the backend
+  (`GET /v1/crashes`) before it sends a report and sends nothing while the
+  deployed service has no crash routes (the install id is made only then); first
+  run's Skip goes to the privacy step; the privacy texts, README.txt and
+  KNOWN_ISSUES.txt say what the game itself sends (Ezz's master server list,
+  Steam's web API), what a report really leaves in (folder paths, the dump's
+  module paths), and what is untested; `THIRD_PARTY_NOTICES.txt` gained the
+  licences of UCDN and fasthash in HarfBuzz, robin_hood and itlib in RmlUi,
+  FreeType's BDF, PCF and hash code and Dear ImGui's fonts and stb parts, with a
+  scan that fails on compiled third-party files under a licence it does not
+  know; the package carries a one-line `data\launcher\main.html` instead of
+  upstream's old launcher page; `tools/release.ps1` runs the fence, licence and
+  Microsoft notice lints; a lobby's stale UPnP mapping is replaced. Checked with
+  unit tests and dry runs only. Open before testers get it: the two-PC test
   (`docs/TWO_PC_TEST.md`; README.txt says joining is untested until it passes),
   the in-game checks of crash reports, push-to-talk and the package's data
-  folder (docs/TESTING.md), the backend's crash routes on Railway (until then
-  reports wait in the outbox), and pushing the commit that `SOURCE.txt` and
-  About link to. Code signing (16.4) stays open for the public release.
+  folder (docs/TESTING.md), the backend's crash routes on Railway
+  (`launcher/crash-backend`; until they are deployed reports wait in the outbox,
+  unsent), and pushing the commit that `SOURCE.txt` and About link to. Code
+  signing (16.4) stays open for the public release.
 
 ---
 
