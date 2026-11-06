@@ -648,6 +648,14 @@ Run on 2026-11-05 by Claude on your PC while you were away (dry launches only):
       and `conflict_b`) block the plan; Mods' "Allow this conflict" turns the
       problem into the warning "Allowed by you", the plan then has no problems,
       and `config\launcher.json` keeps the pair.
+- [x] (launcher/fix2-redo) A pad reaches About from Home (Down past the screen's
+      end), Settings (Up from the tabs) and Diagnostics (it scrolls to its end
+      first). Home's culprit box on a fake game with dependencies and a map: a
+      dependency found names the enabled mods that load it, and "Turn them off"
+      keeps the unrelated mod; a mod only the map needs, two mods that only load
+      with the map, and a test of the map's dependency alone each say so. Every
+      screen in English and in the pseudo-locale has no RmlUi warning, and long
+      panel notes wrap under their titles.
 - [ ] The window by hand: drag by the header, snap, resize from the edges,
       minimize, maximize, close; at 150 percent.
 - [ ] A physical controller: A, B, Y, LB/RB and the D-pad on every screen.
