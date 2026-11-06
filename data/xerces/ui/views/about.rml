@@ -9,7 +9,7 @@
 		.about-name { font-size: 15dp; font-weight: 600; line-height: 20dp; }
 		.about-text { margin-top: 3dp; font-size: 13dp; line-height: 19dp; color: var(--text2); }
 		.about-version { font-family: "IBM Plex Mono"; font-size: 13dp; color: var(--text2); margin-top: 8dp; }
-		.about-mono { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 18dp; color: var(--text2); margin-top: 3dp; }
+		.about-mono { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 18dp; color: var(--text2); margin-top: 3dp; word-break: break-word; }
 		.about-actions { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8dp; margin-top: 10dp; }
 	</style>
 </head>
@@ -41,7 +41,7 @@
 				<div class="about-text">The full text is in the file LICENSE next to Xerces.exe.</div>
 				<div class="about-mono">{{licence_path}}</div>
 				<div class="about-actions">
-					<button id="about-licence-file" class="small-button"><span>Open LICENSE</span></button>
+					<button id="about-licence-file" class="small-button default-focus"><span>Open LICENSE</span></button>
 					<button id="about-licence" class="small-button"><span>Read it on gnu.org</span></button>
 				</div>
 			</div>
@@ -95,7 +95,7 @@
 	</div>
 
 	<div class="section toolbar">
-		<button id="about-home" class="outline default-focus"><span>Back to Home</span></button>
+		<button id="about-home" class="outline"><span>Back to Home</span></button>
 	</div>
 </div>
 </body>

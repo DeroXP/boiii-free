@@ -118,6 +118,19 @@ def third_party_dirs(build: pathlib.Path) -> dict[str, pathlib.Path]:
     return found
 
 
+def compiled_into(build: pathlib.Path, links: dict[str, set[str]], folder: pathlib.Path) -> list[str]:
+    """The programs whose own project, or a library they link, compiles a source file from folder."""
+    rule = re.compile(rf"^build \S+: \S+ \S*[/\\]{re.escape(folder.name)}[/\\]", flags=re.M)
+    programs = []
+    for project, exe in PROGRAMS.items():
+        for name in [project, *sorted(links[exe])]:
+            file = build / f"{name}.ninja"
+            if file.is_file() and rule.search(file.read_text(encoding="utf-8", errors="replace")):
+                programs.append(exe)
+                break
+    return programs
+
+
 def submodules() -> dict[str, tuple[str, str, str]]:
     """path -> (commit, describe, url) at HEAD."""
     urls = {}
@@ -166,7 +179,8 @@ def includes(pattern: str) -> list[str]:
     return [p for p in PROGRAMS.values() if p in programs]
 
 
-def entries(links: dict[str, set[str]], tp: dict[str, pathlib.Path], subs: dict) -> tuple[list[dict], set[str]]:
+def entries(links: dict[str, set[str]], tp: dict[str, pathlib.Path], subs: dict,
+            build: pathlib.Path) -> tuple[list[dict], set[str]]:
     """The notices, and the linked libraries they account for."""
     deps = ROOT / "deps"
 
@@ -262,10 +276,12 @@ def entries(links: dict[str, set[str]], tp: dict[str, pathlib.Path], subs: dict)
                       "Portions of this software are copyright (c) The FreeType Project (www.freetype.org). "
                       "All rights reserved. FreeType is dual-licensed; Xerces uses it under the FreeType "
                       "License.", {"xerces_freetype"}))
+    # HarfBuzz (launcher/harfbuzz): in whichever project compiles its sources.
     harfbuzz_libs = {lib for libs in links.values() for lib in libs if "harfbuzz" in lib.lower()}
-    if "harfbuzz" in tp and harfbuzz_libs:
-        table.append(("HarfBuzz " + tp["harfbuzz"].name.split("-", 1)[1], "Old MIT",
-                      linked(*harfbuzz_libs), f"{tp['harfbuzz'].name} (outside the repository; SOURCE.txt)",
+    harfbuzz_in = compiled_into(build, links, tp["harfbuzz"]) if "harfbuzz" in tp else []
+    if harfbuzz_in:
+        table.append(("HarfBuzz " + tp["harfbuzz"].name.split("-", 1)[1], "Old MIT", harfbuzz_in,
+                      f"{tp['harfbuzz'].name} (outside the repository; SOURCE.txt)",
                       [(None, read(tp["harfbuzz"] / "COPYING"))], "", harfbuzz_libs))
     fonts = ROOT / "data/xerces/fonts"
     table.append(("Inter Tight and IBM Plex Mono (fonts)", "SIL Open Font License 1.1", ["Xerces.exe"],
@@ -422,13 +438,13 @@ def main() -> int:
         links = ninja_links(build)
         tp = third_party_dirs(build)
         subs = submodules()
-        items, known = entries(links, tp, subs)
+        items, known = entries(links, tp, subs, build)
         unknown = sorted({lib for libs in links.values() for lib in libs} - known - OWN_LIBS)
         if unknown:
             raise Problem("linked libraries with no notice (add them to tools/release/notices.py): "
                           + ", ".join(unknown))
         used = {k for k in ("rmlui", "freetype") if k in tp}
-        if "harfbuzz" in tp and any("harfbuzz" in lib.lower() for libs in links.values() for lib in libs):
+        if "harfbuzz" in tp and compiled_into(build, links, tp["harfbuzz"]):
             used.add("harfbuzz")
         if args.check:
             print(f"notices: {len(items)} entries, every linked library known: ok")

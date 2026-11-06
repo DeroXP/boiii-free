@@ -63,6 +63,26 @@ function Read-Utf8([string]$path) {
   [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)
 }
 
+# Zips a folder with '/' in the entry names, as the zip format asks: Windows
+# PowerShell's ZipFile.CreateFromDirectory writes '\'. prefix: the folder the
+# entries go under, or none.
+function New-Zip([string]$folder, [string]$zip, [string]$prefix) {
+  Add-Type -AssemblyName System.IO.Compression
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  if (Test-Path $zip) { Remove-Item -Force -LiteralPath $zip }
+  $archive = [System.IO.Compression.ZipFile]::Open($zip, [System.IO.Compression.ZipArchiveMode]::Create)
+  try {
+    foreach ($file in (Get-ChildItem -Recurse -File $folder | Sort-Object FullName)) {
+      $entry = $file.FullName.Substring($folder.Length + 1) -replace '\\', '/'
+      if ($prefix) { $entry = "$prefix/$entry" }
+      [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+        $archive, $file.FullName, $entry, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+    }
+  } finally {
+    $archive.Dispose()
+  }
+}
+
 function Get-Sha256([string]$path) {
   (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
 }
@@ -175,10 +195,8 @@ try {
   Write-Crlf (Join-Path $stage 'SHA256SUMS.txt') (($sums -join "`n") + "`n")
 
   Step 'Zips'
-  Add-Type -AssemblyName System.IO.Compression.FileSystem
   $zip = Join-Path $OutDir "$name.zip"
-  if (Test-Path $zip) { Remove-Item -Force -LiteralPath $zip }
-  [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
+  New-Zip $stage $zip $name
 
   $symbolsDir = Join-Path $OutDir "symbols-$version"
   if (Test-Path $symbolsDir) { Remove-Item -Recurse -Force -LiteralPath $symbolsDir }
@@ -190,8 +208,7 @@ try {
   }
   Write-Crlf (Join-Path $symbolsDir 'BUILD.txt') "Symbols for Xerces $version, commit $commit.`nFor reading crash dumps of this package only; not for testers.`n"
   $symbols = Join-Path $OutDir "symbols-$version.zip"
-  if (Test-Path $symbols) { Remove-Item -Force -LiteralPath $symbols }
-  [System.IO.Compression.ZipFile]::CreateFromDirectory($symbolsDir, $symbols, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+  New-Zip $symbolsDir $symbols ''
   Remove-Item -Recurse -Force -LiteralPath $symbolsDir
 
   $zipSums = foreach ($file in $zip, $symbols) { "$(Get-Sha256 $file)  $(Split-Path -Leaf $file)" }
