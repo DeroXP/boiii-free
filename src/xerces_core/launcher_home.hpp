@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace xerces_core {
 struct launcher_paths {
@@ -26,8 +27,21 @@ struct launcher_paths {
   // running program.
   std::filesystem::path client;
   std::filesystem::path program; // the running executable
-  // A repository checkout's data\, for XERCES_DATA_PATH.
-  std::optional<std::filesystem::path> dev_data;
+  // The game client's data folder (ui_scripts, scripts, launcher\main.html),
+  // passed to the game as XERCES_DATA_PATH: data\ next to the executable in an
+  // unzipped package, the repository's data\ in a development build. Nothing
+  // when neither holds it; the client then falls back to
+  // %LOCALAPPDATA%\boiii\data, which nothing installs any more.
+  std::optional<std::filesystem::path> client_data;
+  // Where client_data was looked for (Diagnostics names it when missing).
+  std::filesystem::path client_data_expected;
+  // Built in a repository checkout (premake5.lua above the executable): the
+  // DEV badge instead of BETA.
+  bool dev_checkout = false;
+  // LICENSE and THIRD_PARTY_NOTICES.txt next to the executable or in the
+  // checkout above it (About); nothing when not there.
+  std::optional<std::filesystem::path> licence_file;
+  std::optional<std::filesystem::path> notices_file;
   std::filesystem::path config_file() const { return config / "launcher.json"; }
   std::filesystem::path journal_file() const { return logs / "journal.json"; }
   // The Workshop hash cache (catalog.hpp).
@@ -52,6 +66,18 @@ find_home(const std::optional<std::filesystem::path> &home_override);
 launcher_paths
 find_paths(const std::optional<std::filesystem::path> &home_override,
            bool create = true);
+
+// The part of find_paths that depends on where the executable is: data,
+// compat, client, client_data, dev_checkout and the licence files, for a
+// program in exe_dir. program is left alone.
+void locate_install(launcher_paths &out, const std::filesystem::path &exe_dir);
+
+// What the game client needs from its data folder that the folder lacks
+// ("ui_scripts", "launcher/main.html", ...). Empty: it holds the client data.
+// The client refuses to start without launcher\main.html (main.cpp's
+// initial_update_required).
+std::vector<std::string>
+missing_client_data(const std::filesystem::path &data_dir);
 
 // The single-instance mutex of Xerces.exe is per home: one launcher per home
 // keeps one config and one journal. The hash is FNV-1a over the absolute,

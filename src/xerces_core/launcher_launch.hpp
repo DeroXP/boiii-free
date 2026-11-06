@@ -102,7 +102,8 @@ launch_outcome preview_launch(const launch_inputs &in);
 // (modded) and the journal (phase launching, the mode, a fresh launch id and
 // whether the command passes -xerces-db-pool),
 // then starts the client from the game folder with XERCES_HOME,
-// XERCES_DATA_PATH (development builds) and XERCES_LAUNCH_ID set for it alone.
+// XERCES_DATA_PATH (when the data folder is there) and XERCES_LAUNCH_ID set
+// for it alone.
 // If Windows refuses, the old journal is put back. game_running is asked
 // after the plan and game checks. On success *process (when given) receives
 // the process handle, which the caller closes.

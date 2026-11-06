@@ -9,10 +9,14 @@
 		.about-name { font-size: 15dp; font-weight: 600; line-height: 20dp; }
 		.about-text { margin-top: 3dp; font-size: 13dp; line-height: 19dp; color: var(--text2); }
 		.about-version { font-family: "IBM Plex Mono"; font-size: 13dp; color: var(--text2); margin-top: 8dp; }
+		.about-mono { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 18dp; color: var(--text2); margin-top: 3dp; }
+		.about-actions { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8dp; margin-top: 10dp; }
 	</style>
 </head>
-<!-- About and Legal (docs/DESIGN.md 7.3, 16.5): the version, the licence and
-     what Xerces is built from, with the credits their licences ask for.
+<!-- About and Legal (docs/DESIGN.md 7.3, 16.5): the version, the notices
+     GPL-3.0 section 5(d) asks an interactive program to show (copyright, no
+     warranty, how to read the licence), where the source of this build is,
+     and what Xerces is built from, with the credits their licences ask for.
      Reached from the footer's About link. -->
 <body template="shell" data-model="about">
 <div class="page">
@@ -21,6 +25,36 @@
 	<div class="page-sub">A multi-mod launcher and loader for Call of Duty: Black Ops III, for people who own the game on Steam. Self-hosted servers and offline play only. Free software under the GNU General Public License, version 3.</div>
 
 	<div class="about-columns">
+		<div class="about-column">
+			<div class="label section-label">Legal</div>
+			<div class="about-item">
+				<div class="about-name">Copyright</div>
+				<div class="about-text">Copyright (C) 2022-2026 momo5502 and the BOIII contributors, Ezz and the Ezz BOIII contributors, and the Xerces contributors.</div>
+				<div class="about-text">Xerces is a modified version of Ezz BOIII, itself based on BOIII by momo5502. The Xerces contributors have changed it since November 2026.</div>
+			</div>
+			<div class="about-item">
+				<div class="about-name">No warranty</div>
+				<div class="about-text">Xerces is free software: you can redistribute it and change it under the terms of the GNU General Public License, version 3, as published by the Free Software Foundation. It comes with ABSOLUTELY NO WARRANTY, to the extent permitted by law; the licence has the details.</div>
+			</div>
+			<div class="about-item">
+				<div class="about-name">The licence</div>
+				<div class="about-text">The full text is in the file LICENSE next to Xerces.exe.</div>
+				<div class="about-mono">{{licence_path}}</div>
+				<div class="about-actions">
+					<button id="about-licence-file" class="small-button"><span>Open LICENSE</span></button>
+					<button id="about-licence" class="small-button"><span>Read it on gnu.org</span></button>
+				</div>
+			</div>
+			<div class="about-item">
+				<div class="about-name">Source code</div>
+				<div class="about-text">This build was made from this commit of the Xerces repository. Its page has the source, and SOURCE.txt next to Xerces.exe lists the libraries built in.</div>
+				<div class="about-mono">{{source_url}}</div>
+				<div class="about-text" data-if="dirty">This build had changes that are not in that commit.</div>
+				<div class="about-actions">
+					<button id="about-source" class="small-button"><span>Open the source</span></button>
+				</div>
+			</div>
+		</div>
 		<div class="about-column">
 			<div class="label section-label">Built on</div>
 			<div class="about-item">
@@ -35,12 +69,11 @@
 				<div class="about-name">Call of Duty: Black Ops III</div>
 				<div class="about-text">A game by Treyarch, published by Activision. Xerces is not made, endorsed or supported by them and adds no game data.</div>
 			</div>
-		</div>
-		<div class="about-column">
-			<div class="label section-label">Third-party software in the launcher</div>
+
+			<div class="label section-label">Third-party software</div>
 			<div class="about-item">
 				<div class="about-name">RmlUi 6.3</div>
-				<div class="about-text">MIT licence. Copyright (c) 2008-2014 CodePoint Ltd, Shift Technology Ltd, and contributors; (c) 2019-2025 The RmlUi Team, and contributors.</div>
+				<div class="about-text">MIT licence. Copyright (c) 2008-2014 CodePoint Ltd, Shift Technology Ltd, and contributors; (c) 2019-2026 The RmlUi Team, and contributors.</div>
 			</div>
 			<div class="about-item">
 				<div class="about-name">FreeType 2.14.3</div>
@@ -51,15 +84,18 @@
 				<div class="about-text">Fonts under the SIL Open Font License 1.1, unmodified; the licence texts are next to the fonts in data\xerces\fonts.</div>
 			</div>
 			<div class="about-item">
-				<div class="about-name">RapidJSON and Zstandard</div>
-				<div class="about-text">RapidJSON under the MIT licence; Zstandard under the BSD licence.</div>
+				<div class="about-name">Everything else</div>
+				<div class="about-text">The game client and the launcher are built with more libraries (MinHook, curl, zstd, RapidJSON and others). THIRD_PARTY_NOTICES.txt next to Xerces.exe has every one with its licence.</div>
+				<div class="about-mono">{{notices_path}}</div>
+				<div class="about-actions">
+					<button id="about-notices" class="small-button"><span>Open third-party notices</span></button>
+				</div>
 			</div>
 		</div>
 	</div>
 
 	<div class="section toolbar">
-		<button id="about-licence" class="outline default-focus"><span>Read the GPL-3.0</span></button>
-		<button id="about-home" class="link"><span>Back to Home</span></button>
+		<button id="about-home" class="outline default-focus"><span>Back to Home</span></button>
 	</div>
 </div>
 </body>

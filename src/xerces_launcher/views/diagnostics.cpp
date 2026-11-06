@@ -23,6 +23,7 @@
 #include <xerces_core/journal.hpp>
 #include <xerces_core/manifest.hpp>
 #include <xerces_core/planner.hpp>
+#include <xerces_core/version.hpp>
 
 #include "../app.hpp"
 #include "../log.hpp"
@@ -432,9 +433,26 @@ private:
         client ? owner_->tr("Present")
                : owner_->tr("Missing: launches need it next to Xerces.exe"),
         false, !client);
-    row("Xerces", services::version() +
-                      (svc.dry_launch() ? "  (" + owner_->tr("dry launch") + ")"
-                                        : std::string()),
+    // The game's own data folder (ui_scripts, launcher\main.html), which the
+    // launch passes to the game; without it the game stops at its start.
+    const std::vector<std::string> data_missing =
+        xerces_core::missing_client_data(paths.client_data_expected);
+    row("Game data", utf8(paths.client_data_expected), true,
+        !data_missing.empty());
+    if (!data_missing.empty()) {
+      std::string names;
+      for (const std::string &name : data_missing) {
+        names += (names.empty() ? "" : ", ") + name;
+      }
+      row("Game data files",
+          owner_->tr("Missing: unzip the whole Xerces folder again") + " (" +
+              names + ")",
+          false, true);
+    }
+    row("Xerces",
+        services::version_label() +
+            (svc.dry_launch() ? "  (" + owner_->tr("dry launch") + ")"
+                              : std::string()),
         true);
     row("Home folder", utf8(paths.home), true);
     if (!svc.config_error().empty()) {
@@ -732,12 +750,29 @@ private:
 
     report_section xerces{"Xerces", {}, {}};
     xerces.fields = {
-        {"Version", services::version()},
-        {"Build", paths.dev_data ? "development checkout" : "release"},
-        {"Dry launch", svc.dry_launch() ? "yes (the game is never started)" : "no"},
+        {"Version", services::version_label()},
+        {"Commit",
+         xerces_core::xerces_commit[0] != '\0'
+             ? std::string(xerces_core::xerces_commit) +
+                   (xerces_core::xerces_dirty ? " (with changes)" : "")
+             : std::string("unknown")},
+        {"Build", paths.dev_checkout ? "development checkout" : "release"},
+        {"Dry launch",
+         svc.dry_launch() ? "yes (the game is never started)" : "no"},
         {"Windows", windows_version()},
         {"Home folder", utf8(paths.home)},
         {"Data folder", utf8(paths.data)},
+        {"Game data folder", utf8(paths.client_data_expected)},
+        {"Game data",
+         [&] {
+           const auto missing =
+               xerces_core::missing_client_data(paths.client_data_expected);
+           std::string text = missing.empty() ? "present" : "missing:";
+           for (const std::string &name : missing) {
+             text += " " + name;
+           }
+           return text;
+         }()},
         {"Compat folder", utf8(paths.compat)},
         {"Language", owner_->language()},
         {"Theme", config.theme},
@@ -745,7 +780,8 @@ private:
                          ? std::string("follows Windows")
                          : std::to_string(config.ui_scale_percent) + " %"},
         {"Reduced motion", config.reduced_motion ? "on" : "off"},
-        {"Settings file", svc.config_error().empty() ? "read" : svc.config_error()},
+        {"Settings file",
+         svc.config_error().empty() ? "read" : svc.config_error()},
     };
     sections.push_back(std::move(xerces));
 
