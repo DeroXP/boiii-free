@@ -52,11 +52,13 @@ EXTENSIONS = {
 NAMES = {"LICENSE", "LICENCE", "COPYING", "NOTICE", "Dockerfile"}
 
 # SPDX identifiers GPL-3.0 can take in (FSF compatibility list; the -or-later
-# forms of GPL-2.0 and LGPL-2.x reach version 3).
+# forms of GPL-2.0 and LGPL-2.x reach version 3). The FSF lists the Unicode
+# licence for data files and software as lax permissive and GPL-compatible;
+# Unicode-3.0 is its current text (HarfBuzz's built-in Unicode tables).
 COMPATIBLE = {
     "0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "CC0-1.0",
     "FTL", "ISC", "MIT", "MIT-0", "MPL-2.0", "Unlicense", "X11", "Zlib",
-    "zlib-acknowledgement", "GPL-2.0-or-later", "GPL-2.0+", "GPL-3.0",
+    "zlib-acknowledgement", "Unicode-3.0", "Unicode-DFS-2016", "GPL-2.0-or-later", "GPL-2.0+", "GPL-3.0",
     "GPL-3.0-only", "GPL-3.0-or-later", "GPL-3.0+", "LGPL-2.1", "LGPL-2.1-only",
     "LGPL-2.1-or-later", "LGPL-2.1+", "LGPL-2.0-or-later", "LGPL-2.0+",
     "LGPL-3.0", "LGPL-3.0-only", "LGPL-3.0-or-later", "LGPL-3.0+",
@@ -255,6 +257,7 @@ def self_test() -> int:
         (" *       Copyright (c) Microsoft Corporation. All rights reserved.\n", {"microsoft"}),
         ("// Copyright (c) Microsoft Corporation. All rights reserved.\n//\n//\n//\n//\n//\n//\n// Licensed under the MIT License.\n", {"microsoft"}),
         ("// SPDX-License-Identifier: MIT\n", set()),
+        ("SPDX-License-Identifier: Unicode-3.0\n", set()),
         ("// SPDX-License-Identifier: GPL-2.0-or-later\n", set()),
         ("// SPDX-License-Identifier: GPL-2.0 OR MIT\n", set()),
         ("// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception\n", set()),

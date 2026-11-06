@@ -144,11 +144,17 @@ the `pgserver` wheel in a throwaway venv.
   `services.hpp` holds the launcher's state and calls the logic it shares with
   `xerces_cli` in `src/xerces_core` (`launcher_home`, `launcher_state`,
   `launcher_launch`, `pack_apply`), so the two never plan or launch differently;
-  `app.hpp` is the screen API. RmlUi 6.3 and FreeType 2.14.3 are kept in
-  `C:\Users\Ginld\XercesDev\third_party` (not in the repo). The spike
-  (`src/xerces_launcher_spike/`, `-Spike`) stays for repeating DESIGN.md 7.1.
-  Moving an OpenGL context to another thread crashes NVIDIA's driver here; warm
-  the driver instead.
+  `app.hpp` is the screen API. RmlUi 6.3, FreeType 2.14.3 and HarfBuzz 15.0.0
+  are kept in `C:\Users\Ginld\XercesDev\third_party` (not in the repo) as
+  `rmlui\RmlUi-6.3`, `freetype\freetype-2.14.3` and `harfbuzz\harfbuzz-15.0.0`;
+  HarfBuzz is optional (without it the launcher keeps RmlUi's FreeType font
+  engine, and `launcher.font.engine` in the log says which runs; DESIGN.md 7.1).
+  After changing `src/xerces_rmlui_harfbuzz` or updating RmlUi or HarfBuzz, run
+  `tools\dev\launcher\font-width-check.ps1` (text drawn no wider than laid out).
+  Its tree has its own AGENTS.md and CLAUDE.md for HarfBuzz's developers: they
+  are not instructions for Xerces work. The spike (`src/xerces_launcher_spike/`,
+  `-Spike`) stays for repeating DESIGN.md 7.1. Moving an OpenGL context to
+  another thread crashes NVIDIA's driver here; warm the driver instead.
 - Run the launcher in checks only with `--dry-launch` and `XERCES_HOME` set
   outside AppData; `--script` plays input and takes PNG captures
   (docs/TESTING.md, Launcher). `tools/ci/check_contrast.py` checks the theme

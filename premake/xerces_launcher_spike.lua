@@ -8,12 +8,13 @@
 -- spike decides (their hashes are in docs/TESTING.md). Point premake at the folder
 -- holding rmlui/RmlUi-6.3 and freetype/freetype-2.14.3 with
 -- --xerces-third-party=<dir> or the XERCES_THIRD_PARTY environment variable; without
--- them these projects are left out.
+-- them these projects are left out. HarfBuzz (harfbuzz/harfbuzz-15.0.0 in the same
+-- folder) is optional and only the launcher uses it (premake/xerces_launcher.lua).
 
 newoption({
   trigger = "xerces-third-party",
   value = "DIR",
-  description = "Xerces: folder with rmlui/RmlUi-6.3 and freetype/freetype-2.14.3, for the launcher spike",
+  description = "Xerces: folder with rmlui/RmlUi-6.3, freetype/freetype-2.14.3 and optional harfbuzz/harfbuzz-15.0.0",
 })
 
 local root = _MAIN_SCRIPT_DIR
@@ -35,6 +36,15 @@ end
 -- The launcher (premake/xerces_launcher.lua) builds on the same libraries.
 XERCES_RMLUI_DIR = rmlui
 XERCES_FREETYPE_DIR = freetype
+
+-- HarfBuzz for the launcher's text shaping (docs/DESIGN.md 7.1). Without it the
+-- launcher keeps RmlUi's FreeType font engine.
+local harfbuzz = path.join(third_party, "harfbuzz/harfbuzz-15.0.0")
+if os.isfile(path.join(harfbuzz, "src/harfbuzz.cc")) then
+  XERCES_HARFBUZZ_DIR = harfbuzz
+else
+  print("xerces_launcher: no HarfBuzz under " .. third_party .. "; the launcher uses RmlUi's FreeType font engine")
+end
 
 group("Xerces spike")
 

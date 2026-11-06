@@ -4,6 +4,11 @@
 --
 -- Needs the same third-party sources as the spike (xerces_launcher_spike.lua sets
 -- XERCES_RMLUI_DIR when they are present); without them the project is left out.
+--
+-- Text shaping (DESIGN.md 7.1): with HarfBuzz 15.0.0 in the same third-party folder
+-- (XERCES_HARFBUZZ_DIR, also set there) the launcher shapes text with RmlUi's HarfBuzz
+-- font engine, which reads OpenType (GPOS) kerning; without it, with RmlUi's own
+-- FreeType engine. XERCES_LAUNCHER_HARFBUZZ tells the code which one it has.
 
 if not XERCES_RMLUI_DIR then
   return
@@ -12,12 +17,62 @@ end
 local root = _MAIN_SCRIPT_DIR
 local rmlui = XERCES_RMLUI_DIR
 local freetype = XERCES_FREETYPE_DIR
+local harfbuzz = XERCES_HARFBUZZ_DIR
 
 local function root_path(relative)
   return path.join(root, relative)
 end
 
+-- RmlUi 6.3's HarfBuzz font engine lives in its samples, not in RmlUi's core.
+local harfbuzz_engine = path.join(rmlui, "Samples/basic/harfbuzz/src")
+
 group("Xerces")
+
+if harfbuzz then
+  -- HarfBuzz 15.0.0 ("Old MIT" licence) from its amalgamated source with the
+  -- FreeType integration, as BUILD.md describes: no ICU, GLib, Cairo, Graphite or
+  -- platform shapers. HAVE_FT_GET_VAR_BLEND_COORDINATES, which HarfBuzz's own builds
+  -- set for any recent FreeType, is left out on purpose: with it, HarfBuzz 15.0.0
+  -- copies the FreeType face's variation into the font as normalized coordinates
+  -- (whose design values it then records as NaN) and passes those NaNs back to
+  -- FreeType when the font changes, so every Inter Tight weight but Regular was
+  -- measured at its thinnest. Without it the named instance comes from the face
+  -- index alone, in both HarfBuzz and FreeType.
+  project("xerces_harfbuzz")
+  kind("StaticLib")
+  language("C++")
+  warnings("Off")
+  defines({ "HAVE_FREETYPE", "HAVE_FT_GET_TRANSFORM" })
+  includedirs({ path.join(harfbuzz, "src"), path.join(freetype, "include") })
+  files({ path.join(harfbuzz, "src/harfbuzz.cc") })
+
+  -- The engine from RmlUi's sample (MIT, RmlUi's LICENSE.txt), built from RmlUi's
+  -- folder except FontFaceHandleHarfBuzz.cpp, whose copy in src/xerces_rmlui_harfbuzz
+  -- keeps the pen's fractions within words (the file says what changed).
+  -- As the sample's CMakeLists.txt says, it uses RmlUi's private Core headers and
+  -- the FreeType helpers inside RmlUi's core, which a Windows DLL build of RmlUi
+  -- does not export; xerces_rmlui is a static library, so they link. The sample's
+  -- folder comes after Source/Core, so RmlUi's own headers (it has a
+  -- TextureLayout.h too) win there.
+  project("xerces_rmlui_harfbuzz")
+  kind("StaticLib")
+  language("C++")
+  warnings("Off")
+  defines({ "RMLUI_STATIC_LIB", "_CRT_SECURE_NO_WARNINGS" })
+  includedirs({
+    path.join(rmlui, "Include"),
+    path.join(rmlui, "Source/Core"),
+    path.join(freetype, "include"),
+    path.join(harfbuzz, "src"),
+    harfbuzz_engine,
+  })
+  files({
+    path.join(harfbuzz_engine, "*.h"),
+    path.join(harfbuzz_engine, "*.cpp"),
+    root_path("src/xerces_rmlui_harfbuzz/*.cpp"),
+  })
+  removefiles({ path.join(harfbuzz_engine, "main.cpp"), path.join(harfbuzz_engine, "FontFaceHandleHarfBuzz.cpp") })
+end
 
 project("xerces_launcher")
 kind("WindowedApp")
@@ -58,5 +113,10 @@ links({
   "user32",
   "xinput",
 })
+if harfbuzz then
+  defines({ "XERCES_LAUNCHER_HARFBUZZ" })
+  includedirs({ harfbuzz_engine, path.join(harfbuzz, "src") })
+  links({ "xerces_rmlui_harfbuzz", "xerces_harfbuzz" })
+end
 
 group("")

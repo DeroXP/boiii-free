@@ -14,7 +14,9 @@
            2.14.3 under -ThirdPartyDir (default: the tools folder's sibling
            third_party\), laid out as rmlui\RmlUi-6.3 and freetype\freetype-2.14.3.
   -Launcher builds the launcher, Xerces.exe (DESIGN.md 7), from the same
-           third-party sources as -Spike.
+           third-party sources as -Spike, plus HarfBuzz 15.0.0 for text
+           shaping when -ThirdPartyDir has harfbuzz\harfbuzz-15.0.0 (without
+           it the launcher uses RmlUi's FreeType font engine; DESIGN.md 7.1).
 
   LLVM 23, Ninja and premake 5.0.0 must be on PATH, or in -ToolsDir laid out
   as llvm-*\clang+llvm-*\bin, ninja-*\ and premake-*\.

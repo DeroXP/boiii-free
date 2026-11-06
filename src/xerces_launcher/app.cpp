@@ -21,6 +21,7 @@
 #include <xerces_core/json.hpp>
 #include <xerces_core/launcher_pacing.hpp>
 
+#include "font_engine.hpp"
 #include "log.hpp"
 
 namespace xerces_launcher {
@@ -1255,6 +1256,7 @@ int app::run() {
   system_ = std::make_unique<translator>(*this, window_.system_interface());
   Rml::SetSystemInterface(system_.get());
   Rml::SetRenderInterface(window_.render_interface());
+  install_font_engine();
   Rml::Initialise();
   rml_started_ = true;
   context_ = Rml::CreateContext(
@@ -1266,7 +1268,33 @@ int app::run() {
     return 1;
   }
   load_language();
+  text_language_ = xerces_core::text_language_for(language_);
+  register_text_language(text_language_);
+  {
+    namespace json = xerces_core::json;
+    const std::string harfbuzz = harfbuzz_version();
+    const std::string message =
+        harfbuzz.empty() ? "RmlUi's FreeType font engine (no HarfBuzz in this "
+                           "build: no OpenType kerning)"
+                         : "RmlUi's HarfBuzz font engine, HarfBuzz " + harfbuzz;
+    const std::string rtl = text_language_.right_to_left ? "true" : "false";
+    log_info("launcher.font.engine", message,
+             "{\"engine\":" + json::quote(font_engine_name()) +
+                 ",\"harfbuzz\":" + json::quote(harfbuzz) +
+                 ",\"lang\":" + json::quote(text_language_.tag) +
+                 ",\"script\":" + json::quote(text_language_.script) +
+                 ",\"rtl\":" + rtl + "}");
+  }
   load_fonts();
+  // The language and the UI scale go on before any document loads, so that
+  // each document is laid out and shaped once: LoadDocument lays a document
+  // out at once, and changing either afterwards lays out and shapes all its
+  // text again. Documents are children of the context's root and inherit
+  // its lang, which the font engine shapes the text as (font_engine.hpp);
+  // the Update gives the root that computed value.
+  context_->GetRootElement()->SetAttribute("lang", text_language_.tag);
+  apply_look(); // the scale only: there are no documents yet
+  context_->Update();
   mark("rmlui and fonts");
 
   // Screens: data models first (documents bind to them while loading).

@@ -4,7 +4,10 @@
 
 #include <RmlUi/Core.h>
 
+#include <string>
+
 #include "../app.hpp"
+#include "../font_engine.hpp"
 
 namespace xerces_launcher {
 namespace {
@@ -20,6 +23,10 @@ public:
     }
     version_ = "Xerces " + services::version();
     model.Bind("version", &version_);
+    // HarfBuzz and RmlUi's HarfBuzz engine are credited when this build has
+    // them (font_engine.hpp).
+    harfbuzz_ = std::string(font_engine_name()) == "harfbuzz";
+    model.Bind("harfbuzz", &harfbuzz_);
     return true;
   }
 
@@ -35,6 +42,7 @@ public:
 private:
   app *owner_ = nullptr;
   Rml::String version_;
+  bool harfbuzz_ = false;
 };
 } // namespace
 

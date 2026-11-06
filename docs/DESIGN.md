@@ -1304,6 +1304,90 @@ needs your approval first), precompiled DX11 shaders (about 30 ms), the
 overlapped GPU start (on a worker for D3D11; for OpenGL a driver warm-up, never
 a context moved between threads) and the native boot paint.
 
+**HarfBuzz (built 2026-11-05).** HarfBuzz 15.0.0 ("Old MIT" licence) was
+downloaded with your approval from its GitHub release (hash in docs/TESTING.md)
+into `third_party\harfbuzz\harfbuzz-15.0.0`, next to RmlUi and FreeType and
+outside the repo. `premake/xerces_launcher_spike.lua` finds it there as it finds
+the other two and sets `XERCES_HARFBUZZ_DIR`; `premake/xerces_launcher.lua` then
+builds `xerces_harfbuzz` (the amalgamated `src/harfbuzz.cc` with the FreeType
+integration only: no ICU, GLib or Cairo) and `xerces_rmlui_harfbuzz` (RmlUi's
+HarfBuzz font engine from `Samples/basic/harfbuzz`, MIT, linked statically as
+its private Core headers need), and defines `XERCES_LAUNCHER_HARFBUZZ`. Without
+the folder (CI, other PCs) the launcher builds and runs with RmlUi's FreeType
+engine as before. Either way the log's `launcher.font.engine` says which engine
+runs and how the text is tagged. The context's root carries the launcher
+language as `lang`, which every document inherits, and the engine shapes the
+text in that language's script (`xerces_core::text_language_for`: English and
+the pseudo-locale, `en-XA`, are Latin; a translation gets its language's script,
+or HarfBuzz reads it from the text). The language and the UI scale are set
+before the first document loads: RmlUi lays a document out as it loads it, and
+changing either afterwards lays out and shapes all its text again. About lists
+HarfBuzz and the engine, and `data/xerces/licenses` holds their licence texts;
+`HarfBuzz.txt` also has those of the Microsoft Universal Shaping Engine data
+(MIT) and the Unicode data (Unicode License V3) that HarfBuzz's built-in tables
+are generated from.
+
+What it changed, from dry-run captures of every screen at 100 and 150 percent
+and the pseudo-locale (docs/TESTING.md, Launcher): Inter Tight's OpenType
+kerning now applies, so "Yo" in "Your packs" closes by 2 px at 100 percent and 3
+px at 150, "Pa" in the Packs title and "ay" in "Display" by 1 px; the strings
+measured get 0 to 7 px narrower, and nothing wraps, clips or moves otherwise.
+The first frame is unchanged: 212 ms against 210 ms (medians of 20 dry starts),
+211 against 211 when the two builds alternate. Since the review fixes (one
+layout per document, below) the screen is ready as soon as with RmlUi's FreeType
+engine: Home shown in 27.7 ms against 28.8, the first screen loaded at 60 ms
+against 62, first frame 223 against 226 (alternating starts on a busier PC).
+`Xerces.exe` grows from 4.3 to 5.0 MB, and the running launcher by about 5 MB
+(working set 93 against 88 MB on Mods at 150 percent, private bytes 196 against
+190): each weight and size gets its own HarfBuzz face and a second FreeType face
+that HarfBuzz opens on the same font data (`hb_ft_font_set_funcs`) to read the
+hinted advances at that size without resizing the face RmlUi shares between
+sizes. One HarfBuzz face per font across sizes, or giving HarfBuzz the advances
+RmlUi has already loaded, would cut that if it ever matters.
+
+Three things in the parts did not work as shipped, and are handled:
+
+- HarfBuzz 15.0.0 records a FreeType face's variation as normalized coordinates
+  with NaN design values when `HAVE_FT_GET_VAR_BLEND_COORDINATES` is set (as
+  HarfBuzz's own builds set it), and hands those NaNs back to FreeType when the
+  font changes: every Inter Tight weight but Regular was measured at its
+  thinnest. The define is left out, so the named instance comes from the face
+  index in both libraries.
+- The sample dropped the fraction of every advance (`x_advance >> 6`) and took
+  unhinted advances for glyph images FreeType draws hinted, which are up to a
+  pixel wider at 13 to 15 px: text ran tight and "RUST V5" read "RUSTV5". The
+  copy of `FontFaceHandleHarfBuzz.cpp` in `src/xerces_rmlui_harfbuzz` uses the
+  hinted advances RmlUi's FreeType engine uses and keeps the pen in 26.6 fixed
+  point, rounding where a glyph lands and where white space starts or ends; the
+  file lists its changes. The white-space edges matter because RmlUi lays a line
+  out as the sum of its words, each measured alone, and draws the line shaped
+  whole: rounding the pen once for the whole line (the first version) drew some
+  lines a pixel or more wider than their box (4,647 of 96,256 lines in a check
+  of every launcher string, weight and size from 12 to 120 px), enough for an
+  ellipsis on text that fits. Rounding also where RmlUi splits words draws every
+  line within its box and keeps both the layout and the kerning inside words;
+  rounding each advance would fit too, but drops most kerning under half a pixel
+  (two thirds of it at 14 px). This depends on how RmlUi 6.3 splits text
+  (`ElementText`), so recheck it when RmlUi is updated (docs/TESTING.md has the
+  check).
+- Shaping a word costs about 4 µs against 0.1 µs for adding advances, and RmlUi
+  measures the same words many times while laying out: showing Home took about
+  70 ms instead of 29. The same copy keeps each handle's measured widths, which
+  brings it to 39 ms, and laying each document out once (the language and scale
+  set before it loads) to 28 ms.
+
+The spike's "display text runs about 2 % wider" is mostly not kerning: with
+kerning in, headings are still up to 9 % wider than the mockup ("Settings" at 40
+px: 149 px designed, 157 drawn by either engine). FreeType's hinting widens
+Inter Tight's advances, and RmlUi keeps only the whole pixels of a letter
+spacing (-1.2 px becomes -1). A try with unhinted advances and fractional letter
+spacing matched the designed widths to 0.2 % but set 13 to 15 px text unevenly
+against the hinted glyph images, so it was not kept; light hinting for both the
+images and the advances would be the next thing to try. Not checked either:
+right-to-left layout, and marks positioned by OpenType (the sample adds
+HarfBuzz's upward y offsets to the downward screen y; Latin text has none). Both
+matter only for a translation that needs them.
+
 ### 7.2 Design language
 
 C / Signal (your pick from the logos, D5). Mockups, all three directions with
@@ -3074,12 +3158,13 @@ M5a, which you asked for now.
   fake game folder): all screens render with no RmlUi warnings in all three
   themes, and every launch path builds the command line D3 verified; on
   2026-11-05 Launch vanilla, Launch modded, safe mode and the reopened launcher
-  also ran against the real game (M1 above). Open: a person using it; Home
-  showing that the game is running before Launch is pressed; the in-game Lua
-  menu with origin checks (7.6); the rename (7.7); the update client (D16);
-  HarfBuzz for scripts that need shaping (its download waits for your approval);
-  and, from the spike, a physical controller press, vsync pacing on a live
-  display, and Proton.
+  also ran against the real game (M1 above). HarfBuzz text shaping went in the
+  same day (7.1): OpenType kerning, the first frame unchanged. Open: a person
+  using it; Home showing that the game is running before Launch is pressed; the
+  in-game Lua menu with origin checks (7.6); the rename (7.7); the update client
+  (D16); right-to-left layout and OpenType-positioned marks for translations
+  that need them (7.1); and, from the spike, a physical controller press, vsync
+  pacing on a live display, and Proton.
 
 ---
 

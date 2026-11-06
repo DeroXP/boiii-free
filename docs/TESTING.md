@@ -155,16 +155,20 @@ decision are in DESIGN.md 7.1.
 Third-party sources live outside the repository until the gate decides, in
 `C:\Users\Ginld\XercesDev\third_party` (downloaded to `..\downloads`):
 
-| File                      | Source                                     | Bytes     | SHA-256                                                            |
-| ------------------------- | ------------------------------------------ | --------- | ------------------------------------------------------------------ |
-| `RmlUi-6.3.zip`           | github.com/mikke89/RmlUi, tag 6.3 (MIT)    | 4,513,038 | `bfb340660e4bce38d4211cffc836cfbe1be676aa36ef9cc48e7df3855ee74fe3` |
-| `freetype-2.14.3.tar.xz`  | download.savannah.gnu.org (FTL or GPLv2)   | 2,670,220 | `36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f` |
-| `InterTight-wght.ttf`     | github.com/google/fonts, `ofl/intertight`  | 581,588   | `b81b73dcb64df3c230cabade7df6c5773bf863233f24c9ee51087519f1f88b6f` |
-| `IBMPlexMono-Regular.ttf` | github.com/google/fonts, `ofl/ibmplexmono` | 135,580   | `6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46` |
-| `IBMPlexMono-Medium.ttf`  | github.com/google/fonts, `ofl/ibmplexmono` | 136,704   | `a9b4c49bb299e05b5f6c481e7fb5e78943d2793249a0c8874ab574a2d1ea6755` |
+| File                      | Source                                       | Bytes      | SHA-256                                                            |
+| ------------------------- | -------------------------------------------- | ---------- | ------------------------------------------------------------------ |
+| `RmlUi-6.3.zip`           | github.com/mikke89/RmlUi, tag 6.3 (MIT)      | 4,513,038  | `bfb340660e4bce38d4211cffc836cfbe1be676aa36ef9cc48e7df3855ee74fe3` |
+| `freetype-2.14.3.tar.xz`  | download.savannah.gnu.org (FTL or GPLv2)     | 2,670,220  | `36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f` |
+| `InterTight-wght.ttf`     | github.com/google/fonts, `ofl/intertight`    | 581,588    | `b81b73dcb64df3c230cabade7df6c5773bf863233f24c9ee51087519f1f88b6f` |
+| `IBMPlexMono-Regular.ttf` | github.com/google/fonts, `ofl/ibmplexmono`   | 135,580    | `6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46` |
+| `IBMPlexMono-Medium.ttf`  | github.com/google/fonts, `ofl/ibmplexmono`   | 136,704    | `a9b4c49bb299e05b5f6c481e7fb5e78943d2793249a0c8874ab574a2d1ea6755` |
+| `harfbuzz-15.0.0.tar.xz`  | github.com/harfbuzz/harfbuzz, release 15.0.0 | 20,396,372 | `968536e9abd782f07f7954044c0c4020199fcdd39b41d221ec42d2a3be4a44df` |
 
 The fonts and their OFL texts are in `data/xerces/fonts/` (unmodified; the
-variable font's file name drops the `[wght]` suffix).
+variable font's file name drops the `[wght]` suffix). HarfBuzz ("Old MIT"
+licence) was downloaded on 2026-11-05 with your approval and unpacked as
+`third_party\harfbuzz\harfbuzz-15.0.0`; it is optional and only the launcher
+uses it (DESIGN.md 7.1).
 
 To repeat the measurements (the programs are not the game; they only draw a
 window):
@@ -753,13 +757,15 @@ build\bin\x64\Release\Xerces.exe --dry-launch --skip-boot --view home --script s
 
 `tools\dev\launcher\check-screens.ps1 -Out <folder>` opens every screen that
 way, captures it and lists any RmlUi warning (also with `-Theme light`,
-`-Theme contrast` or `-Language pseudo`). A script plays timed steps, the first
-at 1 s: `+500 key down`, `+300 pad a`, `+200 view mods`,
-`+100 click launch-vanilla`, `+100 type text`, `+100 focus search`,
-`+100 shot C:\path\screen.png` (a PNG of the next frame), `+100 front off` (act
-as if another window were in front; `on`, `auto`), `+100 minimize`,
-`+100 activity` (log `launcher.activity` for the span since the last line),
-`+100 quit`. The log is `<home>\logs\<date>-<time>-launcher-<pid>.jsonl`.
+`-Theme contrast` or `-Language pseudo`; `-Scale 1.5` fixes the UI scale and
+`-Exe` runs another build, such as the previous one for before and after). A
+script plays timed steps, the first at 1 s: `+500 key down`, `+300 pad a`,
+`+200 view mods`, `+100 click launch-vanilla`, `+100 type text`,
+`+100 focus search`, `+100 shot C:\path\screen.png` (a PNG of the next frame),
+`+100 front off` (act as if another window were in front; `on`, `auto`),
+`+100 minimize`, `+100 activity` (log `launcher.activity` for the span since the
+last line), `+100 quit`. The log is
+`<home>\logs\<date>-<time>-launcher-<pid>.jsonl`.
 
 Run on 2026-11-05 by Claude on your PC while you were away (dry launches only):
 
@@ -987,6 +993,123 @@ started), the old loop being fb165490's:
       screens' transitions stay smooth at the display's refresh rate (not seen
       here: the launcher stayed behind other windows, and Present returned at
       once).
+
+### Launcher text shaping (HarfBuzz, 2026-11-05)
+
+DESIGN.md 7.1 has the design and the numbers. `Xerces.exe` logs which font
+engine it runs as `launcher.font.engine` (`harfbuzz` with its version, or
+`freetype` in a build made without `third_party\harfbuzz`), with the language
+tag and script the documents are shaped in. For before and after, keep the old
+build next to the new one as `Xerces-old.exe` and capture both with the same
+home and scale:
+
+```
+tools\dev\launcher\check-screens.ps1 -Out <dir>\before\100 -HomeDir C:\Users\Ginld\XercesHome-agent-harfbuzz -Scale 1.0 -Exe build\bin\x64\Release\Xerces-old.exe
+tools\dev\launcher\check-screens.ps1 -Out <dir>\after\150 -HomeDir C:\Users\Ginld\XercesHome-agent-harfbuzz -Scale 1.5
+```
+
+Run on 2026-11-05 by Claude (dry launches only, home seeded from
+`XercesHome-bench`). The captures are in
+`C:\Users\Ginld\XercesDev\scratch\harfbuzz\captures`: `before\` and `after\`
+with `100`, `150` (every screen) and `pseudo-100` (Home, Mods, Settings),
+`after\light-100`, `after\contrast-150`, `after\about`, and `no-harfbuzz\100`
+(Home and Packs from a build without HarfBuzz).
+
+- [x] With HarfBuzz the launcher builds, the log says
+      `"engine":"harfbuzz","harfbuzz":"15.0.0","lang":"en","script":"Latn"`, and
+      every screen loads with no RmlUi warning or error at 100 and 150 percent,
+      in the pseudo-locale and the light and high-contrast themes. Without
+      HarfBuzz (a third-party folder holding only `rmlui` and `freetype`) it
+      builds, logs `"engine":"freetype"` and draws Packs pixel for pixel as
+      before (Home too, but for the scan time it shows).
+- [x] The bundled fonts (Inter Tight's weights, IBM Plex Mono Regular and
+      Medium) load and draw; accented letters in the pseudo-locale draw.
+- [x] Kerning: "Yo" in Packs' "Your packs" (Inter Tight 700, 20 dp) closes by 2
+      px at 100 percent and 3 px at 150 (the o's ink ends at x 56 before and 54
+      after; 85 and 82 at 150); "Pa" in the Packs title and "ay" in Settings'
+      "Display" by 1 px.
+- [x] Nothing wraps, clips or moves: every changed pixel lies in a changed line
+      of text; the pseudo-locale's overflows (the long tilde runs) are the same
+      before and after.
+- [x] Widths of 27 launcher strings at 100 and 150 percent (a scratch program on
+      both engines): equal to RmlUi's FreeType engine except where kerning
+      applies, 0 to 7 px narrower.
+- [x] Startup, `tools\dev\bench\launcher-bench.ps1 -Runs 20`: first frame 209.9
+      ms before and 212.4 after (medians; p90 220.1 and 222.1); with the two
+      builds alternating, 12 starts each, 211.2 and 211.0. The first screen is
+      loaded at 57.9 and 67.4 ms, Home is shown in 29.8 and 39.4 ms (see the
+      review fixes below: now 60.2 and 27.7 ms).
+- [x] About lists HarfBuzz 15.0.0 and RmlUi's HarfBuzz engine, and only in a
+      build that has them (captured from both builds after the review, below);
+      `data/xerces/licenses` holds the licence texts.
+- [ ] You looking at the text on your display, at your usual scale.
+- [ ] A translation in a script other than Latin, or written right to left.
+
+Review fixes, run the same evening by Claude (dry launches only, same home).
+Captures in `C:\Users\Ginld\XercesDev\scratch\harfbuzz\fix\captures`: `head\`
+(the build before these fixes, kept as `Xerces-head.exe`) and `new\` with `100`
+and `150` (every screen and About) and `pseudo-100` (Home, Mods, Settings);
+`no-harfbuzz\` (About, Home, Packs, Settings) and `old\` (Home, Packs, Settings,
+from the build before HarfBuzz) at 100 and 150. The scratch programs and timing
+scripts are next to them in `scratch\harfbuzz\fix`.
+
+- [x] Text is never drawn wider than it is laid out.
+      `tools\dev\launcher\font-width-check.ps1` drives the built engine as
+      RmlUi's `ElementText` does, the line as the sum of its words measured one
+      by one, then drawn whole, for all 752 launcher strings in Inter Tight 400
+      to 900 and IBM Plex Mono Regular and Medium at 16 sizes from 12 to 120 px:
+      0 of 96,256 lines drawn wider (built against the engine from before the
+      fix: 4,647, by up to 5 px, exit code 1), and the whole-string width always
+      equals the drawn width. Lines can be drawn up to a pixel or two narrower
+      than laid out where Inter Tight kerns a comma or full stop against the
+      space after it, which RmlUi measures in different words.
+- [x] Layout is as before the fix: every box keeps its width (the scratch
+      `widths.cpp` finds the laid-out widths unchanged for every string, weight
+      and size it tried), and single words draw the same; letters after a word
+      space move by up to a pixel. Against `head\`, Home at 100 percent changes
+      only inside three lines of text (a word after a space, and the underline
+      of a link that ends after one); nothing wraps or clips on any screen, and
+      the pseudo-locale's overflows are unchanged.
+- [x] One layout per document: the root's `lang` and the UI scale are set before
+      the documents load, so each document is laid out and shaped once (a dry
+      run logged `"lang":"en"` and the final scale on every document as it
+      loaded; the check was then removed). Startup times are in the table below
+      the list.
+- [x] Memory, 3 s into a dry start on Mods, four starts each: working set 93.1
+      to 93.4 MB with HarfBuzz against 88.0 to 88.2 MB without at 150 percent,
+      private bytes 195 to 197 MB against 190 to 191 (90 to 91 and 86 to 88 MB
+      at 100 percent). About 5 to 6 MB for HarfBuzz; DESIGN.md 7.1 says where.
+- [x] A build without HarfBuzz (a third-party folder holding only `rmlui` and
+      `freetype`) logs `"engine":"freetype"`, draws Home, Packs and Settings at
+      100 and 150 percent pixel for pixel as the build before HarfBuzz, and its
+      About has no HarfBuzz entries (`no-harfbuzz\100\about.png`,
+      `no-harfbuzz\150\about.png`).
+- [x] About with HarfBuzz names the Microsoft Universal Shaping Engine data
+      (MIT) and the Unicode data (Unicode License V3) built in with it, and
+      `data/xerces/licenses/HarfBuzz.txt` has HarfBuzz's `COPYING`, its
+      `src/ms-use/COPYING` and the Unicode License V3 (`new\150\about.png`).
+- [x] Kerning seen in the captures: "Yo" in "Your packs" closes as before. Inter
+      Tight also kerns some pairs apart: "rf" in "HarfBuzz" on About opens by
+      0.64 px at 150 percent and is drawn a pixel wider than RmlUi's FreeType
+      engine draws it, which reads like a gap next to FreeType's wide hinted
+      "r". That is the font's kerning, not a layout fault.
+
+Startup after the review fixes, builds alternating, 12 dry starts each at this
+PC's 150 percent (`interleave.ps1` in the scratch folder; medians in ms). The
+first two columns are one run, the last two another. This PC ran about 15 ms
+slower than earlier in the day for every build.
+
+| Measure                 | Before the fix | Fixed | Before HarfBuzz | Fixed |
+| ----------------------- | -------------- | ----- | --------------- | ----- |
+| Home shown              | 41.1           | 28.8  | 28.8            | 27.7  |
+| First screen loaded     | 75.5           | 62.2  | 61.7            | 60.2  |
+| First frame (gate: 250) | 228.4          | 229.1 | 225.9           | 223.2 |
+
+To repeat the width check after changing `src/xerces_rmlui_harfbuzz` or updating
+RmlUi or HarfBuzz: build the launcher with HarfBuzz, then
+`tools\dev\launcher\font-width-check.ps1 -ToolsDir C:\Users\Ginld\XercesDev\tools`
+(exit code 0 when every line fits; it builds the check into
+`build\font-width-check`).
 
 ### Conflict system (M2)
 
