@@ -14,6 +14,7 @@
 #include <xerces_core/crash_report.hpp>
 #include <xerces_core/detect.hpp>
 #include <xerces_core/ipc.hpp>
+#include <xerces_core/join_check.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/launcher_home.hpp>
 #include <xerces_core/launcher_launch.hpp>
@@ -109,7 +110,7 @@ services::services(launcher_paths paths, poster post, bool dry_launch)
   // says how it went. One still running (the player reopened Xerces
   // mid-test) is settled by poll() once it is gone.
   if (culprit_ && !culprit_->testing.empty() && !game_running()) {
-    settle_culprit_test(xerces_core::journal_crashed(last_journal()));
+    settle_culprit_from_journal();
   }
 }
 
@@ -599,7 +600,7 @@ void services::poll() {
   }
   ++journal_rev_;
   if (culprit_ && !culprit_->testing.empty()) {
-    settle_culprit_test(xerces_core::journal_crashed(last_journal()));
+    settle_culprit_from_journal();
   }
   log_info("launcher.game.exited", "exit code " + std::to_string(code),
            "{\"code\":" + std::to_string(code) + "}");
@@ -648,7 +649,7 @@ void services::watch_run_folder() {
   game_was_live_ = live;
   // A culprit test that was still running when this launcher opened.
   if (!live && culprit_ && !culprit_->testing.empty()) {
-    settle_culprit_test(xerces_core::journal_crashed(last_journal()));
+    settle_culprit_from_journal();
   }
 }
 
@@ -950,6 +951,7 @@ bool services::start_culprit() {
                                          game_.steam_build,
                                          decision.crashed_stack));
   culprit_ = std::move(progress);
+  culprit_test_joined_ = false;
   save_culprit();
   std::string settings;
   for (const auto &name : culprit_->settings) {
@@ -970,6 +972,7 @@ bool services::start_culprit() {
 
 void services::stop_culprit() {
   culprit_.reset();
+  culprit_test_joined_ = false;
   save_culprit();
   log_info("launcher.culprit.stop", "stopped");
 }
@@ -999,9 +1002,37 @@ launch_outcome services::launch_culprit_test() {
         culprit_->loaded.push_back(entry.id);
       }
     }
+    culprit_test_joined_ = false;
     save_culprit();
   }
   return out;
+}
+
+void services::settle_culprit_from_journal() {
+  if (!culprit_ || culprit_->testing.empty()) {
+    return;
+  }
+  switch (xerces_core::culprit_test_result(last_journal())) {
+  case xerces_core::culprit_test_end::crashed:
+    settle_culprit_test(true);
+    return;
+  case xerces_core::culprit_test_end::ran_fine:
+    settle_culprit_test(false);
+    return;
+  case xerces_core::culprit_test_end::not_counted:
+    break;
+  }
+  // The test launch joined another player's game and ran the host's mods
+  // from then on, not the ones under test: its crash or clean run says
+  // nothing about them. Nothing is recorded; the same test is next.
+  culprit_->testing.clear();
+  culprit_->loaded.clear();
+  culprit_test_joined_ = true;
+  save_culprit();
+  log_info("launcher.culprit.joined",
+           "the test launch joined another player's game; nothing recorded",
+           "{\"launches\":" + std::to_string(culprit_->search.launches()) +
+               "}");
 }
 
 void services::settle_culprit_test(bool crashed) {

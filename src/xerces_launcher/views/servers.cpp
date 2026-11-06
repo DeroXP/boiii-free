@@ -1,8 +1,10 @@
-// Servers (docs/DESIGN.md 7.3, 11.1; D14): join a self-hosted or LAN server
-// by its address, favourites and recent servers. There is no matchmaking and
-// no network code here: a join only hands "+connect host:port" to the game
-// through services::launch. The public list stays in the game's own server
-// browser until Xerces' backend lists servers (M6).
+// Servers (docs/DESIGN.md 7.3, 11.1, 11.10; D14): join a self-hosted or LAN
+// server by its address, favourites and recent servers. There is no
+// matchmaking and no network code here: a join only hands "+connect
+// host:port" to the game through services::launch. The host decides which
+// mods load (the game switches to the host's when it joins), so "Join
+// modded" only picks what the game starts with. The public list stays in the
+// game's own server browser until Xerces' backend lists servers (M6).
 
 #include <RmlUi/Core.h>
 
@@ -349,7 +351,7 @@ private:
       focus_later("address", 0);
       return false;
     }
-    if (!xerces_core::valid_server_address(address)) {
+    if (!xerces_core::server_join_problem(address).empty()) {
       set_address_problem(address);
       owner_->notify(address_problem_, true);
       focus_later("address", 0);
@@ -359,6 +361,22 @@ private:
 
     services &svc = owner_->svc();
     if (modded && !mods_off) {
+      // The host decides which mods load, so problems in this profile's plan
+      // only stop the game starting with it: join without these mods.
+      const xerces_core::plan plan = svc.resolve(owner_->mode());
+      if (!plan.ok() || plan.stack.empty()) {
+        const std::string note =
+            plan.stack.empty()
+                ? owner_->tr("No mods are enabled for this mode, so the game "
+                             "starts without mods. The host decides which "
+                             "mods load: the game switches to theirs when "
+                             "you join.")
+                : owner_->tr("Your plan has problems, so the game starts "
+                             "without your mods. The host decides which mods "
+                             "load: the game switches to theirs when you "
+                             "join.");
+        return launch_join(address, false, false, note);
+      }
       const xerces_core::safe_mode_decision decision = svc.safe_mode();
       if (decision.safe_mode) {
         // Cancel returns to the Join that asked (a favourite or recent row
@@ -387,14 +405,18 @@ private:
     return launch_join(address, modded, mods_off);
   }
 
-  bool launch_join(const std::string &address, bool modded, bool mods_off) {
+  // note: a line shown first under the result (already translated).
+  bool launch_join(const std::string &address, bool modded, bool mods_off,
+                   const std::string &note = {}) {
     services &svc = owner_->svc();
     const std::string mode = owner_->mode();
     // Logs never hold a server address (DESIGN.md 15.1, log.hpp): a host
     // name without a port is not something the log's scrubber can spot.
     log_info("launcher.servers.join",
              std::string(xerces_core::redacted_address) +
-                 (mods_off ? " mods off" : modded ? " modded" : " vanilla"));
+                 (mods_off ? " mods off"
+                  : modded ? " modded"
+                           : " vanilla"));
     const launch_outcome outcome = svc.launch(mode, modded, mods_off, address);
     const bool ok = outcome.started || outcome.dry_run;
 
@@ -410,6 +432,9 @@ private:
                                          : "vanilla");
     result_message_ = owner_->tr(outcome.message);
     result_lines_.clear();
+    if (!note.empty()) {
+      result_lines_.push_back(note);
+    }
     for (const auto &item : outcome.diags.items()) {
       if (item.message != outcome.message &&
           std::find(result_lines_.begin(), result_lines_.end(),
@@ -465,7 +490,7 @@ private:
   }
 
   void set_address_problem(const std::string &address) {
-    const std::string problem = xerces_core::server_address_problem(address);
+    const std::string problem = xerces_core::server_join_problem(address);
     address_problem_ = problem.empty() ? "" : owner_->tr(problem);
     handle_.DirtyVariable("address_problem");
   }
@@ -519,7 +544,8 @@ private:
             }
             services &s = owner_->svc();
             auto &list = s.config().favorites;
-            const auto found = locate_favorite(list, std::size_t(index), server);
+            const auto found =
+                locate_favorite(list, std::size_t(index), server);
             if (!found) {
               return;
             }

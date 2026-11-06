@@ -62,19 +62,22 @@ std::string server_address_problem(std::string_view address) {
   if (std::ranges::any_of(address, is_space)) {
     return "Remove the spaces from the address.";
   }
+  // IPv6 hints name no IPv6 example: the game cannot join one anyway
+  // (ipv4_only_problem).
   if (address.front() == '[') {
     const std::size_t close = address.find(']');
     if (close == std::string_view::npos) {
-      return "Close the IPv6 address with a ], for example [::1]:27017.";
+      return "Close the IPv6 address with a ]. The game connects over IPv4 "
+             "only, though: use the server's IPv4 address.";
     }
     const std::string_view host = address.substr(1, close - 1);
     if (close < 3 || !std::ranges::all_of(host, ipv6_char)) {
-      return "An IPv6 address has hex digits and colons, for example "
-             "[::1]:27017.";
+      return std::string(ipv4_only_problem);
     }
     const std::string_view rest = address.substr(close + 1);
     if (!rest.empty() && rest.front() != ':') {
-      return "Put a colon between ] and the port, for example [::1]:27017.";
+      return "Put a colon between ] and the port. The game connects over IPv4 "
+             "only, though: use the server's IPv4 address.";
     }
     if (!rest.empty()) {
       if (std::string problem = port_problem(rest.substr(1));
@@ -85,7 +88,7 @@ std::string server_address_problem(std::string_view address) {
     return generic;
   }
   if (std::ranges::count(address, ':') > 1) {
-    return "Put an IPv6 address in brackets, for example [::1]:27017.";
+    return std::string(ipv4_only_problem);
   }
   std::string_view host = address;
   const std::size_t colon = address.find(':');
@@ -108,6 +111,14 @@ std::string server_address_problem(std::string_view address) {
     }
   }
   return generic;
+}
+
+std::string server_join_problem(std::string_view address) {
+  std::string problem = server_address_problem(address);
+  if (problem.empty() && !address.empty() && address.front() == '[') {
+    problem = ipv4_only_problem;
+  }
+  return problem;
 }
 
 bool same_server(std::string_view a, std::string_view b) {

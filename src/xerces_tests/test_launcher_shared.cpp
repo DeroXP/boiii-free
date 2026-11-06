@@ -23,6 +23,7 @@
 #include <vector>
 
 #include <xerces_core/backup.hpp>
+#include <xerces_core/join_check.hpp>
 #include <xerces_core/journal.hpp>
 #include <xerces_core/launch.hpp>
 #include <xerces_core/launcher_home.hpp>
@@ -231,6 +232,19 @@ TEST_CASE("shared launcher: a dry launch writes the plan, no journal") {
            plan_file_id(out.plan_id) + ".json");
   CHECK(!fs::exists(setup.paths.journal_file()));
   CHECK(log.has("launch.dry"));
+  // Every installed item's content id, for the game's join checks
+  // (join_check.hpp).
+  const auto index_text =
+      read_text_file(setup.paths.config / std::string(installed_index_file));
+  REQUIRE(index_text.has_value());
+  const auto index = parse_installed_index(*index_text);
+  CHECK_EQ(index.size(), setup.catalog.items.size());
+  for (const auto &item : setup.catalog.items) {
+    const installed_entry *entry = find_installed(index, item.folder);
+    REQUIRE(entry != nullptr);
+    CHECK_EQ(entry->id, item.info.id);
+    CHECK_EQ(entry->content_id, short_content_id(item.content_hash));
+  }
 
   // A real launch on the same setup stops at the missing client, before the
   // plan file or the journal.

@@ -19,6 +19,7 @@
 #include <component/party.hpp>
 #include <component/scheduler.hpp>
 #include <component/toast.hpp>
+#include <xerces_core/join_check.hpp>
 
 #include <game/impl/db/xzone/xzone.hpp>
 #include <game/impl/lua/lua.hpp>
@@ -173,8 +174,13 @@ bool unload_xzone_by_name(const char *zone_name, bool createDefault,
   return false; // Zone not found
 }
 
+// Xerces: the map the server asked for last, so the missing-map error below
+// can name it (main thread only).
+std::string server_map;
+
 void CL_SetupForNewServerMap_stub(game::LocalClientNum_t localClientNum,
                                   const char *map, const char *gametype) {
+  server_map = map ? map : "";
   const std::string loaded_mod_id = game::ugc::UGC_ActiveMod_PublisherId();
   const bool is_usermap =
       utils::string::is_numeric(map) ||
@@ -1398,6 +1404,10 @@ bool check_valid_mod_stack(const std::string &list) {
   return false;
 }
 
+bool is_stock_map(const std::string_view &mapname) {
+  return is_official_map(mapname);
+}
+
 bool mod_load_requires_fs_reinitialization(const std::string_view &mod_name) {
   return !mod_name.empty() && mod_name != "usermaps";
 }
@@ -1441,9 +1451,55 @@ void setup_same_mod_as_host(game::LocalClientNum_t localClientNum,
 static std::mutex reconnect_guard_mutex;
 static std::string last_auto_reconnect_target;
 
+// Xerces (D15): nothing downloads the map, so reconnecting would only fail
+// again. The error names the map; its Workshop page is offered when the map
+// name is its Workshop id, or when the server's getinfo says which item it
+// is (asked once the error has returned the game to the menus).
+void explain_missing_map(const std::string &map,
+                         const game::net::netadr_t &server) {
+  printf("[ Workshop ] The server's map %s is not installed\n", map.c_str());
+  const auto offer = [map](const std::string &workshop_id) {
+    download_overlay::show_confirmation(
+        "Map not installed",
+        xerces_core::missing_map_message(map, workshop_id) +
+            "\n\nOpen its Workshop page in Steam now?",
+        [workshop_id] { open_workshop_page(workshop_id); });
+  };
+  if (utils::string::is_numeric(map)) {
+    offer(map);
+    return;
+  }
+  if (!network::is_connectable_address(server)) {
+    return;
+  }
+  party::query_server(
+      server, [map, offer](const bool success, const game::net::netadr_t &,
+                           const utils::info_string &info, uint32_t) {
+        const std::string workshop_id = info.get("usermapId").empty()
+                                            ? info.get("workshop_id")
+                                            : info.get("usermapId");
+        if (success && info.get("mapname") == map &&
+            utils::string::is_numeric(workshop_id)) {
+          offer(workshop_id);
+        }
+      });
+}
+
 void com_error_missing_map_stub(const char *file, int line,
                                 game::errorParm code, const char *fmt, ...) {
   const game::net::netadr_t target = party::get_connected_server();
+  if constexpr (!xerces_switches::upstream_downloaders) {
+    const std::string map = server_map;
+    std::string workshop_id;
+    if (utils::string::is_numeric(map)) {
+      workshop_id = map;
+    }
+    explain_missing_map(map, target);
+    game::com::Com_Error_(
+        file, line, code, "%s",
+        xerces_core::missing_map_message(map, workshop_id).c_str());
+    return;
+  }
   if (network::is_connectable_address(target)) {
     const char *addr_str =
         utils::string::va("%i.%i.%i.%i:%hu", target.ipv4.a, target.ipv4.b,

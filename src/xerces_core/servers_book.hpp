@@ -26,6 +26,16 @@ std::string trim_server_address(std::string_view text);
 // reasons follow valid_server_address's rules, so empty means it would pass.
 std::string server_address_problem(std::string_view address);
 
+// The game connects over IPv4 only (its sockets are AF_INET), so an IPv6
+// address can be saved but not joined.
+inline constexpr std::string_view ipv4_only_problem =
+    "The game connects over IPv4 only. Use the server's IPv4 address, for "
+    "example 192.168.1.20:27017.";
+
+// Why the Servers screen cannot join address: server_address_problem, or
+// ipv4_only_problem for an IPv6 address; empty when it can.
+std::string server_join_problem(std::string_view address);
+
 // The same server: host names and IPv6 digits ignore case, so the comparison
 // does too.
 bool same_server(std::string_view a, std::string_view b);

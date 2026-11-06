@@ -28,6 +28,7 @@
 #include <utils/thread.hpp>
 
 #include "scheduler.hpp"
+#include "upnp.hpp"
 
 #include <xerces/runtime.hpp>
 
@@ -1109,6 +1110,9 @@ void force_exit_after(const DWORD grace_ms) {
     // Xerces' journal: the quit ran and nothing crashed, so this launch
     // ended cleanly although no shutdown code runs (xerces/runtime.hpp).
     xerces_runtime::journal_quit_forced();
+    // Xerces: no shutdown code runs after this, so a lobby still open to
+    // direct connect gives its router port back here (upnp.cpp).
+    upnp::close_port_now();
     TerminateProcess(GetCurrentProcess(), 1);
   }).detach();
 }

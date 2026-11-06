@@ -9,6 +9,11 @@ typedef std::function<void(const game::net::netadr_t &, const data_view &,
     callback;
 
 void on(const std::string &command, const callback &callback);
+// Xerces (DESIGN.md 11.4): runs before command's callback, and before the
+// engine sees the packet; false drops it. One guard per command, set in
+// post_unpack.
+typedef std::function<bool(const game::net::netadr_t &)> guard_callback;
+void guard(const std::string &command, const guard_callback &check);
 void send(const game::net::netadr_t &address, const std::string &command,
           const std::string &data = {}, char separator = ' ');
 

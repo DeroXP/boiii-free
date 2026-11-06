@@ -11,6 +11,7 @@
 #include "mod_stack.hpp"
 #include "nat.hpp"
 #include "network.hpp"
+#include "network_password.hpp"
 #include "party.hpp"
 #include "profile_infos.hpp"
 #include "scheduler.hpp"
@@ -22,7 +23,11 @@
 #include <utils/hook.hpp>
 #include <utils/string.hpp>
 
+#include <xerces/join.hpp>
+#include <xerces/join_password.hpp>
+#include <xerces/runtime.hpp>
 #include <xerces/switches.hpp>
+#include <xerces_core/join_check.hpp>
 
 #include <random>
 #include <sstream>
@@ -35,6 +40,13 @@ constexpr size_t MAX_CANDIDATES = 16;
 constexpr const char *FRIEND_REJOIN_ROUTE = "192.0.2.254:40000";
 
 bool open_to_friends{};
+// Xerces: update_hosting checks that an open lobby is still there; after a
+// few checks without one it closes it to direct connect.
+int lobby_gone_checks{};
+// Xerces: one automatic rejoin per host after loading its mods, so a stack
+// that never loads here cannot rejoin in a loop.
+std::optional<game::net::netadr_t> rejoined_host;
+std::chrono::steady_clock::time_point rejoined_at{};
 bool registration_confirmed{};
 bool identity_warning_shown{};
 std::string hosting_token;
@@ -73,6 +85,9 @@ struct lobby_request {
   game::net::netadr_t host{};
   std::chrono::steady_clock::time_point expires;
   std::function<void()> fallback;
+  // Xerces: this request follows a password check the host asked for
+  // (receive_lobby_denied); a second refusal is final.
+  bool after_password_check{};
 };
 
 lobby_request lobby_joining;
@@ -357,19 +372,23 @@ void connect_to(const game::net::netadr_t &endpoint) {
 }
 
 void request_lobby(const game::net::netadr_t &host, const std::string &token,
-                   std::function<void()> fallback = {}) {
+                   std::function<void()> fallback = {},
+                   const bool after_password_check = false) {
   const game::net::HostInfo *own = lobby_host_info();
   if (!own) {
     if (fallback) {
       fallback();
       return;
     }
-    show_error("Open the Multiplayer or Zombies menu first, then join your "
-               "friend again.");
+    show_error("Open the Multiplayer or Zombies menu first, then join again.");
     return;
   }
-  lobby_joining = {true, token, host, std::chrono::steady_clock::now() + 4s,
-                   std::move(fallback)};
+  lobby_joining = {true,
+                   token,
+                   host,
+                   std::chrono::steady_clock::now() + 4s,
+                   std::move(fallback),
+                   after_password_check};
   network::send(host, "lobbyJoin",
                 token + " " +
                     to_hex(own->serializedAdr.addrBuff,
@@ -385,12 +404,8 @@ void complete_join(const game::net::netadr_t &endpoint) {
 }
 
 void show_join_failure(const uint16_t port) {
-  show_error(std::format(
-      "Could not reach your friend.\n\nAsk your friend to restart their game, "
-      "then try again. If it keeps failing, the host can enable UPnP on their "
-      "router or forward UDP port {} to their PC, and both of you should allow "
-      "BOIII through Windows Firewall. Swapping who hosts also works.",
-      port ? port : local_port()));
+  // Xerces: the host's game maps its port itself while the lobby is open.
+  show_error(xerces_core::unreachable_message(port ? port : local_port()));
 }
 
 void lobby_join_complete(int32_t, const game::lobby::join::JoinResult result) {
@@ -400,29 +415,29 @@ void lobby_join_complete(int32_t, const game::lobby::join::JoinResult result) {
     fallback();
     return;
   }
-  std::string message;
+  // Xerces: the words are in xerces_core/join_check.cpp, for every build.
+  using xerces_core::lobby_failure;
+  lobby_failure failure = lobby_failure::other;
   switch (result) {
   case JoinResult::SUCCESS:
     return;
   case JoinResult::LOBBY_FULL:
   case JoinResult::COULD_NOT_RESERVE:
-    message = "Your friend's lobby is full.";
+    failure = lobby_failure::full;
     break;
   case JoinResult::NOT_JOINABLE_NOT_IDLE:
   case JoinResult::MIGRATE_IN_PROGRESS:
-    message = "Your friend's lobby is busy starting or changing a match. Try "
-              "again in a few seconds.";
+    failure = lobby_failure::busy;
     break;
   case JoinResult::JOIN_DISABLED:
   case JoinResult::NOT_JOINABLE_NOT_HOSTING:
   case JoinResult::NOT_JOINABLE_CLOSED:
   case JoinResult::NOT_JOINABLE_INVITE_ONLY:
   case JoinResult::NOT_JOINABLE_FRIENDS_ONLY:
-    message = "Your friend's party is closed. Ask them to open it to friends.";
+    failure = lobby_failure::closed;
     break;
   case JoinResult::NETWORK_MODE_MISMATCH:
-    message = "One of you is in LAN or offline mode. Both of you need to be "
-              "in online play.";
+    failure = lobby_failure::network_mode;
     break;
   case JoinResult::MISMATCH_PROTOCOL_VERSION:
   case JoinResult::MISMATCH_NETFIELD_CHECKSUM:
@@ -431,25 +446,101 @@ void lobby_join_complete(int32_t, const game::lobby::join::JoinResult result) {
   case JoinResult::MISMATCH_PLAYLISTID:
   case JoinResult::MISMATCH_PLAYLIST_VERSION_TO_NEW:
   case JoinResult::MISMATCH_PLAYLIST_VERSION_TO_OLD:
-    message = "Your game doesn't match your friend's. Both of you should "
-              "update BOIII to the same version.";
+    failure = lobby_failure::version;
     break;
   case JoinResult::JOIN_ALREADY_IN_PROGRESS:
-    message = "Already joining a lobby. Please wait.";
+    failure = lobby_failure::in_progress;
     break;
   case JoinResult::INVALID:
-    message = "Your friend's lobby refused the join. Try again in a few "
-              "seconds.";
+    failure = lobby_failure::refused;
     break;
   default:
-    message = std::format(
-        "Your friend's lobby stopped responding while joining (code {}). Try "
-        "again. If it keeps failing, a firewall is blocking UDP traffic: "
-        "allow BOIII through Windows Firewall on both PCs.",
-        static_cast<uint32_t>(result));
     break;
   }
-  show_error(message);
+  show_error(xerces_core::lobby_failure_message(failure,
+                                                static_cast<uint32_t>(result)));
+}
+
+void fail_lobby_join(const std::string &message) {
+  if (const std::function<void()> fallback =
+          std::exchange(game_join_fallback, {})) {
+    fallback();
+  } else if (!message.empty()) {
+    show_error(message);
+  }
+}
+
+bool can_join_lobby(const game::net::netadr_t &host) {
+  const bool on_server =
+      server_lobby && network::are_addresses_equal(*server_lobby, host);
+  return (!game::com::Com_IsInGame() || on_server) && lobby_host_info();
+}
+
+// Xerces: after the host's mods load, join again. A friend's join goes
+// through the friend list as upstream did; a direct connect has no friend id
+// and connects to the same address again, once per host a minute.
+void rejoin_after_mod_load(const game::net::netadr_t &host,
+                           const uint64_t friend_id) {
+  if (friend_id) {
+    scheduler::once([friend_id] { friends::connect_to_friend(friend_id); },
+                    scheduler::main, 3s);
+    return;
+  }
+  const auto now = std::chrono::steady_clock::now();
+  if (rejoined_host && network::are_addresses_equal(*rejoined_host, host) &&
+      now - rejoined_at < 60s) {
+    rejoined_host.reset();
+    show_error("The host's mods did not load here, so the join stopped. "
+               "Xerces > Diagnostics shows what went wrong.");
+    return;
+  }
+  rejoined_host = host;
+  rejoined_at = now;
+  scheduler::once([host] { party::connect(host); }, scheduler::main, 3s);
+}
+
+// The rest of join_lobby, once the host's content is checked: the join
+// takes the host's stack and map-first rule, the host's mods load first if
+// they are not loaded yet, then the engine's lobby join. Nothing of the
+// host's is taken before this, so a join that stops at a dialog leaves this
+// game's own mods as they were.
+void finish_lobby_join(const game::net::netadr_t &host,
+                       game::net::HostInfo info,
+                       const game::lobby::LobbyType target,
+                       const std::string &mod, const std::string &stack,
+                       const std::string &map_scripts_first,
+                       const bool same_mods, const uint64_t friend_id) {
+  // A dialog may have been open for a while.
+  if (!can_join_lobby(host)) {
+    fail_lobby_join("Leave your current match first, then join again.");
+    return;
+  }
+  mod_stack::set(stack);
+  mod_stack::follow_host_map_scripts_first(map_scripts_first);
+  xerces_join::note_joined(mod, stack);
+  if (!same_mods) {
+    game_join_fallback = {};
+    workshop::setup_same_mod_as_host(game::LOCAL_CLIENT_0, {}, mod);
+    rejoin_after_mod_load(host, friend_id);
+    return;
+  }
+  rejoined_host.reset(); // the host's mods are loaded
+
+  add_peer(info.serializedAdr.addrBuff, host);
+  using game::lobby::LobbyType;
+  if (!game::lobby::join::LobbyJoin_Begin(
+          0,
+          game::com::Com_LocalClient_GetControllerIndex(game::LOCAL_CLIENT_0),
+          LobbyType::PRIVATE, target, lobby_join_complete)) {
+    fail_lobby_join("Already joining a lobby. Please wait.");
+    return;
+  }
+  game::lobby::join::LobbyJoin_Add(
+      info.xuid, info.name, &info.secId, &info.secKey, &info.serializedAdr,
+      target == LobbyType::GAME ? game::lobby::join::JoinType::PLAYLIST
+                                : game::lobby::join::JoinType::FRIEND,
+      0);
+  game::lobby::join::LobbyJoin_Finalize();
 }
 
 void join_lobby(const game::net::netadr_t &host,
@@ -467,13 +558,14 @@ void join_lobby(const game::net::netadr_t &host,
   const game::lobby::LobbyType target = parts[5] == "game"
                                             ? game::lobby::LobbyType::GAME
                                             : game::lobby::LobbyType::PRIVATE;
-  std::vector<std::string> content{"", "", "", ""};
+  std::vector<std::string> content(6);
   size_t name_index = 6;
   if (parts[6].starts_with("c:")) {
     content = utils::string::split(parts[6].substr(2), ':');
-    // The fifth field is Xerces' map-first choice; older hosts leave it out
-    // and older clients drop it.
-    content.resize(5);
+    // The fifth field is Xerces' map-first choice and the sixth its content
+    // ids (xerces_core/join_check.hpp); older hosts leave them out and older
+    // clients drop them.
+    content.resize(6);
     name_index = 7;
   }
   std::string name;
@@ -489,72 +581,75 @@ void join_lobby(const game::net::netadr_t &host,
     game_join_fallback = {};
   }
 
-  const auto fail = [](const std::string &message) {
-    if (const std::function<void()> fallback =
-            std::exchange(game_join_fallback, {})) {
-      fallback();
-    } else if (!message.empty()) {
-      show_error(message);
-    }
-  };
-
-  const bool on_server =
-      server_lobby && network::are_addresses_equal(*server_lobby, host);
-  if ((game::com::Com_IsInGame() && !on_server) || !lobby_host_info()) {
-    fail("Leave your current match to join your friend's lobby.");
+  if (!can_join_lobby(host)) {
+    fail_lobby_join("Leave your current match first, then join again.");
     return;
   }
 
-  const std::string &mod = content[0];
-  const std::string &map = content[1];
+  const std::string mod = content[0];
+  const std::string map = content[1];
   const std::string loaded_mod = game::ugc::UGC_ActiveMod_PublisherId();
-  mod_stack::set(content[3]);
-  mod_stack::follow_host_map_scripts_first(content[4]);
+  // Xerces: compared with the host's list without taking it; the join takes
+  // it in finish_lobby_join once nothing stops it.
   const bool same_mods =
       mod == (loaded_mod == "usermaps" ? std::string{} : loaded_mod) &&
-      mod_stack::is_loaded();
+      mod_stack::is_loaded(content[3]);
   if (game_join_fallback && !same_mods) {
-    fail({});
+    // The fallback connects to the host's match and loads the host's mods
+    // there (party.cpp, connect_to_lobby), so it needs the host's list.
+    mod_stack::set(content[3]);
+    mod_stack::follow_host_map_scripts_first(content[4]);
+    fail_lobby_join({});
     return;
   }
 
-  if (!workshop::check_valid_mod_id(mod, {}) ||
-      !workshop::check_valid_mod_stack(content[3]) ||
-      (target == game::lobby::LobbyType::GAME && !map.empty() &&
-       !workshop::check_valid_usermap_id(map, content[2], {}, {}))) {
-    game_join_fallback = {};
-    if (joining.friend_id) {
-      friends::remember_browser_route(joining.friend_id, FRIEND_REJOIN_ROUTE);
-      workshop::set_pending_download_reconnect(FRIEND_REJOIN_ROUTE);
+  const uint64_t friend_id = joining.friend_id;
+  if constexpr (xerces_switches::upstream_downloaders) {
+    // Upstream takes the host's list before its downloads.
+    mod_stack::set(content[3]);
+    mod_stack::follow_host_map_scripts_first(content[4]);
+    if (!workshop::check_valid_mod_id(mod, {}) ||
+        !workshop::check_valid_mod_stack(content[3]) ||
+        (target == game::lobby::LobbyType::GAME && !map.empty() &&
+         !workshop::check_valid_usermap_id(map, content[2], {}, {}))) {
+      game_join_fallback = {};
+      if (friend_id) {
+        friends::remember_browser_route(friend_id, FRIEND_REJOIN_ROUTE);
+        workshop::set_pending_download_reconnect(FRIEND_REJOIN_ROUTE);
+      }
+      return;
     }
+    finish_lobby_join(host, info, target, mod, content[3], content[4],
+                      same_mods, friend_id);
     return;
   }
 
-  if (!same_mods) {
-    workshop::setup_same_mod_as_host(game::LOCAL_CLIENT_0, {}, mod);
-    scheduler::once(
-        [friend_id = joining.friend_id] {
-          friends::connect_to_friend(friend_id);
-        },
-        scheduler::main, 3s);
+  // Xerces (D15, DESIGN.md 11.10): everything the host runs that is missing
+  // here is named at once, with its Workshop page, and files that differ
+  // from the host's are named before the host's mods load. A stock map the
+  // game lacks is DLC (workshop.cpp says so); a custom map is checked in a
+  // party lobby too, because the host's match will load it.
+  const bool custom_map =
+      !map.empty() && map != "core_frontend" && !workshop::is_stock_map(map);
+  if (target == game::lobby::LobbyType::GAME && !map.empty() && !custom_map &&
+      !workshop::check_valid_usermap_id(map, content[2], {}, {})) {
+    game_join_fallback = {};
     return;
   }
-
-  add_peer(info.serializedAdr.addrBuff, host);
-  using game::lobby::LobbyType;
-  if (!game::lobby::join::LobbyJoin_Begin(
-          0,
-          game::com::Com_LocalClient_GetControllerIndex(game::LOCAL_CLIENT_0),
-          LobbyType::PRIVATE, target, lobby_join_complete)) {
-    fail("Already joining a lobby. Please wait.");
-    return;
-  }
-  game::lobby::join::LobbyJoin_Add(
-      info.xuid, info.name, &info.secId, &info.secKey, &info.serializedAdr,
-      target == LobbyType::GAME ? game::lobby::join::JoinType::PLAYLIST
-                                : game::lobby::join::JoinType::FRIEND,
-      0);
-  game::lobby::join::LobbyJoin_Finalize();
+  xerces_join::host_offer offer;
+  offer.main_mod = mod;
+  offer.stack = content[3];
+  offer.map = custom_map ? map : std::string{};
+  offer.map_workshop_id = content[2];
+  offer.content_ids = content[5];
+  // Held back while a dialog may be open; the join puts it back.
+  std::function<void()> fallback = std::exchange(game_join_fallback, {});
+  const std::string map_scripts_first = content[4];
+  xerces_join::check_host(offer, [=] {
+    game_join_fallback = fallback;
+    finish_lobby_join(host, info, target, mod, offer.stack, map_scripts_first,
+                      same_mods, friend_id);
+  });
 }
 
 void update_punching() {
@@ -619,16 +714,66 @@ void refresh_lobby_buttons() {
   }
 }
 
+void show_notice(const xerces_core::join_notice &notice, const bool warn) {
+  if (warn) {
+    toast::warn(notice.title, notice.message);
+  } else {
+    toast::success(notice.title, notice.message);
+  }
+}
+
+// Xerces: what the router said about the lobby's port, on screen only (the
+// address never goes into a log).
+void port_mapped(const upnp::outcome &outcome) {
+  scheduler::once(
+      [outcome] {
+        if (!open_to_friends) {
+          return;
+        }
+        using xerces_core::mapped_reach;
+        using xerces_core::port_map_result;
+        const port_map_result result = outcome.value == upnp::result::mapped
+                                           ? port_map_result::mapped
+                                       : outcome.value == upnp::result::refused
+                                           ? port_map_result::refused
+                                           : port_map_result::no_router;
+        const mapped_reach reach =
+            xerces_core::classify_mapped(outcome.external_ip);
+        const bool public_address = result == port_map_result::mapped &&
+                                    reach == mapped_reach::public_address;
+        show_notice(xerces_core::direct_connect_notice(
+                        result, outcome.external_ip, outcome.port),
+                    !public_address);
+        xerces_runtime::log_info(
+            "join.direct_connect.port",
+            result == port_map_result::mapped
+                ? (public_address ? "the router forwards the port"
+                   : reach == mapped_reach::unknown
+                       ? "the router forwards the port; it did not say its "
+                         "outside address"
+                       : "the router forwards the port; its outside address "
+                         "is not public")
+            : result == port_map_result::refused ? "the router refused the port"
+                                                 : "no UPnP router answered",
+            "{\"port\":" + std::to_string(outcome.port) + "}");
+      },
+      scheduler::main);
+}
+
 void set_open(const bool enabled) {
+  const bool was_open = open_to_friends;
   open_to_friends = enabled;
+  lobby_gone_checks = 0;
   game::Dvar_SetFromStringByName("nat_open", enabled ? "1" : "0", true);
   game::Dvar_SetFromStringByName("friends_open", enabled ? "1" : "0", true);
   refresh_lobby_buttons();
   game::Dvar_SetFromStringByName("com_pauseSupported", enabled ? "0" : "1",
                                  true);
-  if (enabled)
-    upnp::open_port(local_port());
-  else
+  // Xerces: the router forwards the game's UDP port while the lobby is
+  // open, and stops when it closes (or the game exits, upnp.cpp).
+  if (enabled && !was_open)
+    upnp::open_port(local_port(), port_mapped);
+  else if (!enabled)
     upnp::close_port();
   if (!enabled) {
     registration_confirmed = false;
@@ -639,7 +784,37 @@ void set_open(const bool enabled) {
   }
 }
 
+// Xerces: for the "closed" notice, non-empty while the router forwards the
+// port (join_check.hpp), also when it did not say its outside address.
+std::string forwarded_endpoint() {
+  if (std::string mapped = upnp::external_endpoint(); !mapped.empty())
+    return mapped;
+  return upnp::port_mapped() ? "forwarded" : std::string{};
+}
+
+// Xerces: closes the lobby to direct connect, saying so.
+void close_direct_connect() {
+  const std::string mapped = forwarded_endpoint();
+  set_open(false);
+  show_notice(xerces_core::direct_connect_notice(
+                  xerces_core::port_map_result::closed, mapped, local_port()),
+              true);
+}
+
 void update_hosting() {
+  if constexpr (!xerces_switches::ezz_social) {
+    // D14: nothing goes to Ezz's masters, so there is nothing to publish.
+    // An open lobby closes once the host has had none for about 15 s in
+    // the menus (a match keeps it open; a map load is not a menu).
+    if (open_to_friends && !can_host() && !game::com::Com_IsInGame()) {
+      if (++lobby_gone_checks >= 3) {
+        close_direct_connect();
+      }
+    } else {
+      lobby_gone_checks = 0;
+    }
+    return;
+  }
   if (!open_to_friends) {
     if (const game::XUID friend_code = auth::get_guid())
       send_rendezvous("friendPublish",
@@ -668,6 +843,16 @@ void receive_lobby_join(const game::net::netadr_t &sender,
            : hosting_token.empty() || parts[0] != hosting_token) ||
       !is_lobby_address(sender))
     return;
+
+  // Xerces (DESIGN.md 11.10): with net_password set, only an address that
+  // passed the host's password check hears anything of this lobby (its
+  // address, security id and key, or the match to connect to); the others
+  // hear why. Without a password everyone gets in as before, and is
+  // remembered, so a password set later keeps them in.
+  if (!xerces_join_password::admits(sender)) {
+    network::send(sender, "lobbyDenied", parts[0] + " password");
+    return;
+  }
 
   if (hosting_match() && !lobby_host_info(game::lobby::LobbyType::GAME)) {
     network::send(sender, "lobbyGame", hosting_token);
@@ -701,18 +886,25 @@ void receive_lobby_join(const game::net::netadr_t &sender,
   const std::optional<std::string_view> usermap_id =
       usermap_item.has_value() ? std::optional(usermap_item->get().publisherId)
                                : std::nullopt;
+  // Xerces: the sixth content field is the content ids of the mods and the
+  // map (xerces_core/join_check.hpp), so a joiner can say which one differs.
+  const std::string usermap(usermap_id.value_or(""));
+  const bool custom_map =
+      !map.empty() && map != "core_frontend" && !workshop::is_stock_map(map);
   network::send(
       sender, "lobbyHost",
-      std::format("{} {:x} {} {} {} {} c:{}:{}:{}:{}:{} {}", parts[0],
+      std::format("{} {:x} {} {} {} {} c:{}:{}:{}:{}:{}:{} {}", parts[0],
                   host->xuid,
                   to_hex(host->serializedAdr.addrBuff,
                          sizeof(host->serializedAdr.addrBuff)),
                   to_hex(&host->secId, sizeof(host->secId)),
                   to_hex(&host->secKey, sizeof(host->secKey)),
                   game_lobby ? "game" : "party",
-                  mod == "usermaps" ? std::string{} : mod, map,
-                  usermap_id.value_or(""), mod_stack::serialize(),
-                  mod_stack::map_scripts_first_info(), host->name));
+                  mod == "usermaps" ? std::string{} : mod, map, usermap,
+                  mod_stack::serialize(), mod_stack::map_scripts_first_info(),
+                  xerces_join::own_content_ids(custom_map ? map : std::string{},
+                                               usermap),
+                  host->name));
 }
 
 bool from_lobby_request(const game::net::netadr_t &sender,
@@ -732,6 +924,43 @@ void receive_lobby_host(const game::net::netadr_t &sender,
   if (parts.size() >= 7 && from_lobby_request(sender, parts[0]))
     scheduler::once([sender, parts] { join_lobby(sender, parts); },
                     scheduler::main);
+}
+
+// Xerces: the host refused the lobby join; with "password", this address
+// has not passed its password check (DESIGN.md 11.10). No check ran before
+// this request (a friend's join, which skips getinfo), or the host's game
+// restarted since. With net_password set, this game answers the host's
+// check once and asks again; otherwise, or refused again, the join stops
+// here, without the "did not answer" message or a direct connect the host
+// would refuse too.
+void receive_lobby_denied(const game::net::netadr_t &sender,
+                          const network::data_view &data,
+                          game::LocalClientNum_t) {
+  const std::vector<std::string> parts = fields(payload_string(data));
+  // Only the host this game asked: the check is answered to it alone.
+  if (parts.size() != 2 || parts[1] != "password" ||
+      !network::are_addresses_equal(sender, lobby_joining.host) ||
+      !from_lobby_request(sender, parts[0]))
+    return;
+  const bool checked = lobby_joining.after_password_check;
+  std::function<void()> fallback = std::exchange(game_join_fallback, {});
+  using xerces_join_password::outcome;
+  if (checked || !network_password::is_password_set() ||
+      xerces_join_password::skip_check_for_test()) {
+    printf("[Friends] The host refused the join: no password check passed\n");
+    xerces_join_password::show(outcome::refused, 0);
+    return;
+  }
+  printf("[Friends] The host asks for its password check first\n");
+  xerces_join_password::prove(
+      sender, [host = sender, token = parts[0], fallback = std::move(fallback)](
+                  const outcome result, const uint32_t wait_seconds) {
+        if (result == outcome::passed || result == outcome::open) {
+          request_lobby(host, token, fallback, true);
+        } else {
+          xerces_join_password::show(result, wait_seconds);
+        }
+      });
 }
 
 void receive_lobby_follow(const game::net::netadr_t &sender,
@@ -1072,13 +1301,29 @@ void send_invite(const uint64_t steam_id, const std::string &sender_name) {
 }
 
 bool set_open_to_friends(const bool enabled) {
-  // Xerces (D14): friends found an open party through Ezz's masters.
-  if (enabled && !xerces_switches::ezz_social)
-    return false;
+  // Xerces (D14): friends no longer find an open party through Ezz's
+  // masters; opening it lets others join by address (direct connect), and
+  // update_hosting sends nothing.
   if (enabled && !can_host())
     return false;
   set_open(enabled);
   update_hosting();
+  return true;
+}
+
+bool set_open_to_direct_connect(const bool enabled) {
+  const std::string mapped = forwarded_endpoint();
+  if (!set_open_to_friends(enabled)) {
+    toast::warn("Direct connect",
+                "Only the host of a lobby can open it. Open a Zombies or "
+                "Multiplayer lobby first.");
+    return false;
+  }
+  show_notice(xerces_core::direct_connect_notice(
+                  enabled ? xerces_core::port_map_result::pending
+                          : xerces_core::port_map_result::closed,
+                  mapped, local_port()),
+              !enabled);
   return true;
 }
 
@@ -1154,6 +1399,7 @@ public:
     network::on("lobbyHost", receive_lobby_host);
     network::on("lobbyGame", receive_lobby_game);
     network::on("lobbyFollow", receive_lobby_follow);
+    network::on("lobbyDenied", receive_lobby_denied);
 
     scheduler::loop(update_punching, scheduler::main, 250ms);
     scheduler::loop(update_hosting, scheduler::main, REGISTER_INTERVAL);

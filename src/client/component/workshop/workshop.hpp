@@ -30,6 +30,11 @@ bool check_valid_mod_id(const std::string_view &pub_id,
                         const std::string_view &workshop_id,
                         const std::string_view &base_uri = {});
 bool check_valid_mod_stack(const std::string &list);
+// Xerces: a base-game or DLC map, as opposed to a custom map.
+bool is_stock_map(const std::string_view &mapname);
+// Xerces (D15): opens a Workshop item's page in the Steam client, where
+// subscribing downloads it. Digits only; anything else is ignored.
+void open_workshop_page(const std::string &workshop_id);
 struct content_info {
   std::string hash;
   uint64_t built{};

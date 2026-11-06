@@ -29,6 +29,10 @@
 
 #include <game/utils.hpp>
 
+#include <xerces/join.hpp>
+#include <xerces_core/join_password.hpp>
+#include <xerces_core/version.hpp>
+
 namespace getinfo {
 template <typename T> int get_client_count(T *client_states) {
   if (client_states == nullptr) {
@@ -138,10 +142,28 @@ struct component final : generic_component {
       const std::string_view usermapId = game::ugc::active_usermap->publisherId;
       info.set("workshop_id", usermapId);
       info.set("usermapId", usermapId);
+      // Xerces (DESIGN.md 11.10): the Xerces version, so a joiner can say
+      // when it differs, and each mod's and the custom map's content id, so
+      // it can say which one differs. Older clients ignore both keys.
+      info.set("xercesVersion", xerces_core::xerces_version_text);
+      {
+        const std::string map(game::get_mapname().value_or(""));
+        const bool custom_map = !map.empty() && map != "core_frontend" &&
+                                !workshop::is_stock_map(map);
+        info.set("contentIds",
+                 xerces_join::own_content_ids(custom_map ? map : std::string{},
+                                              usermapId));
+      }
 
       if (network_password::is_password_set()) {
+        // Xerces (DESIGN.md 11.10): the host checks the password itself
+        // (xerces/join_password.hpp) and publishes no hash of it. Older
+        // clients find a hash no password gives, so their own check stops
+        // them with their own message.
+        info.set(std::string(xerces_core::join_password::info_key),
+                 std::string(xerces_core::join_password::protocol));
         info.set("net_password_hash",
-                 network_password::get_password_hash_string());
+                 std::string(xerces_core::join_password::legacy_hash_sentinel));
       }
 
       network::send(target, "infoResponse", info.build(), '\n');

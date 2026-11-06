@@ -981,17 +981,16 @@ luaReturnCount_e lua_reload(lua_State *) {
   reload_pending = true;
   return luaReturnCount_e::NONE;
 }
-} // namespace
 
-std::vector<std::string> get(const std::string &main) {
+// The stacked mods a list gives beside the main mod: none without a main
+// mod, and neither the main mod nor duplicates.
+std::vector<std::string> extras_of(const std::string &list,
+                                   const std::string &main) {
   std::vector<std::string> result;
   if (main.empty() || main == "usermaps") {
     return result;
   }
-  const std::optional<std::string_view> list =
-      game::get_dvar_string("fs_extramods");
-  for (std::string id :
-       utils::string::split(list ? std::string(*list) : startup_list, ',')) {
+  for (std::string id : utils::string::split(list, ',')) {
     utils::string::trim(id);
     if (!id.empty() && id != main &&
         std::ranges::find(result, id) == result.end()) {
@@ -999,6 +998,13 @@ std::vector<std::string> get(const std::string &main) {
     }
   }
   return result;
+}
+} // namespace
+
+std::vector<std::string> get(const std::string &main) {
+  const std::optional<std::string_view> list =
+      game::get_dvar_string("fs_extramods");
+  return extras_of(list ? std::string(*list) : startup_list, main);
 }
 
 std::vector<std::string> get() { return get(main_mod()); }
@@ -1052,6 +1058,12 @@ void set(const std::string &list) {
 
 bool is_loaded() {
   const std::vector<std::string> extras = get();
+  std::scoped_lock lock(mutex);
+  return loaded == extras;
+}
+
+bool is_loaded(const std::string &list) {
+  const std::vector<std::string> extras = extras_of(list, main_mod());
   std::scoped_lock lock(mutex);
   return loaded == extras;
 }

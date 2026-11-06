@@ -261,6 +261,11 @@ std::string journal_to_json(const launch_journal &value) {
   json::set(doc, "updated", value.updated, alloc);
   json::set(doc, "safe_mode", value.safe_mode, alloc);
   json::set(doc, "mode", value.mode, alloc);
+  if (value.joined) {
+    json::set(doc, "joined", true, alloc);
+    json::set(doc, "joined_stack",
+              json::string_array(value.joined_stack, alloc), alloc);
+  }
   json::set(doc, "launch_id", value.launch_id, alloc);
   json::set(doc, "db_pool", value.db_pool, alloc);
   json::set(doc, "precise_limiter", value.precise_limiter, alloc);
@@ -297,6 +302,18 @@ std::optional<launch_journal> parse_journal(std::string_view text) {
     out.safe_mode = safe->GetBool();
   }
   out.mode = json::get_string(root, "mode").value_or("");
+  if (const auto *joined = json::member(root, "joined");
+      joined != nullptr && joined->IsBool()) {
+    out.joined = joined->GetBool();
+  }
+  if (const auto *stack = json::member(root, "joined_stack");
+      out.joined && stack != nullptr && stack->IsArray()) {
+    for (const auto &item : stack->GetArray()) {
+      if (item.IsString()) {
+        out.joined_stack.emplace_back(item.GetString(), item.GetStringLength());
+      }
+    }
+  }
   out.launch_id = json::get_string(root, "launch_id").value_or("");
   if (const auto *db_pool = json::member(root, "db_pool");
       db_pool != nullptr && db_pool->IsBool()) {
@@ -347,11 +364,21 @@ bool journal_crashed(const std::optional<launch_journal> &journal) {
   return !journal || journal->phase != launch_phase::clean_exit;
 }
 
+bool journal_ran_host_mods(const std::optional<launch_journal> &journal) {
+  return journal && journal->joined && journal->joined_stack != journal->stack;
+}
+
 safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last) {
   safe_mode_decision out;
   if (!last || last->phase == launch_phase::clean_exit || last->stack.empty() ||
       last->safe_mode) {
     return out; // no crash, or a crash with mods already off
+  }
+  if (journal_ran_host_mods(last)) {
+    // It crashed on another player's game, with the host's mods: this
+    // plan's mods were not running, so they stay on.
+    out.crashed_after_join = true;
+    return out;
   }
   out.safe_mode = true;
   out.crashed_plan_id = last->plan_id;

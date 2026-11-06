@@ -17,6 +17,7 @@
 #include "flip_model.hpp"
 #include "frame_pacing.hpp"
 #include "ipc.hpp"
+#include "join_check.hpp"
 #include "journal.hpp"
 #include "json.hpp"
 #include "launch.hpp"
@@ -371,6 +372,15 @@ launch_outcome launch_game(const launch_inputs &in,
         journal.stack = last->stack;
       }
     }
+  }
+  // Every installed item's content id, so the game can tell a host's copy of
+  // a mod or map from its own when it joins (join_check.hpp). Vanilla
+  // launches join modded hosts too, so every launch writes it.
+  if (in.catalog &&
+      !write_text_file(paths.config / std::string(installed_index_file),
+                       installed_index_to_json(*in.catalog))) {
+    emit(log, log_level::warn, "launch.installed_index",
+         "The installed index could not be written.");
   }
   if (in.dry_launch) {
     out.dry_run = true;

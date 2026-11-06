@@ -7,12 +7,17 @@
 
 #include <natupnp.h>
 
+#include <future>
+
 namespace upnp {
 namespace {
 std::mutex state_mutex;
 std::string mapped_endpoint;
 uint16_t mapped_port{};
 std::atomic_bool operation_running{};
+// Xerces: whether the port should be open. A close while the router is
+// still being asked removes the mapping as soon as the answer comes.
+std::atomic_bool wanted{};
 
 std::string local_ipv4() {
   const auto handle = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -51,76 +56,121 @@ bool create_nat(CComPtr<IUPnPNAT> &nat,
   return SUCCEEDED(nat->get_StaticPortMappingCollection(&mappings)) && mappings;
 }
 
-void map_port(const uint16_t port) {
+void unmap_port(const uint16_t port) {
   const auto initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
   const bool uninitialize = SUCCEEDED(initialized);
-  const auto local = local_ipv4();
-  CComPtr<IUPnPNAT> nat;
-  CComPtr<IStaticPortMappingCollection> mappings;
-  if (local.empty() || !create_nat(nat, mappings)) {
-    operation_running = false;
-    if (uninitialize)
-      CoUninitialize();
-    return;
+  {
+    CComPtr<IUPnPNAT> nat;
+    CComPtr<IStaticPortMappingCollection> mappings;
+    if (create_nat(nat, mappings)) {
+      const CComBSTR protocol(L"UDP");
+      mappings->Remove(port, protocol);
+    }
   }
+  if (uninitialize)
+    CoUninitialize();
+}
 
-  const CComBSTR protocol(L"UDP");
-  const CComBSTR client(widen(local).c_str());
-  const CComBSTR description(L"BOIII friend match");
-  CComPtr<IStaticPortMapping> mapping;
-  const auto result = mappings->Add(port, protocol, port, client, VARIANT_TRUE,
-                                    description, &mapping);
-  if (SUCCEEDED(result) && mapping) {
-    BSTR external_raw{};
-    if (SUCCEEDED(mapping->get_ExternalIPAddress(&external_raw)) &&
-        external_raw) {
-      char external[INET_ADDRSTRLEN]{};
-      WideCharToMultiByte(CP_ACP, 0, external_raw, -1, external,
-                          sizeof(external), nullptr, nullptr);
-      SysFreeString(external_raw);
-      IN_ADDR parsed{};
-      if (inet_pton(AF_INET, external, &parsed) == 1) {
+void map_port(const uint16_t port, const callback &done) {
+  const auto initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  const bool uninitialize = SUCCEEDED(initialized);
+  outcome out{result::no_router, {}, port};
+  {
+    const auto local = local_ipv4();
+    CComPtr<IUPnPNAT> nat;
+    CComPtr<IStaticPortMappingCollection> mappings;
+    if (!local.empty() && create_nat(nat, mappings)) {
+      const CComBSTR protocol(L"UDP");
+      const CComBSTR client(widen(local).c_str());
+      const CComBSTR description(L"Xerces lobby (Black Ops III)");
+      CComPtr<IStaticPortMapping> mapping;
+      const auto added = mappings->Add(port, protocol, port, client,
+                                       VARIANT_TRUE, description, &mapping);
+      if (SUCCEEDED(added) && mapping) {
+        out.value = result::mapped;
+        BSTR external_raw{};
+        if (SUCCEEDED(mapping->get_ExternalIPAddress(&external_raw)) &&
+            external_raw) {
+          char external[INET_ADDRSTRLEN]{};
+          WideCharToMultiByte(CP_ACP, 0, external_raw, -1, external,
+                              sizeof(external), nullptr, nullptr);
+          SysFreeString(external_raw);
+          IN_ADDR parsed{};
+          if (inet_pton(AF_INET, external, &parsed) == 1)
+            out.external_ip = external;
+        }
+        // Remembered even without an outside address, so the mapping is
+        // always removed again.
         std::lock_guard lock(state_mutex);
         mapped_port = port;
-        mapped_endpoint = std::string(external) + ":" + std::to_string(port);
+        mapped_endpoint = out.external_ip.empty()
+                              ? std::string{}
+                              : out.external_ip + ":" + std::to_string(port);
+      } else {
+        out.value = result::refused;
       }
     }
   }
   operation_running = false;
-  if (uninitialize)
-    CoUninitialize();
-}
-
-void unmap_port(const uint16_t port) {
-  const auto initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-  const bool uninitialize = SUCCEEDED(initialized);
-  CComPtr<IUPnPNAT> nat;
-  CComPtr<IStaticPortMappingCollection> mappings;
-  if (create_nat(nat, mappings)) {
-    const CComBSTR protocol(L"UDP");
-    mappings->Remove(port, protocol);
+  if (out.value == result::mapped && !wanted) {
+    // Closed while the router was being asked.
+    uint16_t stale{};
+    {
+      std::lock_guard lock(state_mutex);
+      stale = std::exchange(mapped_port, uint16_t{});
+      mapped_endpoint.clear();
+    }
+    if (stale)
+      unmap_port(stale);
   }
   if (uninitialize)
     CoUninitialize();
+  if (done && wanted)
+    done(out);
+}
+
+uint16_t take_mapped_port() {
+  std::lock_guard lock(state_mutex);
+  mapped_endpoint.clear();
+  return std::exchange(mapped_port, uint16_t{});
 }
 } // namespace
 
-void open_port(const uint16_t port) {
-  if (port < 1024 || operation_running.exchange(true))
+void open_port(const uint16_t port, callback done) {
+  if (port < 1024)
     return;
-  scheduler::once([port] { map_port(port); }, scheduler::async);
+  wanted = true;
+  if (operation_running.exchange(true))
+    return;
+  scheduler::once([port, done = std::move(done)] { map_port(port, done); },
+                  scheduler::async);
 }
 
 void close_port() {
-  uint16_t port{};
-  {
-    std::lock_guard lock(state_mutex);
-    port = mapped_port;
-    mapped_port = 0;
-    mapped_endpoint.clear();
-  }
-  if (port)
+  wanted = false;
+  if (const uint16_t port = take_mapped_port())
     scheduler::once([port] { unmap_port(port); }, scheduler::async);
+}
+
+void close_port_now() {
+  wanted = false;
+  // A request still out usually finishes within a second; its answer then
+  // sees wanted is false and removes what it mapped itself.
+  for (int i = 0; i < 10 && operation_running; ++i)
+    std::this_thread::sleep_for(100ms);
+  const uint16_t port = take_mapped_port();
+  if (!port)
+    return;
+  // A router that stops answering would hold the exit for as long as
+  // Windows waits for it, so the removal runs on its own thread and the
+  // exit waits for it at most 2 s.
+  std::packaged_task<void()> task([port] { unmap_port(port); });
+  std::future<void> removed = task.get_future();
+  std::thread(std::move(task)).detach();
+  if (removed.wait_for(2s) != std::future_status::ready)
+    printf("[UPnP] The router did not answer in time; it may still forward "
+           "UDP port %u until the port is mapped again\n",
+           static_cast<unsigned>(port));
 }
 
 std::string external_endpoint() {
@@ -128,11 +178,17 @@ std::string external_endpoint() {
   return mapped_endpoint;
 }
 
+bool port_mapped() {
+  std::lock_guard lock(state_mutex);
+  return mapped_port != 0;
+}
+
 class component final : public client_component {
   DEFINE_COMPONENT_NAME("upnp");
 
 public:
-  void pre_destroy() override { close_port(); }
+  // Xerces: at once, because the scheduler may already have stopped.
+  void pre_destroy() override { close_port_now(); }
 };
 } // namespace upnp
 

@@ -57,14 +57,32 @@ TEST_CASE("servers: the reasons say what to fix") {
            std::string("The port is a number from 1 to 65535."));
   CHECK_EQ(server_address_problem("1.2.3.4 :1"),
            std::string("Remove the spaces from the address."));
-  CHECK_EQ(server_address_problem("fe80::1"),
-           std::string("Put an IPv6 address in brackets, for example "
-                       "[::1]:27017."));
+  // The game connects over IPv4 only, so no hint shows an IPv6 example.
+  CHECK_EQ(server_address_problem("fe80::1"), std::string(ipv4_only_problem));
+  CHECK_EQ(server_address_problem("[zz]:1"), std::string(ipv4_only_problem));
+  for (const char *typed : {"[::1", "[::1]x"}) {
+    const std::string problem = server_address_problem(typed);
+    CHECK(problem.find("IPv4 only") != std::string::npos);
+    CHECK(problem.find("[::1]") == std::string::npos);
+  }
   CHECK_EQ(
       server_address_problem("srv_1:27017"),
       std::string("Use only letters, digits, dots and dashes in the host."));
   CHECK_EQ(server_address_problem("-x"),
            std::string("The host cannot start with a dot or a dash."));
+}
+
+TEST_CASE("servers: an IPv6 address can be saved but not joined") {
+  // Valid for the command line and for favourites, but the game's sockets
+  // are IPv4 only.
+  CHECK(valid_server_address("[::1]:27017"));
+  CHECK_EQ(server_address_problem("[::1]:27017"), std::string());
+  CHECK_EQ(server_join_problem("[::1]:27017"), std::string(ipv4_only_problem));
+  CHECK_EQ(server_join_problem("[fe80::1]"), std::string(ipv4_only_problem));
+  CHECK_EQ(server_join_problem("192.168.1.20:27017"), std::string());
+  CHECK_EQ(server_join_problem("my-server.lan"), std::string());
+  CHECK_EQ(server_join_problem("x:0"), server_address_problem("x:0"));
+  CHECK_EQ(server_join_problem(""), std::string());
 }
 
 TEST_CASE("servers: addresses are trimmed and compared without case") {

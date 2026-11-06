@@ -20,6 +20,10 @@ std::string get_host_endpoint();
 void begin_join(const std::string &token, const std::string &fallback_address,
                 uint64_t friend_id);
 bool set_open_to_friends(bool enabled);
+// Xerces: the lobby answers joins by address while open, and the router
+// forwards the game's UDP port meanwhile (UPnP). Says so in a toast; false
+// when this game hosts no lobby.
+bool set_open_to_direct_connect(bool enabled);
 std::string joinable_lobby();
 void join_match_lobby(const game::net::netadr_t &host,
                       std::function<void()> fallback);

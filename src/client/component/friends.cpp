@@ -530,14 +530,20 @@ bool connect_to_friend(game::XUID steam_id) {
   });
 
   if (addr_str.empty()) {
+    // Xerces (D14): presence came from Ezz's masters, so this list never
+    // knows where a friend plays.
+    const char *message =
+        !xerces_switches::ezz_social
+            ? "Joining from the friends list is off in this build. Ask your "
+              "friend for their address and join with Xerces > Servers, or "
+              "type connect <address> in the console."
+        : state == status::online
+            ? "Your friend's party is closed. Ask them to open it to friends."
+            : "Your friend is offline.";
     scheduler::once(
-        [state] {
-          game::ui::UI_OpenErrorPopupWithMessage(
-              game::LOCAL_CLIENT_0, game::errorCode::UI,
-              state == status::online
-                  ? "Your friend's party is closed. Ask them to open it to "
-                    "friends."
-                  : "Your friend is offline.");
+        [message] {
+          game::ui::UI_OpenErrorPopupWithMessage(game::LOCAL_CLIENT_0,
+                                                 game::errorCode::UI, message);
         },
         scheduler::main);
     return false;
@@ -727,6 +733,14 @@ struct component final : client_component {
                              "Advertise this private match to saved friends");
     command::add("friends_open", [](const command::params &) {
       const bool enabled = !game::get_dvar_bool("friends_open").value_or(false);
+      if constexpr (!xerces_switches::ezz_social) {
+        // Xerces (D14): the lobby's DIRECT CONNECT button. Open, others
+        // join it by address and the router forwards the port (nat.cpp).
+        if (!nat::set_open_to_direct_connect(enabled)) {
+          game::Dvar_SetFromStringByName("friends_open", "0", true);
+        }
+        return;
+      }
       game::Dvar_SetFromStringByName("friends_open", enabled ? "1" : "0", true);
       if (!nat::set_open_to_friends(enabled)) {
         game::Dvar_SetFromStringByName("friends_open", "0", true);
