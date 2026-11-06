@@ -344,3 +344,12 @@ def test_genkey_prints_an_admin_token() -> None:
     config = resolve(_settings(**_production(XERCES_ADMIN_TOKEN=token)))
     assert config.admin_token_hash == hash_admin_token(token)
     assert _genkey("--admin") != line
+
+
+def test_the_crash_storage_ceiling() -> None:
+    assert resolve(_settings(**_production())).crash_storage_bytes == 1024 * 1024 * 1024
+    config = resolve(_settings(**_production(XERCES_CRASH_STORAGE_MB="300")))
+    assert config.crash_storage_bytes == 300 * 1024 * 1024
+    for bad in ("0", "-5", "lots"):
+        with pytest.raises(ValidationError):
+            _settings(**_production(XERCES_CRASH_STORAGE_MB=bad))

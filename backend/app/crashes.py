@@ -1,11 +1,15 @@
-"""Crash reports: decoding, validation, the server's own privacy scrub and the crash signature.
+"""Crash reports: decoding, validation, the minidump's privacy mask and the crash signature.
 
 The launcher redacts a report before it sends it (profile paths, user names, server addresses).
 The server checks again that no Windows profile path such as C:\\Users\\<name> survives: in the
-text it becomes C:\\Users\\<user>, and in the minidump, which is binary, the name's characters are
-overwritten in place so every offset in the file stays valid. No client address is stored.
+text it becomes C:\\Users\\<user> (app.scrub, which the schema runs on each field it keeps), and
+in the minidump, which is binary, the name's characters are overwritten in place so every offset
+in the file stays valid. No client address is stored.
 
-Everything here is plain CPU work, run in a worker thread (app.routers.crashes).
+What a report costs is bounded before the deep work: the body is at most 4 MiB, everything but
+the minidump at most 1 MiB (checked before parsing), validation drops unknown fields without
+looking into them, and only the fields kept are scrubbed. Everything here is plain CPU work, run
+in a worker thread (app.routers.crashes).
 """
 
 import base64
@@ -21,33 +25,20 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.errors import ApiError
-from app.schemas import CRASH_MINIDUMP_B64_MAX, CrashReportIn
+from app.schemas import CRASH_MINIDUMP_B64_MAX, CRASH_REST_MAX, CrashReportIn
+from app.scrub import SHARED_PROFILES
 from app.security import size_text
 
 MAX_MINIDUMP_BYTES = 2 * 1024 * 1024
-MAX_JOURNAL_BYTES = 256 * 1024
-MAX_DEPTH = 32
 INSTALL_ID = re.compile(r"[0-9a-f]{32}")
-USER_PLACEHOLDER = "<user>"
 MINIDUMP_SIGNATURE = b"MDMP"
-# Profile folders that name nobody; kept so paths into them stay readable.
-SHARED_PROFILES = frozenset({"public", "default", "default user", "all users"})
+# The minidump field as JSON text: base64, maybe with escaped line breaks or slashes. Wherever
+# this matches in valid JSON the run is inside one JSON string, so parsing it costs its size.
+_MINIDUMP_FIELD = re.compile(rb'"minidump_b64"\s*:\s*"([A-Za-z0-9+/=\\]*)')
+# The largest minidump's base64, with room for escaped line breaks and slashes.
+_MINIDUMP_FIELD_MAX = CRASH_MINIDUMP_B64_MAX * 9 // 8
 
-# A drive, then Users (or the old Documents and Settings), then the profile folder's name: every
-# character up to the next path separator, quote or control character. JSON-escaped backslashes
-# (C:\\Users\\name) match too. Over-matching only hides more.
-_NAME_END = r"\\/:*?\"<>|\x00-\x1f"
-_PROFILE_PATH = re.compile(
-    r"([A-Za-z]:[\\/]+(?:Users|Documents and Settings)[\\/]+)([^" + _NAME_END + r"]+)",
-    re.IGNORECASE,
-)
-# Proton and Linux: /home/<name> or Z:\home\<name>, where a path starts (not ui/home/menu). A
-# match may start only at the first slash of a run, so a long run of slashes costs linear time.
-_HOME_PATH = re.compile(
-    r"((?<![\w.~\\/-])(?:[A-Za-z]:)?[\\/]+home[\\/]+)([^" + _NAME_END + r"]+)",
-    re.IGNORECASE,
-)
-# The same prefixes inside a minidump: UTF-16LE (module paths) and ASCII or UTF-8 (CodeView
+# The profile prefixes inside a minidump: UTF-16LE (module paths) and ASCII or UTF-8 (CodeView
 # records, which name where each module's PDB was built).
 _UTF16_PROFILE = re.compile(
     rb"[A-Za-z]\x00:\x00(?:[\\/]\x00)+u\x00s\x00e\x00r\x00s\x00(?:[\\/]\x00)+", re.IGNORECASE
@@ -76,13 +67,17 @@ def check_install_id(value: str | None) -> str:
 def decode_body(
     raw: bytes, content_type: str | None, content_encoding: str | None, limit: int
 ) -> bytes:
-    """The JSON bytes of a request: checks the media type and undoes gzip, at most `limit` bytes."""
+    """The JSON bytes of a request: checks the media type and undoes gzip, at most `limit` bytes.
+
+    A wrong media type or encoding is 400 like any other invalid report: the contract's answers
+    are 400 (drop it), 413 (too large) and 429 (later), and launchers drop only on 400 and 413.
+    """
     media_type, _, parameters = (content_type or "").partition(";")
     if media_type.strip().lower() != "application/json":
-        raise ApiError(415, "unsupported_media_type", "Content-Type must be application/json.")
+        raise ApiError(400, "unsupported_media_type", "Content-Type must be application/json.")
     charset = re.search(r"charset\s*=\s*\"?([\w-]+)", parameters, re.IGNORECASE)
     if charset and charset.group(1).lower() not in ("utf-8", "utf8"):
-        raise ApiError(415, "unsupported_media_type", "The body must be UTF-8.")
+        raise ApiError(400, "unsupported_media_type", "The body must be UTF-8.")
 
     encoding = (content_encoding or "").strip().lower()
     if encoding in ("", "identity"):
@@ -90,7 +85,7 @@ def decode_body(
             raise too_large(limit)
         return raw
     if encoding not in ("gzip", "x-gzip"):
-        raise ApiError(415, "unsupported_media_type", "Content-Encoding must be gzip or absent.")
+        raise ApiError(400, "unsupported_media_type", "Content-Encoding must be gzip or absent.")
     # One bounded step, so a small bomb never inflates past the limit in memory.
     decoder = zlib.decompressobj(wbits=16 + zlib.MAX_WBITS)
     try:
@@ -106,6 +101,13 @@ def decode_body(
 
 def too_large(limit: int) -> ApiError:
     return ApiError(413, "payload_too_large", f"The report is larger than {size_text(limit)}.")
+
+
+def size_without_minidump(body: bytes) -> int:
+    """The body's size less its minidump field's value (the longest such run, up to the
+    largest minidump's base64), found without parsing."""
+    longest = max((len(match.group(1)) for match in _MINIDUMP_FIELD.finditer(body)), default=0)
+    return len(body) - min(longest, _MINIDUMP_FIELD_MAX)
 
 
 def _reject_constant(name: str) -> Any:
@@ -138,54 +140,7 @@ def _first_error(exc: ValidationError) -> str:
     return f"{location}: {message}" if location else message
 
 
-# ----------------------------------------------------------------------------- privacy
-
-
-def _replace_name(match: re.Match[str]) -> str:
-    name = match.group(2)
-    if name.strip().lower() in SHARED_PROFILES:
-        return match.group(0)
-    return match.group(1) + USER_PLACEHOLDER
-
-
-def scrub_text(text: str) -> str:
-    """Profile paths with the user name replaced, NULs removed and lone surrogates replaced."""
-    if "\x00" in text:
-        text = text.replace("\x00", "")
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:  # a lone surrogate ("\ud800") parses as JSON but is not text
-        text = text.encode("utf-8", "replace").decode("utf-8")
-    if ":" in text:
-        text = _PROFILE_PATH.sub(_replace_name, text)
-    return _HOME_PATH.sub(_replace_name, text)
-
-
-def scrub(value: Any) -> Any:
-    """A copy of a parsed JSON value with every string (keys too) scrubbed. Iterative, and
-    refuses nesting deeper than MAX_DEPTH, so no input can exhaust the stack."""
-    root: list[Any] = [None]
-    stack: list[tuple[Any, list[Any] | dict[str, Any], Any, int]] = [(value, root, 0, 0)]
-    while stack:
-        node, parent, slot, depth = stack.pop()
-        if depth > MAX_DEPTH:
-            raise invalid("The report is nested too deeply.")
-        if isinstance(node, dict):
-            copy: dict[str, Any] = {}
-            parent[slot] = copy
-            for key, item in node.items():
-                clean_key = scrub_text(key)
-                copy[clean_key] = None
-                stack.append((item, copy, clean_key, depth + 1))
-        elif isinstance(node, list):
-            items: list[Any] = [None] * len(node)
-            parent[slot] = items
-            stack.extend((item, items, index, depth + 1) for index, item in enumerate(node))
-        elif isinstance(node, str):
-            parent[slot] = scrub_text(node)
-        else:
-            parent[slot] = node
-    return root[0]
+# ----------------------------------------------------------------------------- minidump
 
 
 def mask_minidump(data: bytes) -> bytes:
@@ -255,28 +210,48 @@ class PreparedReport:
     columns: dict[str, Any]  # CrashReport fields, except id, install_id and received_at
     minidump: bytes | None
 
+    @property
+    def stored_bytes(self) -> int:
+        return int(self.columns["stored_bytes"])
+
+
+def stored_size(columns: dict[str, Any], minidump: bytes | None) -> int:
+    """About what a report takes in the database: its strings as UTF-8, its JSON parts as the
+    database driver writes them (non-ASCII as \\u escapes) and the minidump."""
+    size = len(minidump or b"")
+    for value in columns.values():
+        if isinstance(value, str):
+            size += len(value.encode("utf-8"))
+        elif isinstance(value, dict | list):
+            size += len(json.dumps(value))
+    return size
+
 
 def prepare_report(
     raw: bytes, content_type: str | None, content_encoding: str | None, limit: int
 ) -> PreparedReport:
-    """Decode, scrub and validate a POST /v1/crashes body, or raise ApiError (400, 413, 415)."""
-    data = parse_json(decode_body(raw, content_type, content_encoding, limit))
-    # The minidump is masked as bytes below; base64 text can hold "/home/" by chance.
-    minidump_b64 = data.pop("minidump_b64", None)
-    data = scrub(data)
-    data["minidump_b64"] = minidump_b64
+    """Decode, validate and scrub a POST /v1/crashes body, or raise ApiError (400, 413)."""
+    return prepare_body(decode_body(raw, content_type, content_encoding, limit))
+
+
+def prepare_body(body: bytes) -> PreparedReport:
+    """Validate and scrub a decoded body (decode_body), or raise ApiError (400, 413)."""
+    if size_without_minidump(body) > CRASH_REST_MAX:
+        raise ApiError(
+            413,
+            "payload_too_large",
+            f"The report without its minidump is larger than {size_text(CRASH_REST_MAX)}.",
+        )
+    data = parse_json(body)
     try:
+        # Checks every cap as sent, then scrubs each field it keeps (app.schemas).
         report = CrashReportIn.model_validate(data)
     except ValidationError as exc:
         raise invalid(_first_error(exc)) from None
+    del data  # unknown fields go now, not at the end
 
     minidump = decode_minidump(report.minidump_b64)
     logs = report.logs.model_dump(mode="json") if report.logs else None
-    if logs is not None and logs["journal"] is not None:
-        size = len(json.dumps(logs["journal"], ensure_ascii=False, separators=(",", ":")).encode())
-        if size > MAX_JOURNAL_BYTES:
-            raise invalid(f"logs.journal is larger than {MAX_JOURNAL_BYTES // 1024} KB.")
-
     crash = report.crash.model_dump(mode="json")
     game = report.game
     launch = report.launch
@@ -310,4 +285,5 @@ def prepare_report(
         "crash": crash,
         "logs": logs,
     }
+    columns["stored_bytes"] = stored_size(columns, minidump)
     return PreparedReport(report_id=report.report_id, columns=columns, minidump=minidump)

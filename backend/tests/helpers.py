@@ -21,7 +21,10 @@ from app.models import Base
 from app.ratelimit import DEFAULT_RULES, Rule
 
 PASSWORD = "correct horse battery staple"
-RELAXED_RULES = {name: Rule(1_000_000, 1) for name in DEFAULT_RULES}
+# Rules counted in bytes (crash_bytes, crash_address_bytes) need room for a few MiB at once.
+RELAXED_RULES = {
+    name: Rule(10**12 if name.endswith("_bytes") else 1_000_000, 1) for name in DEFAULT_RULES
+}
 _addresses = itertools.count(1)
 
 

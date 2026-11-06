@@ -18,6 +18,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
+from app.errors import ApiError
 from app.ratelimit import DEFAULT_RULES, RateLimiter, Rule, TokenBucket
 from app.security import client_address
 from tests.helpers import (
@@ -418,6 +419,21 @@ def test_limiter_retry_after_and_prune() -> None:
     now[0] = 61.0
     assert limiter.prune() == 1
     assert len(limiter) == 0
+
+
+def test_enforce_all_takes_costs_and_spends_all_or_nothing() -> None:
+    limiter = RateLimiter({"count": Rule(5, 60), "bytes": Rule(100, 60)})
+    limiter.enforce_all([("count", "k"), ("bytes", "k", 60.0)])
+    with pytest.raises(ApiError) as refused:
+        limiter.enforce_all([("count", "k"), ("bytes", "k", 60.0)])  # 40 bytes left
+    assert refused.value.status_code == 429
+    # The count spent on the refused attempt was given back; 4 of 5 are left.
+    for _ in range(4):
+        limiter.enforce_all([("count", "k"), ("bytes", "k", 10.0)])
+    with pytest.raises(ApiError):
+        limiter.enforce("count", "k")
+    limiter.refund_all([("count", "k"), ("bytes", "k", 30.0)])
+    limiter.enforce_all([("count", "k"), ("bytes", "k", 30.0)])
 
 
 def test_limiter_bounds_memory() -> None:

@@ -117,6 +117,7 @@ def _crash(received_at, report_id: str) -> CrashReport:
         kind="exception",
         signature="0" * 16,
         crash={"kind": "exception"},
+        stored_bytes=100,
     )
 
 

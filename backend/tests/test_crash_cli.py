@@ -6,6 +6,8 @@ import base64
 import http.server
 import importlib.util
 import io
+import json
+import re
 import sys
 import threading
 from collections.abc import Mapping
@@ -175,6 +177,144 @@ def test_urllib_against_a_local_server() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+class _Redirecting(http.server.BaseHTTPRequestHandler):
+    target = ""
+
+    def do_GET(self) -> None:  # noqa: N802
+        self.send_response(307)
+        self.send_header("Location", self.target + self.path)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, *args: Any) -> None:
+        pass
+
+
+class _Recording(http.server.BaseHTTPRequestHandler):
+    seen: list[str | None] = []
+
+    def do_GET(self) -> None:  # noqa: N802
+        type(self).seen.append(self.headers.get("Authorization"))
+        body = b'{"reports": 0, "groups": []}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args: Any) -> None:
+        pass
+
+
+def test_redirects_are_not_followed() -> None:
+    # urllib would follow a redirect and send the Authorization header along, to plain HTTP or
+    # another host. crashes.py stops and says where it was sent instead.
+    elsewhere = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Recording)
+    _Redirecting.target = f"http://127.0.0.1:{elsewhere.server_address[1]}"
+    _Recording.seen = []
+    redirecting = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Redirecting)
+    servers = (elsewhere, redirecting)
+    for server in servers:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{redirecting.server_address[1]}"
+        out, err = io.StringIO(), io.StringIO()
+        env = {"XERCES_BACKEND_URL": base, "XERCES_ADMIN_TOKEN": ADMIN_TOKEN}
+        assert cli.main(["groups"], env=env, out=out, err=err) == 1
+        assert "307" in err.getvalue() and "does not follow redirects" in err.getvalue()
+        assert _Redirecting.target in err.getvalue()
+        assert _Recording.seen == []  # the token never went there
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+
+
+ESC = "\x1b"
+# Clears the screen, writes over it, and (OSC 52) puts a command on the clipboard.
+HOSTILE = ESC + "[2J" + ESC + "[H" + "fine" + ESC + "]52;c;Y3VybCBldmlsIHwgc2g=\x07"
+HOSTILE += "\x9b31m" + "\u202e" + "\r" + "\x00"
+# What must never reach the terminal as it is: C0 controls other than tab and line feed, DEL, C1
+# controls and bidirectional overrides.
+_RAW_CONTROL = re.compile(
+    r"[\x00-\x08\x0b-\x1f\x7f-\x9f" r"\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]"
+)
+
+
+async def test_no_control_characters_reach_the_terminal(admin_app: FastAPI) -> None:
+    async with client_for(admin_app) as client:
+        report = crash_report()
+        report["crash"]["module"] = "BlackOps3.exe" + HOSTILE
+        report["crash"]["frames"] = ["x" + HOSTILE]
+        report["launch"]["mods"][0]["name"] = "mod" + HOSTILE
+        report["launch"]["map"] = "zm" + HOSTILE
+        report["logs"]["game_log_tail"] = "line one\r\n" + HOSTILE + "\tline two"
+        report["logs"]["journal"] = {"note" + HOSTILE: HOSTILE}
+        crash_id = (await post_crash(client, report)).json()["id"]
+        for argv in (["groups"], ["list"], ["show", crash_id], ["show", crash_id, "--json"]):
+            code, out, err = await _run(client, *argv)
+            assert (code, err) == (0, ""), argv
+            assert not _RAW_CONTROL.search(out), (argv, _RAW_CONTROL.findall(out))
+        # The log keeps its lines and tabs, and shows the rest as escapes.
+        code, out, _ = await _run(client, "show", crash_id)
+        assert "line one\n\\x1b[2J\\x1b[H" in out and "\tline two" in out
+        # --json is still JSON, and says exactly what was stored (the server drops NULs).
+        code, out, _ = await _run(client, "show", crash_id, "--json")
+        stored = HOSTILE.replace("\x00", "")
+        assert json.loads(out)["logs"]["journal"] == {"note" + stored: stored}
+
+
+def test_no_control_characters_reach_the_terminal_from_any_field() -> None:
+    # The server drops control characters from short fields; the script does not count on it.
+    group = {
+        "signature": "s" + HOSTILE, "count": 1, "installs": 1, "kind": "k" + HOSTILE,
+        "first_seen": "x" + HOSTILE, "last_seen": "2026-11-05T12:00:00Z",
+        "module": "m" + HOSTILE, "offset": "o" + HOSTILE, "frames": ["f" + HOSTILE],
+        "versions": [{"value": "v" + HOSTILE, "count": 1}],
+        "top_mods": [{"id": None, "name": "n" + HOSTILE, "count": 1}],
+        "top_maps": [{"value": "p" + HOSTILE, "count": 1}], "sample_id": "i" + HOSTILE,
+    }
+    item = {
+        "id": "i" + HOSTILE, "received_at": "r" + HOSTILE, "kind": "k" + HOSTILE,
+        "code": "c" + HOSTILE, "phase": "p" + HOSTILE, "version": "v" + HOSTILE,
+        "has_minidump": False, "module": "m" + HOSTILE, "offset": None,
+    }
+    full = {
+        "id": "i" + HOSTILE, "received_at": "r", "created_utc": "c" + HOSTILE,
+        "install_id": "n" + HOSTILE, "signature": "s" + HOSTILE, "has_minidump": True,
+        "minidump_size": "z" + HOSTILE,
+        "xerces": {"version": "v" + HOSTILE, "commit": "c" + HOSTILE, "dirty": True},
+        "game": {"build": "b" + HOSTILE, "steam_build": "s" + HOSTILE},
+        "crash": {key: key + HOSTILE for key in ("kind", "code", "module", "thread")}
+        | {"frames": ["f" + HOSTILE]},
+        "launch": {"mode": "m" + HOSTILE, "map": "p" + HOSTILE, "flags": ["-f" + HOSTILE],
+                   "mods": [{"id": "i" + HOSTILE, "name": "n" + HOSTILE}]},
+        "system": {"windows": "w" + HOSTILE, "cpu": "c" + HOSTILE, "logical_cpus": HOSTILE,
+                   "gpus": [{"name": "g" + HOSTILE, "driver": "d" + HOSTILE}]},
+        "logs": {"journal": {"k" + HOSTILE: "v" + HOSTILE}, "console_tail": "t" + HOSTILE},
+    }
+    answers = {
+        "/v1/admin/crash-groups": {"reports": HOSTILE, "groups": [group]},
+        "/v1/admin/crashes": {"items": [item], "next_cursor": None},
+        "/v1/admin/crashes/x": full,
+    }
+
+    def fetch(url: str, headers: Mapping[str, str]) -> tuple[int, Mapping[str, str], bytes]:
+        path = url.removeprefix("https://backend.test").split("?")[0]
+        if path == "/v1/admin/crashes/y":
+            body = {"error": {"code": "x", "message": "no" + HOSTILE}}
+            return 418, {"Retry-After": HOSTILE}, json.dumps(body).encode()
+        return 200, {}, json.dumps(answers[path]).encode()
+
+    env = {"XERCES_BACKEND_URL": "https://backend.test", "XERCES_ADMIN_TOKEN": ADMIN_TOKEN}
+    for argv in (["groups"], ["list"], ["show", "x"], ["show", "x", "--json"], ["show", "y"]):
+        out, err = io.StringIO(), io.StringIO()
+        cli.main(argv, env=env, fetch=fetch, out=out, err=err)
+        for text in (out.getvalue(), err.getvalue()):
+            assert not _RAW_CONTROL.search(text), (argv, _RAW_CONTROL.findall(text))
+    assert "\\x1b]52;c;" in out.getvalue() + err.getvalue()
 
 
 def test_unreachable_server() -> None:

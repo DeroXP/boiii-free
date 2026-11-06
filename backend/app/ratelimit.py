@@ -27,6 +27,7 @@ class Rule:
 
 HOUR = 3600.0
 DAY = 86400.0
+MIB = 1024 * 1024
 
 DEFAULT_RULES: Mapping[str, Rule] = {
     "register": Rule(3, HOUR),  # every attempt (taken names too), per hashed address
@@ -46,15 +47,22 @@ DEFAULT_RULES: Mapping[str, Rule] = {
     "ws_message": Rule(10, 1),  # per user, whichever socket the messages come over
     # Per user, and per hashed address for sockets that do not sign in (refunded when they do).
     "ws_connect": Rule(10, 60),
-    # Crash reports: per install id (a launcher sends its outbox of up to 20 at start), per hashed
-    # address (several testers can share one), and every stored report together, which caps what
-    # a flood can make the database store.
+    # Crash reports: per install id (a launcher sends its outbox of up to 20 at start); per hashed
+    # address (several testers can share one), counted before the body is read and then by the
+    # decoded body's bytes; and every stored report together, by count and by bytes stored. What
+    # the database holds in total is capped apart from these (XERCES_CRASH_STORAGE_MB).
     "crash_install": Rule(20, HOUR),
     "crash_address": Rule(60, HOUR),
+    "crash_address_bytes": Rule(64 * MIB, HOUR),
     "crash_all": Rule(2000, DAY),
+    "crash_bytes": Rule(256 * MIB, DAY),
     "crash_delete": Rule(10, HOUR),  # per hashed address
     "admin_auth": Rule(10, 15 * 60),  # wrong admin tokens, per hashed address (refunded if right)
 }
+
+
+# One spend in RateLimiter.enforce_all: (rule, key), or (rule, key, cost).
+Charge = tuple[str, str] | tuple[str, str, float]
 
 
 def rate_limited(wait_seconds: float) -> ApiError:
@@ -147,18 +155,19 @@ class RateLimiter:
         if wait > 0:
             raise rate_limited(wait)
 
-    def enforce_all(self, buckets: Sequence[tuple[str, str]]) -> None:
-        """Spend one token from each (rule, key), or none of them: raise 429 if any is empty."""
-        for index, (name, key) in enumerate(buckets):
-            wait = self.hit(name, key)
+    def enforce_all(self, buckets: Sequence[Charge]) -> None:
+        """Spend from each (rule, key) or (rule, key, cost), or from none of them: raise 429 if
+        any is short. The cost is 1 unless given."""
+        for index, (name, key, *cost) in enumerate(buckets):
+            wait = self.hit(name, key, *cost)
             if wait > 0:
                 for spent in buckets[:index]:
                     self.refund(*spent)
                 raise rate_limited(wait)
 
-    def refund_all(self, buckets: Sequence[tuple[str, str]]) -> None:
-        for name, key in buckets:
-            self.refund(name, key)
+    def refund_all(self, buckets: Sequence[Charge]) -> None:
+        for bucket in buckets:
+            self.refund(*bucket)
 
     def _make_room(self, name: str, store: dict[str, TokenBucket]) -> bool:
         # Scanning every bucket of a rule costs milliseconds, so a flood of new keys gets at most

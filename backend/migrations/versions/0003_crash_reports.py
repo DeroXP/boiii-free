@@ -48,6 +48,7 @@ def upgrade() -> None:
         sa.Column("system", sa.JSON(), nullable=True),
         sa.Column("crash", sa.JSON(), nullable=False),
         sa.Column("logs", sa.JSON(), nullable=True),
+        sa.Column("stored_bytes", sa.Integer(), nullable=False),
         sa.CheckConstraint(
             "kind IN ('exception', 'fail_fast', 'out_of_memory', 'unknown_exit')",
             name=op.f("ck_crash_reports_kind"),

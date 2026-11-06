@@ -163,35 +163,58 @@ required; any other part may be missing or null, and unknown fields are ignored
 `unknown_exit`; `code`, `exit_code` and `offset` are hex numbers written
 `0x...`.
 
-| Answer | When                                                                                     |
-| ------ | ---------------------------------------------------------------------------------------- |
-| 201    | stored: `{"id": "<server id>", "duplicate": false}`                                      |
-| 200    | a `report_id` the server already has: `{"id": "<its server id>", "duplicate": true}`     |
-| 400    | not valid: bad JSON, a missing or wrong field, a missing or malformed `X-Xerces-Install` |
-| 408    | the body took over 30 seconds to arrive                                                  |
-| 413    | the body is over 4 MiB (after gzip decoding too), or the minidump over 2 MiB             |
-| 415    | not `application/json` in UTF-8, or a `Content-Encoding` other than gzip                 |
-| 429    | over a rate limit; `Retry-After` says when to try again                                  |
-| 503    | 8 big uploads are already being read; try again after `Retry-After`                      |
+| Answer | When                                                                                                                      |
+| ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| 201    | stored: `{"id": "<server id>", "duplicate": false}`                                                                       |
+| 200    | a `report_id` the server already has: `{"id": "<its server id>", "duplicate": true}`                                      |
+| 400    | not valid: bad JSON, a missing or wrong field, a missing or malformed `X-Xerces-Install`, not `application/json` in UTF-8 |
+| 408    | the body took over 30 seconds to arrive                                                                                   |
+| 413    | the body is over 4 MiB (after gzip decoding too), the minidump over 2 MiB, or the rest of the report over 1 MiB           |
+| 429    | over a rate limit, or the server's room for crash reports is full; `Retry-After` says when to try again                   |
+| 503    | 4 big uploads are already being read, or 2 from this address; try again after `Retry-After`                               |
+
+A launcher drops a report on 400 and 413 (it resends a 413 once without its
+minidump) and keeps it for later on anything else, 408, 429 and 503 included. A
+wrong `Content-Type` or `Content-Encoding` is a 400 for that reason, not a 415.
 
 Limits: names and other short strings 256 characters (versions, hashes and
-phases 64), each log tail 64 KiB, at most 32 frames, 512 mods, 64 flags and 16
-GPUs, the journal 256 KB and 32 levels deep. Sending the same `report_id` again
-never stores a second copy, also when two copies arrive at once, so a launcher
-can retry until it gets an answer. Every report counts against the limits per
-install and per address, rejected and repeated ones too; only stored ones count
-against the limit for all senders together.
+phases 64), each log tail 64 Ki characters, at most 32 frames, 512 mods, 64
+flags and 16 GPUs, the journal 256 KB and 32 levels deep, and everything but the
+minidump 1 MiB. Each cap is checked on the report as sent. The server's own
+scrub (below) runs after that and may lengthen a string (`<user>` is longer than
+`Al`), so it then cuts the string back to its cap: a short field loses its end,
+a log tail its start. A report that met every cap as sent is never refused for
+it. Sending the same `report_id` again never stores a second copy, also when two
+copies arrive at once, so a launcher can retry until it gets an answer.
+
+Every upload counts against its address's limit before its body is read, so
+uploads refused as too large or too slow count too, and an address over its
+limit is refused at once without taking an upload slot. A 503 for busy slots
+does not count. Then each report counts against its install's limit and, by its
+decoded size, against its address's byte limit, rejected and repeated ones too.
+Only reports about to be stored count against the limits for all senders
+together.
+
+What one upload costs is bounded before the deep work. Validation drops unknown
+fields without looking into them and only the fields kept are scrubbed, so the
+costliest body (tiny JSON values filling the 1 MiB) takes about 30 MB and a
+tenth of a second while it is handled. At most 4 are handled at once.
 
 Privacy:
 
 - The launcher redacts before sending (profile paths, user names, server
   addresses, favourite names; no player name, Steam id or XUID). The server
-  checks again: in every string, keys included, a Windows profile path such as
-  `C:\Users\Bob\...` becomes `C:\Users\<user>\...`, and `/home/<name>` (Proton)
-  becomes `/home/<user>`. `Public` and `Default` stay. In the minidump, which is
-  binary, each such name's characters are overwritten with `_` in place, so its
-  offsets stay valid. Debuggers find modules by file name, size and time stamp,
-  so this costs nothing; point the symbol path at the release PDBs.
+  checks again: in every string it keeps, keys included, a Windows profile path
+  such as `C:\Users\Bob\...` becomes `C:\Users\<user>\...`, and `/home/<name>`
+  (Proton) becomes `/home/<user>`. `Public` and `Default` stay. A name the
+  launcher left half done (`C:\Users\<user> Smith\`, as it ends names at a
+  space) loses the rest too. In the minidump, which is binary, each such name's
+  characters are overwritten with `_` in place, so its offsets stay valid.
+  Debuggers find modules by file name, size and time stamp, so this costs
+  nothing; point the symbol path at the release PDBs.
+- Short fields (names, versions, frames, mods, flags) lose their control
+  characters; tabs and line breaks become spaces. Log tails and the journal keep
+  theirs, and `scripts/crashes.py` shows them as escapes.
 - No IP address is stored or logged. It is used only in memory, as an HMAC, for
   the per-address rate limits. The user agent and the install id are not logged
   either, and the user agent is not stored.
@@ -242,7 +265,19 @@ python scripts/crashes.py minidump <id>
 report id. `show` prints that report with its logs; `--json` prints the raw
 JSON. `minidump` saves `<id>.dmp` in the current folder for WinDbg or Visual
 Studio. The script sends the token only over HTTPS (plain HTTP only to
-`127.0.0.1` or `localhost`, for local tests).
+`127.0.0.1` or `localhost`, for local tests) and only to `XERCES_BACKEND_URL`:
+it does not follow redirects, which would carry the token along. Anyone can send
+a crash report, so the script prints control characters in one (terminal escape
+sequences, which could clear the screen, fake text or set the clipboard) as
+escapes such as `\x1b`, never as they are. `--json` stays valid JSON.
+
+The stored reports may take at most `XERCES_CRASH_STORAGE_MB` together (1 GiB by
+default); past it new reports get 429 for an hour and the log says
+`crash_storage_full`. Room comes back as reports turn 90 days old or their
+installs delete them. To make room sooner, delete old ones in Railway's database
+view, for example
+`DELETE FROM crash_reports WHERE received_at < now() - interval '30 days'`
+(minidumps go with their reports).
 
 ## Rate limits
 
@@ -266,9 +301,20 @@ logged.
 | WebSocket sign-ins         | 10 per minute per account, and per address for those that fail |
 | WebSocket messages         | 10 per second per account, then close 1008                     |
 | Crash reports              | 20 per hour per install id, 60 per hour per address            |
-| Crash reports, all senders | 2000 stored per day together, so a flood cannot fill the disk  |
+| Crash report bytes         | 64 MiB per hour per address, counted after gzip decoding       |
+| Crash reports, all senders | 2000 and 256 MiB stored per day together                       |
+| Crash reports, stored      | `XERCES_CRASH_STORAGE_MB` in all (1 GiB by default)            |
 | Deleting crash reports     | 10 per hour per address                                        |
 | Wrong admin tokens         | 10 per 15 minutes per address                                  |
+
+A stored report takes up to about 5 MB (a 2 MiB minidump, and the rest as the
+database holds it, where non-ASCII text takes up to 3 times its UTF-8 size). So
+a flood can add at most 256 MiB of crash reports a day, and never more than
+`XERCES_CRASH_STORAGE_MB` in all, plus the few uploads in flight. Set that below
+what the database volume can hold (Railway's database view shows its size),
+leaving room for accounts and friends: a full volume would stop them too. A
+flood can still fill the crash room and so keep real reports out until old ones
+go; launchers keep theirs for 7 days and retry.
 
 Login attempts and password checks are counted before the password is hashed and
 given back unless it was wrong, so successful logins and attempts that end in a
@@ -321,9 +367,9 @@ per-username limits do not depend on any of this.
   never misses a token issued at the same moment, and a login or password change
   that checked the old password fails once a new one is set.
 - Request bodies over 128 KB are refused before parsing, except crash reports,
-  which may be 4 MiB (8 read at a time, each within 30 seconds). Responses are
-  marked as never to be cached (`no-store`) or sniffed (`nosniff`). There is no
-  CORS, since the launcher is a desktop client.
+  which may be 4 MiB (4 read at a time, 2 per address, each within 30 seconds).
+  Responses are marked as never to be cached (`no-store`) or sniffed
+  (`nosniff`). There is no CORS, since the launcher is a desktop client.
 - Stored: username, password hash, optional email, privacy settings, the time of
   the last password change, friends, pending requests, blocks, reports, invites
   and packs, and for 90 days the names of deleted accounts and crash reports
@@ -411,6 +457,7 @@ every crash report with them.
 | `XERCES_TOKEN_EXTRA_PUBLIC_KEYS` | optional       | none                       | JSON object of old key ids to PEM public keys, accepted during a rotation   |
 | `XERCES_RATE_LIMIT_SECRET`       | required       | throwaway in development   | at least 32 characters; keys the HMAC of client addresses                   |
 | `XERCES_ADMIN_TOKEN`             | for crashes    | unset: admin routes 404    | at least 32 characters; the bearer token of the `/v1/admin` routes          |
+| `XERCES_CRASH_STORAGE_MB`        | optional       | `1024`                     | what all crash reports together may take in the database, in MiB            |
 | `XERCES_TRUST_PROXY`             | `1`            | `0`                        | take the client address from `X-Forwarded-For` (uvicorn trusts it too)      |
 | `XERCES_PROXY_HOPS`              | optional       | `0`                        | `0`: first `X-Forwarded-For` entry; `N`: the Nth from the right             |
 | `XERCES_ARGON2_TIME_COST`        | optional       | `2`                        | Argon2id iterations                                                         |
@@ -455,9 +502,11 @@ it, so these settings are made in the dashboard.
 7. Add `XERCES_ENV=production` and `XERCES_TRUST_PROXY=1`. To read crash
    reports, also run `python scripts/genkey.py --admin` and add the line it
    prints (`XERCES_ADMIN_TOKEN=...`); keep a copy for `scripts/crashes.py`, for
-   example in your password manager, and nowhere else. Then deploy. The
-   container runs the migrations and starts the server; Railway waits for the
-   health check to pass before it sends traffic to the new deployment.
+   example in your password manager, and nowhere else. If the database volume
+   holds less than about 3 GB, also set `XERCES_CRASH_STORAGE_MB` to a third of
+   it or less (see [Rate limits](#rate-limits)). Then deploy. The container runs
+   the migrations and starts the server; Railway waits for the health check to
+   pass before it sends traffic to the new deployment.
 8. In Settings, under Networking, choose Generate Domain. If Railway asks for a
    port, give the one in the deploy log's startup line (8080 unless `PORT` is
    set).

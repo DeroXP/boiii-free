@@ -35,7 +35,12 @@ from app.routers import (
     reports,
     ws,
 )
-from app.security import BodySizeLimitMiddleware, RequestLogMiddleware, SecurityHeadersMiddleware
+from app.security import (
+    BodySizeLimitMiddleware,
+    LargeBodyRoute,
+    RequestLogMiddleware,
+    SecurityHeadersMiddleware,
+)
 from app.tasks import cleanup_loop
 from app.tokens import AccessTokens
 
@@ -121,9 +126,19 @@ def create_app(settings: Settings | None = None, *, tuning: Tuning | None = None
     app.add_middleware(
         BodySizeLimitMiddleware,
         max_bytes=tuning.max_body_bytes,
-        large_paths={crashes.CRASHES_PATH: tuning.crash_max_body_bytes},
+        large_routes=[
+            LargeBodyRoute(
+                "POST",
+                crashes.CRASHES_PATH,
+                tuning.crash_max_body_bytes,
+                rate_rule=crashes.ADDRESS_RULE,
+            )
+        ],
         large_slots=tuning.crash_upload_slots,
+        large_slots_per_address=tuning.crash_upload_slots_per_address,
         large_timeout=tuning.crash_body_timeout,
+        address_key=services.address_key,
+        limiter=services.limiter,
     )
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestLogMiddleware)

@@ -14,10 +14,13 @@ included. `minidump` saves its stacks-only minidump, which WinDbg or Visual Stud
 the symbol path at the release PDBs). `--since` takes 30m, 12h, 7d or an ISO date or time (UTC).
 
 The token is sent only over HTTPS, or plain HTTP to this PC (127.0.0.1, localhost) for local
-tests. Exit codes: 0 done, 1 the server said no or could not be reached, 2 bad usage or setup.
+tests, and only to XERCES_BACKEND_URL: redirects are not followed. Anyone can send a crash report,
+so control characters in one (terminal escape sequences) are printed as escapes, never as they are.
+Exit codes: 0 done, 1 the server said no or could not be reached, 2 bad usage or setup.
 """
 
 import argparse
+import io
 import json
 import os
 import re
@@ -37,6 +40,16 @@ TIMEOUT = 30
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _RELATIVE = re.compile(r"(\d+)([mhd])")
 
+# Control characters (C0, DEL, C1) and bidirectional overrides. ESC starts terminal escape
+# sequences, which can clear the screen, fake text or (OSC 52, in Windows Terminal among others)
+# set the clipboard.
+_BIDI = r"\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069"
+_UNSAFE_LINE = re.compile(r"[\x00-\x1f\x7f-\x9f" + _BIDI + "]")
+# The same, but tabs and line breaks stay (log tails).
+_UNSAFE_TEXT = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f" + _BIDI + "]")
+# What json.dumps(ensure_ascii=False) leaves as it is (it escapes C0 controls itself).
+_UNSAFE_JSON = re.compile(r"[\x7f-\x9f" + _BIDI + "]")
+
 
 class CliError(Exception):
     def __init__(self, message: str, code: int = 1) -> None:
@@ -44,12 +57,60 @@ class CliError(Exception):
         self.code = code
 
 
+def _escape(match: re.Match[str]) -> str:
+    code = ord(match.group())
+    return f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}"
+
+
+def line(value: Any) -> str:
+    """A value from the server, for one line of output: control characters shown as escapes."""
+    return _UNSAFE_LINE.sub(_escape, str(value))
+
+
+def text_block(value: str) -> str:
+    """A log tail from the server: control characters escaped, tabs and line breaks kept."""
+    return _UNSAFE_TEXT.sub(_escape, value.replace("\r\n", "\n"))
+
+
+def json_text(value: Any) -> str:
+    """JSON for the terminal, still valid JSON: what json.dumps leaves raw becomes \\u escapes."""
+    text = json.dumps(value, indent=2, ensure_ascii=False)
+    return _UNSAFE_JSON.sub(lambda match: f"\\u{ord(match.group()):04x}", text)
+
+
+class SafeText(io.TextIOBase):
+    """Output that escapes control characters other than tabs and line breaks: the last guard,
+    should a value from the server reach a print without line() or text_block()."""
+
+    def __init__(self, stream: TextIO) -> None:
+        super().__init__()
+        self._stream = stream
+
+    def write(self, text: str) -> int:
+        self._stream.write(_UNSAFE_TEXT.sub(_escape, text))
+        return len(text)
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect. urllib would send the Authorization header along to wherever one
+    points, plain HTTP and other hosts included. The admin routes never redirect."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirects)
+
+
 def urllib_fetch(url: str, headers: Mapping[str, str]) -> tuple[int, Mapping[str, str], bytes]:
     request = urllib.request.Request(url, headers=dict(headers), method="GET")
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310 (checked)
+        with _OPENER.open(request, timeout=TIMEOUT) as response:  # https checked, no redirects
             return response.status, dict(response.headers), response.read()
-    except urllib.error.HTTPError as error:
+    except urllib.error.HTTPError as error:  # also a refused redirect
         return error.code, dict(error.headers or {}), error.read()
 
 
@@ -85,9 +146,15 @@ class Backend:
 def _error_text(status: int, headers: Mapping[str, str], body: bytes) -> str:
     message = ""
     try:
-        message = json.loads(body.decode("utf-8"))["error"]["message"]
+        message = line(json.loads(body.decode("utf-8"))["error"]["message"])
     except (ValueError, KeyError, TypeError, UnicodeDecodeError):
         pass
+    lower = {key.lower(): value for key, value in headers.items()}
+    if 300 <= status < 400:
+        return (
+            f"{status}: the server redirects to {line(lower.get('location', '?'))}. crashes.py "
+            "does not follow redirects, so the token goes nowhere else; check XERCES_BACKEND_URL."
+        )
     if status == 404 and message in ("", "Not Found"):
         return (
             "404: wrong URL, or XERCES_ADMIN_TOKEN is not set on the server (its admin routes "
@@ -96,7 +163,7 @@ def _error_text(status: int, headers: Mapping[str, str], body: bytes) -> str:
     if status == 401:
         return "401: the server refused XERCES_ADMIN_TOKEN. Check that it matches Railway's."
     if status == 429:
-        wait = {key.lower(): value for key, value in headers.items()}.get("retry-after", "?")
+        wait = line(lower.get("retry-after", "?"))
         return f"429: too many wrong tokens from this address. Try again in {wait} s."
     return f"{status}: {message or 'the server refused the request.'}"
 
@@ -145,14 +212,18 @@ def _when(value: str | None) -> str:
     try:
         moment = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
     except ValueError:
-        return value
+        return line(value)
     return moment.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _or_dash(value: Any) -> str:
+    return "-" if value is None or value == "" else line(value)
 
 
 def _where(module: str | None, offset: str | None) -> str:
     if module and offset:
-        return f"{module}+{offset}"
-    return module or offset or "-"
+        return line(f"{module}+{offset}")
+    return _or_dash(module or offset)
 
 
 def cmd_groups(backend: Backend, args: argparse.Namespace, out: TextIO) -> int:
@@ -169,18 +240,20 @@ def cmd_groups(backend: Backend, args: argparse.Namespace, out: TextIO) -> int:
             file=out,
         )
         where = _where(group["module"], group["offset"])
-        print(f"  signature {group['signature']}  {group['kind']}  {where}", file=out)
+        print(f"  signature {line(group['signature'])}  {line(group['kind'])}  {where}", file=out)
         if group["frames"]:
-            print(f"  frames    {', '.join(group['frames'])}", file=out)
-        versions = ", ".join(f"{v['value']} ({v['count']})" for v in group["versions"])
+            print(f"  frames    {', '.join(line(frame) for frame in group['frames'])}", file=out)
+        versions = ", ".join(f"{line(v['value'])} ({v['count']})" for v in group["versions"])
         print(f"  versions  {versions}", file=out)
         if group["top_mods"]:
-            mods = ", ".join(f"{m['name'] or m['id']} ({m['count']})" for m in group["top_mods"])
+            mods = ", ".join(
+                f"{_or_dash(m['name'] or m['id'])} ({m['count']})" for m in group["top_mods"]
+            )
             print(f"  mods      {mods}", file=out)
         if group["top_maps"]:
-            maps = ", ".join(f"{m['value']} ({m['count']})" for m in group["top_maps"])
+            maps = ", ".join(f"{line(m['value'])} ({m['count']})" for m in group["top_maps"])
             print(f"  maps      {maps}", file=out)
-        print(f"  sample    {group['sample_id']}", file=out)
+        print(f"  sample    {line(group['sample_id'])}", file=out)
     return 0
 
 
@@ -202,8 +275,9 @@ def cmd_list(backend: Backend, args: argparse.Namespace, out: TextIO) -> int:
         for item in page["items"]:
             shown += 1
             print(
-                f"{_when(item['received_at']):<20}  {item['id']:<36}  {item['kind']:<13}  "
-                f"{item['code'] or '-':<10}  {item['phase'] or '-':<12}  {item['version']:<16}  "
+                f"{_when(item['received_at']):<20}  {line(item['id']):<36}  "
+                f"{line(item['kind']):<13}  {_or_dash(item['code']):<10}  "
+                f"{_or_dash(item['phase']):<12}  {line(item['version']):<16}  "
                 f"{'yes' if item['has_minidump'] else 'no':<4}  "
                 f"{_where(item['module'], item['offset'])}",
                 file=out,
@@ -225,7 +299,7 @@ def _section(title: str, out: TextIO) -> None:
 def cmd_show(backend: Backend, args: argparse.Namespace, out: TextIO) -> int:
     report = backend.json(f"/v1/admin/crashes/{urllib.parse.quote(args.id, safe='')}")
     if args.json:
-        print(json.dumps(report, indent=2, ensure_ascii=False), file=out)
+        print(json_text(report), file=out)
         return 0
     crash = report.get("crash") or {}
     xerces = report.get("xerces") or {}
@@ -233,49 +307,51 @@ def cmd_show(backend: Backend, args: argparse.Namespace, out: TextIO) -> int:
     launch = report.get("launch") or {}
     system = report.get("system") or {}
     logs = report.get("logs") or {}
-    print(f"Crash report {report['id']}", file=out)
+    print(f"Crash report {line(report['id'])}", file=out)
     made = _when(report["created_utc"])
     print(f"  received   {_when(report['received_at'])} (made {made})", file=out)
-    print(f"  install    {report['install_id']}", file=out)
-    print(f"  signature  {report['signature']}", file=out)
-    dump = f"yes, {report['minidump_size']} bytes" if report["has_minidump"] else "no"
+    print(f"  install    {line(report['install_id'])}", file=out)
+    print(f"  signature  {line(report['signature'])}", file=out)
+    dump = f"yes, {line(report['minidump_size'])} bytes" if report["has_minidump"] else "no"
     print(f"  minidump   {dump}", file=out)
     dirty = " (dirty)" if xerces.get("dirty") else ""
-    commit = xerces.get("commit") or ""
-    print(f"  xerces     {xerces.get('version')} {commit}{dirty}".rstrip(), file=out)
-    steam = game.get("steam_build") or "-"
-    print(f"  game       build {game.get('build') or '-'}, Steam build {steam}", file=out)
+    commit = line(xerces.get("commit") or "")
+    print(f"  xerces     {_or_dash(xerces.get('version'))} {commit}{dirty}".rstrip(), file=out)
+    steam = _or_dash(game.get("steam_build"))
+    print(f"  game       build {_or_dash(game.get('build'))}, Steam build {steam}", file=out)
 
     _section("Crash", out)
     for key in ("kind", "code", "exit_code", "module", "offset", "thread", "phase"):
-        print(f"  {key:<10} {crash.get(key) if crash.get(key) is not None else '-'}", file=out)
+        print(f"  {key:<10} {_or_dash(crash.get(key))}", file=out)
     for index, frame in enumerate(crash.get("frames") or []):
-        print(f"  #{index:<3} {frame}", file=out)
+        print(f"  #{index:<3} {line(frame)}", file=out)
 
     _section("Launch", out)
     safe_mode = {True: "yes", False: "no"}.get(launch.get("safe_mode"), "-")
     print(
-        f"  mode {launch.get('mode') or '-'}, map {launch.get('map') or '-'}, "
-        f"plan {launch.get('plan_id') or '-'}, safe mode {safe_mode}",
+        f"  mode {_or_dash(launch.get('mode'))}, map {_or_dash(launch.get('map'))}, "
+        f"plan {_or_dash(launch.get('plan_id'))}, safe mode {safe_mode}",
         file=out,
     )
     if launch.get("flags"):
-        print(f"  flags {' '.join(launch['flags'])}", file=out)
+        print(f"  flags {' '.join(line(flag) for flag in launch['flags'])}", file=out)
     for mod in launch.get("mods") or []:
-        name, mod_id, version = (mod.get(key) or "-" for key in ("name", "id", "version"))
+        name, mod_id, version = (_or_dash(mod.get(key)) for key in ("name", "id", "version"))
         print(f"  mod  {name}  {mod_id}  {version}", file=out)
 
     _section("System", out)
-    windows, display = system.get("windows") or "-", system.get("display") or "-"
+    windows, display = _or_dash(system.get("windows")), _or_dash(system.get("display"))
     print(f"  Windows {windows}, display {display}", file=out)
-    threads, ram = system.get("logical_cpus") or "?", system.get("ram_mib") or "?"
-    print(f"  CPU {system.get('cpu') or '-'} ({threads} threads), RAM {ram} MiB", file=out)
+    threads = line(system.get("logical_cpus") or "?")
+    ram = line(system.get("ram_mib") or "?")
+    print(f"  CPU {_or_dash(system.get('cpu'))} ({threads} threads), RAM {ram} MiB", file=out)
     for gpu in system.get("gpus") or []:
-        print(f"  GPU {gpu.get('name') or '-'}, driver {gpu.get('driver') or '-'}", file=out)
+        name, driver = _or_dash(gpu.get("name")), _or_dash(gpu.get("driver"))
+        print(f"  GPU {name}, driver {driver}", file=out)
 
     if logs.get("journal") is not None:
         _section("Journal", out)
-        print(json.dumps(logs["journal"], indent=2, ensure_ascii=False), file=out)
+        print(json_text(logs["journal"]), file=out)
     for key, title in (
         ("game_log_tail", "Game log (tail)"),
         ("console_tail", "Console (tail)"),
@@ -283,7 +359,7 @@ def cmd_show(backend: Backend, args: argparse.Namespace, out: TextIO) -> int:
     ):
         if logs.get(key):
             _section(title, out)
-            print(logs[key].rstrip("\n"), file=out)
+            print(text_block(logs[key]).rstrip("\n"), file=out)
     return 0
 
 
@@ -346,12 +422,16 @@ def main(
         if reconfigure is not None:
             reconfigure(errors="replace")  # a console that cannot show a character
     args = build_parser().parse_args(argv)
+    safe_out, safe_err = SafeText(out), SafeText(err)
     try:
         backend = backend_from_env(os.environ if env is None else env, fetch or urllib_fetch)
-        return args.run(backend, args, out)
+        return args.run(backend, args, safe_out)
     except CliError as error:
-        print(f"crashes.py: {error}", file=err)
+        print(f"crashes.py: {error}", file=safe_err)
         return error.code
+    finally:
+        safe_out.flush()
+        safe_err.flush()
 
 
 if __name__ == "__main__":

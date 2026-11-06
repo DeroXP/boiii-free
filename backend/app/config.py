@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     )
     # Bearer token for the /v1/admin routes (crash reports). Unset: those routes answer 404.
     admin_token: SecretStr | None = Field(default=None, validation_alias="XERCES_ADMIN_TOKEN")
+    # What all crash reports together may take in the database; over it new ones get 429. The
+    # rest of the database (accounts, friends) must never run out of room because of them.
+    crash_storage_mb: int = Field(
+        default=1024, ge=1, le=1024 * 1024, validation_alias="XERCES_CRASH_STORAGE_MB"
+    )
     trust_proxy: bool = Field(default=False, validation_alias="XERCES_TRUST_PROXY")
     # Which X-Forwarded-For entry is the client (used only with XERCES_TRUST_PROXY=1): 0 takes the
     # first entry, for an edge that replaces the header; N takes the Nth entry from the right, for
@@ -105,9 +110,11 @@ class Tuning:
     hash_queue: int = 64
     configure_logging: bool = True
     # POST /v1/crashes: the largest body (before and after gzip decoding), how many such uploads
-    # may be read and handled at once (the rest get 503), and how long reading one may take.
+    # may be read and handled at once, in all and from one address (the rest get 503), and how
+    # long reading one may take. One upload costs at most about 50 MB of memory while handled.
     crash_max_body_bytes: int = 4 * 1024 * 1024
-    crash_upload_slots: int = 8
+    crash_upload_slots: int = 4
+    crash_upload_slots_per_address: int = 2
     crash_body_timeout: float = 30.0
 
 
@@ -126,6 +133,7 @@ class RuntimeConfig:
     proxy_hops: int = 0
     # SHA-256 of XERCES_ADMIN_TOKEN, compared in constant time (app.routers.admin); None when unset.
     admin_token_hash: bytes | None = None
+    crash_storage_bytes: int = 1024 * 1024 * 1024
     warnings: tuple[str, ...] = ()
 
 
@@ -378,5 +386,6 @@ def resolve(settings: Settings) -> RuntimeConfig:
         argon2_parallelism=settings.argon2_parallelism,
         proxy_hops=settings.proxy_hops,
         admin_token_hash=hash_admin_token(admin_token) if admin_token else None,
+        crash_storage_bytes=settings.crash_storage_mb * 1024 * 1024,
         warnings=tuple(warnings),
     )

@@ -4,16 +4,27 @@ Request models forbid unknown fields (crash reports ignore them) and cap every s
 unbounded reaches the database. Validation messages never include the submitted value.
 """
 
+import json
 import re
 import unicodedata
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 
 from app.models import User
 from app.passwords import normalize_password
+from app.scrub import one_line, scrub, scrub_text, storable
 
 USERNAME_MIN = 3
 USERNAME_MAX = 24
@@ -367,18 +378,69 @@ class PackOut(BaseModel):
 
 # POST /v1/crashes (contract xerces.crash/1). Unlike the other request bodies these ignore unknown
 # fields, so newer launchers can add some, and almost every part may be missing or null.
+#
+# Each string's cap is checked as sent. Then the server's scrub runs (app.scrub) and the string is
+# cut back to its cap, because <user> can be longer than the name it replaces: a report that met
+# every cap as sent is never refused for it. Lone surrogates are replaced first (same length), as
+# pydantic refuses them.
 CRASH_SCHEMA = "xerces.crash/1"
 CRASH_NAME_MAX = 256
+CRASH_SHORT_MAX = 64
 CRASH_TAIL_MAX = 64 * 1024
 CRASH_FRAMES_MAX = 32
+CRASH_JOURNAL_MAX = 256 * 1024  # bytes of compact UTF-8 JSON, as sent
+CRASH_JOURNAL_DEPTH = 32
 # Base64 of the largest minidump (2 MiB): 4 characters for every 3 bytes, rounded up.
 CRASH_MINIDUMP_B64_MAX = 4 * -(-(2 * 1024 * 1024) // 3)
+# Everything but the minidump, as sent. A launcher's report stays well under it (its tails are at
+# most 64 KiB each), and it bounds what parsing can cost: 1 MiB of tiny JSON values takes about
+# 25 MB as Python objects.
+CRASH_REST_MAX = 1024 * 1024
 
 _HEX_NUMBER = r"^0x[0-9A-Fa-f]{1,16}$"
-CrashName = Annotated[str, Field(max_length=CRASH_NAME_MAX)]
-CrashShort = Annotated[str, Field(max_length=64)]
+
+
+def _storable(value: Any) -> Any:
+    return storable(value) if isinstance(value, str) else value
+
+
+def _name(cap: int) -> AfterValidator:
+    return AfterValidator(lambda text: scrub_text(one_line(text))[:cap])
+
+
+def _tail(text: str) -> str:
+    # A tail keeps its end: the last lines matter most.
+    return scrub_text(text)[-CRASH_TAIL_MAX:]
+
+
+def _journal(value: Any) -> Any:
+    """The size and depth checks as sent, then a scrubbed copy (keys included)."""
+    if not isinstance(value, dict):
+        return value  # None, or a type error from the field
+    try:
+        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    except RecursionError:
+        raise ValueError("The journal is nested too deeply.") from None
+    if len(text.encode("utf-8", "surrogatepass")) > CRASH_JOURNAL_MAX:
+        raise ValueError(f"The journal is larger than {CRASH_JOURNAL_MAX // 1024} KB.")
+    try:
+        return scrub(value, CRASH_JOURNAL_DEPTH)
+    except ValueError:
+        raise ValueError(
+            f"The journal is nested more than {CRASH_JOURNAL_DEPTH} levels deep."
+        ) from None
+
+
+# Field before BeforeValidator: the length check stays part of the string check, with its usual
+# message, and the before-validator still runs ahead of it.
+_Storable = BeforeValidator(_storable)
+CrashName = Annotated[str, Field(max_length=CRASH_NAME_MAX), _Storable, _name(CRASH_NAME_MAX)]
+CrashShort = Annotated[
+    str, Field(max_length=CRASH_SHORT_MAX), _Storable, _name(CRASH_SHORT_MAX)
+]
 CrashHex = Annotated[str, Field(max_length=18, pattern=_HEX_NUMBER)]
-CrashTail = Annotated[str, Field(max_length=CRASH_TAIL_MAX)]
+CrashTail = Annotated[str, Field(max_length=CRASH_TAIL_MAX), _Storable, AfterValidator(_tail)]
+CrashJournal = Annotated[dict[str, Any], BeforeValidator(_journal)]
 
 
 class _Lenient(BaseModel):
@@ -437,7 +499,7 @@ class CrashDetailsIn(_Lenient):
 
 
 class CrashLogsIn(_Lenient):
-    journal: dict[str, Any] | None = None
+    journal: CrashJournal | None = None
     game_log_tail: CrashTail | None = None
     launcher_log_tail: CrashTail | None = None
     console_tail: CrashTail | None = None

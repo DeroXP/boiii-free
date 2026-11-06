@@ -11,9 +11,10 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from app.crashes import mask_minidump, scrub, scrub_text
+from app.crashes import mask_minidump
 from app.log import JsonFormatter
 from app.models import Base, CrashMinidump, CrashReport
+from app.scrub import scrub, scrub_text
 from tests.crashdata import INSTALL, crash_report, minidump, post_crash, utf16
 from tests.helpers import services_of
 
@@ -32,8 +33,14 @@ from tests.helpers import services_of
         (r"C:\Users\Bob" + "\n" + r"E:\Users\Eve\y", r"C:\Users\<user>" + "\n" + r"E:\Users\<user>\y"),
         ("/home/deck/.steam/steam", "/home/<user>/.steam/steam"),
         (r"Z:\home\deck\Games", r"Z:\home\<user>\Games"),
+        # The launcher ends a name at a space, so "John Smith" reaches the server half done.
+        (r"C:\Users\<user> Smith\AppData\x.dll", r"C:\Users\<user>\AppData\x.dll"),
+        (r"C:\Users\<user>.DESKTOP-1\x", r"C:\Users\<user>\x"),
+        ("/home/<user> x/.steam", "/home/<user>/.steam"),
         # Already redacted, or nobody's: unchanged.
         (r"C:\Users\<user>\x", r"C:\Users\<user>\x"),
+        (r"C:\Users\<name>\x", r"C:\Users\<name>\x"),
+        ("C:\\Users\\", "C:\\Users\\"),
         (r"C:\Users\Public\Documents", r"C:\Users\Public\Documents"),
         (r"C:\Users\Default\NTUSER.DAT", r"C:\Users\Default\NTUSER.DAT"),
         ("%USERPROFILE%\\x", "%USERPROFILE%\\x"),

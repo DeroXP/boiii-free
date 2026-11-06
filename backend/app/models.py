@@ -261,6 +261,9 @@ class CrashReport(Base):
     system: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     crash: Mapped[dict[str, Any]] = mapped_column(JSON)
     logs: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    # About what the report takes in the database, minidump included (app.crashes.stored_size).
+    # Their sum is held under XERCES_CRASH_STORAGE_MB.
+    stored_bytes: Mapped[int] = mapped_column(Integer)
 
 
 class CrashMinidump(Base):

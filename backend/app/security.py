@@ -11,13 +11,15 @@ import hmac
 import ipaddress
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.errors import API_CONTENT_SECURITY_POLICY, SECURITY_HEADERS, error_response
 from app.log import log_event
+from app.ratelimit import RateLimiter, rate_limited
 
 
 def client_address(scope: Scope, trust_proxy: bool, proxy_hops: int = 0) -> str:
@@ -77,13 +79,29 @@ def hashed_address(secret: bytes, address: str) -> str:
     return hmac.new(secret, address.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
 
 
+@dataclass(frozen=True)
+class LargeBodyRoute:
+    """A route that takes bodies over the usual cap (POST /v1/crashes), with its own guards.
+
+    `rate_rule` is charged once per request, per hashed address, before the body is read: so
+    uploads refused as too large (413) or too slow (408) cost the sender too, and an address over
+    its limit is turned away (429) without taking an upload slot.
+    """
+
+    method: str
+    path: str
+    max_bytes: int
+    rate_rule: str | None = None
+
+
 class BodySizeLimitMiddleware:
     """Reject bodies over `max_bytes` before anything parses them (413).
 
-    Paths in `large_paths` (POST /v1/crashes) get their own, larger limit. At most `large_slots`
-    of those are read and handled at once, so a burst of big uploads cannot exhaust memory; the
-    rest are turned away with 503 and Retry-After. Reading one may take `large_timeout` seconds,
-    so slow senders cannot hold the slots (408).
+    The `large_routes` get their own, larger cap. At most `large_slots` of those requests are read
+    and handled at once, and at most `large_slots_per_address` from one address, so neither a
+    burst of big uploads nor one sender can exhaust memory or hold every slot; the rest are turned
+    away with 503 and Retry-After (not charged). Reading one may take `large_timeout` seconds, so
+    slow senders cannot hold the slots (408).
     """
 
     def __init__(
@@ -91,26 +109,37 @@ class BodySizeLimitMiddleware:
         app: ASGIApp,
         max_bytes: int = 128 * 1024,
         *,
-        large_paths: Mapping[str, int] | None = None,
-        large_slots: int = 8,
+        large_routes: Sequence[LargeBodyRoute] = (),
+        large_slots: int = 4,
+        large_slots_per_address: int = 2,
         large_timeout: float = 30.0,
+        address_key: Callable[[Scope], str] | None = None,
+        limiter: RateLimiter | None = None,
     ) -> None:
         self.app = app
         self.max_bytes = max_bytes
-        self.large_paths = dict(large_paths or {})
+        self.large_routes = {(route.method, route.path): route for route in large_routes}
         self.large_slots = large_slots
+        self.large_slots_per_address = large_slots_per_address
         self.large_timeout = large_timeout
+        self.address_key = address_key
+        self.limiter = limiter
         self._large_in_flight = 0
+        self._large_by_address: dict[str, int] = {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        limit = self.large_paths.get(scope.get("path", ""))
-        if limit is None:
+        route = self.large_routes.get((scope.get("method", ""), scope.get("path", "")))
+        if route is None:
             await self._handle(scope, receive, send, self.max_bytes, None)
             return
-        if self._large_in_flight >= self.large_slots:
+        key = self.address_key(scope) if self.address_key is not None else ""
+        if (
+            self._large_in_flight >= self.large_slots
+            or self._large_by_address.get(key, 0) >= self.large_slots_per_address
+        ):
             response = error_response(
                 503,
                 "unavailable",
@@ -119,11 +148,26 @@ class BodySizeLimitMiddleware:
             )
             await response(scope, receive, send)
             return
+        if route.rate_rule is not None and self.limiter is not None:
+            wait = self.limiter.hit(route.rate_rule, key)
+            if wait > 0:
+                limited = rate_limited(wait)
+                response = error_response(
+                    limited.status_code, limited.code, limited.message, headers=limited.headers
+                )
+                await response(scope, receive, send)
+                return
         self._large_in_flight += 1
+        self._large_by_address[key] = self._large_by_address.get(key, 0) + 1
         try:
-            await self._handle(scope, receive, send, limit, self.large_timeout)
+            await self._handle(scope, receive, send, route.max_bytes, self.large_timeout)
         finally:
             self._large_in_flight -= 1
+            remaining = self._large_by_address[key] - 1
+            if remaining:
+                self._large_by_address[key] = remaining
+            else:
+                del self._large_by_address[key]
 
     async def _handle(
         self, scope: Scope, receive: Receive, send: Send, limit: int, timeout: float | None
@@ -139,7 +183,8 @@ class BodySizeLimitMiddleware:
                     await self._reject(scope, receive, send, 413, limit)
                     return
         # Read the body here (bounded) so chunked uploads cannot slip past the limit.
-        body = bytearray()
+        chunks: list[bytes] = []
+        size = 0
         too_large = False
         try:
             async with asyncio.timeout(timeout):
@@ -147,8 +192,10 @@ class BodySizeLimitMiddleware:
                     message = await receive()
                     if message["type"] != "http.request":
                         return  # client went away
-                    body.extend(message.get("body", b""))
-                    if len(body) > limit:
+                    chunk = message.get("body", b"")
+                    chunks.append(chunk)
+                    size += len(chunk)
+                    if size > limit:
                         too_large = True
                         break
                     if not message.get("more_body", False):
@@ -160,13 +207,18 @@ class BodySizeLimitMiddleware:
             await self._reject(scope, receive, send, 413, limit)
             return
 
+        # One copy of the body at most (none when it came in one piece).
+        body = chunks[0] if len(chunks) == 1 else b"".join(chunks)
+        chunks.clear()
         replayed = False
 
         async def replay() -> Message:
-            nonlocal replayed
+            nonlocal replayed, body
             if not replayed:
                 replayed = True
-                return {"type": "http.request", "body": bytes(body), "more_body": False}
+                message: Message = {"type": "http.request", "body": body, "more_body": False}
+                body = b""
+                return message
             return await receive()
 
         await self.app(scope, replay, send)
