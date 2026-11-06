@@ -1,0 +1,262 @@
+// "Find the culprit" (docs/DESIGN.md 5.6) with the real planner and the
+// launch the launcher makes for each test: the profile with next_test() as
+// its mods and its map kept (launch_inputs::mods, crash_followup), the
+// result recorded with every mod that test's plan loaded. The game crashes
+// whenever the bad mod loads.
+
+#include "harness.hpp"
+
+#include <algorithm>
+#include <string>
+#include <vector>
+
+#include <xerces_core/journal.hpp>
+#include <xerces_core/launcher_launch.hpp>
+#include <xerces_core/manifest.hpp>
+#include <xerces_core/planner.hpp>
+
+using namespace xerces_core;
+
+namespace {
+// A mod (or map) with a manifest; needs: the ids it depends on.
+installed_content content_with(const std::string &id,
+                               const std::vector<std::string> &needs = {},
+                               const std::string &kind = "mod") {
+  std::string deps;
+  for (const auto &need : needs) {
+    deps += std::string(deps.empty() ? "" : ",") + R"({"id":")" + need +
+            R"(","version":"^1.0.0"})";
+  }
+  auto parsed = parse_manifest(R"({"schema":1,"id":")" + id + R"(","name":")" +
+                               id + R"(","version":"1.0.0","kind":")" + kind +
+                               R"(","dependencies":[)" + deps + "]}");
+  installed_content content;
+  content.info = parsed.value;
+  content.folder = id;
+  content.content_hash = "sha256:" + std::string(64, '0');
+  return content;
+}
+
+std::vector<std::string> stack_ids(const plan &value) {
+  std::vector<std::string> out;
+  for (const auto &entry : value.stack) {
+    out.push_back(entry.id);
+  }
+  return out;
+}
+
+bool holds(const std::vector<std::string> &ids, const std::string &id) {
+  return std::ranges::find(ids, id) != ids.end();
+}
+
+launcher_config profile(std::vector<std::string> mods,
+                        std::optional<std::string> map = std::nullopt) {
+  launcher_config config;
+  mode_profile &zm = profile_for(config, "zm");
+  zm.mods = std::move(mods);
+  zm.map = std::move(map);
+  return config;
+}
+
+struct search_run {
+  culprit_search search{{}};
+  std::vector<std::string> crashed_stack;
+  std::size_t tests = 0;
+};
+
+// The search from start_culprit to its end, as services runs it. With
+// know_map false it starts without the map's dependencies (a culprit.json
+// saved without "always", or a map changed during the search).
+search_run run_search(const std::vector<installed_content> &catalog,
+                      const launcher_config &config, const std::string &bad,
+                      bool know_map = true) {
+  search_run run;
+  const game_state game; // preview_launch needs no game folder
+  launch_inputs in;
+  in.config = &config;
+  in.game = &game;
+  in.catalog = &catalog;
+  in.mode = "zm";
+  const launch_outcome crashed = preview_launch(in);
+  REQUIRE(crashed.resolved.has_value());
+  REQUIRE(crashed.resolved->ok());
+  run.crashed_stack = stack_ids(*crashed.resolved);
+  run.search = culprit_search(
+      run.crashed_stack, false,
+      know_map ? culprit_always_loaded(catalog, config, "zm", std::nullopt,
+                                       run.crashed_stack)
+               : std::vector<std::string>{});
+  const auto map = config.profiles.at("zm").map;
+  while (!run.search.done() && run.tests < 32) {
+    const std::vector<std::string> mods = run.search.next_test();
+    in.mods = &mods;
+    in.crash_followup = true;
+    const launch_outcome test = preview_launch(in);
+    ++run.tests;
+    REQUIRE(test.resolved.has_value());
+    // The test launch is not refused: it keeps every mod it asked for, what
+    // they need, and the map with what the map needs.
+    CHECK(test.resolved->ok());
+    CHECK(test.diags.items().empty());
+    const std::vector<std::string> loaded = stack_ids(*test.resolved);
+    for (const auto &id : mods) {
+      CHECK(holds(loaded, id));
+    }
+    CHECK_EQ(test.resolved->map.has_value(), map.has_value());
+    run.search.record(holds(loaded, bad), loaded);
+  }
+  CHECK(run.search.done());
+  return run;
+}
+} // namespace
+
+TEST_CASE("culprit: a crashing dependency is found, not the mod needing it") {
+  // A and B both need D, which crashes the game. Each test loads D with A or
+  // B; the search that tested the upper half first saw [A] (with D) crash,
+  // blamed A and turned it off, and the next launch with B crashed again.
+  const std::vector<installed_content> catalog = {
+      content_with("a.mod", {"d.mod"}), content_with("b.mod", {"d.mod"}),
+      content_with("c.mod"), content_with("d.mod")};
+  const launcher_config config = profile({"a.mod", "b.mod", "c.mod"});
+  const plan_request request = profile_request(config, "zm", std::nullopt);
+
+  const search_run dependency = run_search(catalog, config, "d.mod");
+  CHECK_EQ(dependency.crashed_stack.back(), std::string("d.mod"));
+  REQUIRE(dependency.search.culprit().has_value());
+  CHECK_EQ(*dependency.search.culprit(), std::string("d.mod"));
+  // D is not one the player enabled: what turns it off is what loads it.
+  CHECK((culprit_switches(catalog, request, "d.mod") ==
+         std::vector<std::string>{"a.mod", "b.mod"}));
+
+  // Every other mod crashing alone is found too, and is enough to turn off.
+  for (const std::string bad : {"a.mod", "b.mod", "c.mod"}) {
+    const search_run run = run_search(catalog, config, bad);
+    REQUIRE(run.search.culprit().has_value());
+    CHECK_EQ(*run.search.culprit(), bad);
+    CHECK((culprit_switches(catalog, request, bad) ==
+           std::vector<std::string>{bad}));
+  }
+
+  // D enabled by hand as well: A still pulls it in, so both go.
+  plan_request both = request;
+  both.mods = {"a.mod", "d.mod"};
+  CHECK((culprit_switches(catalog, both, "d.mod") ==
+         std::vector<std::string>{"a.mod", "d.mod"}));
+}
+
+TEST_CASE("culprit: a map's dependency loads in every test, and is told "
+          "apart") {
+  // The profile's map needs m.dep, so every test loads it: a test cannot
+  // leave it out, and a crash with it loaded says nothing about it. The
+  // first fix of the dependency case ended this search with no culprit when
+  // x.mod crashed ("cannot be tested apart"); m.dep must be tested alone,
+  // with the map, instead.
+  const std::vector<installed_content> catalog = {
+      content_with("x.mod"), content_with("m.dep"),
+      content_with("the.map", {"m.dep"}, "map")};
+  const launcher_config config = profile({"x.mod"}, "the.map");
+  const plan_request request = profile_request(config, "zm", std::nullopt);
+  for (const bool know_map : {true, false}) {
+    const search_run mod = run_search(catalog, config, "x.mod", know_map);
+    REQUIRE_EQ(mod.crashed_stack.size(), std::size_t(2));
+    REQUIRE(mod.search.culprit().has_value());
+    CHECK_EQ(*mod.search.culprit(), std::string("x.mod"));
+    CHECK(!mod.search.needs_combination());
+    // Known from the start, the map's dependency costs no extra launch.
+    CHECK_EQ(mod.tests, know_map ? std::size_t(2) : std::size_t(3));
+
+    const search_run dep = run_search(catalog, config, "m.dep", know_map);
+    REQUIRE(dep.search.culprit().has_value());
+    CHECK_EQ(*dep.search.culprit(), std::string("m.dep"));
+  }
+  CHECK((culprit_always_loaded(catalog, config, "zm", std::nullopt,
+                               {"x.mod", "m.dep"}) ==
+         std::vector<std::string>{"m.dep"}));
+  // Only the map needs it: no enabled mod turns it off.
+  CHECK(culprit_switches(catalog, request, "m.dep").empty());
+  CHECK((culprit_switches(catalog, request, "x.mod") ==
+         std::vector<std::string>{"x.mod"}));
+}
+
+TEST_CASE("culprit: every mod a test can leave out is found, in a stack with "
+          "a map") {
+  // Dependencies of mods and of the map in one stack: whichever mod crashes
+  // alone, the search names it, and no test drops what the map needs. The
+  // map needs m.dep, which needs m.base, so those two load in every test:
+  // when one of them crashes, the search says they cannot be told apart.
+  const std::vector<installed_content> catalog = {
+      content_with("a.mod", {"d.mod"}),
+      content_with("b.mod"),
+      content_with("c.mod", {"d.mod"}),
+      content_with("d.mod"),
+      content_with("e.mod"),
+      content_with("m.dep", {"m.base"}),
+      content_with("m.base"),
+      content_with("the.map", {"m.dep"}, "map")};
+  const launcher_config config =
+      profile({"a.mod", "b.mod", "c.mod", "e.mod"}, "the.map");
+  const std::vector<std::string> stack =
+      stack_ids(resolve_profile(catalog, config, "zm", std::nullopt));
+  REQUIRE_EQ(stack.size(), std::size_t(7));
+  const std::vector<std::string> with_map = {"m.dep", "m.base"};
+  for (const auto &bad : stack) {
+    for (const bool know_map : {true, false}) {
+      const search_run run = run_search(catalog, config, bad, know_map);
+      if (holds(with_map, bad)) {
+        CHECK_EQ(run.search.culprit().value_or("none"), std::string("none"));
+        CHECK(run.search.inseparable());
+        std::vector<std::string> left = run.search.suspects();
+        std::ranges::sort(left);
+        CHECK((left == std::vector<std::string>{"m.base", "m.dep"}));
+        continue;
+      }
+      CHECK_EQ(run.search.culprit().value_or("none"), bad);
+      // A halving search: never more than two tests per split.
+      CHECK(run.tests <= 6);
+    }
+  }
+}
+
+TEST_CASE("culprit: suspects that only load with the map cannot be told "
+          "apart") {
+  // The map needs two mods. When the crash is in one of them, every test
+  // loads both, so the search ends without blaming either.
+  const std::vector<installed_content> catalog = {
+      content_with("x.mod"), content_with("m.one"), content_with("m.two"),
+      content_with("the.map", {"m.one", "m.two"}, "map")};
+  const launcher_config config = profile({"x.mod"}, "the.map");
+  const search_run run = run_search(catalog, config, "m.one");
+  CHECK(!run.search.culprit().has_value());
+  CHECK(run.search.inseparable());
+  CHECK(!run.search.needs_combination());
+  std::vector<std::string> left = run.search.suspects();
+  std::ranges::sort(left);
+  CHECK((left == std::vector<std::string>{"m.one", "m.two"}));
+}
+
+TEST_CASE("culprit: a search in progress keeps what it learned") {
+  culprit_progress progress;
+  progress.mode = "zm";
+  progress.crashed_stack = {"x.mod", "a.mod", "m.dep", "b.mod"};
+  progress.search = culprit_search(progress.crashed_stack, false, {"m.dep"});
+  // The lower part of the mods a test can leave out; m.dep comes anyway.
+  CHECK((progress.search.next_test() ==
+         std::vector<std::string>{"a.mod", "b.mod"}));
+  progress.search.record(false, {"a.mod", "b.mod", "m.dep"});
+  CHECK((progress.search.cleared() ==
+         std::vector<std::string>{"a.mod", "m.dep", "b.mod"}));
+  progress.testing = progress.search.next_test();
+  progress.loaded = {"x.mod", "m.dep"};
+  CHECK((progress.testing == std::vector<std::string>{"x.mod"}));
+  const auto back = parse_culprit_progress(culprit_progress_to_json(progress));
+  REQUIRE(back.has_value());
+  CHECK(back->testing == progress.testing);
+  CHECK(back->loaded == progress.loaded);
+  CHECK(back->search.cleared() == progress.search.cleared());
+  CHECK((back->search.always() == std::vector<std::string>{"m.dep"}));
+  culprit_search search = back->search;
+  search.record(true, back->loaded);
+  REQUIRE(search.culprit().has_value());
+  CHECK_EQ(*search.culprit(), std::string("x.mod"));
+  CHECK_EQ(search.launches(), std::size_t(2));
+}

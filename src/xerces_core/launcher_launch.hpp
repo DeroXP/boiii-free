@@ -12,6 +12,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -43,6 +44,27 @@ plan resolve_profile(const std::vector<installed_content> &catalog,
                      const std::vector<std::string> *mods = nullptr,
                      const std::string &launcher_settings = {},
                      const std::optional<zone_memory_build> &zone_memory = {});
+
+// "Find the culprit" (5.6). A test launch keeps the profile's map and asks
+// for some of the crashed stack as its mods (launch_inputs::mods), so the
+// planner also loads what those mods need, and what the map needs.
+
+// The mods of a crashed stack that every culprit test of the mode loads
+// whatever it asks for: those the profile's map pulls in. In stack order;
+// empty when the profile has no map.
+std::vector<std::string>
+culprit_always_loaded(const std::vector<installed_content> &catalog,
+                      const launcher_config &config, const std::string &mode,
+                      const std::optional<std::uint64_t> &steam_build,
+                      const std::vector<std::string> &crashed_stack);
+
+// What turns a culprit off in a profile (request.mods): every enabled mod
+// whose own plan loads it, so the culprit itself when the player enabled
+// it, and the enabled mods that pull it in as a dependency. The map is left
+// out: empty when only the map needs it, or nothing loads it any more.
+std::vector<std::string>
+culprit_switches(const std::vector<installed_content> &catalog,
+                 const plan_request &request, std::string_view culprit);
 
 // What stopped a launch, so callers can tell the player's plan from the PC.
 enum class launch_refusal {

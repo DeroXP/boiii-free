@@ -27,7 +27,7 @@
 			<div class="culprit-mods" data-if="culprit_mods != ''">{{culprit_mods}}</div>
 			<div class="toolbar safe-actions">
 				<button id="culprit-launch" class="primary-button" data-if="!culprit_done" data-event-click="act('culprit test')"><span>Launch the test</span></button>
-				<button id="culprit-off" class="primary-button" data-if="culprit_found" data-event-click="act('culprit off')"><span>Turn it off</span></button>
+				<button id="culprit-off" class="primary-button" data-if="culprit_found" data-event-click="act('culprit off')"><span>{{culprit_off}}</span></button>
 				<button id="culprit-stop" class="outline" data-event-click="act('culprit stop')"><span>{{culprit_stop}}</span></button>
 			</div>
 		</div>

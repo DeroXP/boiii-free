@@ -629,9 +629,14 @@ bool services::start_culprit() {
       decision.crashed_mode.empty() ? config_.mode : decision.crashed_mode;
   progress.crashed_stack = decision.crashed_stack;
   // A crashed launch with the larger zone memory has it as a suspect too:
-  // the first test runs the same stack without it.
-  progress.search = xerces_core::culprit_search(decision.crashed_stack,
-                                                decision.crashed_with_db_pool);
+  // the first test runs the same stack without it. Every test keeps the
+  // profile's map, so the map's dependencies load in all of them; the search
+  // splits the other suspects first.
+  progress.search = xerces_core::culprit_search(
+      decision.crashed_stack, decision.crashed_with_db_pool,
+      xerces_core::culprit_always_loaded(catalog_.items, config_, progress.mode,
+                                         game_.steam_build,
+                                         decision.crashed_stack));
   culprit_ = std::move(progress);
   save_culprit();
   log_info("launcher.culprit.start",
@@ -665,6 +670,14 @@ launch_outcome services::launch_culprit_test() {
   out = start(in);
   if (out.started) {
     culprit_->testing = mods;
+    // What the test really loads: the planner adds what the mods asked for
+    // need, and what the map needs. A crash narrows the suspects to these.
+    culprit_->loaded.clear();
+    if (out.resolved) {
+      for (const auto &entry : out.resolved->stack) {
+        culprit_->loaded.push_back(entry.id);
+      }
+    }
     save_culprit();
   }
   return out;
@@ -674,8 +687,11 @@ void services::settle_culprit_test(bool crashed) {
   if (!culprit_ || culprit_->testing.empty()) {
     return;
   }
-  culprit_->search.record(crashed);
+  // A test saved before "loaded" was kept loaded what it asked for.
+  culprit_->search.record(crashed, culprit_->loaded.empty() ? culprit_->testing
+                                                            : culprit_->loaded);
   culprit_->testing.clear();
+  culprit_->loaded.clear();
   save_culprit();
   log_info("launcher.culprit.result", crashed ? "crashed" : "ran fine",
            "{\"launches\":" + std::to_string(culprit_->search.launches()) +

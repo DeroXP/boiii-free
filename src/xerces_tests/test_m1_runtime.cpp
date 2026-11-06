@@ -364,7 +364,7 @@ TEST_CASE("safe mode: finding the culprit halves the stack") {
   }
   REQUIRE(search.culprit().has_value());
   CHECK_EQ(*search.culprit(), "c");
-  CHECK_EQ(search.launches(), 3u);
+  CHECK_EQ(search.launches(), 3u); // [c, d] crash, [d] fine, [c] crashes
 
   culprit_search pair({"a", "b", "c", "d"});
   const auto needs_a_and_d = [](const std::vector<std::string> &mods) {

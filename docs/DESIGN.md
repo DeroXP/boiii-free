@@ -924,8 +924,18 @@ together.
   game never took the journal over (it quit before Xerces' code ran); otherwise
   the journal decides. A game that is still running is never counted as a crash.
 - "Find the culprit" keeps its state in `config\culprit.json` (the crashed mode
-  and stack, the search, the mods of the test launch still to be recorded), so
-  it spans launcher restarts.
+  and stack, the search, the test launch still to be recorded and what its plan
+  loaded), so it spans launcher restarts. The suspects are the whole crashed
+  stack, the dependencies the planner pulled in included. A test asks for some
+  of them as the profile's mods and keeps its map, so it loads what they and the
+  map need. Each split tests the lower part first: dependencies sit below the
+  mods that need them, so it loads nothing from above. A crash narrows the
+  suspects to what that test loaded; a test that runs fine clears what it
+  loaded, and the rest must then crash on its own. The map's dependencies load
+  in every test, so they are tested alone (with the map) when one other suspect
+  is left; suspects that only ever load with the map end the search without a
+  culprit. A culprit that is a dependency is turned off through the enabled mods
+  that pull it in, and one only the map needs is named as such.
 - Larger zone memory in crash recovery. Safe mode and every culprit test leave
   `-xerces-db-pool` out whatever the settings say
   (`launch_inputs::crash_followup`), so they all run on the stock pool and a

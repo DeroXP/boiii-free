@@ -69,6 +69,50 @@ plan resolve_profile(const std::vector<installed_content> &catalog,
   return resolve_plan(catalog, request);
 }
 
+std::vector<std::string>
+culprit_always_loaded(const std::vector<installed_content> &catalog,
+                      const launcher_config &config, const std::string &mode,
+                      const std::optional<std::uint64_t> &steam_build,
+                      const std::vector<std::string> &crashed_stack) {
+  // The profile with no mods: what is left is the map and what it needs.
+  const std::vector<std::string> none;
+  const plan map_alone =
+      resolve_profile(catalog, config, mode, steam_build, &none);
+  std::vector<std::string> out;
+  for (const auto &id : crashed_stack) {
+    if (std::ranges::any_of(map_alone.stack, [&](const plan_entry &entry) {
+          return entry.id == id;
+        })) {
+      out.push_back(id);
+    }
+  }
+  return out;
+}
+
+std::vector<std::string>
+culprit_switches(const std::vector<installed_content> &catalog,
+                 const plan_request &request, std::string_view culprit) {
+  std::vector<std::string> out;
+  for (const auto &id : request.mods) {
+    if (std::ranges::find(out, id) != out.end()) {
+      continue;
+    }
+    plan_request alone = request;
+    alone.mods = {id};
+    alone.map.reset();
+    // A plan with problems still lists what it chose, which is what loads
+    // the culprit.
+    const plan own = resolve_plan(catalog, alone);
+    if (id == culprit ||
+        std::ranges::any_of(own.stack, [&](const plan_entry &entry) {
+          return entry.id == culprit;
+        })) {
+      out.push_back(id);
+    }
+  }
+  return out;
+}
+
 launch_outcome preview_launch(const launch_inputs &in) {
   launch_outcome out;
   std::optional<launcher_config> followup;
