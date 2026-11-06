@@ -4,8 +4,9 @@
 // player's game does not have it (DESIGN.md D9). Upstream opened a "download
 // page" outside Steam for the official Zombies maps. Xerces says the server
 // uses DLC the player does not own or has not installed, and offers Black Ops
-// III's page in the Steam store, which sells the game's DLC. Headless, so the
-// text is tested.
+// III's page in the Steam store, which sells the game's DLC. Some official maps
+// come with the base game; for those the notice says to verify the game files
+// in Steam. Headless, so the text is tested.
 
 #include <string>
 #include <string_view>

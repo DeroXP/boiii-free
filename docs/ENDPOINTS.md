@@ -31,10 +31,19 @@ server uses DLC you don't own or haven't installed, and offers Black Ops III's
 store page in the Steam client (`steam://store/311210`). Upstream opened a page
 on Ezz's forum instead.
 
-Removed by D9 (2026-11-05), so no code names these hosts any more: `archive.org`
-(`main.cpp`'s replacement `BlackOps3.exe` and the old launcher's Patches tab)
-and `api.github.com` (the old launcher's version picker, which ran upstream's
-release builds).
+Removed by D9 (2026-11-05), so no code in the repository or in `boiii.exe` names
+these hosts any more: `archive.org` (`main.cpp`'s replacement `BlackOps3.exe`
+and the old launcher's Patches tab) and `api.github.com` (the old launcher's
+version picker, which ran upstream's release builds).
+
+The old launcher's HTML and JS are not in `boiii.exe`. It loads them from the
+data folder: `XERCES_DATA_PATH` if set, otherwise
+`%LOCALAPPDATA%\boiii\data\launcher`. With the repository's `data\` the picker
+and the Patches tab are gone. A data folder that upstream's updater installed
+still has them, with the `api.github.com` request and the archive.org link,
+because nothing replaces those files: upstream's updater is off and Xerces' own
+(D16) is not built yet. Even then `boiii.exe` downloads and runs nothing else:
+its launch handlers ignore the picker's exe arguments and start this build.
 
 Addresses never appear in Xerces logs (DESIGN.md 15.1). The backend's own host
 joins this list in M5, the relay in M6.

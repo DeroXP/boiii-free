@@ -24,9 +24,15 @@ dlc_notice missing_dlc_notice(std::string_view map) {
     notice.message += map;
     notice.message += ")";
   }
+  // The client shows this for every official map, and the campaign, many
+  // multiplayer maps and Shadows of Evil come with the base game. For those the
+  // game's files are incomplete, so the notice also gives Steam's file check.
   notice.message +=
       ".\n\nIf you own it, install it in Steam: Black Ops III, Properties, "
       "DLC. If not, the game's store page in Steam sells it.\n\n"
+      "If the map comes with the base game, some game files are missing: "
+      "verify them in Steam (Black Ops III, Properties, Installed Files, "
+      "Verify integrity of game files).\n\n"
       "Open the store page in Steam now?";
   return notice;
 }

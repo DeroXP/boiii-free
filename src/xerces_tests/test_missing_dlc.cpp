@@ -1,6 +1,6 @@
 // The notice for a server on one of the game's own maps that the player's game
-// lacks (docs/DESIGN.md D9): it names the DLC, points at Steam and offers no
-// download.
+// lacks (docs/DESIGN.md D9): it names the DLC, points at Steam's store and file
+// check, and offers no download.
 
 #include "harness.hpp"
 
@@ -25,6 +25,22 @@ TEST_CASE("missing dlc: the notice names the map and asks to open the store") {
   CHECK(contains(notice.message, "(the map zm_castle)"));
   CHECK(contains(notice.message, "Properties, DLC"));
   CHECK(notice.message.ends_with("Open the store page in Steam now?"));
+}
+
+TEST_CASE("missing dlc: base-game maps get Steam's file check") {
+  // The client shows the notice for campaign and base multiplayer maps too.
+  for (const std::string_view map :
+       {"cp_mi_eth_prologue", "mp_biodome", "zm_zod", "zm_castle", ""}) {
+    const std::string message = missing_dlc_notice(map).message;
+    const std::size_t verify = message.find(
+        "If the map comes with the base game, some game files are missing: "
+        "verify them in Steam (Black Ops III, Properties, Installed Files, "
+        "Verify integrity of game files).");
+    CHECK(verify != std::string::npos);
+    CHECK(verify > message.find("Properties, DLC"));
+    CHECK(verify < message.find("Open the store page in Steam now?"));
+    CHECK(message.ends_with("Open the store page in Steam now?"));
+  }
 }
 
 TEST_CASE("missing dlc: no download offer and no web link") {

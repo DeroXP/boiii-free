@@ -218,8 +218,9 @@ fonts, for comparison in a browser (Edge headless:
 
 Removed on 2026-11-05: the archive.org `BlackOps3.exe` swap, the old launcher's
 version picker and Patches tab, the dedicated server's `-beta` self-download and
-the `beta_data` folder that went with them. Official DLC maps get a notice
-instead of upstream's download page.
+the `beta_data` folder that went with them. `-beta` is still accepted, so
+existing server command lines work, and does nothing. Official DLC maps get a
+notice instead of upstream's download page.
 
 - [x] (2026-11-05, branch `launcher/d9-remove`) The default build's `boiii.exe`
       no longer contains the archive.org URLs, upstream's beta server path,
@@ -228,12 +229,19 @@ instead of upstream's download page.
       Zombies map you have not installed, for example) shows "DLC needed": the
       server uses DLC you don't own or haven't installed, with the map's name.
       Yes opens Black Ops III's store page in the Steam client; No closes the
-      notice. The join stops either way and nothing is downloaded.
+      notice. The join stops either way and nothing is downloaded. The notice
+      also says to verify the game files in Steam when the map comes with the
+      base game.
 - [ ] A `BlackOps3.exe` the client cannot load (after a Steam update) shows
       "Xerces does not support this Black Ops III build" with no download offer
       and leaves the exe as it is (only when Steam updates the game).
-- [ ] Upstream's old launcher (`boiii.exe` without `-launch`) has no version
-      picker and no Patches tab, and PLAY still starts the game.
+- [ ] Upstream's old launcher (`boiii.exe` without `-launch`, with
+      `XERCES_DATA_PATH` set to the repository's `data\`) has no version picker
+      and no Patches tab, and PLAY still starts the game. The launcher's HTML
+      and JS come from the data folder, not from `boiii.exe`: a data folder that
+      upstream's updater installed (`%LOCALAPPDATA%\boiii\data`) still shows the
+      picker and the Patches tab until Xerces ships its own data (D16). There,
+      PLAY with a picked version still starts this build and downloads nothing.
 
 ### Loader and manifest (M1)
 

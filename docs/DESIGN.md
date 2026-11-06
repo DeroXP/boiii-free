@@ -2505,8 +2505,11 @@ M5a, which you asked for now.
   switch build reached the menu in a game check. D9 is decided and its removals
   are built (2026-11-05): no archive.org exe swap, version picker or `-beta`
   self-download, and official DLC maps get the Steam store notice (not yet seen
-  in the game). Still open from D3: the join test with missing mods, the
-  performance baseline, and a person playing each stacked mod's feature.
+  in the game). The old launcher's pages load from the data folder, so one that
+  upstream's updater installed still shows the picker until D16 ships Xerces'
+  data; the client runs no other build either way (ENDPOINTS.md). Still open
+  from D3: the join test with missing mods, the performance baseline, and a
+  person playing each stacked mod's feature.
 - M1, headless part done: the manifest and its validator with the schema
   (`docs/schema/mod-1.schema.json`), legacy manifests, the planner with
   `plan_id` and `content_id`, JSON logs (`docs/schema/log-1.schema.json`), and

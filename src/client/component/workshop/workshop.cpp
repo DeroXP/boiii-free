@@ -1091,9 +1091,11 @@ void open_workshop_page(const std::string &workshop_id) {
 // Xerces (D9): upstream opened a "download page" outside Steam when a server
 // played an official Zombies map the game lacks. Xerces says the server uses
 // DLC the player does not own or has not installed, and offers Black Ops III's
-// store page, opened in Steam the way Workshop pages are.
+// store page, opened in Steam the way Workshop pages are. Base-game maps get
+// here too when game files are missing; the notice covers that case.
 void explain_missing_dlc(const std::string_view &mapname) {
-  printf("[ Workshop ] The server's map %.*s is not installed (DLC).\n",
+  printf("[ Workshop ] The server's map %.*s is not installed (DLC not "
+         "installed, or game files missing).\n",
          static_cast<int>(mapname.size()), mapname.data());
   const xerces_core::dlc_notice notice =
       xerces_core::missing_dlc_notice(mapname);
