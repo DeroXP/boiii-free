@@ -650,12 +650,22 @@ Run on 2026-11-05 by Claude on your PC while you were away (dry launches only):
       and `config\launcher.json` keeps the pair.
 - [x] (launcher/fix2-redo) A pad reaches About from Home (Down past the screen's
       end), Settings (Up from the tabs) and Diagnostics (it scrolls to its end
-      first). Home's culprit box on a fake game with dependencies and a map: a
-      dependency found names the enabled mods that load it, and "Turn them off"
-      keeps the unrelated mod; a mod only the map needs, two mods that only load
-      with the map, and a test of the map's dependency alone each say so. Every
-      screen in English and in the pseudo-locale has no RmlUi warning, and long
-      panel notes wrap under their titles.
+      first); the review also reached it from Mods, Packs and Servers (B, Up,
+      A). Every screen in English and in the pseudo-locale has no RmlUi warning,
+      and long panel notes wrap under their titles.
+- [x] (launcher/fix2-redo) Home's culprit box on a fake game with dependencies
+      and maps. Each state was written into `config\culprit.json` by hand, one
+      the search reaches (traced step by step, as `test_culprit.cpp` runs the
+      real search); the search itself did not run across launches, because a dry
+      launch records no test result. A dependency that one enabled mod loads, or
+      two, is named with a sentence for one or for several, and the button turns
+      off only those mods. One that the map and an enabled mod both need gets no
+      button: the box says to pick another map and turn the mod off in Mods, and
+      a click on the hidden button changes nothing. A dependency only the map
+      needs, two that only load with the map, a crash with a map where no test
+      ran fine (the map named as a possible cause), and a test of the map's
+      dependency alone each say so. A save that fails (`launcher.json`
+      read-only) shows its reason translated in the pseudo-locale.
 - [ ] The window by hand: drag by the header, snap, resize from the edges,
       minimize, maximize, close; at 150 percent.
 - [ ] A physical controller: A, B, Y, LB/RB and the D-pad on every screen.
