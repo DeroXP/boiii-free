@@ -1838,6 +1838,11 @@ change is brought to you first.
 | A new random dedicated-server identity on every run                                                                                              | Persistent server key, separate from `auth.cpp`'s GUID; fingerprint shown in the browser                                                 |
 | `modStack` is a list of ids with no versions or hashes                                                                                           | Join compares `content_id`; a mismatch starts 9.5; a Xerces protocol mismatch says "update Xerces"                                       |
 
+Since 2026-11-05 the beta has a stopgap for `net_password` (11.10, "The network
+password"): the host checks it itself with a challenge-response keyed by a hash
+of the password, publishes no hash, and limits wrong answers per address. The
+PAKE above replaces it in M6.
+
 ### 11.5 Relay hosting and cost
 
 Default: Cloudflare Realtime TURN (first 1,000 GB a month free, then
@@ -1897,17 +1902,17 @@ You decided that joining another tester's self-hosted game is in the first beta,
 and that a host may open a UDP port on its own router with UPnP while a lobby is
 open. Ezz's social features stay off (D14), the read-only server list stays, and
 nothing touches official matchmaking. Until M6, joins are upstream's plaintext
-direct connect; 11.3 and 11.4 still apply later. The two-PC test is
+direct connect, except that the host checks the network password itself (below,
+since 2026-11-05); 11.3 and 11.4 still apply later. The two-PC test is
 `docs/TWO_PC_TEST.md`.
 
 - **Open to direct connect.** The lobby button upstream labelled "PARTY IS OPEN"
   now reads DIRECT CONNECT: OPEN or CLOSED. Open, a lobby in the menus answers
   joins by address (`nat.cpp`, `joinable_lobby`), and nothing is sent to Ezz's
   masters. A match the host runs was already joinable. While it is open, anyone
-  who can reach the port can join: the network password is checked only by the
-  joiner's own game, during getinfo, so it does not protect an open lobby. The
-  Servers screen's Hosting panel says so, and that the router's toast shows the
-  outside address on screen.
+  who can reach the port can join, unless the host set a network password. The
+  Servers screen's Hosting panel says so, how to set one, and that the router's
+  toast shows the outside address on screen.
 - **The router.** While the lobby is open the game asks the router to forward
   its UDP port (`upnp.cpp`) and says what the router answered: forwarded (with
   the outside address, so the host can share it), forwarded without an outside
@@ -1959,6 +1964,76 @@ direct connect; 11.3 and 11.4 still apply later. The two-PC test is
 - **Servers** says the host decides which mods load; "Join modded" joins without
   your mods when your plan has problems or none are enabled; IPv6 addresses are
   refused for joins (the game's sockets are IPv4 only).
+- **The network password** (`xerces_core/join_password.hpp`,
+  `src/client/xerces/join_password.cpp`; you asked for it on 2026-11-05; built,
+  not yet run on two PCs). Before, `net_password` was compared only by the
+  joiner's own game, with an unsalted FNV-1a hash the host published in getinfo,
+  so a raw `lobbyJoin` or a modified client skipped it, and anyone could test
+  guesses against the hash offline.
+  - What the host says: with `net_password` set, getinfo carries
+    `xercesPassword` `1`, and `net_password_hash` holds a value no password
+    hashes to (the old hash keeps 63 bits), so BOIII and older Xerces builds
+    stop at their own check ("Server requires a network password." or "Network
+    password mismatch."). No hash of the password is published. A host without a
+    password sends neither key, as before.
+  - The check: the joiner asks for a challenge (`xercesJoinChallenge`). The host
+    answers with a fresh 16-byte random nonce (`xercesJoinNonce`), bound to the
+    joiner's address and good once, for 20 s. The joiner answers
+    (`xercesJoinProof`) with HMAC-SHA256, keyed by PBKDF2-HMAC-SHA256 of the
+    password (a fixed salt, 10,000 rounds), over the nonce, the host's address
+    as the joiner dialled it and a random session id; the password never
+    travels. The host compares in constant time and answers ok, wrong, wait
+    (with the seconds) or address (`xercesJoinResult`). The code is
+    xerces_core's own SHA-256 with HMAC and PBKDF2 added, tested against RFC
+    4231 and the published PBKDF2 vectors; no library was added.
+  - Guesses: at most 5 wrong answers per IP address (all its ports) in a sliding
+    minute. After that the host takes no challenge or answer from it until the
+    oldest is a minute old, and says how long. Challenges are limited to 12 a
+    minute per IP address, and every table is bounded (64 open challenges, 256
+    addresses counted, 128 let in).
+  - The host's address: the host accepts an address of one of its own adapters
+    (VPNs included) or 127.x, on its port, and, when the router reported a
+    public outside address, only that address and port. When the router did not,
+    the host does not know its outside address and accepts any public or shared
+    one, so an answer relayed through another host goes unnoticed then.
+  - Every way in that Xerces handles asks `admits`: the lobby join (`nat.cpp`,
+    before `lobbyHost` sends the lobby's address, security id and key, or
+    `lobbyGame` names the match) and the connect into a running match (a guard
+    in `network.cpp`'s connectionless dispatcher, before `auth.cpp`'s handler,
+    which is not touched; no engine address is used). An address that passed is
+    let in, and so are addresses that joined while the host had no password and
+    this PC itself (loopback, its own addresses, bots), so setting or changing
+    the password does not lock out players already in. Nothing is forgotten
+    until the game quits (past 128, the oldest goes). Party members who follow
+    the host into the match passed at the lobby join. Others hear why:
+    `lobbyDenied` for a lobby join, and for a connect the engine's own `error`
+    message, the one `auth.cpp` sends for a bad signature, which BOIII shows
+    too.
+  - Not checked: the engine's own lobby join (`LobbyHost_HandleJoinRequest`). A
+    joiner that skips `lobbyJoin` gets none of the lobby's details from Xerces;
+    whether the engine lets it into the menu lobby without them is not known. It
+    cannot get into the match, whose connect is checked. Checking that join
+    would need a signature for the function and a detour, tried in the game
+    first. The game's traffic is not encrypted, and someone who records a check
+    can still test password guesses offline (slowed by the rounds). M6's PAKE
+    and encrypted channel (11.3) remove both.
+  - The joiner: `party.cpp` runs the check after getinfo says the host checks a
+    password, before the lobby join or connect. Without `net_password` the game
+    shows "This game needs a password. ...", with a wrong one "Wrong password.
+    ...", and after too many "Wrong password too many times. ..." (the game's
+    error popup). An older host's hash is compared as before, with the first two
+    messages. A host in the menus with its lobby closed gets its usual message,
+    without a check. The dvar `xerces_join_skip_password_check 1` skips the
+    joiner's side, as a modified client would, for the two-PC test; the host
+    then refuses with "This game needs a password, and the host's game refused
+    the join ...".
+  - Logs: the game log has `join.password.host` (ok, wrong, address),
+    `join.password.refused` (at most every 10 s) and `join.password.joiner` (the
+    outcome), never an address or the password.
+  - Limits: `net_password` is typed in the game's console, and the game does not
+    save it, so it is typed again after each start; the launcher has no password
+    field. The game's own server password prompt (`g_password`, the server
+    browser's lock) is a different password and is unchanged.
 
 ---
 

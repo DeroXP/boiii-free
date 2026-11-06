@@ -27,6 +27,7 @@ utils::hook::detour handle_packet_internal_hook{};
 utils::hook::detour net_adr_to_string_hook{};
 
 static std::unordered_map<std::string, callback> callbacks{};
+static std::unordered_map<std::string, guard_callback> guards{};
 
 int64_t handle_command(const game::net::netadr_t *address, const char *command,
                        const game::net::msg::msg_t *message,
@@ -48,6 +49,22 @@ int64_t handle_command(const game::net::netadr_t *address, const char *command,
       std::cmp_greater_equal(message->cursize, offset)) {
     data = std::basic_string_view(message->data + offset,
                                   message->cursize - offset);
+  }
+
+  // Xerces: a guard (the host's password check on "connect") drops the
+  // packet before the callback or the engine sees it. A guard that throws
+  // drops it too.
+  if (const auto guarded = guards.find(cmd_string); guarded != guards.end()) {
+    bool allowed = false;
+    try {
+      allowed = guarded->second(*address);
+    } catch (const std::exception &e) {
+      fprintf(stderr, "[Network] guard error: %s\n", e.what());
+    } catch (...) {
+    }
+    if (!allowed) {
+      return static_cast<int64_t>(false);
+    }
   }
 
   if (callbacks.contains(cmd_string)) {
@@ -252,6 +269,10 @@ void com_error_oob_stub(const char *file, int32_t line, game::errorParm code,
 
 void on(const std::string &command, const callback &callback) {
   callbacks[utils::string::to_lower(command)] = callback;
+}
+
+void guard(const std::string &command, const guard_callback &check) {
+  guards[utils::string::to_lower(command)] = check;
 }
 
 void send(const game::net::netadr_t &address, const std::string &command,

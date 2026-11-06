@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -33,4 +34,15 @@ private:
 
 // "sha256:" + hex, the form manifests and packs use.
 std::string sha256_tagged(std::string_view data);
+
+// HMAC-SHA256 (RFC 2104, FIPS 198-1).
+sha256::digest hmac_sha256(std::string_view key, std::string_view message);
+// PBKDF2 with HMAC-SHA256 (RFC 8018), the first 32-byte block only.
+// iterations 0 counts as 1.
+sha256::digest pbkdf2_sha256(std::string_view password, std::string_view salt,
+                             std::uint32_t iterations);
+// Whether a and b hold the same bytes, in a time that depends only on their
+// lengths (a secret compared this way does not leak through timing).
+bool equal_constant_time(std::span<const std::uint8_t> a,
+                         std::span<const std::uint8_t> b);
 } // namespace xerces_core

@@ -105,8 +105,8 @@ Same network, no mods enabled on either PC (Xerces > Mods).
 
 The two PCs on different internet connections, for example J on a phone hotspot.
 H's router needs UPnP on (most home routers have it on). While H's lobby is
-open, anyone who has H's address can join it (the network password does not
-cover it), so H closes it when the test is done.
+open, anyone who has H's address can join it unless H set a network password
+(test 6), so H closes it when the test is done.
 
 1. H: Launch vanilla, then open the lobby. Within a few seconds a toast says
    what the router answered:
@@ -127,6 +127,76 @@ cover it), so H closes it when the test is done.
 4. H: open the lobby again, then quit the game. Expected: the router's entry
    goes too.
 5. Optional: J hosts and H joins.
+
+## 6. A password on the host
+
+H's game checks the password itself (DESIGN.md 11.10, "The network password").
+The same network is enough; over the internet it works the same. No mods. "The
+console" is the game's console, where test 1 typed `connect`. Type the commands
+exactly; `tiger7` stands for any word H picks.
+
+Do the steps in this order: once J's game has given H the right password, or
+joined H while H had no password, H's game lets J's address in until H's game
+quits. So the refusals in steps 2 to 5 only show with a fresh start of H's game
+and before step 6.
+
+1. H: quit the game if it still runs from an earlier test, then Launch vanilla.
+   In the console: `set net_password tiger7` (the password is not saved; set it
+   again after each start of the game). Open the lobby.
+2. J, a join that skips J's own check, as a modified client would: start the
+   game (Launch vanilla), then in the console
+   `set xerces_join_skip_password_check 1` and `connect <H's address>`.
+   Expected: "This game needs a password, and the host's game refused the join
+   ...", and J stays in the menu. Then `set xerces_join_skip_password_check 0`.
+3. J: `connect <H's address>` with no password set. Expected: "This game needs a
+   password. ..." (J's own game says it, before asking H).
+4. J: `set net_password tiger8`, then `connect <H's address>`. Expected: "Wrong
+   password. ..."; H's console shows "[Join] A joiner gave a wrong password".
+5. J: repeat step 4 four more times within a minute (`connect` again each time).
+   Expected: the sixth try says "Wrong password too many times ..." with a
+   number of seconds. Wait that long before step 6.
+6. J: `set net_password tiger7`, then `connect <H's address>`. Expected: J joins
+   H's lobby; H's console shows "[Join] A joiner gave the right password".
+7. H: start a match on The Giant. Expected: J goes along. J: leave to the menu,
+   then `connect <H's address>` again while H plays. Expected: J joins the
+   running match.
+8. A raw join from J's PC, in PowerShell (Windows key, type PowerShell, Enter),
+   while H's lobby is open and again while H plays a match. It sends the same
+   lobby request and connect packet a modified game could, from a port that
+   never passed the check. Put H's address and port in the first two lines:
+
+   ```powershell
+   $h = '192.168.1.20'
+   $p = 27017
+   $u = New-Object Net.Sockets.UdpClient
+   $u.Client.ReceiveTimeout = 3000
+   foreach ( $m in 'lobbyJoin match 00', 'connect x' ) {
+       $b = [byte[]](
+         @( 255, 255, 255, 255 ) + [Text.Encoding]::ASCII.GetBytes($m)
+       )
+       [void] $u.Send( $b, $b.Length, $h, $p )
+       $from = New-Object Net.IPEndPoint( [Net.IPAddress]::Any, 0 )
+       try {
+           $r = $u.Receive([ref] $from)
+           [Text.Encoding]::ASCII.GetString( $r, 4, $r.Length - 4 )
+       } catch {
+           'no answer'
+       }
+   }
+   ```
+
+   Expected: `lobbyDenied match password` for the lobby request, both times. For
+   the connect: `no answer` while H is in the lobby (nothing runs to connect
+   to), and
+   `error This game needs a password, and the host's game refused the connect ...`
+   while H plays. It must run on J's PC: H's game lets its own PC in.
+
+9. H: quit the game (that forgets who passed), start it again without setting a
+   password, and open the lobby. J: join with no password set. Expected: J
+   joins, as in test 1.
+10. Optional, if J has an older Xerces beta zip or BOIII: with H's password set,
+    J joins with it. Expected: J's game stops with "Server requires a network
+    password." or "Network password mismatch.", whatever J types.
 
 ## What to collect afterwards
 

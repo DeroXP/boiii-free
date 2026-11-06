@@ -23,6 +23,7 @@
 #include <utils/string.hpp>
 
 #include <xerces/join.hpp>
+#include <xerces/join_password.hpp>
 #include <xerces/runtime.hpp>
 #include <xerces/switches.hpp>
 #include <xerces_core/join_check.hpp>
@@ -834,6 +835,16 @@ void receive_lobby_join(const game::net::netadr_t &sender,
       !is_lobby_address(sender))
     return;
 
+  // Xerces (DESIGN.md 11.10): with net_password set, only an address that
+  // passed the host's password check hears anything of this lobby (its
+  // address, security id and key, or the match to connect to); the others
+  // hear why. Without a password everyone gets in as before, and is
+  // remembered, so a password set later keeps them in.
+  if (!xerces_join_password::admits(sender)) {
+    network::send(sender, "lobbyDenied", parts[0] + " password");
+    return;
+  }
+
   if (hosting_match() && !lobby_host_info(game::lobby::LobbyType::GAME)) {
     network::send(sender, "lobbyGame", hosting_token);
     return;
@@ -904,6 +915,22 @@ void receive_lobby_host(const game::net::netadr_t &sender,
   if (parts.size() >= 7 && from_lobby_request(sender, parts[0]))
     scheduler::once([sender, parts] { join_lobby(sender, parts); },
                     scheduler::main);
+}
+
+// Xerces: the host refused the lobby join; with "password", this game has
+// not passed its password check (no net_password, or the host restarted).
+// The join stops here, without the "did not answer" message or a direct
+// connect the host would refuse too.
+void receive_lobby_denied(const game::net::netadr_t &sender,
+                          const network::data_view &data,
+                          game::LocalClientNum_t) {
+  const std::vector<std::string> parts = fields(payload_string(data));
+  if (parts.size() != 2 || parts[1] != "password" ||
+      !from_lobby_request(sender, parts[0]))
+    return;
+  game_join_fallback = {};
+  printf("[Friends] The host refused the join: no password check passed\n");
+  xerces_join_password::show(xerces_join_password::outcome::refused, 0);
 }
 
 void receive_lobby_follow(const game::net::netadr_t &sender,
@@ -1342,6 +1369,7 @@ public:
     network::on("lobbyHost", receive_lobby_host);
     network::on("lobbyGame", receive_lobby_game);
     network::on("lobbyFollow", receive_lobby_follow);
+    network::on("lobbyDenied", receive_lobby_denied);
 
     scheduler::loop(update_punching, scheduler::main, 250ms);
     scheduler::loop(update_hosting, scheduler::main, REGISTER_INTERVAL);

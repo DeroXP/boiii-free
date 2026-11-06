@@ -38,6 +38,10 @@ bool is_password_set() {
   return !password.empty();
 }
 
+std::string get_password() {
+  return std::string(net_password_dvar.get_string().value_or(""));
+}
+
 struct component final : generic_component {
   DEFINE_COMPONENT_NAME("network_password");
 

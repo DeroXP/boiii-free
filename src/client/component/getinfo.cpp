@@ -30,6 +30,7 @@
 #include <game/utils.hpp>
 
 #include <xerces/join.hpp>
+#include <xerces_core/join_password.hpp>
 #include <xerces_core/version.hpp>
 
 namespace getinfo {
@@ -155,8 +156,14 @@ struct component final : generic_component {
       }
 
       if (network_password::is_password_set()) {
+        // Xerces (DESIGN.md 11.10): the host checks the password itself
+        // (xerces/join_password.hpp) and publishes no hash of it. Older
+        // clients find a hash no password gives, so their own check stops
+        // them with their own message.
+        info.set(std::string(xerces_core::join_password::info_key),
+                 std::string(xerces_core::join_password::protocol));
         info.set("net_password_hash",
-                 network_password::get_password_hash_string());
+                 std::string(xerces_core::join_password::legacy_hash_sentinel));
       }
 
       network::send(target, "infoResponse", info.build(), '\n');

@@ -150,4 +150,81 @@ std::string sha256::hex(std::string_view data) { return to_hex(of(data)); }
 std::string sha256_tagged(std::string_view data) {
   return "sha256:" + sha256::hex(data);
 }
+
+namespace {
+// The two hash states after the key's inner and outer pad blocks, so PBKDF2
+// does not hash the pads again on every round.
+struct hmac_pads {
+  sha256 inner;
+  sha256 outer;
+};
+
+hmac_pads hmac_start(std::string_view key) {
+  std::array<std::uint8_t, 64> block{};
+  if (key.size() > block.size()) {
+    const sha256::digest hashed = sha256::of(key);
+    std::copy(hashed.begin(), hashed.end(), block.begin());
+  } else if (!key.empty()) {
+    std::memcpy(block.data(), key.data(), key.size());
+  }
+  std::array<std::uint8_t, 64> pad{};
+  hmac_pads pads;
+  for (std::size_t i = 0; i < block.size(); ++i) {
+    pad[i] = static_cast<std::uint8_t>(block[i] ^ 0x36);
+  }
+  pads.inner.update(pad.data(), pad.size());
+  for (std::size_t i = 0; i < block.size(); ++i) {
+    pad[i] = static_cast<std::uint8_t>(block[i] ^ 0x5c);
+  }
+  pads.outer.update(pad.data(), pad.size());
+  block.fill(0);
+  pad.fill(0);
+  return pads;
+}
+
+sha256::digest hmac_finish(const hmac_pads &pads, const void *data,
+                           std::size_t size) {
+  sha256 inner = pads.inner;
+  inner.update(data, size);
+  const sha256::digest inner_digest = inner.finish();
+  sha256 outer = pads.outer;
+  outer.update(inner_digest.data(), inner_digest.size());
+  return outer.finish();
+}
+} // namespace
+
+sha256::digest hmac_sha256(std::string_view key, std::string_view message) {
+  return hmac_finish(hmac_start(key), message.data(), message.size());
+}
+
+sha256::digest pbkdf2_sha256(std::string_view password, std::string_view salt,
+                             std::uint32_t iterations) {
+  const hmac_pads pads = hmac_start(password);
+  // U1 = HMAC(P, S || INT(1)), then Ui = HMAC(P, Ui-1); T1 = U1 ^ ... ^ Uc.
+  std::string first(salt);
+  const char block_index[4] = {0, 0, 0, 1};
+  first.append(block_index, sizeof(block_index));
+  sha256::digest u = hmac_finish(pads, first.data(), first.size());
+  sha256::digest out = u;
+  for (std::uint32_t round = 1; round < iterations; ++round) {
+    u = hmac_finish(pads, u.data(), u.size());
+    for (std::size_t i = 0; i < out.size(); ++i) {
+      out[i] ^= u[i];
+    }
+  }
+  return out;
+}
+
+bool equal_constant_time(std::span<const std::uint8_t> a,
+                         std::span<const std::uint8_t> b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  // volatile keeps the compiler from stopping at the first difference.
+  volatile std::uint8_t difference = 0;
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    difference = static_cast<std::uint8_t>(difference | (a[i] ^ b[i]));
+  }
+  return difference == 0;
+}
 } // namespace xerces_core

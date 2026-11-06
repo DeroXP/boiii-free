@@ -789,6 +789,32 @@ it has run on two PCs.
       (`launcher.culprit.joined` in the launcher log).
 - [ ] Copy report and the console text from both PCs after the test.
 
+The network password checked by the host (DESIGN.md 11.10, "The network
+password"; TWO_PC_TEST test 6). Built 2026-11-05 and unit-tested
+(`src/xerces_tests/test_join_password.cpp`: HMAC-SHA256 and PBKDF2 against RFC
+4231 and the published vectors, the messages, the host's challenges, checks,
+address rule and wrong-answer limit); not run in the game or on two PCs.
+
+- [ ] A join with `xerces_join_skip_password_check 1` and no password is refused
+      by H: "This game needs a password, and the host's game refused the join".
+- [ ] J without `net_password`: "This game needs a password." from J's own game.
+- [ ] J with a wrong password: "Wrong password."; H's console says a joiner gave
+      a wrong password. The sixth wrong try within a minute says "Wrong password
+      too many times" with the seconds to wait.
+- [ ] J with the right password joins H's lobby, follows H into the match, and
+      joins the running match again after leaving.
+- [ ] From J's PC, PowerShell's raw `lobbyJoin` gets `lobbyDenied ... password`,
+      and a raw `connect` while H plays gets the `error` "This game needs a
+      password, and the host's game refused the connect".
+- [ ] H without a password: joins work as before.
+- [ ] An older Xerces build or BOIII with any password stops at its own check
+      ("Server requires a network password." or "Network password mismatch.").
+- [ ] Over the internet with UPnP, the right password passes (the host's outside
+      address is the one the router reported), and when the router did not
+      report one (H gives the public address by hand).
+- [ ] H's game log has `join.password.host` with `ok` and `wrong`, and J's
+      `join.password.joiner`; neither has an address or the password.
+
 ### Conflict system (M2)
 
 - [ ] `xerces_cli test run both-apply` with the loose pair: the merged table

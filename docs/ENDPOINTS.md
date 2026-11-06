@@ -36,3 +36,6 @@ A host whose lobby is open to direct connect (DESIGN.md 11.10) asks its own
 router to forward the game's UDP port (UPnP through Windows' NAT API,
 `upnp.cpp`) and removes the mapping when the lobby closes or the game quits.
 That traffic stays on the local network and names no host.
+
+The network password check (DESIGN.md 11.10) is messages between the joiner and
+the host it joins, on the game's own UDP port; nothing else is contacted.
