@@ -1,0 +1,48 @@
+#pragma code_page(65001)
+
+// Xerces.exe's version resource (docs/DESIGN.md 16.5): what Windows shows in
+// the file's properties, SmartScreen and antivirus reports. The version comes
+// from xerces_version.h, which premake writes from VERSION and git. No icon
+// yet: the repository has no Xerces icon (upstream's is BOIII's).
+
+#include "winres.h"
+#include "xerces_version.h"
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION XERCES_VERSION_RC
+ PRODUCTVERSION XERCES_VERSION_RC
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+#ifdef XERCES_PRERELEASE
+ FILEFLAGS VS_FF_PRERELEASE
+#else
+ FILEFLAGS 0x0L
+#endif
+#endif
+ FILEOS 0x40004L
+ FILETYPE VFT_APP
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Xerces contributors"
+            VALUE "FileDescription", "Xerces launcher"
+            VALUE "FileVersion", XERCES_VERSION_FILE
+            VALUE "InternalName", "Xerces"
+            VALUE "LegalCopyright", "Copyright (C) 2022-2026 the BOIII and Xerces contributors. GPL-3.0, no warranty. Modified from BOIII by Ezz and momo5502."
+            VALUE "OriginalFilename", "Xerces.exe"
+            VALUE "ProductName", "Xerces"
+            VALUE "ProductVersion", XERCES_VERSION
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

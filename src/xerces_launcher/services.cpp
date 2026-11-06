@@ -79,6 +79,10 @@ services::~services() {
 
 std::string services::version() { return xerces_core::xerces_version_text; }
 
+std::string services::version_label() {
+  return xerces_core::xerces_version_label;
+}
+
 // ------------------------------------------------------------------- config
 void services::load_config() {
   const auto text = read_text(paths_.config_file());

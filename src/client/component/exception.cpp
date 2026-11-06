@@ -31,6 +31,9 @@
 #define SHORTVERSION "0"
 #endif
 #endif
+#ifndef XERCES_VERSION_LABEL
+#define XERCES_VERSION_LABEL "Xerces"
+#endif
 
 #include <CommCtrl.h>
 #include <dbghelp.h>
@@ -591,7 +594,8 @@ std::string generate_crash_info(const LPEXCEPTION_POINTERS exceptioninfo) {
 
   line("Ezz Crash Dump");
   line(std::string{});
-  line("Version: "s + VERSION);
+  // Xerces: "Xerces <version> (<commit>)", the build the report is about.
+  line("Version: "s + XERCES_VERSION_LABEL);
   line("Timestamp: "s + get_timestamp());
   line(utils::string::va(
       "Exception: 0x%08X (%s)", exceptioninfo->ExceptionRecord->ExceptionCode,

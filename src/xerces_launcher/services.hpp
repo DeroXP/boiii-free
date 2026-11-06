@@ -167,6 +167,8 @@ public:
 
   // ---------------------------------------------------------------- version
   static std::string version();
+  // "Xerces 0.1.0-beta.1 (3f09512d)", as the game shows it.
+  static std::string version_label();
 
 private:
   // launch() and the culprit tests: launch_game and the process handle.
