@@ -40,7 +40,15 @@
 			<div class="label section-label">Third-party software in the launcher</div>
 			<div class="about-item">
 				<div class="about-name">RmlUi 6.3</div>
-				<div class="about-text">MIT licence. Copyright (c) 2008-2014 CodePoint Ltd, Shift Technology Ltd, and contributors; (c) 2019-2025 The RmlUi Team, and contributors.</div>
+				<div class="about-text">MIT licence. Copyright (c) 2008-2014 CodePoint Ltd, Shift Technology Ltd, and contributors; (c) 2019-2026 The RmlUi Team, and contributors. The licence text is in data\xerces\licenses\RmlUi.txt.</div>
+			</div>
+			<div class="about-item" data-if="harfbuzz">
+				<div class="about-name">RmlUi's HarfBuzz font engine</div>
+				<div class="about-text">The text shaping code of RmlUi 6.3's HarfBuzz sample, with one file changed for Xerces. MIT licence, as RmlUi.</div>
+			</div>
+			<div class="about-item" data-if="harfbuzz">
+				<div class="about-name">HarfBuzz 15.0.0</div>
+				<div class="about-text">Text shaping and OpenType kerning, under the "Old MIT" licence. Copyright (c) Google, Inc., Behdad Esfahbod, Red Hat, Inc. and the other holders listed with their years in data\xerces\licenses\HarfBuzz.txt, which has the licence text.</div>
 			</div>
 			<div class="about-item">
 				<div class="about-name">FreeType 2.14.3</div>

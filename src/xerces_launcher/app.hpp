@@ -18,6 +18,8 @@
 
 #include <RmlUi/Core/Input.h>
 
+#include <xerces_core/text_language.hpp>
+
 #include "services.hpp"
 #include "view.hpp"
 #include "window.hpp"
@@ -182,6 +184,8 @@ private:
   std::string language_ = "en";
   // English -> translation; for "pseudo", the template's keys (values empty).
   std::map<std::string, std::string> strings_;
+  // What the font engine shapes language_ as; every document's lang attribute.
+  xerces_core::text_language text_language_;
 
   double started_ = 0;
   float applied_scale_ = 0.f;

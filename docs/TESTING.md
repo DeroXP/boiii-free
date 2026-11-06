@@ -155,16 +155,20 @@ decision are in DESIGN.md 7.1.
 Third-party sources live outside the repository until the gate decides, in
 `C:\Users\Ginld\XercesDev\third_party` (downloaded to `..\downloads`):
 
-| File                      | Source                                     | Bytes     | SHA-256                                                            |
-| ------------------------- | ------------------------------------------ | --------- | ------------------------------------------------------------------ |
-| `RmlUi-6.3.zip`           | github.com/mikke89/RmlUi, tag 6.3 (MIT)    | 4,513,038 | `bfb340660e4bce38d4211cffc836cfbe1be676aa36ef9cc48e7df3855ee74fe3` |
-| `freetype-2.14.3.tar.xz`  | download.savannah.gnu.org (FTL or GPLv2)   | 2,670,220 | `36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f` |
-| `InterTight-wght.ttf`     | github.com/google/fonts, `ofl/intertight`  | 581,588   | `b81b73dcb64df3c230cabade7df6c5773bf863233f24c9ee51087519f1f88b6f` |
-| `IBMPlexMono-Regular.ttf` | github.com/google/fonts, `ofl/ibmplexmono` | 135,580   | `6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46` |
-| `IBMPlexMono-Medium.ttf`  | github.com/google/fonts, `ofl/ibmplexmono` | 136,704   | `a9b4c49bb299e05b5f6c481e7fb5e78943d2793249a0c8874ab574a2d1ea6755` |
+| File                      | Source                                       | Bytes      | SHA-256                                                            |
+| ------------------------- | -------------------------------------------- | ---------- | ------------------------------------------------------------------ |
+| `RmlUi-6.3.zip`           | github.com/mikke89/RmlUi, tag 6.3 (MIT)      | 4,513,038  | `bfb340660e4bce38d4211cffc836cfbe1be676aa36ef9cc48e7df3855ee74fe3` |
+| `freetype-2.14.3.tar.xz`  | download.savannah.gnu.org (FTL or GPLv2)     | 2,670,220  | `36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f` |
+| `InterTight-wght.ttf`     | github.com/google/fonts, `ofl/intertight`    | 581,588    | `b81b73dcb64df3c230cabade7df6c5773bf863233f24c9ee51087519f1f88b6f` |
+| `IBMPlexMono-Regular.ttf` | github.com/google/fonts, `ofl/ibmplexmono`   | 135,580    | `6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46` |
+| `IBMPlexMono-Medium.ttf`  | github.com/google/fonts, `ofl/ibmplexmono`   | 136,704    | `a9b4c49bb299e05b5f6c481e7fb5e78943d2793249a0c8874ab574a2d1ea6755` |
+| `harfbuzz-15.0.0.tar.xz`  | github.com/harfbuzz/harfbuzz, release 15.0.0 | 20,396,372 | `968536e9abd782f07f7954044c0c4020199fcdd39b41d221ec42d2a3be4a44df` |
 
 The fonts and their OFL texts are in `data/xerces/fonts/` (unmodified; the
-variable font's file name drops the `[wght]` suffix).
+variable font's file name drops the `[wght]` suffix). HarfBuzz ("Old MIT"
+licence) was downloaded on 2026-11-05 with your approval and unpacked as
+`third_party\harfbuzz\harfbuzz-15.0.0`; it is optional and only the launcher
+uses it (DESIGN.md 7.1).
 
 To repeat the measurements (the programs are not the game; they only draw a
 window):
@@ -624,11 +628,12 @@ build\bin\x64\Release\Xerces.exe --dry-launch --skip-boot --view home --script s
 
 `tools\dev\launcher\check-screens.ps1 -Out <folder>` opens every screen that
 way, captures it and lists any RmlUi warning (also with `-Theme light`,
-`-Theme contrast` or `-Language pseudo`). A script plays timed steps, the first
-at 1 s: `+500 key down`, `+300 pad a`, `+200 view mods`,
-`+100 click launch-vanilla`, `+100 type text`, `+100 focus search`,
-`+100 shot C:\path\screen.png` (a PNG of the next frame), `+100 quit`. The log
-is `<home>\logs\<date>-<time>-launcher-<pid>.jsonl`.
+`-Theme contrast` or `-Language pseudo`; `-Scale 1.5` fixes the UI scale and
+`-Exe` runs another build, such as the previous one for before and after). A
+script plays timed steps, the first at 1 s: `+500 key down`, `+300 pad a`,
+`+200 view mods`, `+100 click launch-vanilla`, `+100 type text`,
+`+100 focus search`, `+100 shot C:\path\screen.png` (a PNG of the next frame),
+`+100 quit`. The log is `<home>\logs\<date>-<time>-launcher-<pid>.jsonl`.
 
 Run on 2026-11-05 by Claude on your PC while you were away (dry launches only):
 
@@ -737,6 +742,55 @@ Run on 2026-11-05 by Claude (no game running, dry launches only):
       with a valid "é"), and `Xerces.exe --dry-launch` on that home reads its 17
       items instead of ending in `std::terminate`. Its scan event reports 686
       hits, without BlackOps3.exe.
+
+### Launcher text shaping (HarfBuzz, 2026-11-05)
+
+DESIGN.md 7.1 has the design and the numbers. `Xerces.exe` logs which font
+engine it runs as `launcher.font.engine` (`harfbuzz` with its version, or
+`freetype` in a build made without `third_party\harfbuzz`), with the language
+tag and script the documents are shaped in. For before and after, keep the old
+build next to the new one as `Xerces-old.exe` and capture both with the same
+home and scale:
+
+```
+tools\dev\launcher\check-screens.ps1 -Out <dir>\before\100 -HomeDir C:\Users\Ginld\XercesHome-agent-harfbuzz -Scale 1.0 -Exe build\bin\x64\Release\Xerces-old.exe
+tools\dev\launcher\check-screens.ps1 -Out <dir>\after\150 -HomeDir C:\Users\Ginld\XercesHome-agent-harfbuzz -Scale 1.5
+```
+
+Run on 2026-11-05 by Claude (dry launches only, home seeded from
+`XercesHome-bench`). The captures are in
+`C:\Users\Ginld\XercesDev\scratch\harfbuzz\captures`: `before\` and `after\`
+with `100`, `150` (every screen) and `pseudo-100` (Home, Mods, Settings),
+`after\light-100`, `after\contrast-150`, `after\about`, and `no-harfbuzz\100`
+(Home and Packs from a build without HarfBuzz).
+
+- [x] With HarfBuzz the launcher builds, the log says
+      `"engine":"harfbuzz","harfbuzz":"15.0.0","lang":"en","script":"Latn"`, and
+      every screen loads with no RmlUi warning or error at 100 and 150 percent,
+      in the pseudo-locale and the light and high-contrast themes. Without
+      HarfBuzz (a third-party folder holding only `rmlui` and `freetype`) it
+      builds, logs `"engine":"freetype"` and draws Packs pixel for pixel as
+      before (Home too, but for the scan time it shows).
+- [x] The bundled fonts (Inter Tight's weights, IBM Plex Mono Regular and
+      Medium) load and draw; accented letters in the pseudo-locale draw.
+- [x] Kerning: "Yo" in Packs' "Your packs" (Inter Tight 700, 20 dp) closes by 2
+      px at 100 percent and 3 px at 150 (the o's ink ends at x 56 before and 54
+      after; 85 and 82 at 150); "Pa" in the Packs title and "ay" in Settings'
+      "Display" by 1 px.
+- [x] Nothing wraps, clips or moves: every changed pixel lies in a changed line
+      of text; the pseudo-locale's overflows (the long tilde runs) are the same
+      before and after.
+- [x] Widths of 27 launcher strings at 100 and 150 percent (a scratch program on
+      both engines): equal to RmlUi's FreeType engine except where kerning
+      applies, 0 to 7 px narrower.
+- [x] Startup, `tools\dev\bench\launcher-bench.ps1 -Runs 20`: first frame 209.9
+      ms before and 212.4 after (medians; p90 220.1 and 222.1); with the two
+      builds alternating, 12 starts each, 211.2 and 211.0. The first screen is
+      loaded at 57.9 and 67.4 ms, Home is shown in 29.8 and 39.4 ms.
+- [x] About lists HarfBuzz 15.0.0 and RmlUi's HarfBuzz engine, and only in a
+      build that has them; `data/xerces/licenses` holds both licence texts.
+- [ ] You looking at the text on your display, at your usual scale.
+- [ ] A translation in a script other than Latin, or written right to left.
 
 ### Conflict system (M2)
 

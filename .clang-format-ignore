@@ -12,3 +12,5 @@ nul
 /**/*.cscasm
 /**/*.luac
 /**/*.aps
+# Copied from RmlUi with its own formatting (the file says what changed).
+src/xerces_rmlui_harfbuzz/*.cpp

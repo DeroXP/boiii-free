@@ -19,6 +19,7 @@
 
 #include <xerces_core/json.hpp>
 
+#include "font_engine.hpp"
 #include "log.hpp"
 
 namespace xerces_launcher {
@@ -633,6 +634,9 @@ bool app::load_view(view &v, const view_info &info) {
     return false;
   }
   v.doc = doc;
+  // Inherited by all the text in it: the font engine shapes it as this
+  // language (font_engine.hpp).
+  doc->SetAttribute("lang", text_language_.tag);
   doc->SetClass(std::string("view-") + info.id, true);
   if (doc->GetElementById("header")) {
     wire_shell(doc);
@@ -1187,6 +1191,7 @@ int app::run() {
   system_ = std::make_unique<translator>(*this, window_.system_interface());
   Rml::SetSystemInterface(system_.get());
   Rml::SetRenderInterface(window_.render_interface());
+  install_font_engine();
   Rml::Initialise();
   rml_started_ = true;
   context_ = Rml::CreateContext(
@@ -1198,6 +1203,23 @@ int app::run() {
     return 1;
   }
   load_language();
+  text_language_ = xerces_core::text_language_for(language_);
+  register_text_language(text_language_);
+  {
+    namespace json = xerces_core::json;
+    const std::string harfbuzz = harfbuzz_version();
+    const std::string message =
+        harfbuzz.empty() ? "RmlUi's FreeType font engine (no HarfBuzz in this "
+                           "build: no OpenType kerning)"
+                         : "RmlUi's HarfBuzz font engine, HarfBuzz " + harfbuzz;
+    const std::string rtl = text_language_.right_to_left ? "true" : "false";
+    log_info("launcher.font.engine", message,
+             "{\"engine\":" + json::quote(font_engine_name()) +
+                 ",\"harfbuzz\":" + json::quote(harfbuzz) +
+                 ",\"lang\":" + json::quote(text_language_.tag) +
+                 ",\"script\":" + json::quote(text_language_.script) +
+                 ",\"rtl\":" + rtl + "}");
+  }
   load_fonts();
   mark("rmlui and fonts");
 
@@ -1217,6 +1239,7 @@ int app::run() {
   }
   dialog_doc_ = context_->LoadDocument(generic(paths.data / "ui" / "dialog.rml"));
   if (dialog_doc_) {
+    dialog_doc_->SetAttribute("lang", text_language_.tag);
     listen(dialog_doc_->GetElementById("dialog-buttons"), "click",
            [this](Rml::Event &event) {
              for (Rml::Element *e = event.GetTargetElement(); e;
