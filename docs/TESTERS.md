@@ -84,8 +84,9 @@ hash, sent with the link, shows that the zip is the one we made.
 - In this beta the Xerces server does not take crash reports yet. Until it does,
   they wait in `crash\outbox` in your Xerces folder: Xerces tries again every 10
   minutes while it is open and at every start, keeps at most 20, and removes
-  those older than 7 days without sending them. Nothing is lost by leaving them
-  on, and "Delete my crash reports" has nothing on the server to delete yet.
+  those older than 7 days without sending them. Leaving crash reports on does no
+  harm meanwhile, and "Delete my crash reports" has nothing on the server to
+  delete yet.
 - Xerces also keeps crash bundles on your PC (Diagnostics, Crash bundles; "Make
   a bundle" makes one any time). Attach one to a bug report if we ask.
 

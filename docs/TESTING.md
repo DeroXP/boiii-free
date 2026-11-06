@@ -765,8 +765,9 @@ GPU busy), more than 3 runs a side.
 `tools\release.ps1` refuses to build while `notices.py --licences` finds code
 GPL-3.0 cannot take in (`src/common/str.hpp` until its rewrite merges) or while
 Settings lacks the crash report controls `README.txt` describes (until
-`launcher/crash-client` merges). Not checked yet, all with the game (ask first),
-from an unzipped package outside the repository:
+`launcher/crash-client` merges). Both are merged in the beta candidate (below),
+where the gates pass. Not checked yet, all with the game (ask first), from an
+unzipped package outside the repository:
 
 - [ ] The game reads the package's `data\` (`XERCES_DATA_PATH`): the Xerces
       menus and `ui_scripts` load with no `%LOCALAPPDATA%\boiii\data`.
@@ -779,6 +780,58 @@ from an unzipped package outside the repository:
       Dump" and its `Version:` line.
 - [ ] The first host or join shows the firewall prompt for "BOIII"
       (`KNOWN_ISSUES.md`).
+
+### Beta candidate (launcher/integrate-2, 2026-11-05)
+
+`xerces-main` 0212339c with `launcher/str-rewrite`, `tls-rewrite`, `harfbuzz`,
+`crash-client`, `beta-package`, `join-password` (with `join-fixes`) and
+`voice-ptt` merged, then the cross-branch fixes (DESIGN.md 18). Run by Claude
+with dry launches only, homes outside AppData
+(`C:\Users\Ginld\XercesHome-agent-integrate2`, `-notice`, `-cli`, `-pkg`),
+scripts in `C:\Users\Ginld\XercesDev\scratch\integrate2`; the game was never
+started and nothing was sent to the Railway service.
+
+- [x] `xerces_tests`: 540 tests pass; `cli_smoke.ps1` passes; every lint and
+      self-test (`check_fenced`, `check_hosts`, `check_contrast`,
+      `check_licences`, `check_microsoft_notices`, `check_switches`,
+      `notices.py --self-test`, `--check` and `--licences`, `tokens.py --check`,
+      `extract_strings.py --check`); no fenced function, line or file differs
+      from 0212339c.
+- [x] `check-screens.ps1` (dark, light, pseudo): every screen captured, no RmlUi
+      warning or error; Settings > Privacy shows the crash report switch,
+      "Delete my crash reports", the GitHub link and the voice line.
+      `check-idle.ps1`: every case passes.
+- [x] The MinHook speed check (`test_minhook_threads.cpp`) run as twelve copies
+      at once, three times: 36 of 36 passed.
+- [x] Crash report notices from the worker (`crash-wake-idle.ps1`): with 400
+      stand-in pending notes the start-up job ends while the loop is idle behind
+      other windows. A build without the wake took the result 10, 83, 61 and 65
+      ms later; the merged build 0, 0, 0.1 and 0 ms (`launcher.crash.event`).
+      "Delete my crash reports" in a dry launcher shows "This launcher runs with
+      --dry-launch ..." 19 to 21 ms after the confirming click.
+- [x] `xerces_cli crash list` and `crash send` against a stand-in backend on
+      127.0.0.1 (`crash_stub.py`, `XERCES_CRASH_URL`): two stand-in pending
+      crashes became reports, went out gzipped with the install id and
+      `User-Agent: Xerces/0.1.0-beta.1`, came back 201, and left the outbox
+      empty; the reports' `xerces.commit` and `dirty` came from
+      `xerces_version.h`.
+- [x] `tools\release.ps1` on the clean committed tree passed every gate (it
+      warned that HEAD is not on origin) and wrote
+      `dist\xerces-0.1.0-beta.1.zip` (236 entries, `/` in every name),
+      `SHA256SUMS-0.1.0-beta.1.txt` and the symbols zip. `README.txt`,
+      `KNOWN_ISSUES.txt`, `SOURCE.txt` and `THIRD_PARTY_NOTICES.txt` are UTF-8
+      without a byte-order mark, with CRLF line ends; the notices have 32
+      entries, HarfBuzz's with `COPYING`, `src/ms-use/COPYING` and the Unicode
+      License V3; `data\xerces\licenses` is gone from the package.
+- [x] The zip unzipped in the scratch folder, its `Xerces.exe --dry-launch` on a
+      fresh home: `launcher.start` names the package's `data` as `client_data`,
+      HarfBuzz runs, the first scan read 17 items, and Launch vanilla logged
+      `launcher.launch.dry` with `xerces_data_path` set to the package's `data`
+      folder. About shows the BETA badge, the commit's source link and the
+      `THIRD_PARTY_NOTICES.txt` next to the program; no RmlUi warning or error.
+- [ ] Everything with the game or a second PC: the two-PC join test
+      (`docs/TWO_PC_TEST.md`), the crash report and push-to-talk items above and
+      below, and the beta package items above.
 
 ### Voice chat starts as push-to-talk (2026-11-05)
 
