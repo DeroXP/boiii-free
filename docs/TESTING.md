@@ -497,6 +497,51 @@ extra).
       explained; the client now logs an uncaught C++ exception as
       `loader.terminate` before the fail-fast (none was logged since).
 
+### Menu crash at the first main frame (2026-11-05)
+
+- [x] The 17:13 crash (dump
+      `C:\Users\Ginld\XercesDev\dumps\bench-20261105\crash-2026-11-05-17-13-04.dmp`;
+      the frame-time bench's run 5 of 15, `s240`, the D3 stack on Cheese Cube,
+      `C:\Users\Ginld\XercesDev\bench\20261105-fps\runs\20261105-171239-s240`).
+      The cause was found in the dump and confirmed by a second, independent
+      read of it, before the fix. Upstream's `IN_SetActiveDevice_stub`
+      (`client_patches.cpp`, from upstream f8f7b735, "Fix a crash when switching
+      between controller and keyboard in the menus") runs a call made off the
+      main thread in the next main frame (`scheduler::once`). A mouse-button
+      change on the game window while the game loads reaches `IN_MouseEvent` on
+      the window thread while `primaryLocalClientNum` is still -1. The deferred
+      call then ran in the first main frame with local client -1, and the engine
+      indexed its per-local-client tables with it: the fault is in
+      `Storage_IsFileReady` with controller -1. The game log ends at
+      `loader.plan.applied` (phase `frontend`, the first main frame), with
+      nothing from Xerces after it; the bench script logged "menu after 25.4 s",
+      then the crash dialog (`crash_load`).
+- [x] The same log signature in two map-check runs on `XercesHome-maps`, the D3
+      stack, no dumps taken: 12:52 (`zm_mw2rust`) and 12:55 (`zm_ccube`). Both
+      are "the game ended after 0 s of loading" in
+      `C:\Users\Ginld\XercesDev\map-checks\results.jsonl`, with the journal left
+      in `frontend` and the game log ending at `loader.plan.applied`. Their
+      cause is inferred from that signature, not read from a dump. The 12:53 run
+      (`zm_mw2rust`) ended 9.5 s into the map's load and is not counted with
+      them.
+- [x] Fix (`xerces_core/active_device`): the hook checks the local client where
+      it calls the original, on the direct path and in the deferred call, and
+      drops a call for a local client outside 0 to `LOCAL_CLIENT_COUNT` - 1. The
+      first drop logs `xerces.input.active_device_dropped` at info, with the
+      local client, the device and whether the call was deferred; later drops
+      are not logged. No engine address is added. `game/symbols/in.hpp` names
+      the parameter a local client number (`LocalClientNum_t`, the same 32-bit
+      argument as the `ControllerIndex_t` it had). Unit tests in
+      `test_active_device.cpp`. Not run in the game.
+- [ ] In the game, with your go-ahead, on a modded launch: click on the game
+      window and move the mouse over it while the game loads, before the menu.
+      The game reaches the menu; the log may hold one
+      `xerces.input.active_device_dropped` with `local_client` -1 and `deferred`
+      true. In the menu, switching between a controller and the keyboard still
+      changes the button prompts (upstream's fix still works). Then rerun the
+      frame-time bench's `s240` runs and map-check on Cheese Cube with the
+      stack, and note whether "the game ended after 0 s of loading" comes back.
+
 ### Performance instrumentation (2026-11-05)
 
 What DESIGN.md 12.2 describes was built on `launcher/perf-probe` and covered by

@@ -17,6 +17,8 @@
 #include <utils/string.hpp>
 
 #include <xerces/frame_pacing.hpp>
+#include <xerces/runtime.hpp>
+#include <xerces_core/active_device.hpp>
 
 #include <mmeapi.h>
 
@@ -478,16 +480,44 @@ void CL_CompositeRender_stub() {
 }
 
 utils::hook::detour IN_SetActiveDevice_hook;
-void IN_SetActiveDevice_stub(const game::ControllerIndex_t controllerIndex,
+xerces_core::active_device_filter active_device_filter;
+
+// The original, only for a local client the engine has (0 or 1). A
+// mouse-button change on the game window while the game loads reaches
+// IN_MouseEvent on the window thread before there is a primary local client
+// (-1); deferred below, that call ran in the first main frame, and the engine
+// indexed its per-local-client tables with -1 (a fault in Storage_IsFileReady
+// with controller -1, dump of 2026-11-05 17:13). The check is here, where the
+// original is called, so the direct and the deferred call both pass it.
+void call_IN_SetActiveDevice(const game::LocalClientNum_t localClientNum,
+                             const int32_t device, const bool force,
+                             const bool deferred) {
+  using verdict = xerces_core::active_device_filter::verdict;
+  const verdict decision =
+      active_device_filter.check(localClientNum, game::LOCAL_CLIENT_COUNT);
+  if (decision == verdict::call) {
+    IN_SetActiveDevice_hook.invoke<void>(localClientNum, device, force);
+    return;
+  }
+  if (decision == verdict::drop_first) {
+    xerces_runtime::log_info(
+        "xerces.input.active_device_dropped",
+        "IN_SetActiveDevice for a local client the engine does not have was "
+        "dropped (logged once)",
+        "{\"local_client\":" + std::to_string(int32_t(localClientNum)) +
+            ",\"device\":" + std::to_string(device) +
+            ",\"deferred\":" + (deferred ? "true" : "false") + "}");
+  }
+}
+
+void IN_SetActiveDevice_stub(const game::LocalClientNum_t localClientNum,
                              const int32_t device, const bool force) {
   if (game::sys::Sys_IsMainThread()) {
-    IN_SetActiveDevice_hook.invoke<void>(controllerIndex, device, force);
+    call_IN_SetActiveDevice(localClientNum, device, force, false);
     return;
   }
   scheduler::once(
-      [=] {
-        IN_SetActiveDevice_hook.invoke<void>(controllerIndex, device, force);
-      },
+      [=] { call_IN_SetActiveDevice(localClientNum, device, force, true); },
       scheduler::main);
 }
 
