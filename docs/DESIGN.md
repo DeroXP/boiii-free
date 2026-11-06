@@ -2416,8 +2416,9 @@ import-table hooks and detours (listed), the small TLS helper DLL that upstream
 extracts to `%TEMP%`, and window subclassing used only for UI input. Xerces does
 not inject into other processes, install drivers, or load plugins in release
 builds (5.9). Every release has checksums and builds from documented, pinned
-tools so anyone can rebuild and compare. The loader and TLS helper are on the
-pending fence-review list before anything about them changes.
+tools so anyone can rebuild and compare. The TLS helper was reviewed on
+2026-11-05 and is not fenced (`docs/FENCED.md`); the loader is still on the
+pending fence-review list before anything about it changes.
 
 ### 16.4 Code signing (deferred)
 

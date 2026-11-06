@@ -38,8 +38,32 @@ Pending classification (treat as fenced until reviewed):
 `src/client/game/structs/live/core.hpp` (licence verification bits),
 `src/client/game/structs/dw/core.hpp` (licence error codes),
 `src/client/game/structs/sys.hpp`, `src/client/game/symbols/lua/cod/api.hpp`,
-`src/client/loader/**`, the game load and TLS handling in `src/client/main.cpp`,
-and the `TLS_DLL` resource.
+`src/client/loader/**`, and the game load and TLS handling in
+`src/client/main.cpp`.
+
+Reviewed, not fenced (2026-11-05, review asked for by the user): the TLS helper,
+meaning `src/tlsdll/**` (`dllmain.cpp`, `tlssup.cpp`, `resource.rc`,
+`app.manifest`), the `tlsdll` project in `premake5.lua` and the `TLS_DLL`
+resource that embeds `tlsdll.dll` in `boiii.exe`. It is loader plumbing. The DLL
+holds one 8 KiB `thread_local` block and a TLS directory, so when Windows loads
+it, Windows gives it a TLS index and every thread a block of that size.
+`src/client/loader/tls.cpp` extracts and loads it, and `load_tls` in
+`src/client/loader/loader.cpp` gives that index and block to the game
+executable, which the client maps itself and whose TLS Windows does not set up
+for it. Nothing in it checks ownership, licences or file integrity, or deals
+with Arxan or TAC. Upstream added it in 2022 (e752501d "Finish process wrapper",
+564e5e40 "Fix tls dll"); the later commits to these files are style, formatting
+and build changes by their titles, and the comments and pragmas of `tlssup.cpp`
+did not change in meaning. What was read: `dllmain.cpp`, `resource.rc` and
+`app.manifest` in full; `tlssup.cpp` only its comments, pragmas and section
+names (so that its rewrite stays clean-room), together with the symbols,
+sections and TLS directory of the built `tlsdll.dll`; the `tlsdll` premake
+project; the `git log --follow` history of these files. Also read, but not
+reclassified, so they stay pending: `src/client/loader/**` (read in full;
+`tls.cpp` and `load_tls` are TLS plumbing, but `component_interface.hpp` orders
+the fenced Arxan and `steam_proxy` components), and in `src/client/main.cpp`
+only `load_process`, `get_tls_callbacks`, `run_tls_callbacks`, `tls_runner` and
+the part of `main` that loads the game.
 
 Do not call or build on (not fenced as code, but Xerces flows never use them;
 see DESIGN.md D15): upstream's Workshop and map downloaders, meaning
