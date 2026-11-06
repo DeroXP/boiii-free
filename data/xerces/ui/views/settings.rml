@@ -309,6 +309,7 @@
 			<div class="statement">
 				<p>A crash report holds the crash's code, the game mode, map and mods, the Xerces and game versions, this PC's Windows version, CPU, graphics card and driver, RAM and display, the last lines of the game's and Xerces' logs (without chat), and a small dump of the threads' stacks. Your user name, player names, folders and server addresses are removed; the rest of the stack memory is raw and can hold bits of what the game was doing. It is tied to a random id kept in your Xerces folder, never to your name or your hardware, and the server deletes it after 90 days.</p>
 				<p>Never sent: usage data or analytics, your Steam id or game identity, full crash dumps, your settings, packs or files.</p>
+				<p>Voice chat in the game reaches the other players. Xerces starts a new game profile on push-to-talk (talk key B unless you rebind it) and leaves a profile you already have as it is. Not yet checked in the game.</p>
 			</div>
 			<div class="field">
 				<div class="field-text">

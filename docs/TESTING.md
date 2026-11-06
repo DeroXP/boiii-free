@@ -780,6 +780,31 @@ from an unzipped package outside the repository:
 - [ ] The first host or join shows the firewall prompt for "BOIII"
       (`KNOWN_ISSUES.md`).
 
+### Voice chat starts as push-to-talk (2026-11-05)
+
+Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The
+game keeps the choice in the player's profile (`snd_voicechat_open_mic`), so
+Xerces sets push-to-talk only when the game has no profile yet
+(`boiii_players\user_settings_<n>.cgp`), with one attempt from the first front
+end's Lua (DESIGN.md 10.5). The talk key is B (`+talk` in the game's default
+bindings).
+
+- [ ] With `boiii_players` moved aside for the test (put it back after), so the
+      game makes a new profile: the game log has `xerces.voice.default_due`,
+      then `xerces.voice.push_to_talk` (not `xerces.voice.not_set`) once the
+      front end has loaded; the game's voice options show Push to talk on; and
+      `boiii_players\user_settings_0.cgp` exists after the game is closed. After
+      a match, back in the front end, the log has no second line from Xerces
+      about voice. After a restart the switch is still on and the log says
+      `xerces.voice.kept`. With a second player in the lobby, they hear you only
+      while you hold B.
+- [ ] Then turn Push to talk off in the game and restart: it stays off (the
+      player's choice is kept), and the log says `xerces.voice.kept`.
+- [ ] On an install that already has a profile (your own: the 2026-11-04 test
+      runs made `boiii_players\user_settings_0.cgp`): the log says
+      `xerces.voice.kept`, and the voice options show the same Push to talk
+      setting as before the start.
+
 ### Launcher (M3)
 
 `tools\build.ps1 -Launcher` builds `build\bin\x64\Release\Xerces.exe` from the
