@@ -2403,9 +2403,28 @@ pending fence-review list before anything about them changes.
   BOIII, itself based on boiii by momo5502 and contributors", with dates),
   `CREDITS`, `THIRD_PARTY_NOTICES` for every dependency and font, and an About
   and Legal page (GPL-3.0 section 5(d)). Corrected `VERSIONINFO`.
-- Rewrite `src/common/str.hpp`, which contains GPL-2.0-only kernel code
-  (incompatible with GPL-3.0 according to the FSF), and add a CI SPDX scan so
-  upstream merges cannot bring such code back.
+- Done (2026-11-05): `src/common/str.hpp` held GPL-2.0-only kernel code
+  (incompatible with GPL-3.0 according to the FSF) and is now a clean-room
+  rewrite. It was written from the old declarations, the kernel's documented
+  strscpy contract and the call sites in `src/`, without reading the old bodies.
+  Names, signatures and results stay the same: the number of characters copied,
+  or -E2BIG as a size_t (`strscpy_truncated`) when the source was cut, the count
+  is 0 or the count is above INT_MAX. The destination always ends in a NUL
+  unless nothing could be written. A black-box run of the old header against the
+  new one over 226,000 cases matched every result and every byte written. Two
+  differences remain, both safer: the string_view overloads stop at the end of
+  the view (the old ones read on to the next NUL; no caller passes a view that
+  ends early), and a null source copies as an empty string.
+  `src/xerces_tests/test_str.cpp` pins what the callers rely on, including the
+  compile-time mode table in `party.cpp`.
+- Done (2026-11-05): the CI scan, so upstream merges cannot bring such code
+  back. `tools/ci/check_licences.py` reads the code outside `deps/` and `docs/`
+  and fails on SPDX tags that are not GPL-3.0-compatible (or not yet reviewed),
+  GPL version 2 only notices, Linux kernel source headers and Microsoft runtime
+  source. `tlssup.cpp` is listed there as known until its rewrite (next item).
+  The first scan of the whole repository outside `deps/` found nothing else: the
+  files in `src/` under other licences are permissive (`str.cpp` ISC, `xxhash.h`
+  and MinHook's thread walk BSD-2-Clause, the RmlUi backends MIT).
 - Replace `src/tlsdll/tlssup.cpp` (Microsoft CRT source) with a clean-room
   version, after the fence review of the loader and TLS helper.
 - AGPL-3.0 `sqlite_orm` (if D1 brings it): servers advertise a source link in
