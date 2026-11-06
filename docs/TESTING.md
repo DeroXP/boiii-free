@@ -634,6 +634,27 @@ at the old settings.
 Not covered: a heavier map, PresentMon (displayed frames, present mode, CPU and
 GPU busy), more than 3 runs a side.
 
+### Voice chat starts as push-to-talk (2026-11-05)
+
+Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The
+game keeps the choice in the player's profile (`snd_voicechat_open_mic`), so
+Xerces sets push-to-talk once, from the front end's Lua, while `config.cfg` has
+no `xerces_voice_default_applied` line that is on (DESIGN.md 10.5). The talk key
+is B (`+talk` in the game's default bindings).
+
+- [ ] With `boiii_players` moved aside for the test (put it back after), so the
+      game makes a new profile and has no `config.cfg`: the game log has
+      `xerces.voice.default_due`, then `xerces.voice.push_to_talk` once the
+      front end has loaded; the game's voice options show Push to talk on; about
+      10 s later `boiii_players\user\config.cfg` has
+      `set xerces_voice_default_applied "1"`. After a restart the switch is
+      still on and the log says `xerces.voice.kept`. With a second player in the
+      lobby, they hear you only while you hold B.
+- [ ] Then turn Push to talk off in the game and restart: it stays off (the
+      player's choice is kept), and the log says `xerces.voice.kept`.
+- [ ] On an install that already has a `config.cfg` without the line (your own):
+      the first start sets push-to-talk once, the same way.
+
 ### Launcher (M3)
 
 `tools\build.ps1 -Launcher` builds `build\bin\x64\Release\Xerces.exe` from the

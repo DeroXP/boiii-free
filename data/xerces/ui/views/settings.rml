@@ -286,6 +286,7 @@
 			<div class="statement">
 				<p>Xerces sends no telemetry. Nothing about you, this PC or your games is sent anywhere.</p>
 				<p>If the game crashes, a crash report would only ever be uploaded when you agree to it for that one crash. Uploading is not built yet, so today nothing is uploaded at all.</p>
+				<p>In the game, voice chat starts as push-to-talk: other players hear you only while you hold B. The game's options change it.</p>
 			</div>
 			<div class="field">
 				<div class="field-text">

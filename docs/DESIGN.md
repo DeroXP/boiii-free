@@ -1696,9 +1696,32 @@ must say in `PRIVACY.md`:
   from hardware ids, survives reinstalls and is sent to every server you join
   (upstream behaviour, fenced). Xerces' backend never stores it and never uses
   it to authenticate anything; Xerces bans use Xerces accounts.
-- **Voice.** `beta` adds voice chat. Xerces defaults the microphone to off (or
-  push-to-talk), says that audio reaches everyone on the server, and accepts
-  voice only from authenticated session peers (11.2).
+- **Voice.** `beta` adds voice chat. Xerces starts it as push-to-talk (decided
+  2026-11-05; built the same day, not yet run in the game), says that audio
+  reaches other players, and accepts voice only from authenticated session peers
+  (11.2). The launcher's Settings, Privacy, says it in one line (not the
+  first-run privacy step: in the pseudo-locale its Finish button already sits at
+  the bottom edge of the default window).
+  - The game keeps the choice in the player's profile, not in a dvar: the "Push
+    to talk" switch in its voice options is the profile setting
+    `snd_voicechat_open_mic` (1 open mic, 0 push-to-talk;
+    `data/ui_scripts/lua_fixes`). No dvar has that name (looked up in the dvar
+    pool of a game dump), so `config.cfg` never holds it. The engine's
+    `cl_voice` (voice on or off) is not archived either.
+  - The talk key is the `+talk` bind, B in the game's default bindings
+    (`boiii_players\bindings_0.cfg`). Players change it in the game's key
+    bindings or with `bind <key> +talk` in the console.
+  - The profile cannot say whether the player ever chose, so Xerces keeps the
+    archived dvar `xerces_voice_default_applied` in `config.cfg`. While it is
+    absent or off, the client (`src/client/xerces/voice_default.cpp`, the rule
+    in `xerces_core/voice_default`) sets `xerces_voice_ptt_due`, and the front
+    end's Lua (`data/ui_scripts/xerces_voice`) sets push-to-talk in the profile
+    and turns the archived dvar on. From then on the switch is the player's and
+    Xerces never changes it. The client reads `config.cfg` as it starts, not at
+    the `dvars_loaded` step, which runs only when the file exists.
+  - Limits: a player who chose an open mic in BOIII gets push-to-talk once, at
+    Xerces' first start; deleting `config.cfg` sets it again at the next start;
+    a profile reset while `config.cfg` stays gets the game's own default.
 - **Discord.** Presence is off until you turn it on.
 - **Deletion.** Self-serve and immediate in the live database. Backups roll off
   on published schedules (30-day lifecycle on the dump bucket; Railway's own
