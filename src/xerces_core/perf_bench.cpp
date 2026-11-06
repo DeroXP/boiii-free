@@ -245,6 +245,21 @@ std::string swapchain_json(const swapchain_info &info) {
   out += ",\"present_flags\":" + std::to_string(info.present_flags);
   out += ",\"swapchain1\":" + boolean(info.swapchain1);
   out += ",\"swapchain2\":" + boolean(info.swapchain2);
+  out += ",\"flip_model\":" + json::quote(info.flip_model);
+  if (info.engine_swap_effect) {
+    out +=
+        ",\"engine_swap_effect\":" + std::to_string(*info.engine_swap_effect);
+    out += ",\"engine_swap_effect_name\":" +
+           json::quote(swap_effect_name(*info.engine_swap_effect));
+  } else {
+    out += ",\"engine_swap_effect\":null,\"engine_swap_effect_name\":null";
+  }
+  if (info.engine_flags) {
+    std::snprintf(flags, sizeof(flags), "0x%X", *info.engine_flags);
+    out += ",\"engine_flags\":" + json::quote(flags);
+  } else {
+    out += ",\"engine_flags\":null";
+  }
   return out + "}";
 }
 
@@ -282,7 +297,7 @@ std::string run_meta_json(const run_meta &meta) {
          "\"i,t_ms,dt_ms\"}";
   out += ",\n  \"flag_bits\": {\"1\": \"overlay_drew\", \"2\": "
          "\"sync_interval\", \"4\": \"present_status\", \"8\": "
-         "\"unfocused\", \"16\": \"new_chain\"}";
+         "\"unfocused\", \"16\": \"new_chain\", \"32\": \"tearing\"}";
   return out + "\n}\n";
 }
 

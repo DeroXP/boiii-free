@@ -3,6 +3,7 @@
 // The XERCES_BENCH frame probe and perf.swapchain (docs/DESIGN.md 12.2). See
 // perf_probe.hpp.
 
+#include "flip_model.hpp"
 #include "perf.hpp"
 #include "perf_probe.hpp"
 #include "runtime.hpp"
@@ -560,6 +561,8 @@ void on_first_present(IDXGISwapChain *chain, UINT sync_interval, UINT flags) {
     info.swapchain2 = true;
     chain2->Release();
   }
+  // -xerces-flip-model: the engine's own request and what became of it.
+  xerces_flip::describe(info);
   game_chain = chain;
   present_thread.store(GetCurrentThreadId(), std::memory_order_relaxed);
   swapchain_seen = info;
@@ -572,7 +575,9 @@ void on_first_present(IDXGISwapChain *chain, UINT sync_interval, UINT flags) {
             std::string(bench::swap_effect_name(info.swap_effect)) + ", " +
                 std::to_string(info.buffer_count) + " buffers, " +
                 std::to_string(info.width) + "x" + std::to_string(info.height) +
-                (info.windowed ? ", windowed" : ", fullscreen"),
+                (info.windowed ? ", windowed" : ", fullscreen") +
+                (info.flip_model == "off" ? std::string()
+                                          : ", flip model: " + info.flip_model),
             bench::swapchain_json(info));
       },
       scheduler::async);
@@ -580,7 +585,7 @@ void on_first_present(IDXGISwapChain *chain, UINT sync_interval, UINT flags) {
 
 void probe_present(IDXGISwapChain *chain, const probe_entry &entry,
                    std::int64_t before, std::int64_t after, HRESULT result,
-                   UINT sync_interval, bool overlay_drew) {
+                   UINT sync_interval, UINT present_flags, bool overlay_drew) {
   auto *ring = frames.load(std::memory_order_acquire);
   if (!ring) {
     return;
@@ -600,6 +605,9 @@ void probe_present(IDXGISwapChain *chain, const probe_entry &entry,
   }
   if (result != S_OK) {
     flags |= bench::frame_flag::present_status;
+  }
+  if ((present_flags & DXGI_PRESENT_ALLOW_TEARING) != 0) {
+    flags |= bench::frame_flag::tearing;
   }
   if (window_unfocused.load(std::memory_order_relaxed)) {
     flags |= bench::frame_flag::unfocused;

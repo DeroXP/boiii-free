@@ -87,6 +87,14 @@
 
 			<div class="field">
 				<div class="field-text">
+					<div class="field-name">Flip-model presentation (experimental)</div>
+					<div class="field-help">Windowed and borderless show frames the way fullscreen does, without the extra copy through the desktop. With V-Sync off, frames may tear. -xerces-flip-model. Turn it off if the picture freezes, goes black or the game crashes. Safe mode always leaves it off.</div>
+				</div>
+				<button id="flip-model" class="toggle" data-class-on="flip_model" data-event-click="toggle('flip_model')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="flip_model">On</span><span class="toggle-state" data-if="!flip_model">Off</span></button>
+			</div>
+
+			<div class="field">
+				<div class="field-text">
 					<div class="field-name">FPS limit</div>
 					<div class="field-help">com_maxfps, 0 to 1000; 0 means no limit. Type a number and press Enter, or use the slider. Empty: the game's setting.</div>
 					<div class="field-note">{{fps_note}}</div>
@@ -191,7 +199,7 @@
 			<div class="field field-stack">
 				<div class="field-text">
 					<div class="field-name">Extra launch flags</div>
-					<div class="field-help">Each a '-' then letters, digits, '-' or '_', separated by spaces, for example -console. Press Enter to save. Display mode, Skip all cinematics and Larger zone memory show up here too.</div>
+					<div class="field-help">Each a '-' then letters, digits, '-' or '_', separated by spaces, for example -console. Press Enter to save. Display mode, Flip-model presentation, Skip all cinematics and Larger zone memory show up here too.</div>
 				</div>
 				<input id="flags-field" type="text" class="text mono-field flags-field" maxlength="1000" data-attr-placeholder="flags_hint" data-value="flags" data-event-blur="commit('flags')"/>
 				<div class="field-error" data-if="flags_error != ''">{{flags_error}}</div>

@@ -14,6 +14,7 @@
 #include <cwctype>
 
 #include "db_pool.hpp"
+#include "flip_model.hpp"
 #include "ipc.hpp"
 #include "journal.hpp"
 #include "json.hpp"
@@ -77,10 +78,14 @@ launch_outcome preview_launch(const launch_inputs &in) {
     // experimental larger zone memory is a suspect of its own (the journal
     // says whether the crashed launch had it), so none of them has it,
     // whatever the settings say: the tests then compare like with like. The
-    // plan is checked against the stock pool too.
+    // plan is checked against the stock pool too. The experimental
+    // flip-model presentation is left out for the same reason: a crash or a
+    // black screen it causes must not be blamed on a mod (DESIGN.md 12.4).
     followup = *in.config;
     followup->extra_flags =
         with_flag(std::move(followup->extra_flags), db_pool::flag_name, false);
+    followup->extra_flags = with_flag(std::move(followup->extra_flags),
+                                      flip_model::flag_name, false);
   }
   const launcher_config &config = followup ? *followup : *in.config;
   launch_options options;

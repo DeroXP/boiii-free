@@ -10,6 +10,7 @@
 #include <utils/concurrency.hpp>
 #include <utils/hook.hpp>
 
+#include <xerces/flip_model.hpp>
 #include <xerces/perf_probe.hpp>
 
 #include <imgui.h>
@@ -443,15 +444,37 @@ HRESULT __stdcall present_stub(IDXGISwapChain *swap_chain, UINT sync_interval,
     drew_last_frame = shown;
   }
 
-  if (!probing) {
+  // Xerces: flip-model presentation (-xerces-flip-model,
+  // xerces/flip_model.hpp). On the chain it made a flip chain, Present gets
+  // the tearing flag when allowed, and the render targets bound before the
+  // flip are bound again after it. Any other chain, or the flag off: one
+  // atomic load.
+  const bool flipping = xerces_flip::is_flipped(swap_chain);
+  xerces_flip::present_call flip{};
+  if (flipping) {
+    xerces_flip::before_present(swap_chain, sync_interval, flags, flip);
+  }
+  UINT present_flags = flipping ? flip.flags : flags;
+
+  if (!probing && !flipping) {
     return present_hook.invoke<HRESULT>(swap_chain, sync_interval, flags);
   }
-  const std::int64_t before = xerces_perf::probe_clock();
-  const HRESULT result =
-      present_hook.invoke<HRESULT>(swap_chain, sync_interval, flags);
-  xerces_perf::probe_present(swap_chain, entry, before,
-                             xerces_perf::probe_clock(), result, sync_interval,
-                             drew);
+  const std::int64_t before = probing ? xerces_perf::probe_clock() : 0;
+  HRESULT result =
+      present_hook.invoke<HRESULT>(swap_chain, sync_interval, present_flags);
+  if (flipping && xerces_flip::tearing_refused(flip, result)) {
+    present_flags = flip.flags;
+    result =
+        present_hook.invoke<HRESULT>(swap_chain, sync_interval, present_flags);
+  }
+  const std::int64_t after = probing ? xerces_perf::probe_clock() : 0;
+  if (flipping) {
+    xerces_flip::after_present(flip);
+  }
+  if (probing) {
+    xerces_perf::probe_present(swap_chain, entry, before, after, result,
+                               sync_interval, present_flags, drew);
+  }
   return result;
 }
 
@@ -487,9 +510,15 @@ void setup_present_hook() {
   IDXGISwapChain *dummy_chain = nullptr;
   D3D_FEATURE_LEVEL fl{};
 
-  const HRESULT hr = D3D11CreateDeviceAndSwapChain(
-      nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION,
-      &sd, &dummy_chain, &dummy_device, &fl, &dummy_context);
+  HRESULT hr;
+  {
+    // Xerces: -xerces-flip-model's CreateSwapChain detour leaves this one be.
+    const xerces_flip::own_chain_scope own_chain;
+    hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr,
+                                       0, nullptr, 0, D3D11_SDK_VERSION, &sd,
+                                       &dummy_chain, &dummy_device, &fl,
+                                       &dummy_context);
+  }
 
   DestroyWindow(dummy_hwnd);
   UnregisterClassA(wc.lpszClassName, wc.hInstance);
@@ -500,6 +529,8 @@ void setup_present_hook() {
   // vtable index 8 = IDXGISwapChain::Present
   void **vtable = *reinterpret_cast<void ***>(dummy_chain);
   present_hook.create(vtable[8], present_stub);
+  // Xerces: with -xerces-flip-model, ResizeBuffers through the same vtable.
+  xerces_flip::on_present_hooked(dummy_chain);
 
   dummy_chain->Release();
   dummy_device->Release();

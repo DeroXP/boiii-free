@@ -391,6 +391,52 @@ TEST_CASE("shared launcher: culprit tests leave the larger zone memory off") {
          std::vector<std::string>{"-windowed", "-xerces-db-pool"}));
 }
 
+TEST_CASE("shared launcher: crash follow-ups leave flip model off") {
+  // The experimental flip-model presentation stays out of safe mode and the
+  // culprit tests, like the larger zone memory, so a crash or a black screen
+  // it causes is never blamed on a mod.
+  fake_setup setup("flip_model", true);
+  setup.config.extra_flags = {"-windowed", "-xerces-flip-model",
+                              "-xerces-db-pool"};
+  profile_for(setup.config, "zm").mods = {"fixture.alpha", "fixture.beta"};
+  launch_inputs in = setup.inputs(true);
+  in.modded = false;
+  launch_outcome out = launch_game(in, [] { return false; }, {});
+  REQUIRE(out.dry_run);
+  CHECK_EQ(out.command_line,
+           std::string("-launch -nointro -windowed -xerces-flip-model "
+                       "-xerces-db-pool"));
+
+  in.modded = true;
+  out = launch_game(in, [] { return false; }, {});
+  REQUIRE(out.dry_run);
+  CHECK(out.command_line.starts_with(
+      "-launch -nointro -windowed -xerces-flip-model -xerces-db-pool "
+      "-xerces-plan "));
+
+  const std::vector<std::string> half = {"fixture.alpha"};
+  in.mods = &half;
+  in.crash_followup = true;
+  out = launch_game(in, [] { return false; }, {});
+  REQUIRE(out.dry_run);
+  CHECK(out.command_line.find("xerces-flip-model") == std::string::npos);
+  CHECK(out.command_line.find("xerces-db-pool") == std::string::npos);
+  CHECK(
+      out.command_line.starts_with("-launch -nointro -windowed -xerces-plan "));
+
+  in.mods = nullptr;
+  in.crash_followup = false;
+  in.mods_off = true;
+  out = launch_game(in, [] { return false; }, {});
+  REQUIRE(out.dry_run);
+  CHECK_EQ(out.command_line, std::string("-launch -nointro -windowed"));
+
+  // Only for those launches: the setting itself stays on.
+  CHECK((setup.config.extra_flags ==
+         std::vector<std::string>{"-windowed", "-xerces-flip-model",
+                                  "-xerces-db-pool"}));
+}
+
 TEST_CASE("shared launcher: a pack becomes the profile") {
   mode_profile profile;
   profile.mods = {"old.mod"};

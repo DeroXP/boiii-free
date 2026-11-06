@@ -535,6 +535,37 @@ during a measurement window.
       `XERCES_BENCH_AUTO=ingame:15:60` writes one run after the level starts.
 - [ ] `XERCES_BENCH_OUT` under AppData or in the game folder logs
       `perf.bench.refused` and writes nothing.
+- [ ] Flip-model presentation (`-xerces-flip-model`, DESIGN.md 12.4 item 4;
+      built 2026-11-05, never run in the game). The launcher side was checked in
+      a dry run only: Settings, Display, "Flip-model presentation
+      (experimental)" puts `-xerces-flip-model` into `launcher.json`'s
+      `extra_flags` and takes it out again; the DXGI side was checked offline
+      with a scratch program (DESIGN.md 12.4 item 4). One session, with your
+      go-ahead, Cheese Cube, uncapped, 3 runs a side in A-B-B-A order:
+      `tools\dev\bench\game-bench.ps1 -Variant flip -ExtraFlags -xerces-flip-model -Dvars @{com_maxfps='0'} -OutDir C:\Users\Ginld\XercesDev\bench\<session> -Live`
+      against the same without `-ExtraFlags` (`-Variant w0`), then both again
+      with `-FullScreenMode 2` (borderless). In the game log:
+  - `xerces.flip_model.armed`, then `xerces.flip_model` at info: asked `discard`
+    with flags 0x2, made `flip_discard` with 0x802 (0x2 if the PC reports no
+    tearing support). A warning instead names the reason (for example
+    `hooks_not_ready`: the overlay's Present hook was not in place when the
+    engine made its chain), and the run proves nothing about flip model.
+  - `perf.swapchain`:
+    `flip_discard, 2 buffers, 3840x2160, windowed, flip model: applied` with
+    `engine_swap_effect` 0.
+  - No `xerces.flip_model.resize_failed` or `xerces.flip_model.tearing_refused`.
+  - On screen: the menu, the loading screen and the level draw and keep updating
+    (no black or frozen picture) windowed, borderless and in exclusive
+    fullscreen (`FullScreenMode 1`: the chain goes fullscreen through
+    `SetFullscreenState`); a resolution or window size change keeps drawing
+    (`ResizeBuffers`); Alt+Tab out and back works; the download overlay's dialog
+    still shows and takes clicks (join a server whose map is missing).
+  - Numbers: `xerces_cli bench compare --a <w0> --b <flip>` on the probe CSVs.
+    The goal is windowed and borderless close to exclusive fullscreen's 345 FPS
+    and its p99 and 1% low (DESIGN.md 12.4 item 4). The flags column has 32 on
+    windowed and borderless frames with V-Sync off, and never with V-Sync on. If
+    you run PresentMon, its PresentMode column should read a flip mode (composed
+    flip windowed, independent flip borderless) instead of a copy.
 
 ### Launcher (M3)
 

@@ -52,9 +52,11 @@ inline probe_entry probe_enter() {
 void on_first_present(IDXGISwapChain *chain, UINT sync_interval, UINT flags);
 
 // After the original Present returned (render thread, probe armed only).
+// present_flags are the flags the original got (with -xerces-flip-model they
+// may hold DXGI_PRESENT_ALLOW_TEARING).
 void probe_present(IDXGISwapChain *chain, const probe_entry &entry,
                    std::int64_t before, std::int64_t after, HRESULT result,
-                   UINT sync_interval, bool overlay_drew);
+                   UINT sync_interval, UINT present_flags, bool overlay_drew);
 
 // The thread that presents the game's swap chain (0 until seen).
 std::uint32_t present_thread_id();

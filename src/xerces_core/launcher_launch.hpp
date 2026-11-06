@@ -85,6 +85,8 @@ struct launch_inputs {
   // It leaves the experimental larger zone memory (-xerces-db-pool) out
   // whatever the settings say, so safe mode and every test run on the same
   // stock pool, and a crash the setting causes is never blamed on a mod.
+  // The experimental flip-model presentation (-xerces-flip-model) is left
+  // out too.
   bool crash_followup = false;
   std::optional<std::string> connect; // "+connect host:port" (Servers)
   // Instead of the profile's (a culprit-search test, with crash_followup).
