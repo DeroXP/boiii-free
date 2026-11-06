@@ -48,11 +48,12 @@ if harfbuzz then
 
   -- The engine from RmlUi's sample (MIT, RmlUi's LICENSE.txt), built from RmlUi's
   -- folder except FontFaceHandleHarfBuzz.cpp, whose copy in src/xerces_rmlui_harfbuzz
-  -- keeps the pen's fractions (the file says what changed). As the sample's
-  -- CMakeLists.txt says, it uses RmlUi's private Core headers and the FreeType
-  -- helpers inside RmlUi's core, which a Windows DLL build of RmlUi does not export;
-  -- xerces_rmlui is a static library, so they link. The sample's folder comes after
-  -- Source/Core, so RmlUi's own headers (it has a TextureLayout.h too) win there.
+  -- keeps the pen's fractions within words (the file says what changed).
+  -- As the sample's CMakeLists.txt says, it uses RmlUi's private Core headers and
+  -- the FreeType helpers inside RmlUi's core, which a Windows DLL build of RmlUi
+  -- does not export; xerces_rmlui is a static library, so they link. The sample's
+  -- folder comes after Source/Core, so RmlUi's own headers (it has a
+  -- TextureLayout.h too) win there.
   project("xerces_rmlui_harfbuzz")
   kind("StaticLib")
   language("C++")

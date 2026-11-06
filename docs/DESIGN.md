@@ -1274,12 +1274,17 @@ HarfBuzz font engine from `Samples/basic/harfbuzz`, MIT, linked statically as
 its private Core headers need), and defines `XERCES_LAUNCHER_HARFBUZZ`. Without
 the folder (CI, other PCs) the launcher builds and runs with RmlUi's FreeType
 engine as before. Either way the log's `launcher.font.engine` says which engine
-runs and how the text is tagged. Every document carries the launcher language as
-`lang`, and the engine shapes it in that language's script
-(`xerces_core::text_language_for`: English and the pseudo-locale, `en-XA`, are
-Latin; a translation gets its language's script, or HarfBuzz reads it from the
-text). About lists HarfBuzz and the engine, and `data/xerces/licenses` holds
-their licence texts.
+runs and how the text is tagged. The context's root carries the launcher
+language as `lang`, which every document inherits, and the engine shapes the
+text in that language's script (`xerces_core::text_language_for`: English and
+the pseudo-locale, `en-XA`, are Latin; a translation gets its language's script,
+or HarfBuzz reads it from the text). The language and the UI scale are set
+before the first document loads: RmlUi lays a document out as it loads it, and
+changing either afterwards lays out and shapes all its text again. About lists
+HarfBuzz and the engine, and `data/xerces/licenses` holds their licence texts;
+`HarfBuzz.txt` also has those of the Microsoft Universal Shaping Engine data
+(MIT) and the Unicode data (Unicode License V3) that HarfBuzz's built-in tables
+are generated from.
 
 What it changed, from dry-run captures of every screen at 100 and 150 percent
 and the pseudo-locale (docs/TESTING.md, Launcher): Inter Tight's OpenType
@@ -1287,9 +1292,17 @@ kerning now applies, so "Yo" in "Your packs" closes by 2 px at 100 percent and 3
 px at 150, "Pa" in the Packs title and "ay" in "Display" by 1 px; the strings
 measured get 0 to 7 px narrower, and nothing wraps, clips or moves otherwise.
 The first frame is unchanged: 212 ms against 210 ms (medians of 20 dry starts),
-211 against 211 when the two builds alternate; the screen is ready about 10 ms
-later on the main thread, still well before the GPU worker. `Xerces.exe` grows
-from 4.3 to 5.0 MB.
+211 against 211 when the two builds alternate. Since the review fixes (one
+layout per document, below) the screen is ready as soon as with RmlUi's FreeType
+engine: Home shown in 27.7 ms against 28.8, the first screen loaded at 60 ms
+against 62, first frame 223 against 226 (alternating starts on a busier PC).
+`Xerces.exe` grows from 4.3 to 5.0 MB, and the running launcher by about 5 MB
+(working set 93 against 88 MB on Mods at 150 percent, private bytes 196 against
+190): each weight and size gets its own HarfBuzz face and a second FreeType face
+that HarfBuzz opens on the same font data (`hb_ft_font_set_funcs`) to read the
+hinted advances at that size without resizing the face RmlUi shares between
+sizes. One HarfBuzz face per font across sizes, or giving HarfBuzz the advances
+RmlUi has already loaded, would cut that if it ever matters.
 
 Three things in the parts did not work as shipped, and are handled:
 
@@ -1304,11 +1317,23 @@ Three things in the parts did not work as shipped, and are handled:
   pixel wider at 13 to 15 px: text ran tight and "RUST V5" read "RUSTV5". The
   copy of `FontFaceHandleHarfBuzz.cpp` in `src/xerces_rmlui_harfbuzz` uses the
   hinted advances RmlUi's FreeType engine uses and keeps the pen in 26.6 fixed
-  point, rounding only where a glyph lands; the file lists its changes.
+  point, rounding where a glyph lands and where white space starts or ends; the
+  file lists its changes. The white-space edges matter because RmlUi lays a line
+  out as the sum of its words, each measured alone, and draws the line shaped
+  whole: rounding the pen once for the whole line (the first version) drew some
+  lines a pixel or more wider than their box (4,647 of 96,256 lines in a check
+  of every launcher string, weight and size from 12 to 120 px), enough for an
+  ellipsis on text that fits. Rounding also where RmlUi splits words draws every
+  line within its box and keeps both the layout and the kerning inside words;
+  rounding each advance would fit too, but drops most kerning under half a pixel
+  (two thirds of it at 14 px). This depends on how RmlUi 6.3 splits text
+  (`ElementText`), so recheck it when RmlUi is updated (docs/TESTING.md has the
+  check).
 - Shaping a word costs about 4 µs against 0.1 µs for adding advances, and RmlUi
   measures the same words many times while laying out: showing Home took about
   70 ms instead of 29. The same copy keeps each handle's measured widths, which
-  brings it to 39 ms.
+  brings it to 39 ms, and laying each document out once (the language and scale
+  set before it loads) to 28 ms.
 
 The spike's "display text runs about 2 % wider" is mostly not kerning: with
 kerning in, headings are still up to 9 % wider than the mockup ("Settings" at 40

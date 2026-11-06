@@ -786,11 +786,79 @@ with `100`, `150` (every screen) and `pseudo-100` (Home, Mods, Settings),
 - [x] Startup, `tools\dev\bench\launcher-bench.ps1 -Runs 20`: first frame 209.9
       ms before and 212.4 after (medians; p90 220.1 and 222.1); with the two
       builds alternating, 12 starts each, 211.2 and 211.0. The first screen is
-      loaded at 57.9 and 67.4 ms, Home is shown in 29.8 and 39.4 ms.
+      loaded at 57.9 and 67.4 ms, Home is shown in 29.8 and 39.4 ms (see the
+      review fixes below: now 60.2 and 27.7 ms).
 - [x] About lists HarfBuzz 15.0.0 and RmlUi's HarfBuzz engine, and only in a
-      build that has them; `data/xerces/licenses` holds both licence texts.
+      build that has them (captured from both builds after the review, below);
+      `data/xerces/licenses` holds the licence texts.
 - [ ] You looking at the text on your display, at your usual scale.
 - [ ] A translation in a script other than Latin, or written right to left.
+
+Review fixes, run the same evening by Claude (dry launches only, same home).
+Captures in `C:\Users\Ginld\XercesDev\scratch\harfbuzz\fix\captures`: `head\`
+(the build before these fixes, kept as `Xerces-head.exe`) and `new\` with `100`
+and `150` (every screen and About) and `pseudo-100` (Home, Mods, Settings);
+`no-harfbuzz\` (About, Home, Packs, Settings) and `old\` (Home, Packs, Settings,
+from the build before HarfBuzz) at 100 and 150. The scratch programs and timing
+scripts are next to them in `scratch\harfbuzz\fix`.
+
+- [x] Text is never drawn wider than it is laid out.
+      `tools\dev\launcher\font-width-check.ps1` drives the built engine as
+      RmlUi's `ElementText` does, the line as the sum of its words measured one
+      by one, then drawn whole, for all 752 launcher strings in Inter Tight 400
+      to 900 and IBM Plex Mono Regular and Medium at 16 sizes from 12 to 120 px:
+      0 of 96,256 lines drawn wider (built against the engine from before the
+      fix: 4,647, by up to 5 px, exit code 1), and the whole-string width always
+      equals the drawn width. Lines can be drawn up to a pixel or two narrower
+      than laid out where Inter Tight kerns a comma or full stop against the
+      space after it, which RmlUi measures in different words.
+- [x] Layout is as before the fix: every box keeps its width (the scratch
+      `widths.cpp` finds the laid-out widths unchanged for every string, weight
+      and size it tried), and single words draw the same; letters after a word
+      space move by up to a pixel. Against `head\`, Home at 100 percent changes
+      only inside three lines of text (a word after a space, and the underline
+      of a link that ends after one); nothing wraps or clips on any screen, and
+      the pseudo-locale's overflows are unchanged.
+- [x] One layout per document: the root's `lang` and the UI scale are set before
+      the documents load, so each document is laid out and shaped once (a dry
+      run logged `"lang":"en"` and the final scale on every document as it
+      loaded; the check was then removed). Startup times are in the table below
+      the list.
+- [x] Memory, 3 s into a dry start on Mods, four starts each: working set 93.1
+      to 93.4 MB with HarfBuzz against 88.0 to 88.2 MB without at 150 percent,
+      private bytes 195 to 197 MB against 190 to 191 (90 to 91 and 86 to 88 MB
+      at 100 percent). About 5 to 6 MB for HarfBuzz; DESIGN.md 7.1 says where.
+- [x] A build without HarfBuzz (a third-party folder holding only `rmlui` and
+      `freetype`) logs `"engine":"freetype"`, draws Home, Packs and Settings at
+      100 and 150 percent pixel for pixel as the build before HarfBuzz, and its
+      About has no HarfBuzz entries (`no-harfbuzz\100\about.png`,
+      `no-harfbuzz\150\about.png`).
+- [x] About with HarfBuzz names the Microsoft Universal Shaping Engine data
+      (MIT) and the Unicode data (Unicode License V3) built in with it, and
+      `data/xerces/licenses/HarfBuzz.txt` has HarfBuzz's `COPYING`, its
+      `src/ms-use/COPYING` and the Unicode License V3 (`new\150\about.png`).
+- [x] Kerning seen in the captures: "Yo" in "Your packs" closes as before. Inter
+      Tight also kerns some pairs apart: "rf" in "HarfBuzz" on About opens by
+      0.64 px at 150 percent and is drawn a pixel wider than RmlUi's FreeType
+      engine draws it, which reads like a gap next to FreeType's wide hinted
+      "r". That is the font's kerning, not a layout fault.
+
+Startup after the review fixes, builds alternating, 12 dry starts each at this
+PC's 150 percent (`interleave.ps1` in the scratch folder; medians in ms). The
+first two columns are one run, the last two another. This PC ran about 15 ms
+slower than earlier in the day for every build.
+
+| Measure                 | Before the fix | Fixed | Before HarfBuzz | Fixed |
+| ----------------------- | -------------- | ----- | --------------- | ----- |
+| Home shown              | 41.1           | 28.8  | 28.8            | 27.7  |
+| First screen loaded     | 75.5           | 62.2  | 61.7            | 60.2  |
+| First frame (gate: 250) | 228.4          | 229.1 | 225.9           | 223.2 |
+
+To repeat the width check after changing `src/xerces_rmlui_harfbuzz` or updating
+RmlUi or HarfBuzz: build the launcher with HarfBuzz, then
+`tools\dev\launcher\font-width-check.ps1 -ToolsDir C:\Users\Ginld\XercesDev\tools`
+(exit code 0 when every line fits; it builds the check into
+`build\font-width-check`).
 
 ### Conflict system (M2)
 

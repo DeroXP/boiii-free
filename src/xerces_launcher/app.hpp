@@ -184,7 +184,8 @@ private:
   std::string language_ = "en";
   // English -> translation; for "pseudo", the template's keys (values empty).
   std::map<std::string, std::string> strings_;
-  // What the font engine shapes language_ as; every document's lang attribute.
+  // What the font engine shapes language_ as; the lang attribute of the
+  // context's root, which every document inherits.
   xerces_core::text_language text_language_;
 
   double started_ = 0;

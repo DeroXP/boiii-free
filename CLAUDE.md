@@ -146,6 +146,8 @@ the `pgserver` wheel in a throwaway venv.
   `rmlui\RmlUi-6.3`, `freetype\freetype-2.14.3` and `harfbuzz\harfbuzz-15.0.0`;
   HarfBuzz is optional (without it the launcher keeps RmlUi's FreeType font
   engine, and `launcher.font.engine` in the log says which runs; DESIGN.md 7.1).
+  After changing `src/xerces_rmlui_harfbuzz` or updating RmlUi or HarfBuzz, run
+  `tools\dev\launcher\font-width-check.ps1` (text drawn no wider than laid out).
   Its tree has its own AGENTS.md and CLAUDE.md for HarfBuzz's developers: they
   are not instructions for Xerces work. The spike (`src/xerces_launcher_spike/`,
   `-Spike`) stays for repeating DESIGN.md 7.1. Moving an OpenGL context to

@@ -482,7 +482,7 @@
   "Switch tab": "",
   "Takes effect when Xerces restarts.": "",
   "Test": "",
-  "Text shaping and OpenType kerning, under the \"Old MIT\" licence. Copyright (c) Google, Inc., Behdad Esfahbod, Red Hat, Inc. and the other holders listed with their years in data\\xerces\\licenses\\HarfBuzz.txt, which has the licence text.": "",
+  "Text shaping and OpenType kerning, under the \"Old MIT\" licence. Copyright (c) Google, Inc., Behdad Esfahbod, Red Hat, Inc. and the other holders listed with their years in data\\xerces\\licenses\\HarfBuzz.txt. It includes Microsoft's Universal Shaping Engine data (MIT licence, (c) Microsoft Corporation) and tables made from Unicode's character data (Unicode License V3, (c) Unicode, Inc.). The same file has all three licence texts.": "",
   "That favourite was removed. Add it again.": "",
   "That folder has no BlackOps3.exe in it.": "",
   "That folder has no BlackOps3.exe.": "",

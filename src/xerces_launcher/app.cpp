@@ -634,9 +634,6 @@ bool app::load_view(view &v, const view_info &info) {
     return false;
   }
   v.doc = doc;
-  // Inherited by all the text in it: the font engine shapes it as this
-  // language (font_engine.hpp).
-  doc->SetAttribute("lang", text_language_.tag);
   doc->SetClass(std::string("view-") + info.id, true);
   if (doc->GetElementById("header")) {
     wire_shell(doc);
@@ -1221,6 +1218,15 @@ int app::run() {
                  ",\"rtl\":" + rtl + "}");
   }
   load_fonts();
+  // The language and the UI scale go on before any document loads, so that
+  // each document is laid out and shaped once: LoadDocument lays a document
+  // out at once, and changing either afterwards lays out and shapes all its
+  // text again. Documents are children of the context's root and inherit
+  // its lang, which the font engine shapes the text as (font_engine.hpp);
+  // the Update gives the root that computed value.
+  context_->GetRootElement()->SetAttribute("lang", text_language_.tag);
+  apply_look(); // the scale only: there are no documents yet
+  context_->Update();
   mark("rmlui and fonts");
 
   // Screens: data models first (documents bind to them while loading).
@@ -1239,7 +1245,6 @@ int app::run() {
   }
   dialog_doc_ = context_->LoadDocument(generic(paths.data / "ui" / "dialog.rml"));
   if (dialog_doc_) {
-    dialog_doc_->SetAttribute("lang", text_language_.tag);
     listen(dialog_doc_->GetElementById("dialog-buttons"), "click",
            [this](Rml::Event &event) {
              for (Rml::Element *e = event.GetTargetElement(); e;

@@ -7,10 +7,18 @@
 //   engine uses, because the glyph images are hinted too (FreeTypeInterface).
 //   The sample's unhinted advances placed hinted glyphs that are up to a pixel
 //   wider at 13 to 15 px closer than they are drawn: "RUST V5" read "RUSTV5".
-// - The pen moves in HarfBuzz's 26.6 fixed point and is rounded only where a
-//   glyph is placed and for the width. The sample dropped the fraction of every
-//   advance (x_advance >> 6), so a kerning of -0.3 px moved a letter by a
-//   whole pixel and unhinted text came out half a pixel per letter too tight.
+// - The pen moves in HarfBuzz's 26.6 fixed point and is rounded where a glyph
+//   is placed, where white space starts or ends, and for the width. The sample
+//   dropped the fraction of every advance (x_advance >> 6), so a kerning of
+//   -0.3 px moved a letter by a whole pixel and unhinted text came out half a
+//   pixel per letter too tight. RmlUi 6.3 lays a line out as the sum of its
+//   words, each with the space before it, measured one by one with
+//   GetStringWidth (ElementText::GenerateLine and BuildToken split text where
+//   white space starts or ends), and draws the line shaped whole with
+//   GenerateString. Rounding the pen at those same places makes the drawn
+//   line as wide as the sum, so text is never drawn wider than its box (a
+//   rounded 26.6 sum of the whole line could be a pixel wider and get an
+//   ellipsis it does not need). Recheck this when RmlUi changes how it splits.
 // - GetStringWidth keeps the widths it measured, per handle, as shaping costs
 //   far more than RmlUi's FreeType engine adding advances.
 // The rest of the engine is built unmodified from RmlUi's folder; this file
@@ -56,6 +64,17 @@ static int PenToPixels(int pen)
 static int LetterSpacing26_6(const TextShapingContext& text_shaping_context)
 {
 	return (int)text_shaping_context.letter_spacing * 64;
+}
+
+// Xerces: the pen goes to a whole pixel where white space starts or ends, which is where RmlUi splits the text it
+// measures (StringUtilities::IsWhitespace; tabs and line breaks are control characters, skipped before this).
+static void RoundPenAtWhiteSpaceEdge(int& pen, Character character, bool& previous_was_white_space, bool& first_glyph)
+{
+	const bool white_space = (character == Character(' '));
+	if (!first_glyph && white_space != previous_was_white_space)
+		pen = PenToPixels(pen) * 64;
+	previous_was_white_space = white_space;
+	first_glyph = false;
 }
 
 // Xerces: widths measured before, per handle. RmlUi measures the same words again and again while it lays a
@@ -167,6 +186,7 @@ int FontFaceHandleHarfBuzz::GetStringWidth(StringView string, const TextShapingC
 	// Xerces: the pen in 26.6.
 	int width = 0;
 	const int letter_spacing = LetterSpacing26_6(text_shaping_context);
+	bool previous_was_white_space = false, first_glyph = true;
 
 	// Apply text shaping.
 	hb_buffer_t* shaping_buffer = hb_buffer_create();
@@ -191,6 +211,8 @@ int FontFaceHandleHarfBuzz::GetStringWidth(StringView string, const TextShapingC
 		// Don't render control characters.
 		if (IsControlCharacter(character))
 			continue;
+
+		RoundPenAtWhiteSpaceEdge(width, character, previous_was_white_space, first_glyph); // Xerces
 
 		const FontGlyphIndex glyph_index = glyph_info[g].codepoint;
 		int extra_glyph_index_offset = 0;
@@ -382,6 +404,7 @@ int FontFaceHandleHarfBuzz::GenerateString(RenderManager& render_manager, Textur
 		// Xerces: the pen in 26.6 until the end of the layer.
 		line_width = 0;
 		const int letter_spacing = LetterSpacing26_6(text_shaping_context);
+		bool previous_was_white_space = false, first_glyph = true;
 
 		// Set the mesh and textures to the geometries.
 		for (int tex_index = 0; tex_index < num_textures; ++tex_index)
@@ -409,6 +432,8 @@ int FontFaceHandleHarfBuzz::GenerateString(RenderManager& render_manager, Textur
 			// Don't render control characters.
 			if (IsControlCharacter(character))
 				continue;
+
+			RoundPenAtWhiteSpaceEdge(line_width, character, previous_was_white_space, first_glyph); // Xerces
 
 			const FontGlyphIndex glyph_index = glyph_info[g].codepoint;
 			int extra_glyph_index_offset = 0;

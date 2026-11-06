@@ -48,7 +48,7 @@
 			</div>
 			<div class="about-item" data-if="harfbuzz">
 				<div class="about-name">HarfBuzz 15.0.0</div>
-				<div class="about-text">Text shaping and OpenType kerning, under the "Old MIT" licence. Copyright (c) Google, Inc., Behdad Esfahbod, Red Hat, Inc. and the other holders listed with their years in data\xerces\licenses\HarfBuzz.txt, which has the licence text.</div>
+				<div class="about-text">Text shaping and OpenType kerning, under the "Old MIT" licence. Copyright (c) Google, Inc., Behdad Esfahbod, Red Hat, Inc. and the other holders listed with their years in data\xerces\licenses\HarfBuzz.txt. It includes Microsoft's Universal Shaping Engine data (MIT licence, (c) Microsoft Corporation) and tables made from Unicode's character data (Unicode License V3, (c) Unicode, Inc.). The same file has all three licence texts.</div>
 			</div>
 			<div class="about-item">
 				<div class="about-name">FreeType 2.14.3</div>
