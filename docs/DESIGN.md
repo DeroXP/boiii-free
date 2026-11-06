@@ -2137,9 +2137,86 @@ What changed:
   and the launcher's worker runs the pre-flight next to the catalog scan instead
   of before it.
 
-Not changed here: the boot screen's 650 ms floor (a design choice), the cached
-rescan itself (about 75 ms for 686 files), and the launcher loop presenting a
-frame on every pass (`launcher.activity` now counts them per window state).
+Not changed here: the boot screen's 650 ms floor (a design choice) and the
+cached rescan itself (about 75 ms for 686 files). The launcher loop presented a
+frame on every pass; 12.7 changed that.
+
+### 12.7 Launcher idle
+
+Xerces.exe should cost nothing while the player is in the game. Its loop used to
+wait at most 100 ms for an event and then always update, draw and present, so an
+idle launcher drew about 9 frames a second in every window state, also behind a
+running game. With `--seconds` (scripted checks such as `map-check.ps1`) it
+never waited at all, and behind the full-screen game Present returned at once:
+one map check logged 3,113 to 4,382 presents a second. Now a pass of the loop
+draws only when something changed since the last frame.
+
+Measured on the test PC on 2026-11-05 with `tools\dev\bench\launcher-idle.ps1`
+(docs/TESTING.md, Launcher speed): a dry launch on Home with a controller
+connected (in front the waits are cut into 8 ms controller reads, which are not
+passes), one minute per state, from `launcher.activity`. The game is a stand-in,
+a sleeping process announced in `<home>\run`, which the launcher takes for a
+running game.
+
+| Window state (one minute each)                  | Frames a minute, before | Frames a minute, after | Passes a minute, after |
+| ----------------------------------------------- | ----------------------- | ---------------------- | ---------------------- |
+| In front, idle                                  | 552                     | 0                      | 553                    |
+| Behind another window                           | 560                     | 21 (\*)                | 570                    |
+| Minimized                                       | 540                     | 0                      | 538                    |
+| A game running, launcher behind                 | 542                     | 4 (\*)                 | 62                     |
+| A game running, launcher minimized              | 546                     | 0                      | 62                     |
+| `--seconds 15` alone, Home, 15 s                | 66,714 in all           | 23 in all              | 156 in all             |
+| A scripted walk through four screens, six shots | 38,895 in all           | 90 in all              | 136 in all             |
+
+(\*) The frames drawn when the state began: another window came to the front, or
+the launcher was restored behind it. A second minute behind another window drew
+none (553 passes). Before, every pass drew a frame. The stand-in's exit was
+noticed within a second either way: 86 and 876 ms in two runs of the old loop,
+851 ms with the new one. Present returned at once even with the launcher in
+front (the display was probably asleep), so the old loop's scripted runs drew
+thousands of frames a second, as it did behind the full-screen game.
+
+What a pass does (`app::run`, `src/xerces_launcher/app.cpp`):
+
+- **It waits** for the first of: a window message (input, a task posted by the
+  scan worker), a controller change (read every 8 ms while the launcher is in
+  front and a controller is connected), the exit of the game it started (the
+  process handle is waited on with the messages), RmlUi's next update
+  (`GetNextUpdateDelay`: an animation step, a caret blink), the end of the
+  footer notice, the next script step and the end of `--seconds`. Otherwise it
+  wakes after 100 ms, or after a second while a game runs and the launcher is
+  behind it or minimized. The services are polled on every pass and the run
+  folder about once a second (every 900 ms at most), so the exit of a game the
+  launcher did not start is still noticed within about a second.
+- **It updates** as before: messages, posted tasks, the services, the
+  controller, script steps, one more screen document at startup, every screen's
+  `update()`, the RmlUi context.
+- **It draws and presents only for a reason:** a message was pumped, a posted
+  task ran, a controller press or repeat fired, a script step ran, a counter the
+  screens draw from moved (config, game, catalog, journal, culprit search,
+  signatures, mode, detection or scan running, game running), the notice
+  changed, focus moved, the window was minimized, restored, resized or came to
+  the front (also when another program did it, which Windows sends rather than
+  posts), a screen was shown, a dialog opened or closed, a screen called
+  `app::redraw()` (Diagnostics, whose progress line catches up a quarter second
+  after the counter moved), RmlUi's update was due (a transition keeps drawing
+  until it ends), a capture is pending, or it is the first frame. After a change
+  it draws three more frames, because screens move focus or scroll a frame or
+  two after the change that caused it (focus waits for the rows the data model
+  adds).
+- **Minimized it draws nothing**, except a capture; a change is drawn once the
+  window shows again.
+- **Frames are paced:** Present does not always wait for the display (it returns
+  at once behind a full-screen game, and while the display sleeps), so frames
+  are at least one refresh apart (DWM's composition rate), and 1/60 s apart
+  behind another window.
+- **Scripted checks:** `--seconds` no longer keeps the loop busy. A `--script`
+  step draws when it runs, and `shot` always draws the frame it captures, so a
+  capture shows the screen as it is: the six captures of a scripted walk through
+  Home, Mods, Packs and Servers are byte for byte the same as the old loop's.
+- `launcher.activity` counts the loop's passes (`wakes`) as well as frames per
+  window state, and counts time per pass, so a state with no frames still gets
+  its seconds.
 
 ---
 

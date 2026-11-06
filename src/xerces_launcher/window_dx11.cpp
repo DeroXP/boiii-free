@@ -540,15 +540,22 @@ Rml::RenderInterface *window::render_interface() {
   return s ? &*s->deferred : nullptr;
 }
 
-bool window::wait_events(int max_wait_ms) {
+bool window::wait_events(int max_wait_ms, void *also) {
   // MWMO_INPUTAVAILABLE: a message already in the queue also ends the wait,
   // not only one that arrives during it.
   const DWORD wait = DWORD(std::max(0, max_wait_ms));
-  return MsgWaitForMultipleObjectsEx(0, nullptr, wait, QS_ALLINPUT,
-                                     MWMO_INPUTAVAILABLE) == WAIT_OBJECT_0;
+  HANDLE handle = static_cast<HANDLE>(also);
+  const DWORD count = handle ? 1 : 0;
+  // WAIT_OBJECT_0 (0) is the handle when there is one; WAIT_OBJECT_0 + count
+  // is a message either way. A timeout or a failure is past both.
+  const DWORD got =
+      MsgWaitForMultipleObjectsEx(count, handle ? &handle : nullptr, wait,
+                                  QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+  return got <= WAIT_OBJECT_0 + count;
 }
 
-bool window::process_events(Rml::Context *context, int max_wait_ms) {
+bool window::process_events(Rml::Context *context, int max_wait_ms,
+                            bool *pumped) {
   if (s->context_dimensions_dirty) {
     s->context_dimensions_dirty = false;
     context->SetDimensions(s->dimensions);
@@ -560,6 +567,9 @@ bool window::process_events(Rml::Context *context, int max_wait_ms) {
   }
   MSG message{};
   bool has_message = PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE) != 0;
+  if (pumped) {
+    *pumped = has_message;
+  }
   while (has_message) {
     TranslateMessage(&message);
     DispatchMessageW(&message);
@@ -621,6 +631,18 @@ void window::wake() {
 float window::dp_ratio() const {
   return s ? float(window_dpi(s->handle)) / float(USER_DEFAULT_SCREEN_DPI)
            : 1.f;
+}
+
+double window::refresh_interval() const {
+  DWM_TIMING_INFO timing{};
+  timing.cbSize = sizeof(timing);
+  if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &timing)) &&
+      timing.rateRefresh.uiNumerator > 0 &&
+      timing.rateRefresh.uiDenominator > 0) {
+    return double(timing.rateRefresh.uiDenominator) /
+           double(timing.rateRefresh.uiNumerator);
+  }
+  return 1.0 / 60.0;
 }
 
 void *window::native_handle() const { return s ? s->handle : nullptr; }

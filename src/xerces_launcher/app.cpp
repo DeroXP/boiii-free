@@ -10,12 +10,14 @@
 #undef GetObject
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cwchar>
 #include <cwctype>
 #include <fstream>
 #include <iterator>
 #include <sstream>
+#include <utility>
 
 #include <xerces_core/json.hpp>
 
@@ -424,7 +426,7 @@ void app::post(std::function<void()> task) {
   window_.wake();
 }
 
-void app::run_posted() {
+bool app::run_posted() {
   std::deque<std::function<void()>> tasks;
   {
     std::lock_guard lock(posted_mutex_);
@@ -433,6 +435,7 @@ void app::run_posted() {
   for (auto &task : tasks) {
     task();
   }
+  return !tasks.empty();
 }
 
 std::string app::escape(const std::string &text) {
@@ -681,6 +684,7 @@ void app::show(const std::string &id) {
     old->doc->Hide();
   }
   current_ = id;
+  changed_ = true;
   view &v = *target->screen;
   v.doc->Show(Rml::ModalFlag::None, Rml::FocusFlag::None);
   v.shown();
@@ -778,19 +782,19 @@ void app::notify(const std::string &text, bool error, std::string_view logged) {
       "launcher.notice", logged.empty() ? std::string_view(text) : logged);
 }
 
-void app::update_notice() {
+bool app::update_notice() {
   const bool expired = !notice_text_.empty() && now() >= notice_until_;
   if (expired) {
     notice_text_.clear();
     notice_dirty_ = true;
   }
   if (!notice_dirty_) {
-    return;
+    return false;
   }
   notice_dirty_ = false;
   view *v = find(current_);
   if (!v || !v->doc) {
-    return;
+    return false;
   }
   for (auto &e : views_) {
     if (!e.screen->doc) {
@@ -805,6 +809,7 @@ void app::update_notice() {
       notice->SetClass("error", notice_error_);
     }
   }
+  return true;
 }
 
 void app::dialog(const std::string &title, const std::string &body,
@@ -830,6 +835,7 @@ void app::dialog(const std::string &title, const std::string &body,
   dialog_doc_->GetElementById("dialog-buttons")->SetInnerRML(markup);
   dialog_done_ = std::move(done);
   dialog_open_ = true;
+  changed_ = true;
   dialog_doc_->Show(Rml::ModalFlag::Modal, Rml::FocusFlag::None);
   dialog_doc_->PullToFront();
   if (Rml::Element *first = dialog_doc_->GetElementById("dialog-b0")) {
@@ -843,6 +849,7 @@ void app::close_dialog(int choice) {
     return;
   }
   dialog_open_ = false;
+  changed_ = true;
   dialog_doc_->Hide();
   auto done = std::move(dialog_done_);
   dialog_done_ = nullptr;
@@ -1040,9 +1047,11 @@ hit_region app::hit_test(int x, int y) {
   return hit_region::client;
 }
 
-void app::run_script(double seconds) {
+bool app::run_script(double seconds) {
+  bool ran = false;
   while (script_next_ < script_.size() && script_[script_next_].at <= seconds) {
     const script_step step = script_[script_next_++];
+    ran = true;
     log_info("launcher.check.step", step.verb + " " + step.arg);
     if (step.verb == "key") {
       // "key ctrl+up", "key shift+tab"; "numlock+q" adds the lock flag a real
@@ -1108,6 +1117,7 @@ void app::run_script(double seconds) {
       window_.request_close();
     }
   }
+  return ran;
 }
 
 int app::run() {
@@ -1279,45 +1289,132 @@ int app::run() {
     }
   }
 
+  // The loop draws a frame only when something changed since the last one
+  // (DESIGN.md 12.7). Otherwise it sleeps until the next thing it waits for:
+  // a window message (input, a posted task, a wake), the controller, the
+  // game it started exiting, RmlUi's next animation step or caret blink, the
+  // notice's end, the next script step or the end of --seconds; at most
+  // 100 ms, or a second while a game runs and the launcher is behind it or
+  // minimized. Every pass still polls the services and updates the screens,
+  // which costs little; drawing and presenting is what costs.
+  const HWND handle = static_cast<HWND>(window_.native_handle());
+  // Only the window in front takes the controller. XInput reads it from
+  // anywhere, so a launcher left open behind the game would otherwise take
+  // every press meant for the game (toggling mods, switching tabs) and
+  // wake up for each one.
+  const auto in_front = [this, handle] {
+    if (script_front_ >= 0) {
+      return script_front_ == 1; // a check script says (front on|off)
+    }
+    return GetForegroundWindow() == handle;
+  };
+  // What the screens draw from besides input and posted tasks; a change to
+  // any of them is a reason to draw.
+  const auto revisions = [this] {
+    const services &svc = *services_;
+    return std::array<std::uint64_t, 10>{svc.config_rev(),
+                                         svc.game_rev(),
+                                         svc.catalog_rev(),
+                                         svc.journal_rev(),
+                                         svc.culprit_rev(),
+                                         svc.signatures_rev(),
+                                         mode_rev_,
+                                         std::uint64_t(svc.detecting()),
+                                         std::uint64_t(svc.catalog().scanning),
+                                         std::uint64_t(game_seen_)};
+  };
+  // Messages Windows sends rather than posts (another program minimizing or
+  // restoring the window, a DPI change) are handled while process_events
+  // looks for posted ones and do not count as pumped; the window's own state
+  // says that it changed.
+  const auto window_shape = [this, handle, &in_front] {
+    return std::array<int, 4>{int(in_front()), int(IsIconic(handle) != FALSE),
+                              window_.width(), window_.height()};
+  };
+  // Frames still drawn after a change: screens move focus or scroll a frame
+  // or two after the change that caused it, once the rows the data model
+  // adds exist.
+  constexpr int settle_frames = 3;
+  // Present does not always wait for the display: it returns at once behind
+  // a full-screen game, and while the display sleeps. So frames are at least
+  // a refresh apart, and 1/60 s behind another window. A wait under 2 ms is
+  // left out: Windows' timer can round it up to a whole tick, which would
+  // slow down a loop that Present already paces.
+  constexpr double behind_frame_gap = 1.0 / 60.0;
+  constexpr double shortest_wait = 0.002;
+
+  auto seen_revisions = revisions();
+  auto seen_shape = window_shape();
+  const Rml::Element *seen_focus = nullptr;
+  std::string last_focus;
   bool first_frame = true;
   bool running = true;
-  std::string last_focus;
+  bool stale = false; // a change was not drawn (minimized); draw it later
+  int settle = 0;
+  double rml_due = 0; // when RmlUi asked for its next update
+  double presented_at = -1;
   while (running) {
-    const bool busy = first_frame || !script_.empty() ||
-                      context_->GetNextUpdateDelay() == 0 ||
-                      std::ranges::any_of(views_, [](const entry &e) {
-                        return !e.loaded;
-                      }) ||
-                      opts_.seconds > 0 || window_.capture_pending();
-    int wait = busy ? 0 : 100;
-    if (!busy && context_->GetNextUpdateDelay() < 0.1) {
-      wait = std::min(wait, int(context_->GetNextUpdateDelay() * 1000.0));
+    const double t0 = now();
+    // Whether a game runs, for the wait and launcher.activity: asked about
+    // once a second (900 ms, so one-second waits ask on every pass).
+    if (game_checked_at_ < 0 || t0 - game_checked_at_ >= 0.9) {
+      game_checked_at_ = t0;
+      game_seen_ = services_->game_running();
     }
-    // Only the window in front takes the controller. XInput reads it from
-    // anywhere, so a launcher left open behind the game would otherwise take
-    // every press meant for the game (toggling mods, switching tabs) and
-    // wake up for each one.
-    const auto in_front = [this] {
-      if (script_front_ >= 0) {
-        return script_front_ == 1; // a check script says (front on|off)
-      }
-      return GetForegroundWindow() ==
-             static_cast<HWND>(window_.native_handle());
-    };
     const bool front = in_front();
-    if (front && (pad_previous_ & ~pad_ignored_ & pad_directions)) {
-      wait = std::min(wait, 8); // a held direction repeats (below)
+    const bool minimized = IsIconic(handle) != FALSE;
+    const bool loading =
+        std::ranges::any_of(views_, [](const entry &e) { return !e.loaded; });
+    // Passes that cannot wait: the first frame, screens still loading (one
+    // per pass), a capture, and while the window shows: frames after a
+    // change and RmlUi's animations.
+    const bool urgent = first_frame || loading || changed_ ||
+                        window_.capture_pending() ||
+                        (!minimized && (stale || settle > 0 || rml_due <= t0));
+    double until = t0;
+    if (!urgent) {
+      const bool game_behind = game_seen_ && (!front || minimized);
+      until = t0 + (game_behind ? 1.0 : 0.1);
+      if (!minimized) {
+        until = std::min(until, rml_due);
+      }
+      if (!notice_text_.empty()) {
+        until = std::min(until, notice_until_);
+      }
+      if (script_next_ < script_.size()) {
+        until = std::min(until, script_[script_next_].at);
+      }
+      if (opts_.seconds > 0) {
+        until = std::min(until, opts_.seconds);
+      }
+      if (front && (pad_previous_ & ~pad_ignored_ & pad_directions)) {
+        until = std::min(until, t0 + 0.008); // a held direction repeats
+      }
+      // What counts passes or times itself: focus being put back
+      // (keep_focus) and the boot screen. Passes, not frames: they draw
+      // once they change something.
+      if (focus_lost_frames_ > 0 || current_ == "boot") {
+        until = std::min(until, t0 + 0.016);
+      }
+    } else if (presented_at >= 0) {
+      const double refresh = window_.refresh_interval();
+      const double gap = front ? refresh : std::max(refresh, behind_frame_gap);
+      if (presented_at + gap - t0 > shortest_wait) {
+        until = presented_at + gap;
+      }
     }
-    // XInput sends no window messages. With a controller connected the idle
-    // wait is cut into 8 ms slices with the controller read between them, so
-    // a quick tap wakes the loop as a key would; no frames are drawn while
+    // XInput sends no window messages. With a controller connected the wait
+    // is cut into 8 ms slices with the controller read between them, so a
+    // quick tap wakes the loop as a key would; no frames are drawn while
     // nothing changes.
     std::optional<unsigned> pad_read;
-    const double wait_until = now() + wait / 1000.0;
-    for (int left = wait; left > 0;
-         left = int((wait_until - now()) * 1000.0)) {
+    const auto left_ms = [&] {
+      return int(std::ceil((until - now()) * 1000.0));
+    };
+    for (int left = left_ms(); left > 0; left = left_ms()) {
       const bool pad = front && pad_slots_ != 0;
-      if (window_.wait_events(pad ? std::min(left, 8) : left)) {
+      if (window_.wait_events(pad ? std::min(left, 8) : left,
+                              services_->game_process())) {
         break;
       }
       if (pad) {
@@ -1328,8 +1425,9 @@ int app::run() {
         }
       }
     }
-    running = window_.process_events(context_, 0);
-    run_posted();
+    bool changed = false;
+    running = window_.process_events(context_, 0, &changed);
+    changed |= run_posted();
     services_->poll();
     apply_look();
 
@@ -1369,6 +1467,7 @@ int app::run() {
         }
       }
     }
+    changed |= pressed != 0;
     const unsigned held = live & pad_directions;
     if (held && !(pressed & held) && t >= pad_repeat_at_) {
       for (unsigned bit = 1; bit <= pad_right; bit <<= 1) {
@@ -1377,12 +1476,13 @@ int app::run() {
         }
       }
       pad_repeat_at_ = t + 0.12;
+      changed = true;
     }
     pad_previous_ = buttons;
 
-    run_script(t);
+    changed |= run_script(t);
 
-    // Load the remaining screens one per frame after the first frame.
+    // Load the remaining screens one per pass after the first frame.
     if (!first_frame) {
       for (auto &e : views_) {
         if (!e.loaded) {
@@ -1400,37 +1500,71 @@ int app::run() {
     for (auto &e : views_) {
       e.screen->update(t);
     }
-    update_notice();
-
-    const std::string focus = [&] {
-      Rml::Element *f = context_->GetFocusElement();
-      return f ? f->GetTagName() + (f->GetId().empty() ? "" : "#" + f->GetId())
-               : std::string("(none)");
-    }();
-    if (focus != last_focus) {
-      last_focus = focus;
-      log(xerces_core::log_level::debug, "launcher.focus", focus);
-    }
+    changed |= update_notice();
 
     context_->Update();
     // After the update: data-if and data-for changes have taken effect.
     keep_focus();
-    window_.begin_frame();
-    context_->Render();
-    const bool capturing = window_.capture_pending();
-    window_.present();
-    count_present(t, front);
-    if (capturing && !window_.capture_pending()) {
-      if (window_.last_capture_error().empty()) {
-        log_info("launcher.check.captured", current_);
-      } else {
-        log_warn("launcher.check.capture", window_.last_capture_error());
+    if (Rml::Element *focus = context_->GetFocusElement();
+        focus != seen_focus) {
+      seen_focus = focus;
+      changed = true;
+      const std::string name =
+          focus ? focus->GetTagName() +
+                      (focus->GetId().empty() ? "" : "#" + focus->GetId())
+                : std::string("(none)");
+      if (name != last_focus) {
+        last_focus = name;
+        log(xerces_core::log_level::debug, "launcher.focus", name);
       }
     }
-    if (first_frame) {
-      first_frame = false;
-      mark("first frame presented");
+    if (const auto now_revisions = revisions();
+        now_revisions != seen_revisions) {
+      seen_revisions = now_revisions;
+      changed = true;
     }
+    if (const auto shape = window_shape(); shape != seen_shape) {
+      seen_shape = shape;
+      changed = true;
+    }
+    changed |= std::exchange(changed_, false);
+    // RmlUi's own reasons: a running animation or transition asks for the
+    // next update at once, a caret blink later. The pass it asked for draws
+    // what that update moved.
+    const bool animating = rml_due <= t;
+    rml_due = t + context_->GetNextUpdateDelay();
+
+    const bool settling = settle > 0;
+    const bool hidden = IsIconic(handle) != FALSE;
+    const bool draw = first_frame || window_.capture_pending() ||
+                      (!hidden && (changed || stale || settling || animating));
+    if (changed) {
+      settle = settle_frames;
+    } else if (draw && settling) {
+      --settle;
+    }
+    if (draw) {
+      window_.begin_frame();
+      context_->Render();
+      const bool capturing = window_.capture_pending();
+      window_.present();
+      presented_at = t;
+      stale = false;
+      if (capturing && !window_.capture_pending()) {
+        if (window_.last_capture_error().empty()) {
+          log_info("launcher.check.captured", current_);
+        } else {
+          log_warn("launcher.check.capture", window_.last_capture_error());
+        }
+      }
+      if (first_frame) {
+        first_frame = false;
+        mark("first frame presented");
+      }
+    } else if (changed || animating) {
+      stale = true; // minimized: drawn once the window shows again
+    }
+    count_activity(t, takes_pad, draw);
     if (opts_.seconds > 0 && t >= opts_.seconds) {
       running = false;
     }
@@ -1442,22 +1576,21 @@ int app::run() {
   return 0;
 }
 
-void app::count_present(double t, bool front) {
-  if (t - game_checked_at_ >= 1.0 || game_checked_at_ < 0) {
-    game_checked_at_ = t;
-    game_seen_ = services_->game_running();
-  }
+void app::count_activity(double t, bool front, bool presented) {
   const activity_state state =
       game_seen_ ? state_game
       : IsIconic(static_cast<HWND>(window_.native_handle()))
           ? state_minimized
           : (front ? state_front : state_behind);
   if (activity_since_ < 0) {
-    activity_since_ = last_frame_at_ = t;
+    activity_since_ = last_wake_at_ = t;
   }
-  ++frames_[state];
-  state_seconds_[state] += t - last_frame_at_;
-  last_frame_at_ = t;
+  ++wakes_[state];
+  if (presented) {
+    ++frames_[state];
+  }
+  state_seconds_[state] += t - last_wake_at_;
+  last_wake_at_ = t;
   if (t - activity_since_ >= 60.0) {
     log_activity(t);
   }
@@ -1470,16 +1603,17 @@ void app::log_activity(double t) {
   static constexpr const char *names[state_count] = {
       "front", "behind", "minimized", "game_running"};
   std::string data = "{";
-  char part[160];
+  char part[192];
   std::snprintf(part, sizeof(part), "\"seconds\":%.1f", t - activity_since_);
   data += part;
   for (int state = 0; state < state_count; ++state) {
     const double seconds = state_seconds_[state];
     std::snprintf(part, sizeof(part),
-                  ",\"%s\":{\"frames\":%llu,\"seconds\":%.1f,"
+                  ",\"%s\":{\"frames\":%llu,\"wakes\":%llu,\"seconds\":%.1f,"
                   "\"per_minute\":%.0f}",
                   names[state], static_cast<unsigned long long>(frames_[state]),
-                  seconds, seconds > 0 ? frames_[state] * 60.0 / seconds : 0.0);
+                  static_cast<unsigned long long>(wakes_[state]), seconds,
+                  seconds > 0 ? frames_[state] * 60.0 / seconds : 0.0);
     data += part;
   }
   const services::resolve_timing resolves = services_->resolve_stats();
@@ -1488,9 +1622,11 @@ void app::log_activity(double t) {
                 "\"max_ms\":%.1f}}",
                 resolves.count, resolves.total_ms, resolves.max_ms);
   data += part;
-  log_info("launcher.activity", "frames presented per window state", data);
+  log_info("launcher.activity",
+           "frames presented and passes of the loop per window state", data);
   frames_ = {};
+  wakes_ = {};
   state_seconds_ = {};
-  activity_since_ = last_frame_at_ = t;
+  activity_since_ = last_wake_at_ = t;
 }
 } // namespace xerces_launcher

@@ -613,8 +613,9 @@ what still needs you:
 
 ### Launcher speed (2026-11-05)
 
-DESIGN.md 12.6 has the numbers and what changed. Nothing here starts the game:
-`Xerces.exe` runs with `--dry-launch` only, and Workshop files are only read.
+DESIGN.md 12.6 and 12.7 have the numbers and what changed. Nothing here starts
+the game: `Xerces.exe` runs with `--dry-launch` only, and Workshop files are
+only read.
 
 - `tools\dev\bench\launcher-bench.ps1 -Runs 20 -HomeDir C:\Users\Ginld\XercesHome-bench`
   starts
@@ -645,10 +646,18 @@ DESIGN.md 12.6 has the numbers and what changed. Nothing here starts the game:
   `launcher.refresh.timing` (cache load, detection, pre-flight, scan and cache
   save, in ms), `launcher.catalog.scanned` (with per-file and overall MB/s, the
   slowest file and the threads), and `launcher.activity` every minute and at
-  exit (frames presented per minute in front, behind, minimized and while a game
-  runs, and the resolve totals). With `--seconds` the loop never waits, so the
-  benchmark's frame counts are an upper bound, not what a player's launcher
-  draws.
+  exit (frames presented and passes of the loop, `wakes`, in front, behind,
+  minimized and while a game runs, and the resolve totals). Since the idle work
+  (DESIGN.md 12.7) `--seconds` no longer keeps the loop busy, so these counts
+  are what a player's launcher draws.
+- `tools\dev\bench\launcher-idle.ps1 -HomeDir <home> [-Exe <Xerces.exe>] [-Label before]`
+  measures an idle launcher, one minute per state: in front, behind (a small
+  empty window titled "Xerces idle check" takes the foreground), minimized, and
+  with a stand-in game running (a sleeping `powershell.exe` announced in
+  `<home>\run`, never the real game), behind and minimized; then the stand-in
+  exits and it prints how long the launcher took to notice. About seven minutes;
+  leave the PC alone meanwhile. It prints frames and passes per minute for each
+  state the window was really in and saves them as JSON in `<home>\bench`.
 
 Run on 2026-11-05 by Claude (no game running, dry launches only):
 
@@ -668,6 +677,36 @@ Run on 2026-11-05 by Claude (no game running, dry launches only):
       with a valid "é"), and `Xerces.exe --dry-launch` on that home reads its 17
       items instead of ending in `std::terminate`. Its scan event reports 686
       hits, without BlackOps3.exe.
+
+Run on 2026-11-05 by Claude for the idle loop (DESIGN.md 12.7; dry launches
+only, the game never started), the old loop being 843ba747's:
+
+- [x] `launcher-idle.ps1`, frames a minute before and after: in front 552 and 0,
+      behind 560 and 21 (the change of foreground; a second minute behind drew
+      none), minimized 540 and 0, a stand-in game running with the launcher
+      behind 542 and 4 (the restore), minimized 546 and 0. Passes a minute
+      after: 553 in front, 570 behind, 538 minimized, 62 with the game running.
+      The stand-in's exit was noticed after 851 ms (86 and 876 ms in two runs of
+      the old loop).
+- [x] `Xerces.exe --dry-launch --skip-boot --view home --seconds 15`: the old
+      loop drew 66,714 frames (4,478 a second: Present did not wait, the display
+      probably asleep), the new one 23 frames in 156 passes.
+- [x] `check-screens.ps1`, also with `-Theme light` and `-Language pseudo`:
+      every screen captured, no RmlUi warning or error.
+- [x] A scripted walk (Home, Down, Mods, E, RB, Q, Q, Down, Down) with six
+      `shot` steps: the six PNGs are byte for byte the same as the old loop's,
+      which drew 38,895 frames for it; the new one drew 90 in 136 passes.
+- [x] A `view mods` step while the window is minimized draws nothing (0 frames
+      in 3.1 s, 38 passes; the old loop drew 8,366); restored, the desktop shows
+      Mods, as with the old loop.
+- [x] `m1-check.ps1 -Case vanilla` and `-Case modded` without `-Live` pass: the
+      warm run (`--seconds 900`, closed once the scan is logged) and the run
+      with `+3000 click` and `--seconds`, the way `map-check.ps1` drives the
+      launcher. `map-check.ps1` itself was not run (it starts the game).
+- [ ] With you and the game: the launcher behind a match draws nothing (its
+      `launcher.activity` lines in `<home>\logs`), it notices the game's exit at
+      once (it waits on the process it started), and on a live display the
+      screens' transitions stay smooth at the display's refresh rate.
 
 ### Conflict system (M2)
 

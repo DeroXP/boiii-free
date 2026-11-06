@@ -50,12 +50,15 @@ public:
   Rml::SystemInterface *system_interface();
   Rml::RenderInterface *render_interface();
 
-  // Waits up to max_wait_ms for a window message (input, a wake); true when
-  // one is waiting. Pumps nothing.
-  bool wait_events(int max_wait_ms);
+  // Waits up to max_wait_ms for a window message (input, a wake) or, when
+  // given, for `also` (a process handle) to be signalled; true when either
+  // happened. Pumps nothing.
+  bool wait_events(int max_wait_ms, void *also = nullptr);
   // Pumps messages; waits up to max_wait_ms when idle (0: never waits).
-  // Returns false once the window was asked to close.
-  bool process_events(Rml::Context *context, int max_wait_ms);
+  // Returns false once the window was asked to close. *pumped (when given)
+  // says whether there was any message: something may have changed.
+  bool process_events(Rml::Context *context, int max_wait_ms,
+                      bool *pumped = nullptr);
   void begin_frame();
   void present();
 
@@ -68,6 +71,9 @@ public:
   void wake();
 
   float dp_ratio() const;
+  // Seconds between the desktop's refreshes (DWM composition), 1/60 when
+  // Windows does not say.
+  double refresh_interval() const;
   void *native_handle() const;
   // Client size in pixels.
   int width() const;

@@ -42,8 +42,11 @@ public:
   virtual void loaded(Rml::ElementDocument *) {}
   virtual void shown() {}
   virtual void hidden() {}
-  // Every frame, shown or not: compare the services' revision counters and
-  // refresh the model when they changed. now is seconds since start.
+  // On every pass of the app's loop, shown or not (at least once a second;
+  // a pass draws a frame only when something changed): compare the
+  // services' revision counters and refresh the model when they changed.
+  // A change the app cannot see (a timer of the view's own) calls
+  // app::redraw(). now is seconds since start.
   virtual void update(double /*now*/) {}
   // Where focus goes when the view is shown. Default: the first element with
   // the class "default-focus", else the first button in #content.

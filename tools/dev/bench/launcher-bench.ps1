@@ -134,10 +134,13 @@ function Measures($run) {
         }
       }
       'launcher.activity' {
-        # With --seconds the loop never waits, so these are upper bounds.
+        # A 2 s run is mostly startup; launcher-idle.ps1 measures idle.
         foreach ($state in 'front', 'behind', 'minimized', 'game_running') {
           $s = $e.data.$state
-          if ($s -and $s.seconds -gt 0) { $m["presents per minute: $state"] = [double]$s.per_minute }
+          if ($s -and $s.seconds -gt 0) {
+            $m["presents per minute: $state"] = [double]$s.per_minute
+            if ($null -ne $s.wakes) { $m["passes per minute: $state"] = [double]$s.wakes * 60 / [double]$s.seconds }
+          }
         }
         if ($e.data.resolve) { $m['resolve total (ms)'] = [double]$e.data.resolve.total_ms }
       }

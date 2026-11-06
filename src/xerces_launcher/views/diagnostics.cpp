@@ -303,6 +303,9 @@ public:
     }
     if (dirty) {
       handle_.DirtyAllVariables();
+      // The progress line can catch up on a pass where no counter moved
+      // (the quarter-second wait above), which the loop would not draw.
+      owner_->redraw();
     }
   }
 
