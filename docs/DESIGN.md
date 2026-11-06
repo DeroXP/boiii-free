@@ -2176,40 +2176,99 @@ noticed within a second either way: 86 and 876 ms in two runs of the old loop,
 front (the display was probably asleep), so the old loop's scripted runs drew
 thousands of frames a second, as it did behind the full-screen game.
 
+That table is fb165490's. A review of it found three problems, fixed the same
+evening: the wait before a frame ended at Windows' 15.6 ms timer tick, so
+transitions drew at about 55 frames a second; any input ended that wait; and a
+focused text field's caret kept the launcher drawing behind the game. With the
+fixes, `tools\dev\launcher\check-idle.ps1` (docs/TESTING.md, Launcher speed)
+counts the frames and passes between two script steps:
+
+| Case (one span of a dry run)                            | Frames                | Passes a second |
+| ------------------------------------------------------- | --------------------- | --------------- |
+| In front, idle (4 s)                                    | 0                     | 12              |
+| In front, a focused text field (4 s)                    | 7 (the caret's blink) | 12.5            |
+| Behind, a focused text field (4 s)                      | 0                     | 11.3            |
+| Minimized, a screen shown by a script step (2.8 s)      | 0                     | 11.4            |
+| A game running, the launcher behind, a text field (5 s) | 0                     | 1.8             |
+| In front, one 0.2 s transition (1 s)                    | 17 to 58 (\*)         | 25 to 67        |
+
+(\*) 58 in most runs, 25 and 17 in two, for reasons not tracked down.
+
+One 0.2 s transition (focus leaving Launch modded: its arrow and the button
+styles), as the difference between dry runs with and without it, three runs
+each: fb165490 drew 11 frames for it in front (about 55 a second) and about 5
+behind another window; now 54 in front and 10 behind. Present returned at once
+in these runs: 54 frames in 0.2 s is more than the display's 240 a second, and a
+diagnostic build timed it at about 0.1 ms (`S_OK`) in two runs. The launcher was
+behind other windows, as Windows did not let it take the foreground and the
+script's `front on` only makes it act as if it were in front. So in front the
+transition drew at the frame gap's rate (below), about 270 a second on this 240
+Hz display. Where the window shows, Present should wait for the display and hold
+it to the refresh rate; that was not observed here. The first seconds after
+start draw less as well: a 5 s run on Home drew 41 frames with fb165490 and 9
+now (Windows' timer messages, below).
+
 What a pass does (`app::run`, `src/xerces_launcher/app.cpp`):
 
 - **It waits** for the first of: a window message (input, a task posted by the
   scan worker), a controller change (read every 8 ms while the launcher is in
   front and a controller is connected), the exit of the game it started (the
   process handle is waited on with the messages), RmlUi's next update
-  (`GetNextUpdateDelay`: an animation step, a caret blink), the end of the
-  footer notice, the next script step and the end of `--seconds`. Otherwise it
-  wakes after 100 ms, or after a second while a game runs and the launcher is
-  behind it or minimized. The services are polled on every pass and the run
-  folder about once a second (every 900 ms at most), so the exit of a game the
-  launcher did not start is still noticed within about a second.
+  (`GetNextUpdateDelay`: an animation step; a caret blink or a held scroll arrow
+  only while the launcher is in front), the end of the footer notice, the next
+  script step and the end of `--seconds`. Otherwise it wakes after 100 ms, or
+  after a second while a game runs and the launcher is behind it or minimized.
+  The services are polled on every pass and the run folder about once a second
+  (every 900 ms at most), so the exit of a game the launcher did not start is
+  still noticed within about a second.
+- **Waits are timed finely:** `xerces_core::precise_wait` waits on a
+  high-resolution waitable timer (Windows 10 1803 and later) next to the
+  messages and the game's process handle. A plain timeout ends at Windows' next
+  timer tick, 15.6 ms unless a program raises the timer's resolution (Xerces.exe
+  does not): on the test PC timeouts of 3, 8 and 16 ms took 12, 23 and 30 ms,
+  the timer 3.4, 8.4 and 16.5 ms (medians of 40 waits).
 - **It updates** as before: messages, posted tasks, the services, the
   controller, script steps, one more screen document at startup, every screen's
   `update()`, the RmlUi context.
-- **It draws and presents only for a reason:** a message was pumped, a posted
-  task ran, a controller press or repeat fired, a script step ran, a counter the
-  screens draw from moved (config, game, catalog, journal, culprit search,
-  signatures, mode, detection or scan running, game running), the notice
+- **It draws and presents only for a reason:** a message was pumped (other than
+  `WM_SYSTIMER`, Windows' internal timer, which came every 530 ms, the caret
+  blink time, for the first seconds after start and drew four frames each time),
+  a posted task ran, a controller press or repeat fired, a script step ran, a
+  counter the screens draw from moved (config, game, catalog, journal, culprit
+  search, signatures, mode, detection or scan running, game running), the notice
   changed, focus moved, the window was minimized, restored, resized or came to
   the front (also when another program did it, which Windows sends rather than
   posts), a screen was shown, a dialog opened or closed, a screen called
   `app::redraw()` (Diagnostics, whose progress line catches up a quarter second
   after the counter moved), RmlUi's update was due (a transition keeps drawing
-  until it ends), a capture is pending, or it is the first frame. After a change
-  it draws three more frames, because screens move focus or scroll a frame or
-  two after the change that caused it (focus waits for the rows the data model
-  adds).
+  until it ends; a caret blink only in front, so behind the game a focused text
+  field neither wakes the launcher nor draws, and the caret is drawn again when
+  the window comes to the front, which is a change), a capture is pending, or it
+  is the first frame. After a change it draws three more frames, because screens
+  move focus or scroll a frame or two after the change that caused it (focus
+  waits for the rows the data model adds).
 - **Minimized it draws nothing**, except a capture; a change is drawn once the
   window shows again.
 - **Frames are paced:** Present does not always wait for the display (it returns
-  at once behind a full-screen game, and while the display sleeps), so frames
-  are at least one refresh apart (DWM's composition rate), and 1/60 s apart
-  behind another window.
+  at once behind a full-screen game, and while the display sleeps), so a frame
+  starts at least three quarters of a refresh (DWM's composition rate) after the
+  last one, and at least 1/60 s after it behind another window. The wait before
+  a frame is on the timer alone, whatever woke the loop: input that arrives
+  meanwhile is handled in the next pass, so moving the mouse does not draw
+  frames back to back. Three quarters and not a whole refresh, so that where
+  Present waits for the display it alone sets the pace and transitions draw at
+  the refresh rate; the gap only holds frames back where Present returns at
+  once. Without the high-resolution timer the gap would be rounded up to the
+  timer tick, so then there is none in front and Present alone paces.
+- **The decisions are tested:** when to wake, whether to draw and when a frame
+  may start are `xerces_core::launcher_pacer`
+  (`src/xerces_core/launcher_pacing.cpp`), apart from Windows and RmlUi;
+  `xerces_tests` checks them (idle, settle frames, minimized, a game behind,
+  deadlines, transitions, the caret, the frame gap) and the timer's waits.
+  `tools\dev\launcher\check-idle.ps1` checks a built launcher through
+  `launcher.activity`: the script steps `activity` (log the counts since the
+  last line and start a new span) and `minimize` let it count one stretch of a
+  run.
 - **Scripted checks:** `--seconds` no longer keeps the loop busy. A `--script`
   step draws when it runs, and `shot` always draws the frame it captures, so a
   capture shows the screen as it is: the six captures of a scripted walk through

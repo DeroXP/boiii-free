@@ -10,7 +10,6 @@
 #undef GetObject
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cwchar>
 #include <cwctype>
@@ -20,6 +19,7 @@
 #include <utility>
 
 #include <xerces_core/json.hpp>
+#include <xerces_core/launcher_pacing.hpp>
 
 #include "log.hpp"
 
@@ -1051,8 +1051,16 @@ bool app::run_script(double seconds) {
   bool ran = false;
   while (script_next_ < script_.size() && script_[script_next_].at <= seconds) {
     const script_step step = script_[script_next_++];
-    ran = true;
     log_info("launcher.check.step", step.verb + " " + step.arg);
+    if (step.verb == "activity") {
+      // Logs launcher.activity for the span since the last line and starts
+      // a new one, so a check can count the frames and passes between two
+      // steps (tools\dev\launcher\check-idle.ps1). It changes nothing on
+      // screen, so it is no reason to draw.
+      log_activity(seconds);
+      continue;
+    }
+    ran = true;
     if (step.verb == "key") {
       // "key ctrl+up", "key shift+tab"; "numlock+q" adds the lock flag a real
       // keyboard sends, to check that it is ignored.
@@ -1113,6 +1121,8 @@ bool app::run_script(double seconds) {
       }
     } else if (step.verb == "type") {
       context_->ProcessTextInput(step.arg);
+    } else if (step.verb == "minimize") {
+      window_.minimize();
     } else if (step.verb == "quit") {
       window_.request_close();
     }
@@ -1289,10 +1299,11 @@ int app::run() {
     }
   }
 
-  // The loop draws a frame only when something changed since the last one
-  // (DESIGN.md 12.7). Otherwise it sleeps until the next thing it waits for:
-  // a window message (input, a posted task, a wake), the controller, the
-  // game it started exiting, RmlUi's next animation step or caret blink, the
+  // The loop draws a frame only when something changed since the last one,
+  // and otherwise sleeps until the next thing it waits for (DESIGN.md 12.7;
+  // the decisions are xerces_core::launcher_pacer's): a window message
+  // (input, a posted task, a wake), the controller, the game it started
+  // exiting, RmlUi's next animation step or (in front) caret blink, the
   // notice's end, the next script step or the end of --seconds; at most
   // 100 ms, or a second while a game runs and the launcher is behind it or
   // minimized. Every pass still polls the services and updates the screens,
@@ -1331,28 +1342,17 @@ int app::run() {
     return std::array<int, 4>{int(in_front()), int(IsIconic(handle) != FALSE),
                               window_.width(), window_.height()};
   };
-  // Frames still drawn after a change: screens move focus or scroll a frame
-  // or two after the change that caused it, once the rows the data model
-  // adds exist.
-  constexpr int settle_frames = 3;
-  // Present does not always wait for the display: it returns at once behind
-  // a full-screen game, and while the display sleeps. So frames are at least
-  // a refresh apart, and 1/60 s behind another window. A wait under 2 ms is
-  // left out: Windows' timer can round it up to a whole tick, which would
-  // slow down a loop that Present already paces.
-  constexpr double behind_frame_gap = 1.0 / 60.0;
-  constexpr double shortest_wait = 0.002;
+  // XInput sends no window messages: with a controller connected the waits
+  // in front are cut into slices this long, with the controller read
+  // between them.
+  constexpr double pad_slice = 0.008;
 
+  xerces_core::launcher_pacer pacer;
   auto seen_revisions = revisions();
   auto seen_shape = window_shape();
   const Rml::Element *seen_focus = nullptr;
   std::string last_focus;
-  bool first_frame = true;
   bool running = true;
-  bool stale = false; // a change was not drawn (minimized); draw it later
-  int settle = 0;
-  double rml_due = 0; // when RmlUi asked for its next update
-  double presented_at = -1;
   while (running) {
     const double t0 = now();
     // Whether a game runs, for the wait and launcher.activity: asked about
@@ -1362,58 +1362,34 @@ int app::run() {
       game_seen_ = services_->game_running();
     }
     const bool front = in_front();
-    const bool minimized = IsIconic(handle) != FALSE;
-    const bool loading =
+    xerces_core::launcher_pacer::wait_input waiting;
+    waiting.now = t0;
+    waiting.loading =
         std::ranges::any_of(views_, [](const entry &e) { return !e.loaded; });
-    // Passes that cannot wait: the first frame, screens still loading (one
-    // per pass), a capture, and while the window shows: frames after a
-    // change and RmlUi's animations.
-    const bool urgent = first_frame || loading || changed_ ||
-                        window_.capture_pending() ||
-                        (!minimized && (stale || settle > 0 || rml_due <= t0));
-    double until = t0;
-    if (!urgent) {
-      const bool game_behind = game_seen_ && (!front || minimized);
-      until = t0 + (game_behind ? 1.0 : 0.1);
-      if (!minimized) {
-        until = std::min(until, rml_due);
-      }
-      if (!notice_text_.empty()) {
-        until = std::min(until, notice_until_);
-      }
-      if (script_next_ < script_.size()) {
-        until = std::min(until, script_[script_next_].at);
-      }
-      if (opts_.seconds > 0) {
-        until = std::min(until, opts_.seconds);
-      }
-      if (front && (pad_previous_ & ~pad_ignored_ & pad_directions)) {
-        until = std::min(until, t0 + 0.008); // a held direction repeats
-      }
-      // What counts passes or times itself: focus being put back
-      // (keep_focus) and the boot screen. Passes, not frames: they draw
-      // once they change something.
-      if (focus_lost_frames_ > 0 || current_ == "boot") {
-        until = std::min(until, t0 + 0.016);
-      }
-    } else if (presented_at >= 0) {
-      const double refresh = window_.refresh_interval();
-      const double gap = front ? refresh : std::max(refresh, behind_frame_gap);
-      if (presented_at + gap - t0 > shortest_wait) {
-        until = presented_at + gap;
-      }
+    waiting.redraw = changed_;
+    waiting.capture = window_.capture_pending();
+    waiting.minimized = IsIconic(handle) != FALSE;
+    waiting.front = front;
+    waiting.game_running = game_seen_;
+    if (!notice_text_.empty()) {
+      waiting.notice_end = notice_until_;
     }
-    // XInput sends no window messages. With a controller connected the wait
-    // is cut into 8 ms slices with the controller read between them, so a
-    // quick tap wakes the loop as a key would; no frames are drawn while
-    // nothing changes.
+    if (script_next_ < script_.size()) {
+      waiting.script_next = script_[script_next_].at;
+    }
+    if (opts_.seconds > 0) {
+      waiting.seconds_end = opts_.seconds;
+    }
+    waiting.pad_repeat =
+        front && (pad_previous_ & ~pad_ignored_ & pad_directions) != 0;
+    waiting.counting = focus_lost_frames_ > 0 || current_ == "boot";
+    const double until = pacer.wake_at(waiting);
+    // A quick controller tap wakes the loop as a key would; no frames are
+    // drawn while nothing changes.
     std::optional<unsigned> pad_read;
-    const auto left_ms = [&] {
-      return int(std::ceil((until - now()) * 1000.0));
-    };
-    for (int left = left_ms(); left > 0; left = left_ms()) {
+    for (double left = until - now(); left > 0; left = until - now()) {
       const bool pad = front && pad_slots_ != 0;
-      if (window_.wait_events(pad ? std::min(left, 8) : left,
+      if (window_.wait_events(pad ? std::min(left, pad_slice) : left,
                               services_->game_process())) {
         break;
       }
@@ -1483,7 +1459,7 @@ int app::run() {
     changed |= run_script(t);
 
     // Load the remaining screens one per pass after the first frame.
-    if (!first_frame) {
+    if (!pacer.first_frame()) {
       for (auto &e : views_) {
         if (!e.loaded) {
           // Tried once: a document that fails is not retried every frame,
@@ -1528,28 +1504,32 @@ int app::run() {
       changed = true;
     }
     changed |= std::exchange(changed_, false);
-    // RmlUi's own reasons: a running animation or transition asks for the
-    // next update at once, a caret blink later. The pass it asked for draws
-    // what that update moved.
-    const bool animating = rml_due <= t;
-    rml_due = t + context_->GetNextUpdateDelay();
 
-    const bool settling = settle > 0;
-    const bool hidden = IsIconic(handle) != FALSE;
-    const bool draw = first_frame || window_.capture_pending() ||
-                      (!hidden && (changed || stale || settling || animating));
-    if (changed) {
-      settle = settle_frames;
-    } else if (draw && settling) {
-      --settle;
-    }
+    xerces_core::launcher_pacer::pass_input pass;
+    pass.now = t;
+    pass.changed = changed;
+    pass.capture = window_.capture_pending();
+    pass.minimized = IsIconic(handle) != FALSE;
+    pass.front = takes_pad;
+    pass.rml_delay = context_->GetNextUpdateDelay();
+    const bool draw = pacer.draw(pass);
     if (draw) {
+      // Frames are paced: Present does not always wait for the display (it
+      // returns at once behind a full-screen game and while the display
+      // sleeps), so a frame starts at least three quarters of a refresh
+      // after the last one, and 1/60 s behind another window, whatever woke
+      // the loop. Input that arrives meanwhile is handled in the next pass.
+      const double start = pacer.frame_at(now(), window_.refresh_interval(),
+                                          takes_pad, window_.precise_waits());
+      if (const double gap = start - now(); gap > 0) {
+        window_.sleep(gap);
+      }
+      const bool first = pacer.first_frame();
+      pacer.presented(now());
       window_.begin_frame();
       context_->Render();
       const bool capturing = window_.capture_pending();
       window_.present();
-      presented_at = t;
-      stale = false;
       if (capturing && !window_.capture_pending()) {
         if (window_.last_capture_error().empty()) {
           log_info("launcher.check.captured", current_);
@@ -1557,12 +1537,9 @@ int app::run() {
           log_warn("launcher.check.capture", window_.last_capture_error());
         }
       }
-      if (first_frame) {
-        first_frame = false;
+      if (first) {
         mark("first frame presented");
       }
-    } else if (changed || animating) {
-      stale = true; // minimized: drawn once the window shows again
     }
     count_activity(t, takes_pad, draw);
     if (opts_.seconds > 0 && t >= opts_.seconds) {

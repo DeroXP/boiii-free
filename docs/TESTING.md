@@ -558,8 +558,10 @@ way, captures it and lists any RmlUi warning (also with `-Theme light`,
 `-Theme contrast` or `-Language pseudo`). A script plays timed steps, the first
 at 1 s: `+500 key down`, `+300 pad a`, `+200 view mods`,
 `+100 click launch-vanilla`, `+100 type text`, `+100 focus search`,
-`+100 shot C:\path\screen.png` (a PNG of the next frame), `+100 quit`. The log
-is `<home>\logs\<date>-<time>-launcher-<pid>.jsonl`.
+`+100 shot C:\path\screen.png` (a PNG of the next frame), `+100 front off` (act
+as if another window were in front; `on`, `auto`), `+100 minimize`,
+`+100 activity` (log `launcher.activity` for the span since the last line),
+`+100 quit`. The log is `<home>\logs\<date>-<time>-launcher-<pid>.jsonl`.
 
 Run on 2026-11-05 by Claude on your PC while you were away (dry launches only):
 
@@ -658,6 +660,13 @@ only read.
   exits and it prints how long the launcher took to notice. About seven minutes;
   leave the PC alone meanwhile. It prints frames and passes per minute for each
   state the window was really in and saves them as JSON in `<home>\bench`.
+- `tools\dev\launcher\check-idle.ps1 -HomeDir <home>` checks a built launcher in
+  about a minute, from the `launcher.activity` line between two `activity` steps
+  of a script: idle in front draws nothing; a focused text field blinks its
+  caret in front but draws nothing behind another window; a screen shown while
+  minimized draws nothing; behind a stand-in game (as above) nothing is drawn
+  and the loop wakes about once a second; a transition in front draws on every
+  pass while it runs. It prints one line per case and exits 1 when one fails.
 
 Run on 2026-11-05 by Claude (no game running, dry launches only):
 
@@ -703,10 +712,40 @@ only, the game never started), the old loop being 843ba747's:
       warm run (`--seconds 900`, closed once the scan is logged) and the run
       with `+3000 click` and `--seconds`, the way `map-check.ps1` drives the
       launcher. `map-check.ps1` itself was not run (it starts the game).
+
+Run on 2026-11-05 by Claude after the review of the idle loop (DESIGN.md 12.7:
+finely timed waits, frames paced whatever woke the loop, no caret behind another
+window, `WM_SYSTIMER` no reason to draw; dry launches only, the game never
+started), the old loop being fb165490's:
+
+- [x] `xerces_tests`: 402 tests pass, 14 of them new (`launcher pacer`,
+      `precise wait`).
+- [x] `check-idle.ps1`: every case passes. In front idle 0 frames, 11 to 12
+      passes a second; a caret in front 5 to 7 frames in 4 s; behind with a
+      focused text field 0 frames; minimized with a screen shown 0 frames;
+      behind a stand-in game with a focused text field 0 frames, 1.2 to 1.8
+      passes a second (fb165490 drew 21 more frames in 12 s with the caret than
+      without it, the reviewer's case); a transition in front 17 to 58 frames.
+- [x] One 0.2 s transition (focus leaving Launch modded), three runs with and
+      without it: fb165490 drew 11 frames for it in front and about 5 behind
+      another window; the new loop 54 and 10. Present returned at once in these
+      runs, so the 54 are the frame gap's limit, not the display's.
+- [x] A 5 s run on Home in front: 41 frames with fb165490, 9 now (`WM_SYSTIMER`
+      every 530 ms drew four frames each in the first seconds).
+- [x] `check-screens.ps1`, also with `-Theme light` and `-Language pseudo`:
+      every screen captured, no RmlUi warning or error.
+- [x] A scripted walk (Home, Down, Mods, E, RB, Q, Q, Down, Down) with six
+      `shot` steps: the six PNGs are byte for byte the same as fb165490's (130
+      frames for it, the new loop 79).
+- [x] `m1-check.ps1 -Case vanilla` and `-Case modded` without `-Live` pass.
+      `map-check.ps1` was not run (it starts the game); it drives the launcher
+      with `+3000 click` and `--seconds`, as m1-check's runs do.
 - [ ] With you and the game: the launcher behind a match draws nothing (its
       `launcher.activity` lines in `<home>\logs`), it notices the game's exit at
       once (it waits on the process it started), and on a live display the
-      screens' transitions stay smooth at the display's refresh rate.
+      screens' transitions stay smooth at the display's refresh rate (not seen
+      here: the launcher stayed behind other windows, and Present returned at
+      once).
 
 ### Conflict system (M2)
 

@@ -21,6 +21,8 @@
 #include <optional>
 #include <thread>
 
+#include <xerces_core/launcher_pacing.hpp>
+
 #include "deferred_render.hpp"
 #include "png.hpp"
 
@@ -96,6 +98,9 @@ struct state {
   std::filesystem::path capture_path;
   std::atomic<bool> capture_requested = false;
   std::string capture_error;
+
+  // The loop's waits (the window's thread only).
+  xerces_core::precise_wait waits;
 };
 std::unique_ptr<state> s;
 // The handle wake() posts to. wake() is called from other threads, which must
@@ -540,19 +545,17 @@ Rml::RenderInterface *window::render_interface() {
   return s ? &*s->deferred : nullptr;
 }
 
-bool window::wait_events(int max_wait_ms, void *also) {
-  // MWMO_INPUTAVAILABLE: a message already in the queue also ends the wait,
-  // not only one that arrives during it.
-  const DWORD wait = DWORD(std::max(0, max_wait_ms));
-  HANDLE handle = static_cast<HANDLE>(also);
-  const DWORD count = handle ? 1 : 0;
-  // WAIT_OBJECT_0 (0) is the handle when there is one; WAIT_OBJECT_0 + count
-  // is a message either way. A timeout or a failure is past both.
-  const DWORD got =
-      MsgWaitForMultipleObjectsEx(count, handle ? &handle : nullptr, wait,
-                                  QS_ALLINPUT, MWMO_INPUTAVAILABLE);
-  return got <= WAIT_OBJECT_0 + count;
+bool window::wait_events(double seconds, void *also) {
+  return s && s->waits.wait_messages(seconds, also);
 }
+
+void window::sleep(double seconds) {
+  if (s) {
+    s->waits.sleep(seconds);
+  }
+}
+
+bool window::precise_waits() const { return s && s->waits.precise(); }
 
 bool window::process_events(Rml::Context *context, int max_wait_ms,
                             bool *pumped) {
@@ -563,14 +566,20 @@ bool window::process_events(Rml::Context *context, int max_wait_ms,
   }
   s->context = context;
   if (max_wait_ms > 0) {
-    wait_events(max_wait_ms);
+    wait_events(max_wait_ms / 1000.0);
   }
   MSG message{};
   bool has_message = PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE) != 0;
   if (pumped) {
-    *pumped = has_message;
+    *pumped = false;
   }
   while (has_message) {
+    // WM_SYSTIMER (0x118) is Windows' internal timer (caret blinks and the
+    // like). It came every 530 ms, the caret blink time, for the first
+    // seconds after start; it changes nothing the launcher draws.
+    if (pumped && message.message != 0x0118) {
+      *pumped = true;
+    }
     TranslateMessage(&message);
     DispatchMessageW(&message);
     has_message = PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE) != 0;

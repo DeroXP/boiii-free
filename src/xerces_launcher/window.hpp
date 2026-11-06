@@ -50,13 +50,20 @@ public:
   Rml::SystemInterface *system_interface();
   Rml::RenderInterface *render_interface();
 
-  // Waits up to max_wait_ms for a window message (input, a wake) or, when
+  // Waits up to `seconds` for a window message (input, a wake) or, when
   // given, for `also` (a process handle) to be signalled; true when either
-  // happened. Pumps nothing.
-  bool wait_events(int max_wait_ms, void *also = nullptr);
+  // happened. Pumps nothing. Timed finely (xerces_core::precise_wait): the
+  // wait ends within about half a millisecond of `seconds`, not at Windows'
+  // next 15.6 ms timer tick.
+  bool wait_events(double seconds, void *also = nullptr);
+  // Sleeps `seconds`, timed the same way; messages wait in the queue.
+  void sleep(double seconds);
+  // Whether the waits are timed finely (Windows 10 1803 and later).
+  bool precise_waits() const;
   // Pumps messages; waits up to max_wait_ms when idle (0: never waits).
   // Returns false once the window was asked to close. *pumped (when given)
-  // says whether there was any message: something may have changed.
+  // says whether there was a message (other than WM_SYSTIMER, Windows'
+  // internal timer): something may have changed.
   bool process_events(Rml::Context *context, int max_wait_ms,
                       bool *pumped = nullptr);
   void begin_frame();
