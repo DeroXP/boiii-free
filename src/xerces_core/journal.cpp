@@ -20,8 +20,9 @@ constexpr std::pair<launch_phase, const char *> phase_names[] = {
     {launch_phase::clean_exit, "clean_exit"},
 };
 
-// The safe-mode notice for a crash in a phase, with or without experimental
-// settings (the sentences naming them follow, setting_on_sentence). Whole
+// The safe-mode notice for a crash in a phase, without experimental settings
+// or with two or more (the sentences naming them follow,
+// setting_on_sentence); one_setting_message is the notice for one. Whole
 // sentences, so that the launcher translates each as one string (Home,
 // Servers and Diagnostics show them through app::tr();
 // tools/i18n/extract_strings.py reads the sentences from here).
@@ -81,6 +82,138 @@ const char *safe_mode_message(launch_phase phase, bool settings) {
              : "The last launch with mods crashed while starting. This launch "
                "starts with mods off. Retry with mods, report the crash, or "
                "find the mod that causes it.";
+}
+
+// The safe-mode notice for a crash in a phase with one experimental setting
+// on (flag, one of suspect_settings()): it names the setting and where it is
+// turned off, so no setting_on_sentence follows. Larger zone memory's are
+// the sentences from when it was the only suspect setting. Empty for any
+// other flag.
+const char *one_setting_message(launch_phase phase, std::string_view flag) {
+  const bool pool = flag == db_pool::flag_name;
+  const bool limiter = flag == frame_pacing::flag_name;
+  const bool flip = flag == flip_model::flag_name;
+  switch (phase) {
+  case launch_phase::symbols:
+    return pool ? "The last launch with mods and larger zone memory "
+                  "(experimental) crashed while finding the game's functions. "
+                  "This launch starts with mods and larger zone memory off. "
+                  "Larger zone memory may be the cause: find the culprit runs "
+                  "the same mods without it first. Or retry with mods, report "
+                  "the crash, or turn larger zone memory off in Settings > "
+                  "Launch."
+           : limiter
+               ? "The last launch with mods and the precise FPS limit "
+                 "(experimental) crashed while finding the game's functions. "
+                 "This launch starts with mods and the precise FPS limit off. "
+                 "The precise FPS limit may be the cause: find the culprit "
+                 "runs the same mods without it first. Or retry with mods, "
+                 "report the crash, or turn the precise FPS limit off in "
+                 "Settings > Display."
+           : flip
+               ? "The last launch with mods and flip-model presentation "
+                 "(experimental) crashed while finding the game's functions. "
+                 "This launch starts with mods and flip-model presentation "
+                 "off. Flip-model presentation may be the cause: find the "
+                 "culprit runs the same mods without it first. Or retry with "
+                 "mods, report the crash, or turn flip-model presentation off "
+                 "in Settings > Display."
+               : "";
+  case launch_phase::frontend:
+    return pool ? "The last launch with mods and larger zone memory "
+                  "(experimental) crashed in the menus. This launch starts "
+                  "with mods and larger zone memory off. Larger zone memory "
+                  "may be the cause: find the culprit runs the same mods "
+                  "without it first. Or retry with mods, report the crash, or "
+                  "turn larger zone memory off in Settings > Launch."
+           : limiter
+               ? "The last launch with mods and the precise FPS limit "
+                 "(experimental) crashed in the menus. This launch starts "
+                 "with mods and the precise FPS limit off. The precise FPS "
+                 "limit may be the cause: find the culprit runs the same mods "
+                 "without it first. Or retry with mods, report the crash, or "
+                 "turn the precise FPS limit off in Settings > Display."
+           : flip
+               ? "The last launch with mods and flip-model presentation "
+                 "(experimental) crashed in the menus. This launch starts "
+                 "with mods and flip-model presentation off. Flip-model "
+                 "presentation may be the cause: find the culprit runs the "
+                 "same mods without it first. Or retry with mods, report the "
+                 "crash, or turn flip-model presentation off in Settings > "
+                 "Display."
+               : "";
+  case launch_phase::loading_map:
+    return pool ? "The last launch with mods and larger zone memory "
+                  "(experimental) crashed while loading a map. This launch "
+                  "starts with mods and larger zone memory off. Larger zone "
+                  "memory may be the cause: find the culprit runs the same "
+                  "mods without it first. Or retry with mods, report the "
+                  "crash, or turn larger zone memory off in Settings > Launch."
+           : limiter
+               ? "The last launch with mods and the precise FPS limit "
+                 "(experimental) crashed while loading a map. This launch "
+                 "starts with mods and the precise FPS limit off. The precise "
+                 "FPS limit may be the cause: find the culprit runs the same "
+                 "mods without it first. Or retry with mods, report the "
+                 "crash, or turn the precise FPS limit off in Settings > "
+                 "Display."
+           : flip
+               ? "The last launch with mods and flip-model presentation "
+                 "(experimental) crashed while loading a map. This launch "
+                 "starts with mods and flip-model presentation off. "
+                 "Flip-model presentation may be the cause: find the culprit "
+                 "runs the same mods without it first. Or retry with mods, "
+                 "report the crash, or turn flip-model presentation off in "
+                 "Settings > Display."
+               : "";
+  case launch_phase::in_game:
+    return pool ? "The last launch with mods and larger zone memory "
+                  "(experimental) crashed in a match. This launch starts with "
+                  "mods and larger zone memory off. Larger zone memory may be "
+                  "the cause: find the culprit runs the same mods without it "
+                  "first. Or retry with mods, report the crash, or turn larger "
+                  "zone memory off in Settings > Launch."
+           : limiter
+               ? "The last launch with mods and the precise FPS limit "
+                 "(experimental) crashed in a match. This launch starts with "
+                 "mods and the precise FPS limit off. The precise FPS limit "
+                 "may be the cause: find the culprit runs the same mods "
+                 "without it first. Or retry with mods, report the crash, or "
+                 "turn the precise FPS limit off in Settings > Display."
+           : flip
+               ? "The last launch with mods and flip-model presentation "
+                 "(experimental) crashed in a match. This launch starts with "
+                 "mods and flip-model presentation off. Flip-model "
+                 "presentation may be the cause: find the culprit runs the "
+                 "same mods without it first. Or retry with mods, report the "
+                 "crash, or turn flip-model presentation off in Settings > "
+                 "Display."
+               : "";
+  case launch_phase::launching:
+  case launch_phase::clean_exit: // not a crash; never asked for
+    break;
+  }
+  return pool ? "The last launch with mods and larger zone memory "
+                "(experimental) crashed while starting. This launch starts "
+                "with mods and larger zone memory off. Larger zone memory may "
+                "be the cause: find the culprit runs the same mods without it "
+                "first. Or retry with mods, report the crash, or turn larger "
+                "zone memory off in Settings > Launch."
+         : limiter
+             ? "The last launch with mods and the precise FPS limit "
+               "(experimental) crashed while starting. This launch starts "
+               "with mods and the precise FPS limit off. The precise FPS "
+               "limit may be the cause: find the culprit runs the same mods "
+               "without it first. Or retry with mods, report the crash, or "
+               "turn the precise FPS limit off in Settings > Display."
+         : flip
+             ? "The last launch with mods and flip-model presentation "
+               "(experimental) crashed while starting. This launch starts "
+               "with mods and flip-model presentation off. Flip-model "
+               "presentation may be the cause: find the culprit runs the same "
+               "mods without it first. Or retry with mods, report the crash, "
+               "or turn flip-model presentation off in Settings > Display."
+             : "";
 }
 
 // The sentence after safe_mode_message for each setting the crashed launch
@@ -230,12 +363,18 @@ safe_mode_decision decide_safe_mode(const std::optional<launch_journal> &last) {
   out.crashed_with_precise_limiter = last->precise_limiter;
   out.crashed_with_flip_model = last->flip_model;
   // The experimental settings are as much suspects as the mods (5.4, 12.4):
-  // the phase's sentence, then one naming each setting.
+  // with one, the phase's sentence names it; with more, the phase's sentence
+  // for settings, then one naming each.
   const std::vector<std::string> settings = crashed_settings(out);
-  out.message_parts.emplace_back(
-      safe_mode_message(last->phase, !settings.empty()));
-  for (const auto &flag : settings) {
-    out.message_parts.emplace_back(setting_on_sentence(flag));
+  if (settings.size() == 1) {
+    out.message_parts.emplace_back(
+        one_setting_message(last->phase, settings.front()));
+  } else {
+    out.message_parts.emplace_back(
+        safe_mode_message(last->phase, !settings.empty()));
+    for (const auto &flag : settings) {
+      out.message_parts.emplace_back(setting_on_sentence(flag));
+    }
   }
   for (const auto &part : out.message_parts) {
     out.message += (out.message.empty() ? "" : " ") + part;
@@ -518,14 +657,27 @@ std::optional<culprit_progress> parse_culprit_progress(std::string_view text) {
   culprit_progress out;
   out.mode = json::get_string(root, "mode").value_or("");
   out.crashed_stack = strings_at(root, "crashed_stack");
-  // "settings" is a list of flag names. A development build of flip-model
-  // presentation (never released) kept the step there as a string instead;
-  // a value of another kind is not a search this version can continue.
-  if (const auto *settings = json::member(root, "settings");
-      settings != nullptr && !settings->IsArray()) {
-    return std::nullopt;
+  // "settings" is a list of flag names, each one of suspect_settings() once.
+  // A development build of flip-model presentation (never released) kept the
+  // step there as a string instead; a value of another kind, or a name this
+  // version does not know (a newer build's setting, a hand edit), is not a
+  // search this version can continue: Home would name and turn off the wrong
+  // setting.
+  if (const auto *settings = json::member(root, "settings")) {
+    if (!settings->IsArray()) {
+      return std::nullopt;
+    }
+    for (const auto &item : settings->GetArray()) {
+      if (!item.IsString()) {
+        return std::nullopt;
+      }
+      std::string flag(item.GetString(), item.GetStringLength());
+      if (!holds(suspect_settings(), flag) || holds(out.settings, flag)) {
+        return std::nullopt;
+      }
+      out.settings.push_back(std::move(flag));
+    }
   }
-  out.settings = strings_at(root, "settings");
   out.testing = strings_at(root, "testing");
   out.loaded = strings_at(root, "loaded");
   std::size_t launches = 0;

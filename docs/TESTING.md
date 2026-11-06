@@ -522,8 +522,13 @@ extra).
       `C:\Users\Ginld\XercesDev\map-checks\results.jsonl`, with the journal left
       in `frontend` and the game log ending at `loader.plan.applied`. Their
       cause is inferred from that signature, not read from a dump. The 12:53 run
-      (`zm_mw2rust`) ended 9.5 s into the map's load and is not counted with
-      them.
+      (`zm_mw2rust`, "the game ended after 9.5 s of loading") is not counted
+      with them, although its game log
+      (`C:\Users\Ginld\XercesDev\map-checks\20261105-125335-zm_mw2rust-stack3\20261105-185355-game-30488.jsonl`)
+      and its journal
+      (`C:\Users\Ginld\XercesHome-maps\logs\journal.json.20261105-125551`) end
+      the same way, at `loader.plan.applied` with the phase `frontend`: only the
+      script's load timing differs, so it may be the same crash.
 - [x] Fix (`xerces_core/active_device`): the hook checks the local client where
       it calls the original, on the direct path and in the deferred call, and
       drops a call for a local client outside 0 to `LOCAL_CLIENT_COUNT` - 1. The
@@ -540,7 +545,10 @@ extra).
       true. In the menu, switching between a controller and the keyboard still
       changes the button prompts (upstream's fix still works). Then rerun the
       frame-time bench's `s240` runs and map-check on Cheese Cube with the
-      stack, and note whether "the game ended after 0 s of loading" comes back.
+      stack, and note whether a run ends in `crash_load` with the game log
+      ending at `loader.plan.applied` (phase `frontend`), whatever load time the
+      script gives: "the game ended after 0 s of loading" as at 12:52 and 12:55,
+      or a few seconds as at 12:53.
 
 ### Performance instrumentation (2026-11-05)
 
@@ -807,7 +815,13 @@ Run on 2026-11-05 by Claude on your PC while you were away (dry launches only):
       its flag. A pad's Up from the Home tab focused the footer's About link,
       and A opened About. check-screens (dark, light, pseudo) and check-idle
       pass on the merged build; `xerces_cli plan apply --dry-launch` printed a
-      note for each of the three settings.
+      note for each of the three settings. After the review (script
+      `C:\Users\Ginld\XercesDev\scratch\integrate\fix-check.ps1`, also in the
+      pseudo-locale): with only larger zone memory on, a crash in the menus gave
+      xerces-main's sentence word for word, and flip-model presentation alone (a
+      crash in a match) its own sentence naming Settings > Display; a
+      `culprit.json` whose `settings` named `xerces-other` was not continued
+      (Home offered "Find the culprit" again).
 - [ ] The window by hand: drag by the header, snap, resize from the edges,
       minimize, maximize, close; at 150 percent.
 - [ ] A physical controller: A, B, Y, LB/RB and the D-pad on every screen.

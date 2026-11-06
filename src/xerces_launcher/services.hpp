@@ -159,8 +159,9 @@ public:
   // ------------------------------------------------------ find the culprit
   // After a crash with mods (5.6): halve the crashed stack over a few test
   // launches, after running it once without the experimental settings
-  // (larger zone memory, flip-model presentation) when the crashed launch had
-  // them. Every test leaves them out, as safe mode does. Kept in
+  // (xerces_core::suspect_settings: larger zone memory, the precise FPS
+  // limit, flip-model presentation) when the crashed launch had any. Every
+  // test leaves them all out, as safe mode does. Kept in
   // <home>/config/culprit.json so it survives restarts; each test's result
   // comes from the journal when the game exits.
   const std::optional<xerces_core::culprit_progress> &culprit() const {

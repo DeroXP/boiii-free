@@ -350,6 +350,32 @@ TEST_CASE("safe mode: the larger zone memory step survives between launches") {
   unknown_settings.insert(unknown_settings.size() - 1,
                           R"(,"settings":"maybe")");
   CHECK(!parse_culprit_progress(unknown_settings).has_value());
+  // Each entry is one of suspect_settings(), once. A name this version does
+  // not know (a newer build's setting, a hand edit) would be named and
+  // turned off wrongly on Home, so the search is not continued; nor with an
+  // entry that is not a string, or one listed twice.
+  for (const char *settings :
+       {R"(["xerces-other"])", R"(["xerces-db-pool","xerces-other"])",
+        R"(["xerces-db-pool",1])",
+        R"(["xerces-flip-model","xerces-flip-model"])", R"([""])"}) {
+    std::string bad = db_pool_only;
+    bad.insert(bad.size() - 1, std::string(R"(,"settings":)") + settings);
+    CHECK(!parse_culprit_progress(bad).has_value());
+  }
+  std::string known = db_pool_only;
+  known.insert(known.size() - 1,
+               R"(,"settings":["xerces-precise-limiter","xerces-flip-model"])");
+  const auto both_known = parse_culprit_progress(known);
+  REQUIRE(both_known.has_value());
+  CHECK((
+      both_known->settings ==
+      std::vector<std::string>{"xerces-precise-limiter", "xerces-flip-model"}));
+  CHECK(!both_known->has_setting("xerces-db-pool"));
+  std::string empty_list = db_pool_only;
+  empty_list.insert(empty_list.size() - 1, R"(,"settings":[])");
+  const auto none_listed = parse_culprit_progress(empty_list);
+  REQUIRE(none_listed.has_value());
+  CHECK(none_listed->has_setting("xerces-db-pool")); // as before the list
 }
 
 TEST_CASE("safe mode: the settings it crashed with survive between launches") {

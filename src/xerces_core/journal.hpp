@@ -265,5 +265,7 @@ struct culprit_progress {
 };
 
 std::string culprit_progress_to_json(const culprit_progress &value);
+// Empty for a file this version cannot continue, among them one whose
+// settings name a flag outside suspect_settings() or name one twice.
 std::optional<culprit_progress> parse_culprit_progress(std::string_view text);
 } // namespace xerces_core

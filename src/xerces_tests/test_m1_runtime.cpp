@@ -241,26 +241,43 @@ TEST_CASE("safe mode: a crash with mods turns the next launch safe") {
   CHECK(std::ranges::none_of(crash.message,
                              [](char c) { return c >= '0' && c <= '9'; }));
   CHECK((crash.message_parts == std::vector<std::string>{crash.message}));
-  // With an experimental setting: the phase's sentence for settings, then
-  // one fixed sentence naming it, each translated on its own.
+  // With one experimental setting: one fixed sentence for the phase that
+  // names it (larger zone memory's from before the other settings were
+  // suspects, word for word).
   bigger.db_pool = true;
   const safe_mode_decision with_pool = decide_safe_mode(bigger);
-  REQUIRE_EQ(with_pool.message_parts.size(), std::size_t{2});
-  CHECK(with_pool.message_parts[0].find("while loading a map") !=
-        std::string::npos);
-  CHECK(with_pool.message_parts[0].find("experimental settings") !=
-        std::string::npos);
-  CHECK_EQ(with_pool.message_parts[1],
-           "Larger zone memory was on (Settings > Launch).");
-  CHECK_EQ(with_pool.message,
-           with_pool.message_parts[0] + " " + with_pool.message_parts[1]);
-  CHECK_EQ(
-      safe_mode_text(with_pool,
-                     [](const std::string &part) { return "[" + part + "]"; }),
-      "[" + with_pool.message_parts[0] + "] [" + with_pool.message_parts[1] +
-          "]");
+  CHECK((with_pool.message_parts ==
+         std::vector<std::string>{
+             "The last launch with mods and larger zone memory (experimental) "
+             "crashed while loading a map. This launch starts with mods and "
+             "larger zone memory off. Larger zone memory may be the cause: "
+             "find the culprit runs the same mods without it first. Or retry "
+             "with mods, report the crash, or turn larger zone memory off in "
+             "Settings > Launch."}));
+  CHECK_EQ(with_pool.message, with_pool.message_parts[0]);
   bigger.stack = {"a.mod"};
   CHECK_EQ(decide_safe_mode(bigger).message, with_pool.message);
+  // With two: the phase's sentence for settings, then one fixed sentence
+  // naming each, each translated on its own.
+  bigger.precise_limiter = true;
+  const safe_mode_decision with_two = decide_safe_mode(bigger);
+  REQUIRE_EQ(with_two.message_parts.size(), std::size_t{3});
+  CHECK(with_two.message_parts[0].find("while loading a map") !=
+        std::string::npos);
+  CHECK(with_two.message_parts[0].find("experimental settings") !=
+        std::string::npos);
+  CHECK_EQ(with_two.message_parts[1],
+           "Larger zone memory was on (Settings > Launch).");
+  CHECK_EQ(with_two.message_parts[2],
+           "The precise FPS limit was on (Settings > Display).");
+  CHECK_EQ(with_two.message, with_two.message_parts[0] + " " +
+                                 with_two.message_parts[1] + " " +
+                                 with_two.message_parts[2]);
+  CHECK_EQ(
+      safe_mode_text(with_two,
+                     [](const std::string &part) { return "[" + part + "]"; }),
+      "[" + with_two.message_parts[0] + "] [" + with_two.message_parts[1] +
+          "] [" + with_two.message_parts[2] + "]");
 
   journal.phase = launch_phase::clean_exit;
   CHECK(!decide_safe_mode(journal).safe_mode);
@@ -423,8 +440,10 @@ TEST_CASE(
   const safe_mode_decision decision = decide_safe_mode(back);
   REQUIRE(decision.safe_mode);
   CHECK(decision.crashed_with_db_pool);
-  CHECK(decision.message.find("Larger zone memory was on") !=
+  CHECK(decision.message.find("larger zone memory (experimental)") !=
         std::string::npos);
+  CHECK(decision.message.find("Settings > Launch") != std::string::npos);
+  CHECK(decision.message.find("experimental settings") == std::string::npos);
   CHECK(culprit_search_possible(decision));
 
   // Safe mode ran fine. Every test runs without the setting too
@@ -471,6 +490,7 @@ TEST_CASE("safe mode: a crash the precise FPS limit causes is not blamed on "
   REQUIRE(decision.safe_mode);
   CHECK(decision.crashed_with_precise_limiter);
   CHECK(!decision.crashed_with_db_pool);
+  CHECK_EQ(decision.message_parts.size(), std::size_t{1});
   CHECK(decision.message.find("precise FPS limit") != std::string::npos);
   CHECK(decision.message.find("Settings > Display") != std::string::npos);
   CHECK(decision.message.find("zone memory") == std::string::npos);
@@ -547,9 +567,11 @@ TEST_CASE("safe mode: a crash flip model causes is not blamed on a mod") {
   CHECK(decision.crashed_with_settings());
   CHECK((crashed_settings(decision) ==
          std::vector<std::string>{"xerces-flip-model"}));
-  REQUIRE_EQ(decision.message_parts.size(), std::size_t{2});
-  CHECK_EQ(decision.message_parts[1],
-           "Flip-model presentation was on (Settings > Display).");
+  // One setting: one sentence, naming it and where it is turned off.
+  REQUIRE_EQ(decision.message_parts.size(), std::size_t{1});
+  CHECK(decision.message.find("flip-model presentation (experimental)") !=
+        std::string::npos);
+  CHECK(decision.message.find("Settings > Display") != std::string::npos);
   CHECK(decision.message.find("zone memory") == std::string::npos);
 
   // Safe mode and every test run without it, so the first test, the whole
@@ -691,6 +713,63 @@ TEST_CASE("safe mode: three experimental settings are one suspect") {
   const std::size_t end = string_step.find(']', at);
   string_step.replace(at, end - at + 1, R"("settings":"untested")");
   CHECK(!parse_culprit_progress(string_step).has_value());
+}
+
+TEST_CASE("safe mode: one experimental setting is named in the phase's "
+          "sentence") {
+  // Each phase and setting: one fixed sentence that names the setting in the
+  // singular and where it is turned off; never the plural sentence, never a
+  // sentence of another setting or phase.
+  struct setting_case {
+    const char *name;  // as the sentence names it
+    const char *place; // where it is turned off
+    bool launch_journal::*field;
+  };
+  const setting_case cases[] = {
+      {"larger zone memory (experimental)", "Settings > Launch",
+       &launch_journal::db_pool},
+      {"the precise FPS limit (experimental)", "Settings > Display",
+       &launch_journal::precise_limiter},
+      {"flip-model presentation (experimental)", "Settings > Display",
+       &launch_journal::flip_model},
+  };
+  const std::pair<launch_phase, const char *> phases[] = {
+      {launch_phase::launching, "while starting"},
+      {launch_phase::symbols, "while finding the game's functions"},
+      {launch_phase::frontend, "in the menus"},
+      {launch_phase::loading_map, "while loading a map"},
+      {launch_phase::in_game, "in a match"},
+  };
+  std::set<std::string> seen;
+  for (const auto &setting : cases) {
+    for (const auto &[phase, where] : phases) {
+      launch_journal journal;
+      journal.plan_id = "sha256:abc";
+      journal.stack = {"a", "b"};
+      journal.phase = phase;
+      journal.*setting.field = true;
+      const safe_mode_decision decision = decide_safe_mode(journal);
+      REQUIRE(decision.safe_mode);
+      REQUIRE_EQ(decision.message_parts.size(), std::size_t{1});
+      const std::string &text = decision.message;
+      CHECK_EQ(text, decision.message_parts[0]);
+      CHECK(text.starts_with(std::string("The last launch with mods and ") +
+                             setting.name + " crashed " + where + "."));
+      CHECK(text.find(setting.place) != std::string::npos);
+      CHECK(text.find("without it first") != std::string::npos);
+      CHECK(text.find("experimental settings") == std::string::npos);
+      CHECK(text.find(" was on (") == std::string::npos);
+      for (const auto &other : cases) {
+        if (&other != &setting) {
+          CHECK(text.find(other.name) == std::string::npos);
+        }
+      }
+      CHECK(std::ranges::none_of(text,
+                                 [](char c) { return c >= '0' && c <= '9'; }));
+      CHECK(seen.insert(text).second);
+    }
+  }
+  CHECK_EQ(seen.size(), std::size(cases) * std::size(phases));
 }
 
 TEST_CASE(

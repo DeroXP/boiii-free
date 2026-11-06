@@ -83,7 +83,7 @@ TEXT_FUNCTIONS = {
     "src/xerces_launcher/views/packs.cpp": ("mode_name",),
     "src/xerces_launcher/views/servers.cpp": ("mode_name",),
     "src/xerces_core/compat.cpp": ("preflight_label",),
-    "src/xerces_core/journal.cpp": ("safe_mode_message", "setting_on_sentence", "setting_name"),
+    "src/xerces_core/journal.cpp": ("safe_mode_message", "one_setting_message", "setting_on_sentence", "setting_name"),
     "src/xerces_core/mods_edit.cpp": ("mods_capabilities",),
     "src/xerces_core/packs_store.cpp": ("pack_name_problem",),
     "src/xerces_core/servers_book.cpp": ("port_problem", "server_address_problem"),

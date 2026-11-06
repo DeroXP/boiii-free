@@ -961,20 +961,23 @@ together.
   (`launch_inputs::crash_followup`), so they all run on the stock pool, the
   engine's own frame limiter and the engine's own swap chain, and a crash or a
   black screen a setting causes is never narrowed down to a mod. When the
-  crashed launch had any, the safe-mode message names each (a fixed sentence per
-  setting after the phase's), the search can start with one mod (the settings
-  count as one suspect), and its first test runs the whole crashed stack without
-  them: if that runs fine, Home says the setting caused the crash and offers to
-  turn it off (the profile keeps its mods; with several on, the test cannot tell
-  them apart, so Home names them all and turns off just those: "Turn both off",
-  "Turn them all off"; turn one back on to find out which); if it crashes too,
-  the mods are bisected as usual. `culprit.json` keeps the settings as a
-  `settings` list of flag names and the step under its first name, `db_pool`; a
-  file saved before the list existed had only larger zone memory. A stack that
-  only fits with the larger pool also crashes in that first test, so its search
-  can end in "these mods together"; when the crashed launch had larger zone
-  memory, Home then adds that together they may need more zone memory than the
-  stock pool.
+  crashed launch had any, the safe-mode message names each (with one, the
+  phase's sentence names it and where it is turned off; with more, a fixed
+  sentence per setting follows the phase's), the search can start with one mod
+  (the settings count as one suspect), and its first test runs the whole crashed
+  stack without them: if that runs fine, Home says the setting caused the crash
+  and offers to turn it off (the profile keeps its mods; with several on, the
+  test cannot tell them apart, so Home names them all and turns off just those:
+  "Turn both off", "Turn them all off"; turn one back on to find out which); if
+  it crashes too, the mods are bisected as usual. `culprit.json` keeps the
+  settings as a `settings` list of flag names and the step under its first name,
+  `db_pool`; a file saved before the list existed had only larger zone memory,
+  and one whose list names a flag this version does not know (or one twice) is
+  not continued, so Home never names or turns off the wrong setting. A stack
+  that only fits with the larger pool also crashes in that first test, so its
+  search can end in "these mods together"; when the crashed launch had larger
+  zone memory, Home then adds that together they may need more zone memory than
+  the stock pool.
 - After **any** crash with mods enabled, the next launch defaults to safe mode
   (all mods off, same game settings) with one-click "Retry with mods", and the
   launcher names the plan that crashed. Other options: report, or "find the
