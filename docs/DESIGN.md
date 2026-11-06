@@ -935,7 +935,15 @@ together.
   in every test, so they are tested alone (with the map) when one other suspect
   is left; suspects that only ever load with the map end the search without a
   culprit. A culprit that is a dependency is turned off through the enabled mods
-  that pull it in, and one only the map needs is named as such.
+  that pull it in. When the profile's map needs it too, turning mods off would
+  leave it loading, so Home offers no button and says to pick another map
+  (`culprit_remedy_for`).
+- Limit: the map is never a suspect, but every test keeps it. So a culprit the
+  map needs never ran without the map, and Home says "it, or the map that needs
+  it". A map that crashes by itself makes every test crash, and the search ends
+  on the lowest mod, as when that mod crashes; until a test runs fine
+  (`culprit_search::ran_fine`, kept in `culprit.json`), Home names the map as a
+  possible cause and still offers to turn the mod off.
 - Larger zone memory in crash recovery. Safe mode and every culprit test leave
   `-xerces-db-pool` out whatever the settings say
   (`launch_inputs::crash_followup`), so they all run on the stock pool and a

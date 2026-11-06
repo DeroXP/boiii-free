@@ -66,6 +66,20 @@ std::vector<std::string>
 culprit_switches(const std::vector<installed_content> &catalog,
                  const plan_request &request, std::string_view culprit);
 
+// What stops a found culprit loading in a profile (request: its mods and
+// map). Home offers to turn the mods off only when that is enough.
+struct culprit_remedy {
+  // culprit_switches: the enabled mods that load it.
+  std::vector<std::string> mods;
+  // The profile's map loads it too (the map's own plan, without the mods):
+  // turning mods off does not stop it, only another map does.
+  bool map = false;
+  bool mods_enough() const { return !mods.empty() && !map; }
+};
+culprit_remedy culprit_remedy_for(const std::vector<installed_content> &catalog,
+                                  const plan_request &request,
+                                  std::string_view culprit);
+
 // What stopped a launch, so callers can tell the player's plan from the PC.
 enum class launch_refusal {
   none,

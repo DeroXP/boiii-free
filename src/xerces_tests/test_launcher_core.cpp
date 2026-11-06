@@ -302,6 +302,8 @@ TEST_CASE("safe mode: the larger zone memory step survives between launches") {
   REQUIRE(old.has_value());
   CHECK(old->search.db_pool() == db_pool_suspect::none);
   CHECK((old->search.next_test() == std::vector<std::string>{"b"}));
+  // Saved without "ran_fine": no test known to have run fine.
+  CHECK(!old->search.ran_fine());
   // That search tested the upper half first; "second_half" said it had run
   // fine, so the other half is what is left to test.
   std::string half = older;
@@ -311,6 +313,7 @@ TEST_CASE("safe mode: the larger zone memory step survives between launches") {
   REQUIRE(upper_fine.has_value());
   CHECK((upper_fine->search.cleared() == std::vector<std::string>{"a"}));
   CHECK((upper_fine->search.next_test() == std::vector<std::string>{"b"}));
+  CHECK(upper_fine->search.ran_fine()); // the cleared half ran fine
   std::string unknown = older;
   unknown.insert(unknown.size() - 1, R"(,"db_pool":"maybe")");
   CHECK(!parse_culprit_progress(unknown).has_value());

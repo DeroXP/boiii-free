@@ -232,9 +232,10 @@ culprit_search::culprit_search(std::vector<std::string> suspects,
                                std::vector<std::string> cleared,
                                bool combination, std::size_t launches,
                                db_pool_suspect db_pool,
-                               std::vector<std::string> always)
+                               std::vector<std::string> always, bool ran_fine)
     : suspects_(std::move(suspects)), always_(std::move(always)),
-      combination_(combination), launches_(launches), db_pool_(db_pool) {
+      combination_(combination), ran_fine_(ran_fine), launches_(launches),
+      db_pool_(db_pool) {
   // Only suspects can be cleared, and never all of them (that ends the
   // search as a combination instead).
   for (const auto &id : cleared) {
@@ -245,6 +246,8 @@ culprit_search::culprit_search(std::vector<std::string> suspects,
   if (cleared_.size() >= suspects_.size()) {
     cleared_.clear();
   }
+  // Searches saved without "ran_fine": a cleared part ran fine.
+  ran_fine_ = ran_fine_ || !cleared_.empty();
 }
 
 std::vector<std::string> culprit_search::apart() const {
@@ -301,6 +304,7 @@ void culprit_search::record(bool crashed,
     return;
   }
   const std::vector<std::string> asked = next_test();
+  ran_fine_ = ran_fine_ || !crashed;
   // The suspects the test loaded, in stack order.
   const std::vector<std::string> &test = loaded.empty() ? asked : loaded;
   std::vector<std::string> ran;
@@ -421,6 +425,7 @@ std::string culprit_progress_to_json(const culprit_progress &value) {
   json::set(doc, "always", json::string_array(value.search.always(), alloc),
             alloc);
   json::set(doc, "combination", value.search.needs_combination(), alloc);
+  json::set(doc, "ran_fine", value.search.ran_fine(), alloc);
   json::set(doc, "launches", static_cast<std::int64_t>(value.search.launches()),
             alloc);
   for (const auto &[state, name] : db_pool_names) {
@@ -477,9 +482,9 @@ std::optional<culprit_progress> parse_culprit_progress(std::string_view text) {
                    suspects.begin() +
                        static_cast<std::ptrdiff_t>(suspects.size() / 2));
   }
-  out.search = culprit_search(std::move(suspects), std::move(cleared),
-                              bool_at(root, "combination"), launches, db_pool,
-                              strings_at(root, "always"));
+  out.search = culprit_search(
+      std::move(suspects), std::move(cleared), bool_at(root, "combination"),
+      launches, db_pool, strings_at(root, "always"), bool_at(root, "ran_fine"));
   return out;
 }
 } // namespace xerces_core

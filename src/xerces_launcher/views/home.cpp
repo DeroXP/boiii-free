@@ -307,21 +307,27 @@ private:
     return out;
   }
 
-  // The enabled mods to turn off for the mod the search found: the culprit
-  // itself, or the mods that pull it in as a dependency (it may not be one
-  // the player enabled). Empty when only the map needs it.
-  std::vector<std::string>
-  culprit_switches(const xerces_core::culprit_progress &culprit) const {
+  // What stops the mod the search found loading in its profile: the enabled
+  // mods that load it (the culprit itself, or the mods that pull it in as a
+  // dependency), and whether the profile's map needs it too.
+  xerces_core::culprit_remedy
+  remedy_for(const xerces_core::culprit_progress &culprit) const {
     const services &svc = owner_->svc();
     const auto found = culprit.search.culprit();
     if (!found) {
       return {};
     }
-    return xerces_core::culprit_switches(
+    return xerces_core::culprit_remedy_for(
         svc.catalog().items,
         xerces_core::profile_request(svc.config(), culprit.mode,
                                      svc.game().steam_build),
         *found);
+  }
+
+  bool profile_has_map(const std::string &mode) const {
+    const auto &profiles = owner_->svc().config().profiles;
+    const auto it = profiles.find(mode);
+    return it != profiles.end() && it->second.map.has_value();
   }
 
   // The culprit search (5.6): one test launch at a time, the result read
@@ -346,29 +352,54 @@ private:
       culprit_mods_ = mod_list(culprit->crashed_stack);
       culprit_stop_ = owner_->tr("Close");
     } else if (const auto found = culprit->search.culprit()) {
-      const std::vector<std::string> off = culprit_switches(*culprit);
+      const xerces_core::culprit_remedy fix = remedy_for(*culprit);
+      const std::vector<std::string> &off = fix.mods;
       culprit_done_ = true;
-      culprit_found_ = !off.empty();
-      culprit_text_ = owner_->tr("Found it:") + " " + mod_label(*found) + ". " +
-                      owner_->tr("It crashes the game on its own.") + " ";
-      if (off.empty()) {
-        // No enabled mod loads it: the map does, or it is off already.
-        const auto stack = owner_->svc().resolve(culprit->mode).stack;
-        const bool by_map =
-            std::ranges::any_of(stack, [&](const xerces_core::plan_entry &e) {
-              return e.id == *found;
-            });
-        culprit_text_ += owner_->tr(by_map ? "Only the map in this profile "
-                                             "needs it: pick another map in "
-                                             "Mods."
-                                           : "Nothing in this profile loads it "
-                                             "any more.");
+      // Turning mods off is offered only when that stops it loading.
+      culprit_found_ = fix.mods_enough();
+      // Every test keeps the profile's map, so what the search saw is the
+      // culprit crashing with the map. One the map needs never ran without
+      // it; otherwise the map is cleared once a test ran fine.
+      const auto &always = culprit->search.always();
+      const bool with_map =
+          fix.map || std::ranges::find(always, *found) != always.end();
+      const bool map_untested =
+          !culprit->search.ran_fine() && profile_has_map(culprit->mode);
+      culprit_text_ =
+          owner_->tr("Found it:") + " " + mod_label(*found) + ". " +
+          owner_->tr(with_map ? "It, or the map that needs it, crashes the "
+                                "game."
+                     : map_untested
+                         ? "It crashes the game with the map in this "
+                           "profile. No test ran without a crash, so the "
+                           "map may be the cause instead."
+                         : "It crashes the game on its own.") +
+          " ";
+      if (fix.map) {
+        // Turning mods off would leave it loading with the map.
+        culprit_text_ += owner_->tr(
+            off.empty() ? "Only the map in this profile needs it: pick "
+                          "another map in Mods."
+            : off.size() == 1 && off.front() == *found
+                ? "The map in this profile needs it too: pick another map "
+                  "and turn it off in Mods."
+            : off.size() == 1
+                ? "The map in this profile needs it, and so does the mod "
+                  "below: pick another map and turn that mod off in Mods."
+                : "The map in this profile needs it, and so do the mods "
+                  "below: pick another map and turn those mods off in Mods.");
+        culprit_mods_ = mod_list(off);
+      } else if (off.empty()) {
+        culprit_text_ +=
+            owner_->tr("Nothing in this profile loads it any more.");
       } else if (off.size() == 1 && off.front() == *found) {
         culprit_text_ += owner_->tr("Turn it off in this profile?");
       } else {
         // A dependency: turning off only it would not stop it loading.
-        culprit_text_ +=
-            owner_->tr("These mods in this profile load it. Turn them off?");
+        culprit_text_ += owner_->tr(
+            off.size() == 1
+                ? "The mod below in this profile loads it. Turn it off?"
+                : "These mods in this profile load it. Turn them off?");
         culprit_mods_ = mod_list(off);
         if (off.size() > 1) {
           culprit_off_ = owner_->tr("Turn them off");
@@ -519,7 +550,13 @@ private:
                      !outcome.started && !outcome.dry_run);
     } else if (action == "culprit off") {
       const auto &culprit = owner_->svc().culprit();
-      if (culprit && culprit->search.db_pool_culprit()) {
+      // Only what the box offers a button for: a search still running, or
+      // a culprit the map needs too, is left as it is.
+      if (!culprit || !(culprit->search.db_pool_culprit() ||
+                        remedy_for(*culprit).mods_enough())) {
+        return;
+      }
+      if (culprit->search.db_pool_culprit()) {
         // The setting, not a mod: the profile keeps its mods.
         auto &config = owner_->svc().config();
         config.extra_flags =
@@ -533,12 +570,10 @@ private:
                              owner_->svc().config_error(),
                          true);
         }
-      } else if (const std::vector<std::string> off =
-                     culprit ? culprit_switches(*culprit)
-                             : std::vector<std::string>{};
-                 !off.empty()) {
+      } else {
         // The culprit, or the enabled mods that pull it in: turning off a
         // dependency alone would not stop it loading.
+        const std::vector<std::string> off = remedy_for(*culprit).mods;
         services &svc = owner_->svc();
         auto &profile = xerces_core::profile_for(svc.config(), culprit->mode);
         for (const auto &id : off) {

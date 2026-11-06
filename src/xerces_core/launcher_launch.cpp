@@ -114,6 +114,23 @@ culprit_switches(const std::vector<installed_content> &catalog,
   return out;
 }
 
+culprit_remedy culprit_remedy_for(const std::vector<installed_content> &catalog,
+                                  const plan_request &request,
+                                  std::string_view culprit) {
+  culprit_remedy out;
+  out.mods = culprit_switches(catalog, request, culprit);
+  if (request.map) {
+    // The map with no mods: what is left is the map and what it needs.
+    plan_request map_alone = request;
+    map_alone.mods.clear();
+    const plan own = resolve_plan(catalog, map_alone);
+    out.map = std::ranges::any_of(own.stack, [&](const plan_entry &entry) {
+      return entry.id == culprit;
+    });
+  }
+  return out;
+}
+
 launch_outcome preview_launch(const launch_inputs &in) {
   launch_outcome out;
   std::optional<launcher_config> followup;

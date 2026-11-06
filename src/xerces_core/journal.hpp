@@ -143,7 +143,7 @@ public:
                  std::vector<std::string> cleared, bool combination,
                  std::size_t launches,
                  db_pool_suspect db_pool = db_pool_suspect::none,
-                 std::vector<std::string> always = {});
+                 std::vector<std::string> always = {}, bool ran_fine = false);
 
   // Mods for the next test launch, to be asked for as the plan's mods;
   // empty when the search is over.
@@ -174,6 +174,9 @@ public:
   // is the rest of the suspects. Empty while a split is still to be tested.
   const std::vector<std::string> &cleared() const { return cleared_; }
   const std::vector<std::string> &always() const { return always_; }
+  // A test of the mods ran fine. Every test keeps the profile's map, so
+  // until one does, the map is as much a suspect as the culprit found.
+  bool ran_fine() const { return ran_fine_; }
 
 private:
   // The suspects a test can leave out (not in always_), in stack order.
@@ -183,6 +186,7 @@ private:
   std::vector<std::string> cleared_;
   std::vector<std::string> always_;
   bool combination_ = false;
+  bool ran_fine_ = false;
   std::size_t launches_ = 0;
   db_pool_suspect db_pool_ = db_pool_suspect::none;
 };
