@@ -204,7 +204,15 @@ std::optional<std::string> read_text_file(const fs::path &path) {
                      std::istreambuf_iterator<char>());
 }
 
-bool write_text_file(const fs::path &path, std::string_view text) {
+bool write_text_file(const fs::path &path, std::string_view text,
+                     std::string *why) {
+  const std::string name = path_utf8(path.filename());
+  const auto fail = [&](std::string reason) {
+    if (why) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
   std::error_code ec;
   fs::create_directories(path.parent_path(), ec);
   fs::path temporary = path;
@@ -212,20 +220,23 @@ bool write_text_file(const fs::path &path, std::string_view text) {
   {
     std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
     if (!out) {
-      return false;
+      return fail(name + ".tmp could not be created in its folder.");
     }
     out.write(text.data(), static_cast<std::streamsize>(text.size()));
-    if (!out.flush()) {
-      out.close();
+    out.close(); // flushes: failbit when the data did not reach the file
+    if (out.fail()) {
       fs::remove(temporary, ec);
-      return false;
+      return fail("Writing " + name + ".tmp failed (is the disk full?).");
     }
   }
   fs::rename(temporary, path, ec);
   if (ec) {
     std::error_code ignored;
     fs::remove(temporary, ignored);
-    return false;
+    return fail(name + " could not be replaced: " + ec.message());
+  }
+  if (why) {
+    why->clear();
   }
   return true;
 }

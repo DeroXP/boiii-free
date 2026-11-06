@@ -439,6 +439,12 @@ private:
     row("Home folder", utf8(paths.home), true);
     if (!svc.config_error().empty()) {
       row("Settings file", svc.config_error(), false, true);
+    } else if (!svc.config_load_problem().empty()) {
+      // Broken at start-up, written again since: the settings are safe now.
+      row("Settings file",
+          owner_->tr("Reset to defaults at start-up, saved since:") + " " +
+              svc.config_load_problem(),
+          false, false);
     }
   }
 
@@ -745,7 +751,11 @@ private:
                          ? std::string("follows Windows")
                          : std::to_string(config.ui_scale_percent) + " %"},
         {"Reduced motion", config.reduced_motion ? "on" : "off"},
-        {"Settings file", svc.config_error().empty() ? "read" : svc.config_error()},
+        {"Settings file", !svc.config_error().empty() ? svc.config_error()
+                          : !svc.config_load_problem().empty()
+                              ? "reset to defaults at start-up, saved since: " +
+                                    svc.config_load_problem()
+                              : std::string("read")},
     };
     sections.push_back(std::move(xerces));
 

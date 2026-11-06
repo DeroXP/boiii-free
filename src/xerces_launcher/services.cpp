@@ -93,20 +93,24 @@ void services::load_config() {
     fs::copy_file(paths_.config_file(),
                   paths_.config / "launcher.json.broken",
                   fs::copy_options::overwrite_existing, ec);
-    config_error_ = parsed.diags.items().empty()
-                        ? "launcher.json could not be read"
-                        : parsed.diags.items().front().message;
-    log_warn("launcher.config.broken", config_error_);
+    config_load_problem_ = parsed.diags.items().empty()
+                               ? "launcher.json could not be read"
+                               : parsed.diags.items().front().message;
+    config_error_ = config_load_problem_;
+    log_warn("launcher.config.broken", config_load_problem_);
   }
   config_ = std::move(parsed.value);
 }
 
 bool services::save_config() {
   ++config_rev_;
-  const bool ok = write_text(paths_.config_file(),
-                             xerces_core::launcher_config_to_json(config_));
+  // A write that worked also ends a problem from start-up: the file holds
+  // valid settings again.
+  const bool ok = xerces_core::write_text_file(
+      paths_.config_file(), xerces_core::launcher_config_to_json(config_),
+      &config_error_);
   if (!ok) {
-    log_error("launcher.config.write", "Could not write launcher.json");
+    log_error("launcher.config.write", config_error_);
   }
   return ok;
 }
