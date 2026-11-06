@@ -5,18 +5,19 @@ can show (docs/DESIGN.md 15.3 and 15.4). The checklist grows every milestone.
 
 ## Automated
 
-| What                                                                                                                                                             | Command                                                        | Needs                         |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------- |
-| Core unit tests: manifests, SemVer, the planner and its determinism, merges, conflict rules, hook chains, packs and share codes, logs, the loose both-apply pair | `tools\build.ps1 -Tests`                                       | LLVM 23, Ninja, premake 5.0.0 |
-| CLI smoke: plan, conflicts and pack round trip on the fixtures                                                                                                   | `tools\build.ps1 -Tests`                                       | the same                      |
-| CLI smoke on a home: mods enable, disable, order and info, `plan apply --dry-launch`, `packs apply`, `logs tail`, `sig check` on a fake game folder              | `tools\build.ps1 -Tests` (`tools\ci\cli_smoke.ps1`)            | the same                      |
-| Benchmark: frame statistics, Welch, TOST, the bootstrap, the probe/PresentMon/console/log readers; `bench` on small logs and CSVs                                | `tools\build.ps1 -Tests`                                       | the same                      |
-| Signature registry against a stored dump (`compat/signatures.json`)                                                                                              | `xerces_cli sig check --dump C:\Users\Ginld\XercesDev\dumps`   | a dump on this PC             |
-| Pre-flight check of the installed game against `compat/builds.json`                                                                                              | `xerces_cli game check`                                        | the game on this PC           |
-| Hashing micro-benchmark: disk read speed apart from hashing speed, the portable code against CNG, files hashed 1 to 6 at once (reads only)                       | `xerces_tests --bench-hash <file>...`                          | large files (Workshop)        |
-| Launcher start times: 20 dry starts and one through the boot screen, summarized from the launcher log                                                            | `tools\dev\bench\launcher-bench.ps1`                           | a seeded home                 |
-| Backend: auth, rate limits, privacy, migrations                                                                                                                  | `cd backend` then `pytest -q`                                  | Python 3.12+                  |
-| Formatting: prettier, clang-format, stylua                                                                                                                       | `yarn run check`, `clang-format --dry-run`, `stylua --check .` | Node, LLVM, StyLua            |
+| What                                                                                                                                                                           | Command                                                        | Needs                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- | ----------------------------- |
+| Core unit tests: manifests, SemVer, the planner and its determinism, merges, conflict rules, hook chains, packs and share codes, logs, the loose both-apply pair               | `tools\build.ps1 -Tests`                                       | LLVM 23, Ninja, premake 5.0.0 |
+| CLI smoke: plan, conflicts and pack round trip on the fixtures                                                                                                                 | `tools\build.ps1 -Tests`                                       | the same                      |
+| CLI smoke on a home: mods enable, disable, order and info, `plan apply --dry-launch`, `packs apply`, `logs tail`, `sig check` on a fake game folder                            | `tools\build.ps1 -Tests` (`tools\ci\cli_smoke.ps1`)            | the same                      |
+| Benchmark: frame statistics, Welch, TOST, the bootstrap, the probe/PresentMon/console/log readers; `bench` on small logs and CSVs                                              | `tools\build.ps1 -Tests`                                       | the same                      |
+| Signature registry against a stored dump (`compat/signatures.json`)                                                                                                            | `xerces_cli sig check --dump C:\Users\Ginld\XercesDev\dumps`   | a dump on this PC             |
+| Pre-flight check of the installed game against `compat/builds.json`                                                                                                            | `xerces_cli game check`                                        | the game on this PC           |
+| Hashing micro-benchmark: disk read speed apart from hashing speed, the portable code against CNG, files hashed 1 to 6 at once (reads only)                                     | `xerces_tests --bench-hash <file>...`                          | large files (Workshop)        |
+| Launcher start times: 20 dry starts and one through the boot screen, summarized from the launcher log                                                                          | `tools\dev\bench\launcher-bench.ps1`                           | a seeded home                 |
+| Crash reports: the contract's fields (a golden report), redaction, the outbox's limits, the setting off sending nothing (a fake transport), gzip, the crashing module's origin | `xerces_tests crash`                                           | the same                      |
+| Backend: auth, rate limits, privacy, migrations                                                                                                                                | `cd backend` then `pytest -q`                                  | Python 3.12+                  |
+| Formatting: prettier, clang-format, stylua                                                                                                                                     | `yarn run check`, `clang-format --dry-run`, `stylua --check .` | Node, LLVM, StyLua            |
 
 The fixtures in `tests/fixtures/` are written for Xerces and contain no game
 data.
@@ -737,6 +738,44 @@ Run on 2026-11-05 by Claude (no game running, dry launches only):
       with a valid "é"), and `Xerces.exe --dry-launch` on that home reads its 17
       items instead of ending in `std::terminate`. Its scan event reports 686
       hits, without BlackOps3.exe.
+
+### Crash reports (2026-11-05)
+
+`docs/CRASH_REPORTS.md` has the contract. Built and checked without the game:
+the unit tests, `xerces_cli crash list` and `crash send` against a stand-in
+backend on 127.0.0.1 (`XERCES_CRASH_URL`; a pending crash became a report, went
+out gzipped with the install id and came back 201), and the launcher's Privacy
+screens with `--dry-launch` (the switch, "Delete my crash reports", first run
+step 04). Still to check in the game, with a build from this branch and the
+backend deployed with the crash routes:
+
+- Force a crash: add `-xerces-crash-test` in Settings > Extra launch flags,
+  start the game from Xerces, open the console and run `xerces_crash_test` (an
+  access violation) or `xerces_crash_test fastfail` (0xC0000409, no dump).
+  Remove the flag afterwards.
+- [ ] Setting on, Xerces open: the dialog's title is "Xerces", it names no Ezz
+      site, and it says Xerces sends a crash report as soon as the game closes.
+      After "Close game", the footer says "Crash report sent." with a server id,
+      and `<home>\crash\pending` and `outbox` are empty.
+- [ ] The report is in the backend: `GET /v1/admin/crashes` (admin token) lists
+      it with kind `exception`, the module and frames, `has_minidump` true; the
+      report has no `C:\Users\<your name>`, no player name and no server
+      address. The minidump opens in WinDbg and has thread stacks only.
+- [ ] Setting on, Xerces closed (close it after the game starts): the dialog
+      says the report is sent when Xerces opens next; opening Xerces sends it.
+- [ ] `xerces_crash_test fastfail`: no dialog; the footer says the report was
+      sent, kind `fail_fast` in the backend.
+- [ ] Setting off: the dialog says crash reports are off and points to
+      `https://github.com/DeroXP/boiii-free/issues` and Diagnostics > Copy
+      report; nothing appears in `<home>\crash\pending`, `outbox` or the
+      backend.
+- [ ] Out of memory (a custom map that overflows with DS4C, 5.6): kind
+      `out_of_memory`, with the map and the console lines.
+- [ ] Settings > Privacy > "Delete my crash reports": the footer says how many
+      were deleted, and the admin list has none from this install.
+- [ ] A crash in the game with Xerces' hooks on the stack no longer says
+      boiii.exe "was loaded into the game by other software"; a crash inside
+      boiii.exe itself says it is a bug in the Xerces game client.
 
 ### Conflict system (M2)
 
