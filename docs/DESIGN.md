@@ -3151,7 +3151,7 @@ release from v1.0.
 
 Beta packages for testers (2026-11-05) come first, as a zip by private link:
 
-- `VERSION` is the one place the version is set (`0.1.0-beta.2`). premake writes
+- `VERSION` is the one place the version is set (`0.1.0-beta.3`). premake writes
   it, the commit and whether the tree had changes into
   `build\src\xerces_version.h`; all three programs show "Xerces <version>
   (<commit>)" (About, the menu watermark, the console title, the crash report)
