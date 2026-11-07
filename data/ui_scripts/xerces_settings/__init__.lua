@@ -4,8 +4,8 @@
 -- (data/custom_scripts/zm/xerces_rounds.gsc), so everyone in the match gets
 -- the host's settings. In the front end this menu changes them; its button is
 -- in the Zombies lobbies (data/ui_scripts/frontend_menus). In a Zombies match
--- the host gets the round HUD and, in the pause menu, XERCES SETTINGS showing
--- the settings the match uses, which changes nothing.
+-- each player's pause menu gets XERCES SETTINGS, showing the settings the
+-- match uses, and the Pack-a-Punch wheel and coin flip when they are on.
 if type(LUI) ~= "table" or type(LUI.UIList) ~= "table" or __xercesSettingsInstalled then
   return
 end
@@ -17,70 +17,99 @@ if type(XercesTokens) == "table" and type(XercesTokens.dark) == "table" and Xerc
   ACCENT = XercesTokens.dark.accent_text
 end
 
--- bit: the setting's bit in the mask the host's game sends
+-- bit: the setting's bit in the mask the host's game sends; tab: where the
+-- front end lists it
+local WHEEL_BIT = 128
+local COIN_FLIP_BIT = 256
 local SETTINGS = {
   {
     dvar = "xerces_zm_maxAmmo",
     name = "Max Ammo Every Round",
     bit = 1,
+    tab = "zombies",
     description = "Everyone gets a Max Ammo at the start of each round.",
   },
   {
     dvar = "xerces_zm_autoPap",
     name = "Auto Pack-a-Punch",
     bit = 2,
+    tab = "zombies",
     description = "Guns from wall buys and the mystery box come already Pack-a-Punched.",
   },
   {
     dvar = "xerces_zm_startPoints",
     name = "Starting Points",
     points = true,
+    tab = "zombies",
     description = "The points each player starts the match with. Default keeps the map's own, 500 on most maps.",
   },
   {
     dvar = "xerces_zm_noPerkLimit",
     name = "No Perk Limit",
     bit = 4,
+    tab = "zombies",
     description = "Players can buy every perk on the map instead of stopping at four.",
   },
   {
     dvar = "xerces_zm_boxStays",
     name = "Mystery Box Stays",
     bit = 8,
+    tab = "zombies",
     description = "The mystery box never moves to another spot.",
   },
   {
     dvar = "xerces_zm_powerOn",
     name = "Power On at Start",
     bit = 16,
+    tab = "zombies",
     description = "The power switch turns on when the match starts. Maps without a standard power switch are left as they are.",
   },
   {
     dvar = "xerces_zm_doorsOpen",
     name = "Doors Open at Start",
     bit = 32,
+    tab = "zombies",
     description = "Every door and debris pile opens for free when the match starts. Doors that need the power open once it is on.",
   },
   {
     dvar = "xerces_zm_roundHud",
     name = "Round HUD",
     bit = 64,
-    description = "Shows you how many zombies are left in the round and how long it has taken. Only the host sees it for now.",
+    tab = "zombies",
+    description = "Shows how many zombies are left in the round and how long it has taken, top left.",
+  },
+  {
+    dvar = "xerces_zm_wheel",
+    name = "Pack-a-Punch Wheel",
+    bit = WHEEL_BIT,
+    tab = "gambling",
+    description = "From the pause menu: 2,500 points (10 during a Fire Sale), once a round, with a Pack-a-Punched gun in hand. It lands on one of the five ammo mods or on nothing.",
+  },
+  {
+    dvar = "xerces_zm_coinFlip",
+    name = "Coin Flip",
+    bit = COIN_FLIP_BIT,
+    tab = "gambling",
+    description = "From the pause menu: bet points on a coin, heads wins. A win pays the bet times 2 at round 1, 0.1 more each round, up to 5.",
   },
 }
 
 -- 50000 -> "50,000"; 0 is the map's own
-local function pointsText(points)
-  if points <= 0 then
-    return "Default"
-  end
-  local text = tostring(math.floor(points))
+local function withCommas(number)
+  local text = tostring(math.floor(number))
   local grouped = ""
   while #text > 3 do
     grouped = "," .. string.sub(text, -3) .. grouped
     text = string.sub(text, 1, -4)
   end
   return text .. grouped
+end
+
+local function pointsText(points)
+  if points <= 0 then
+    return "Default"
+  end
+  return withCommas(points)
 end
 
 if Engine.GetCurrentMap() == "core_frontend" then
@@ -120,44 +149,50 @@ if Engine.GetCurrentMap() == "core_frontend" then
     return options
   end
 
-  DataSources.XercesSettingsZombies = DataSourceHelpers.ListSetup("XercesSettingsZombies", function(controller)
-    local items = {}
-    for _, setting in ipairs(SETTINGS) do
-      local options = {
-        { option = "MENU_DISABLED", value = 0, default = true },
-        { option = "MENU_ENABLED", value = 1 },
-      }
-      if setting.points then
-        options = pointsOptions()
+  local function settingsSource(name, tab)
+    DataSources[name] = DataSourceHelpers.ListSetup(name, function(controller)
+      local items = {}
+      for _, setting in ipairs(SETTINGS) do
+        if setting.tab == tab then
+          local options = {
+            { option = "MENU_DISABLED", value = 0, default = true },
+            { option = "MENU_ENABLED", value = 1 },
+          }
+          if setting.points then
+            options = pointsOptions()
+          end
+          table.insert(
+            items,
+            CoD.OptionsUtility.CreateDvarSettings(
+              controller,
+              setting.name,
+              setting.description,
+              "XercesSettings_" .. setting.dvar,
+              setting.dvar,
+              options,
+              nil,
+              updateDvar
+            )
+          )
+        end
       end
-      table.insert(
-        items,
-        CoD.OptionsUtility.CreateDvarSettings(
-          controller,
-          setting.name,
-          setting.description,
-          "XercesSettings_" .. setting.dvar,
-          setting.dvar,
-          options,
-          nil,
-          updateDvar
-        )
-      )
-    end
-    return items
-  end)
+      return items
+    end)
+  end
+  settingsSource("XercesSettingsZombies", "zombies")
+  settingsSource("XercesSettingsGambling", "gambling")
 
   DataSources.XercesSettingsTabs = DataSourceHelpers.ListSetup("XercesSettingsTabs", function(controller)
+    local function tab(name, dataSourceName, title)
+      return {
+        models = { tabName = name, tabIcon = "" },
+        properties = { tabId = dataSourceName, dataSourceName = dataSourceName, title = title },
+      }
+    end
     return {
       { models = { tabIcon = CoD.buttonStrings.shoulderl }, properties = { m_mouseDisabled = true } },
-      {
-        models = { tabName = "ZOMBIES", tabIcon = "" },
-        properties = {
-          tabId = "XercesSettingsZombies",
-          dataSourceName = "XercesSettingsZombies",
-          title = "Zombies, when you host",
-        },
-      },
+      tab("ZOMBIES", "XercesSettingsZombies", "Zombies, when you host"),
+      tab("GAMBLING", "XercesSettingsGambling", "Gambling, when you host"),
       { models = { tabIcon = CoD.buttonStrings.shoulderr }, properties = { m_mouseDisabled = true } },
     }
   end, true)
@@ -203,7 +238,7 @@ if Engine.GetCurrentMap() == "core_frontend" then
     local tabs = CoD.FE_TabBar.new(self, controller)
     tabs:setLeftRight(true, false, 0, 2496)
     tabs:setTopBottom(true, false, 84, 123)
-    tabs.Tabs.grid:setHorizontalCount(3)
+    tabs.Tabs.grid:setHorizontalCount(4)
     tabs.Tabs.grid:setDataSource("XercesSettingsTabs")
     self:addElement(tabs)
     self.TabList = tabs
@@ -259,141 +294,65 @@ if Engine.GetCurrentMap() == "core_frontend" then
   return
 end
 
--- In a match. Only the host's own game knows the match's settings: a listen
--- server shares its dvars with the host's client, and the game script
--- (xerces_rounds.gsc) puts what it applied in xerces_zm_match ("<mask>
--- <starting points>") and the round HUD's values in xerces_zm_hud ("<zombies
--- left> <round seconds> <1 while a round is on>"). The other players get the
--- settings as a game message when they spawn. Sending them more would mean
--- registering new strings with the game, which breaks a player's join
--- (docs/DESIGN.md 7.9).
-local function isHost()
-  if game and game.ishost then
-    return game.ishost()
-  end
-  local dedicated = false
-  pcall(function()
-    dedicated = Dvar.cl_connected_to_dedi and Dvar.cl_connected_to_dedi:get()
-  end)
-  return Engine.IsLobbyHost(Enum.LobbyType.LOBBY_TYPE_GAME) and not dedicated
+-- In a match. The host's game opens a hidden HudElementText for each player
+-- whose text is "XERCES <mask> <starting points> <round>"
+-- (xerces_rounds.gsc data_text). The game sends a script menu's text as it
+-- is, where a new LUI event name would be refused (docs/DESIGN.md 7.9). The
+-- wheel and coin flip go back to the game script as menu responses under
+-- StartMenu_Main, which the game's own handler ignores.
+local function hasBit(mask, bit)
+  return math.floor(mask / bit) % 2 == 1
 end
 
-local function hostDvar(name)
-  if not isHost() then
-    return ""
-  end
-  local ok, value = pcall(Engine.DvarString, nil, name)
-  return ok and type(value) == "string" and value or ""
-end
-
-local function matchSettings()
-  local mask, points = string.match(hostDvar("xerces_zm_match"), "^(%d+) (%d+)$")
-  if not mask then
-    return nil
-  end
-  return { mask = tonumber(mask), points = tonumber(points) }
-end
-
--- 83 -> "1:23"; 3723 -> "1:02:03"
-local function clock(seconds)
-  local hours = math.floor(seconds / 3600)
-  local minutes = math.floor(seconds / 60) % 60
-  local rest = seconds % 60
-  if hours > 0 then
-    return string.format("%d:%02d:%02d", hours, minutes, rest)
-  end
-  return string.format("%d:%02d", minutes, rest)
-end
-
--- The XP bar's (data/ui_scripts/xp_bar): no round HUD over menus, the
--- scoreboard or cameras
-local HIDE_BITS = {
-  Enum.UIVisibilityBit.BIT_SCOREBOARD_OPEN,
-  Enum.UIVisibilityBit.BIT_UI_ACTIVE,
-  Enum.UIVisibilityBit.BIT_HIDE_FOR_FULLSCREEN_MENU,
-  Enum.UIVisibilityBit.BIT_CAMERA_ANIM_HIDING_HUD,
-  Enum.UIVisibilityBit.BIT_IN_KILLCAM,
-  Enum.UIVisibilityBit.BIT_FINAL_KILLCAM,
-  Enum.UIVisibilityBit.BIT_GAME_ENDED,
-  Enum.UIVisibilityBit.BIT_SPECTATING_CLIENT,
-  Enum.UIVisibilityBit.BIT_IS_DEMO_PLAYING,
-}
-
-local function hudHidden(controller)
-  if not Engine.IsVisibilityBitSet(controller, Enum.UIVisibilityBit.BIT_HUD_VISIBLE) then
-    return true
-  end
-  for _, bit in ipairs(HIDE_BITS) do
-    if Engine.IsVisibilityBitSet(controller, bit) then
-      return true
-    end
-  end
-  return false
-end
-
--- Zombies left and the round time, top left
-local function createRoundHud(root, controller)
-  local hud = LUI.UIElement.new()
-  hud:setLeftRight(true, false, 24, 344)
-  hud:setTopBottom(true, false, 20, 76)
-  hud:setAlpha(0)
-  root:addElement(hud)
-
-  local function text(left, right, top, color)
-    local element = LUI.UIText.new()
-    element:setLeftRight(true, false, left, right)
-    element:setTopBottom(true, false, top, top + 24)
-    element:setTTF("fonts/RefrigeratorDeluxe-Regular.ttf")
-    element:setAlignment(Enum.LUIAlignment.LUI_ALIGNMENT_LEFT)
-    element:setRGB(color[1], color[2], color[3])
-    hud:addElement(element)
-    return element
-  end
-  local grey = { 0.75, 0.75, 0.75 }
-  local white = { 1, 1, 1 }
-  text(0, 150, 0, grey):setText("ZOMBIES LEFT")
-  local left = text(156, 320, 0, white)
-  local timeLabel = text(0, 150, 30, grey)
-  local time = text(156, 320, 30, white)
-
-  -- On the UI root, as timers don't run inside a hidden element
-  root:addElement(LUI.UITimer.newElementTimer(250, false, function()
-    local count, seconds, running = string.match(hostDvar("xerces_zm_hud"), "^(%d+) (%d+) (%d)$")
-    if not count or hudHidden(controller) then
-      hud:setAlpha(0)
+local function matchData()
+  local found = nil
+  local function walk(element, depth)
+    if found or not element or depth > 4 then
       return
     end
-    left:setText(count)
-    if running == "1" or seconds ~= "0" then
-      timeLabel:setText(running == "1" and "ROUND TIME" or "LAST ROUND")
-      time:setText(clock(tonumber(seconds)))
-    else
-      -- Before the first round starts
-      timeLabel:setText("")
-      time:setText("")
+    if element.menuName == "HudElementText" then
+      local ok, model = pcall(function()
+        return element:getModel()
+      end)
+      local text = ok and model and Engine.GetModel(model, "text")
+      local value = text and Engine.GetModelValue(text)
+      if type(value) == "string" then
+        local mask, points, round = string.match(value, "^XERCES (%d+) (%d+) (%d+)$")
+        if mask then
+          found = { mask = tonumber(mask), points = tonumber(points), round = tonumber(round) }
+          return
+        end
+      end
     end
-    hud:setAlpha(1)
-  end))
-  root.xercesRoundHud = hud
+    local kid = element:getFirstChild()
+    while kid do
+      walk(kid, depth + 1)
+      kid = kid:getNextSibling()
+    end
+  end
+  for _, root in pairs(LUI.roots) do
+    walk(root, 0)
+  end
+  return found
 end
 
-local primary = Engine.GetPrimaryController()
-local primaryRoot = LUI.roots["UIRoot" .. primary]
-if primaryRoot and not primaryRoot.xercesRoundHud then
-  createRoundHud(primaryRoot, primary)
+-- A win pays the bet times 2 at round 1, 0.1 more each round, at most 5
+-- (xerces_rounds.gsc flip_payout_tenths)
+local function payoutTenths(round)
+  return math.min(50, 20 + math.max(1, round) - 1)
 end
 
-local function row(text, description)
-  return { models = { displayText = text, description = description } }
+local function row(text, description, action)
+  return { models = { displayText = text, description = description, action = action } }
 end
 
 DataSources.XercesMatchSettings = ListHelper_SetupDataSource("XercesMatchSettings", function()
-  local match = matchSettings()
+  local match = matchData()
   if not match then
     return {
       row(
         "NOT IN USE",
-        "This match runs without Xerces' round settings: Xerces' game script did not start, or this is a dedicated server."
+        "This match runs without Xerces' round settings: the host's game did not start Xerces' script, or this is a dedicated server."
       ),
     }
   end
@@ -402,114 +361,179 @@ DataSources.XercesMatchSettings = ListHelper_SetupDataSource("XercesMatchSetting
     local value = "Off"
     if setting.points then
       value = pointsText(match.points)
-    elseif math.floor(match.mask / setting.bit) % 2 == 1 then
+    elseif hasBit(match.mask, setting.bit) then
       value = "On"
     end
-    table.insert(rows, row(setting.name .. ": " .. value, setting.description .. " Change it in the lobby."))
+    table.insert(rows, row(setting.name .. ": " .. value, setting.description .. " The host sets it in the lobby."))
   end
+  return rows
+end, true)
+
+-- The pause menu each controller opened the coin flip from, closed with the
+-- bet menu so the game runs again (a solo game is paused under it) before
+-- the bet goes in
+local flipPauseMenus = {}
+
+local function placeBet(amount)
+  return function(self, element, controller, param, menu)
+    GoBack(menu, controller)
+    if flipPauseMenus[controller] then
+      StartMenuGoBack(flipPauseMenus[controller], controller)
+      flipPauseMenus[controller] = nil
+    end
+    -- A menu response ends at its first space
+    Engine.SendMenuResponse(controller, "StartMenu_Main", "xerces_flip:" .. amount)
+  end
+end
+
+DataSources.XercesCoinFlipBets = ListHelper_SetupDataSource("XercesCoinFlipBets", function()
+  local match = matchData()
+  local tenths = payoutTenths(match and match.round or 1)
+  local times = string.format("%d.%d", math.floor(tenths / 10), tenths % 10)
+  local rows = {}
+  for _, bet in ipairs({ 100, 500, 1000, 2500, 5000, 10000, 25000, 50000 }) do
+    table.insert(
+      rows,
+      row(
+        "BET " .. withCommas(bet),
+        "Heads wins " .. withCommas(math.floor(bet * tenths / 10)) .. " (x" .. times .. "), tails loses the bet.",
+        placeBet(tostring(bet))
+      )
+    )
+  end
+  table.insert(
+    rows,
+    row(
+      "ALL IN",
+      "Bet every point you have. Heads pays it times " .. times .. ", up to the 4,194,303 points the game holds.",
+      placeBet("all")
+    )
+  )
   return rows
 end, true)
 
 require("ui.uieditor.widgets.Scrollbars.verticalScrollbar")
 
 -- Like the host menus (data/ui_scripts/host_menu): a list on the left, the
--- focused row and its description on the right. The rows do nothing.
-LUI.createMenu.XercesMatchSettingsMenu = function(controller)
-  local name = "XercesMatchSettingsMenu"
-  local self = CoD.Menu.NewForUIEditor(name)
-  self.soundSet = "ChooseDecal"
-  self:setOwner(controller)
-  self:setLeftRight(true, true, 0, 0)
-  self:setTopBottom(true, true, 0, 0)
-  self:playSound("menu_open", controller)
-  self.buttonModel = Engine.CreateModel(Engine.GetModelForController(controller), name .. ".buttonPrompts")
-  self.anyChildUsesUpdateState = true
+-- focused row and its description on the right; a row with an action runs it.
+local function createListMenu(name, title, dataSource)
+  LUI.createMenu[name] = function(controller)
+    local self = CoD.Menu.NewForUIEditor(name)
+    self.soundSet = "ChooseDecal"
+    self:setOwner(controller)
+    self:setLeftRight(true, true, 0, 0)
+    self:setTopBottom(true, true, 0, 0)
+    self:playSound("menu_open", controller)
+    self.buttonModel = Engine.CreateModel(Engine.GetModelForController(controller), name .. ".buttonPrompts")
+    self.anyChildUsesUpdateState = true
 
-  local background = LUI.UIImage.new()
-  background:setLeftRight(true, true, 0, 0)
-  background:setTopBottom(true, true, 0, 0)
-  background:setRGB(0, 0, 0)
-  background:setAlpha(0.7)
-  self:addElement(background)
+    local background = LUI.UIImage.new()
+    background:setLeftRight(true, true, 0, 0)
+    background:setTopBottom(true, true, 0, 0)
+    background:setRGB(0, 0, 0)
+    background:setAlpha(0.7)
+    self:addElement(background)
 
-  local list = LUI.UIList.new(self, controller, 2, 0, nil, false, false, 0, 0, false, false)
-  list:makeFocusable()
-  list:setLeftRight(true, false, 64, 444)
-  list:setTopBottom(true, false, 136, 640)
-  list:setWidgetType(CoD.List1ButtonLarge_PH)
-  list:setVerticalCount(14)
-  list:setVerticalScrollbar(CoD.verticalScrollbar)
-  list:setDataSource("XercesMatchSettings")
-  self:addElement(list)
-  self.Options = list
+    local list = LUI.UIList.new(self, controller, 2, 0, nil, false, false, 0, 0, false, false)
+    list:makeFocusable()
+    list:setLeftRight(true, false, 64, 444)
+    list:setTopBottom(true, false, 136, 640)
+    list:setWidgetType(CoD.List1ButtonLarge_PH)
+    list:setVerticalCount(14)
+    list:setVerticalScrollbar(CoD.verticalScrollbar)
+    list:setDataSource(dataSource)
+    self:addElement(list)
+    self.Options = list
 
-  local heading = LUI.UIText.new()
-  heading:setLeftRight(true, false, 500, 1180)
-  heading:setTopBottom(true, false, 136, 172)
-  heading:setTTF("fonts/escom.ttf")
-  heading:setRGB(ACCENT[1], ACCENT[2], ACCENT[3])
-  heading:linkToElementModel(list, "displayText", true, function(model)
-    heading:setText(Engine.GetModelValue(model) or "")
-  end)
-  self:addElement(heading)
+    local heading = LUI.UIText.new()
+    heading:setLeftRight(true, false, 500, 1180)
+    heading:setTopBottom(true, false, 136, 172)
+    heading:setTTF("fonts/escom.ttf")
+    heading:setRGB(ACCENT[1], ACCENT[2], ACCENT[3])
+    heading:linkToElementModel(list, "displayText", true, function(model)
+      heading:setText(Engine.GetModelValue(model) or "")
+    end)
+    self:addElement(heading)
 
-  local description = LUI.UIText.new()
-  description:setLeftRight(true, false, 500, 1180)
-  description:setTopBottom(true, false, 188, 210)
-  description:setTTF("fonts/default.ttf")
-  description:setRGB(0.75, 0.75, 0.75)
-  description:setAlignment(Enum.LUIAlignment.LUI_ALIGNMENT_LEFT)
-  description:linkToElementModel(list, "description", true, function(model)
-    description:setText(Engine.GetModelValue(model) or "")
-  end)
-  self:addElement(description)
+    local description = LUI.UIText.new()
+    description:setLeftRight(true, false, 500, 1180)
+    description:setTopBottom(true, false, 188, 210)
+    description:setTTF("fonts/default.ttf")
+    description:setRGB(0.75, 0.75, 0.75)
+    description:setAlignment(Enum.LUIAlignment.LUI_ALIGNMENT_LEFT)
+    description:linkToElementModel(list, "description", true, function(model)
+      description:setText(Engine.GetModelValue(model) or "")
+    end)
+    self:addElement(description)
 
-  local frame = CoD.GenericMenuFrame.new(self, controller)
-  frame:setLeftRight(true, true, 0, 0)
-  frame:setTopBottom(true, true, 0, 0)
-  frame.titleLabel:setText(TITLE)
-  pcall(function()
-    frame.cac3dTitleIntermediary0.FE3dTitleContainer0.MenuTitle.TextBox1.Label0:setText(TITLE)
-  end)
-  frame:setModel(self.buttonModel, controller)
-  self:addElement(frame)
-  self.MenuFrame = frame
+    local frame = CoD.GenericMenuFrame.new(self, controller)
+    frame:setLeftRight(true, true, 0, 0)
+    frame:setTopBottom(true, true, 0, 0)
+    frame.titleLabel:setText(title)
+    pcall(function()
+      frame.cac3dTitleIntermediary0.FE3dTitleContainer0.MenuTitle.TextBox1.Label0:setText(title)
+    end)
+    frame:setModel(self.buttonModel, controller)
+    self:addElement(frame)
+    self.MenuFrame = frame
 
-  self:AddButtonCallbackFunction(
-    self,
-    controller,
-    Enum.LUIButton.LUI_KEY_XBB_PSCIRCLE,
-    nil,
-    function(element, menu, actionController)
-      GoBack(self, actionController)
-      return true
-    end,
-    function(element, menu)
-      CoD.Menu.SetButtonLabel(menu, Enum.LUIButton.LUI_KEY_XBB_PSCIRCLE, "MENU_BACK")
-      return true
-    end,
-    false
-  )
+    self:AddButtonCallbackFunction(
+      list,
+      controller,
+      Enum.LUIButton.LUI_KEY_XBA_PSCROSS,
+      "ENTER",
+      function(element, menu, actionController)
+        ProcessListAction(self, element, actionController)
+        return true
+      end,
+      function(element, menu)
+        CoD.Menu.SetButtonLabel(menu, Enum.LUIButton.LUI_KEY_XBA_PSCROSS, "MENU_SELECT")
+        return true
+      end,
+      false
+    )
 
-  list.id = "Options"
-  self:processEvent({ name = "menu_loaded", controller = controller })
-  self:processEvent({ name = "update_state", menu = self })
-  if not self:restoreState() then
-    list:processEvent({ name = "gain_focus", controller = controller })
+    self:AddButtonCallbackFunction(
+      self,
+      controller,
+      Enum.LUIButton.LUI_KEY_XBB_PSCIRCLE,
+      nil,
+      function(element, menu, actionController)
+        GoBack(self, actionController)
+        return true
+      end,
+      function(element, menu)
+        CoD.Menu.SetButtonLabel(menu, Enum.LUIButton.LUI_KEY_XBB_PSCIRCLE, "MENU_BACK")
+        return true
+      end,
+      false
+    )
+
+    list.id = "Options"
+    self:processEvent({ name = "menu_loaded", controller = controller })
+    self:processEvent({ name = "update_state", menu = self })
+    if not self:restoreState() then
+      list:processEvent({ name = "gain_focus", controller = controller })
+    end
+
+    LUI.OverrideFunction_CallOriginalSecond(self, "close", function(element)
+      element.MenuFrame:close()
+      element.Options:close()
+      Engine.UnsubscribeAndFreeModel(
+        Engine.GetModel(Engine.GetModelForController(controller), name .. ".buttonPrompts")
+      )
+    end)
+    return self
   end
-
-  LUI.OverrideFunction_CallOriginalSecond(self, "close", function(element)
-    element.MenuFrame:close()
-    element.Options:close()
-    Engine.UnsubscribeAndFreeModel(Engine.GetModel(Engine.GetModelForController(controller), name .. ".buttonPrompts"))
-  end)
-  return self
 end
 
--- The host's pause menu entry, in the game options list in use: the stock
--- one, a mod's own copy (DS4C's StartMenuGameOptions_Death) or the
--- mod-settings template's ModStartMenuGameOptions. It goes above the first of
--- these, or last when none is there (as data/ui_scripts/mod_menu does).
+createListMenu("XercesMatchSettingsMenu", TITLE, "XercesMatchSettings")
+createListMenu("XercesCoinFlipMenu", "COIN FLIP", "XercesCoinFlipBets")
+
+-- The pause menu entries, in the game options list in use: the stock one, a
+-- mod's own copy (DS4C's StartMenuGameOptions_Death) or the mod-settings
+-- template's ModStartMenuGameOptions. They go above the first of these, or
+-- last when none is there (as data/ui_scripts/mod_menu does).
 local BELOW = {
   MENU_RESTART_LEVEL_CAPS = true,
   MENU_RESTART_MISSION_CAPS = true,
@@ -520,8 +544,20 @@ local BELOW = {
   ["QUIT TO DESKTOP"] = true,
 }
 
-local function open_menu(self, element, controller)
+local function openSettings(self, element, controller)
   OpenPopup(self, "XercesMatchSettingsMenu", controller)
+end
+
+-- The wheel turns on the game's HUD, so the pause menu closes (and a solo game
+-- runs again) before the request goes in
+local function spinWheel(self, element, controller, param, menu)
+  StartMenuGoBack(menu, controller)
+  Engine.SendMenuResponse(controller, "StartMenu_Main", "xerces_wheel")
+end
+
+local function openCoinFlip(self, element, controller, param, menu)
+  flipPauseMenus[controller] = menu
+  OpenPopup(self, "XercesCoinFlipMenu", controller)
 end
 
 -- The pause list keeps the height it was made with, so an added row would
@@ -551,25 +587,29 @@ local function fit_pause_list(list, key, count)
   end)
 end
 
-local function add_entry(controller, list)
+local function add_entries(controller, list)
   local key = list.customDataSourceHelper
   local items = key and list[key]
-  if type(items) ~= "table" or not isHost() then
+  if type(items) ~= "table" then
     return
   end
   for _, item in ipairs(items) do
-    if item.xercesSettings then
+    if item.xercesEntry then
       return
     end
   end
-  local root = Engine.CreateModel(Engine.GetModelForController(controller), key)
-  local model = Engine.GetModel(root, "xercesSettings")
-  if model then
-    Engine.UnsubscribeAndFreeModel(model)
+  local match = matchData()
+  if not match then
+    return
   end
-  model = Engine.CreateModel(root, "xercesSettings")
-  Engine.SetModelValue(Engine.CreateModel(model, "displayText"), "^3" .. TITLE)
-  Engine.SetModelValue(Engine.CreateModel(model, "action"), open_menu)
+  local entries = { { id = "xercesSettings", text = "^3" .. TITLE, action = openSettings } }
+  if hasBit(match.mask, WHEEL_BIT) then
+    table.insert(entries, { id = "xercesWheel", text = "^3PACK-A-PUNCH WHEEL", action = spinWheel })
+  end
+  if hasBit(match.mask, COIN_FLIP_BIT) then
+    table.insert(entries, { id = "xercesCoinFlip", text = "^3COIN FLIP", action = openCoinFlip })
+  end
+
   local at = #items + 1
   for index, item in ipairs(items) do
     local text = item.model and Engine.GetModel(item.model, "displayText")
@@ -578,7 +618,17 @@ local function add_entry(controller, list)
       break
     end
   end
-  table.insert(items, at, { model = model, xercesSettings = true })
+  local root = Engine.CreateModel(Engine.GetModelForController(controller), key)
+  for offset, entry in ipairs(entries) do
+    local model = Engine.GetModel(root, entry.id)
+    if model then
+      Engine.UnsubscribeAndFreeModel(model)
+    end
+    model = Engine.CreateModel(root, entry.id)
+    Engine.SetModelValue(Engine.CreateModel(model, "displayText"), entry.text)
+    Engine.SetModelValue(Engine.CreateModel(model, "action"), entry.action)
+    table.insert(items, at + offset - 1, { model = model, xercesEntry = true })
+  end
   fit_pause_list(list, key, #items)
 end
 
@@ -592,7 +642,7 @@ local function wrap_source(name)
   local prepare = source.prepare
   source.prepare = function(controller, list, ...)
     local result = prepare(controller, list, ...)
-    pcall(add_entry, controller, list)
+    pcall(add_entries, controller, list)
     return result
   end
   source.xercesSettings = true

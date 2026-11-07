@@ -46,6 +46,14 @@ public:
     on_off("xerces_zm_roundHud",
            "Zombies, when you host: shows the zombies left in the round and "
            "the round's time.");
+    on_off("xerces_zm_wheel",
+           "Zombies, when you host: a Pack-a-Punch wheel in the pause menu: "
+           "2,500 points (10 during a Fire Sale), once a round, on a "
+           "Pack-a-Punched gun, for one of the five ammo mods or nothing.");
+    on_off("xerces_zm_coinFlip",
+           "Zombies, when you host: a coin flip in the pause menu: bet points "
+           "on a 50/50; a win pays the bet times 2 at round 1, 0.1 more each "
+           "round, up to 5.");
   }
 };
 } // namespace xerces_round_settings

@@ -1216,6 +1216,121 @@ HUD labels with the engine as the map loads (DESIGN.md 7.9). The server's and
 client's lists then differed ("BG Cache Diff for LocalizedStrings - Mismatched")
 and the game left the map at once.
 
+### Zombies round settings, stage 2 (2026-11-07)
+
+DESIGN.md 7.9 stage 2 (the Pack-a-Punch wheel and the coin flip), on
+`launcher/round-system`. Run by Claude with your go-ahead ("Yes, I'm not
+playing") on Kino der Toten, the same way as stage 1, through
+`C:\Users\Ginld\XercesDev\bench\20261107-rounds\stage2-run.ps1`: all ten
+settings on as launcher dvars, and a test-only game script (`probe3\`, copied
+into the worktree's `data\` for each run and removed after it) that gave a gun
+from the map's list (Auto Pack-a-Punch upgraded it), kept the test player from
+going down (it stands among the zombies), ended rounds by killing the zombies,
+and reported as game messages. The first runs used the pause menu entries and
+the bet menu through Lua, calling each row's action the way selecting it does;
+the later ones pressed the arrow keys and Enter. All took full-screen captures.
+
+- [x] Lobby, with and without mods: XERCES SETTINGS has a ZOMBIES tab (stage 1's
+      eight) and a GAMBLING tab (Pack-a-Punch Wheel and Coin Flip, each with its
+      description). The runner changed tabs the way the controller's shoulder
+      buttons do (the tab grid's `navigateItemRight`; the game's tab list has no
+      keyboard key, and a mouse click goes to the same grid), and the list and
+      its heading changed to GAMBLING.
+- [x] No mods, with real keys: the pause menu reads Resume, Direct Connect,
+      Change Map, Kick Players, Restart, Game Tweaks, XERCES SETTINGS,
+      PACK-A-PUNCH WHEEL, COIN FLIP, Main Menu, Quit to Desktop, all in view.
+      The arrow keys and Enter on PACK-A-PUNCH WHEEL closed the pause menu and
+      spun the wheel. On COIN FLIP they opened the bet menu (BET 100 to BET
+      50,000 and ALL IN, "Heads wins 200 (x2.0)" at round 1), where Enter on BET
+      1,000 flipped. On XERCES SETTINGS they opened the read-only list of all
+      ten settings, where Enter on a row did nothing. The runner pressed Enter
+      only once a Lua readout said that row had focus.
+- [x] The wheel, no mods: 2,500 points a spin. A second spin in the same round
+      was refused ("One spin a round: spin again next round") with nothing
+      taken. During a Fire Sale (the game's own flag, set by the test script) a
+      spin cost 10 and the wheel's middle said FIRE SALE: 10. On nothing the
+      box's teddy bear rose and turned in front of the player. It refused the
+      starting M1911 and a score of 1,000, taking nothing. Across the runs it
+      gave each of the five ammo mods and nothing (Turned only came up after 25
+      spins, with your stack). One run had five nothings in a row (a 0.7%
+      chance), so the stack run counted the game's `RandomInt(8)` 4,000 times:
+      532, 501, 487, 483, 465, 505, 530, 497, as even as chance allows
+      (chi-square 7.3, 7 degrees of freedom).
+- [x] The coin flip, no mods: BET 1,000 at round 1 lost once ("COIN FLIP:
+      1,000", TAILS, "YOU LOSE 1,000" in red) and won twice ("YOU WIN 2,000
+      (x2.0)" in green). In round 2 (x2.1), after a win: 100 from 5,000 ends at
+      5,110 ("YOU WIN 210 (x2.1)", with the game's own +210 by the score), 1,234
+      from 5,000 at 6,357, 987,654 from 3,000,000 at 4,086,419, and 100,000 from
+      4,100,000 at 4,194,303 ("YOU WIN 194,303 (MAX POINTS)"). Refused, with
+      nothing taken: 50, 6,000 with 5,000 points, "abc", and any bet at
+      4,194,303 points.
+- [x] The game's points cap, found by these tests: a score a script sets to
+      1,500,000,000 reads back as 4,194,303. The coin flip now stops there
+      (DESIGN.md 7.9).
+- [x] No mods: after the pause menu's restart (`fast_restart`, which RESTART
+      runs in a solo game) the round HUD shows once, not doubled, and the pause
+      menu has the three entries again.
+- [x] Your stack (PEGASUS on top, DS4C's pause menu), with real keys: the pause
+      menu reads Resume, DS4C Camos, DS4C Mod Options, XERCES SETTINGS,
+      PACK-A-PUNCH WHEEL, COIN FLIP, PEGASUS MENU, Restart Level, End Game, all
+      in view. Two soak runs of 8 rounds each pressed only keys, with no Lua
+      sent from the console. Every round Down and Enter spun the wheel, then
+      picked COIN FLIP and a bet; the second soak also opened XERCES SETTINGS
+      every round (Enter on a row did nothing) and PEGASUS MENU every other
+      round (its Camo and Character menu). No crash, no Lua error and no script
+      error from Xerces in either. The payouts on screen were right (5,000 at
+      x2.1 paid 10,500; ALL IN with 10,290 at x2.8 paid 28,812; 7,500 at x2.4
+      and at x2.6 paid 18,000 and 19,500), the wheel took nothing for a Death
+      Machine from a power-up, and the bet menu reopens on the row last picked.
+- [x] Your stack, earlier runs driven by test Lua: the lobby's GAMBLING tab; the
+      wheel landed on Turned, Dead Wire, Thunder Wall and Blast Furnace; a bet
+      of 1,000 won ("YOU WIN 2,000 (x2.0)"); the Fire Sale spin cost 10; and the
+      HUD stays clear of PEGASUS's and DS4C's panels.
+- [x] How it looks, from full-screen captures. The wheel is a dark square in the
+      middle of the screen under an orange PACK-A-PUNCH WHEEL, with the ammo
+      mods' HUD icons and three NOTHING round the price; an orange highlight
+      goes round three times, slows onto the result, and the result's name shows
+      in the middle in its colour. The coin flip is a smaller panel: COIN FLIP
+      and the bet in orange, the coin's side turning in gold, then YOU WIN in
+      green or YOU LOSE in red. Both close by themselves. The round HUD is top
+      left for every player, as in stage 1. With PEGASUS the lobby screen has no
+      title (its restyle of the settings screen), in stage 1 too.
+- [x] No script error from Xerces' scripts in any run, and no Lua error from
+      Xerces' menus. With your stack, DS4C's progression script
+      (`scripts/ds4c/progression/live_xp.gsc`) prints "LUI event name (string)
+      is not precached" as zombies die, as it did in stage 1.
+
+Found and fixed during these runs:
+
+- A menu response ends at its first space, so in the first run the bet went to
+  the game as `xerces_flip` alone and no flip ran. Responses now join their
+  parts with ":".
+- GSC multiplies in single-precision floats, so a payout came out a point short
+  for about 1 bet in 100 (100 at x2.1 paid 209). The payout is now worked out in
+  whole numbers, checked offline against exact arithmetic for about a million
+  bets, and in the game above.
+- A win past the points cap was cut by the game without a word; it now says MAX
+  POINTS, ALL IN's description names the cap, and a bet at the cap is refused.
+- From a review of the code: under the Shopping Free gum a spin whose gun was
+  gone gave back 2,500 points it never took (it now gives back what it took);
+  the once-a-round lock would have stuck at round 255 (it counts rounds started
+  now); between rounds the flip paid 0.1 more than the menu showed (both use the
+  round as of its start now); a refused request said nothing once the pause menu
+  had closed; the teddy bear stayed in the world if its player left mid-rise;
+  and an ammo mod without a HUD icon would have broken the wheel (it shows the
+  name now).
+
+Crashes in the test runs: four of the seven runs with your stack that sent Lua
+through the console (to read the menus and pick rows) crashed in the game's Lua
+VM, twice at BlackOps3.exe+0x141D3DAA3 writing near address 0, once in its
+garbage collector on another thread, and once with no crash dump. None did
+without mods (four runs), and none did in the two soaks above, which only press
+keys, so they are put down to the test's own Lua. The address is noted in case
+it turns up in a player's crash report.
+
+Not tested yet: the refund under Shopping Free, rounds past 255, an ammo mod
+without an icon, and everything that needs a second player (KNOWN_ISSUES.md).
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The

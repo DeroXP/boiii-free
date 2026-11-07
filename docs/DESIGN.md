@@ -1592,7 +1592,7 @@ logs, asks about config and backups, and says account deletion is separate.
 Unsigned installers trigger SmartScreen; `TRUST.md` says so. A portable zip is
 published as well.
 
-### 7.9 Zombies round settings (stage 1 built 2026-11-07)
+### 7.9 Zombies round settings (stages 1 and 2 built 2026-11-07)
 
 Settings that change how a Zombies match plays, asked for and decided by the
 user on 2026-11-07. They are all off by default, the host's settings apply to
@@ -1604,9 +1604,10 @@ only when the user says so:
 1. The XERCES SETTINGS menu and the simple toggles (built, below).
 2. A double Pack-a-Punch wheel (2,500 points, once per round, on a gun already
    Pack-a-Punched; 8 slices: the five ammo mods and 3 "nothing" slices that show
-   the mystery box's teddy bear and play its laugh) and a coin flip (the
+   the mystery box's teddy bear and play its laugh; during a Fire Sale it costs
+   what the box does then, asked for on 2026-11-07) and a coin flip (the
    player's bet, at least 100 points; 50/50; a win pays the bet times 2 at round
-   1, plus 0.1 per round, at most 5).
+   1, plus 0.1 per round, at most 5). Built, below.
 3. Round skips (special and prime rounds, +400 points each, a majority vote in
    co-op, a Max Ammo with a special-round skip), a random loadout each round
    (two guns from the map's box), self-revives (one per player, refilled every
@@ -1618,15 +1619,16 @@ only when the user says so:
    round 999, each type with its own eye glow or aura from effects every map
    already loads.
 
-**Stage 1.** Eight saved dvars, registered by
-`src/client/xerces/round_settings.cpp` with the archive flag:
-`xerces_zm_maxAmmo`, `xerces_zm_autoPap`, `xerces_zm_startPoints` (0 keeps the
-map's own), `xerces_zm_noPerkLimit`, `xerces_zm_boxStays`, `xerces_zm_powerOn`,
-`xerces_zm_doorsOpen` and `xerces_zm_roundHud`.
-`data/ui_scripts/xerces_settings` is the menu: in the front end a settings
-screen like BOIII SETTINGS (one ZOMBIES tab for now), whose button
-`data/ui_scripts/frontend_menus` adds after BOIII SETTINGS in the Zombies
-lobbies (`UI_ZMLOBBYONLINE`, `UI_ZMLOBBYLANGAME`), with or without mods.
+**Stage 1.** Saved dvars, registered by `src/client/xerces/round_settings.cpp`
+with the archive flag: `xerces_zm_maxAmmo`, `xerces_zm_autoPap`,
+`xerces_zm_startPoints` (0 keeps the map's own), `xerces_zm_noPerkLimit`,
+`xerces_zm_boxStays`, `xerces_zm_powerOn`, `xerces_zm_doorsOpen` and
+`xerces_zm_roundHud`, and for stage 2 `xerces_zm_wheel` and
+`xerces_zm_coinFlip`. `data/ui_scripts/xerces_settings` is the menu: in the
+front end a settings screen like BOIII SETTINGS, with a ZOMBIES and a GAMBLING
+tab, whose button `data/ui_scripts/frontend_menus` adds after BOIII SETTINGS in
+the Zombies lobbies (`UI_ZMLOBBYONLINE`, `UI_ZMLOBBYLANGAME`), with or without
+mods.
 
 `data/custom_scripts/zm/xerces_rounds.gsc` reads the dvars once, as the match
 loads, and uses only scripts the core Zombies script uses itself, so it links on
@@ -1661,7 +1663,7 @@ not a replaced script:
   open with the power.
 - Round HUD: zombies left (`get_current_zombie_count` plus `level.zombie_total`)
   and the round's time, between `start_of_round` and `end_of_round` (the last
-  round's time shows between rounds).
+  round's time shows between rounds), top left on every player's screen (below).
 
 **What reaches the other players.** The game only sends a LUI event or shows a
 HUD label whose name it loaded from the map's zones
@@ -1674,20 +1676,78 @@ Registering the names through the engine's own functions (`0x1400A3FF0` for LUI
 events, `0x1400A4690` for localized strings, build 0x6531394) was tried on
 2026-11-07: the game then compares the server's and the client's lists ("BG
 Cache Diff ... Mismatched") and ends the map at once, and a player joining later
-would hit the same check. So stage 1 registers nothing:
+would hit the same check. So nothing is registered. What every map does register
+are the game's generic script menus (`HudElementText`, `HudElementImage`,
+`HudElementTimer`, `ScriptMessageDialog_Compact`) with their data keys (`text`,
+`x`, `y`, `width`, `height`, `alignment`, `red`, `green`, `blue`, `alpha`,
+`material`, `zRot`), and the script menu `StartMenu_Main`. A script opens one
+for a player (`OpenLUIMenu`) and fills it (`SetLUIMenuData`), and the game sends
+a text as it is. Measured on 2026-11-07: the screen is 1280x720, an image's `x`
+and `y` are its top left corner, and a text sits in the box from `x` to
+`x + width`, by `alignment` 1 left, 2 centre or 4 right. An image needs a
+registered material: the five ammo mods' HUD icons (`t7_hud_zm_aat_*`), `white`
+and `black` are on every Zombies map.
 
 - Every player gets the host's settings as a game message when they first spawn
   (`IPrintLn`, plain text), such as "Xerces settings: Max Ammo every round, Auto
   Pack-a-Punch, 5,000 starting points".
-- The round HUD and the pause menu's read-only XERCES SETTINGS are drawn by the
-  host's own menus from two dvars that a listen server shares with the host's
-  client: `xerces_zm_match` ("<mask> <starting points>", what the script
-  applied) and `xerces_zm_hud` ("<zombies left> <seconds> <1 while a round
-  runs>", four times a second). Other players do not get them yet; a safe way to
-  send them needs the two-PC test.
-- The pause menu entry ("XERCES SETTINGS", above Restart and End Game) goes into
-  whichever game options list the pause menu uses, as the mod menu entry does,
-  and grows that list the same way (7.6); the host's only.
+- The round HUD is four `HudElementText` per player, updated four times a
+  second, sending only what changed.
+- Each player also gets a hidden `HudElementText` (alpha 0) whose text is
+  "XERCES <mask> <starting points> <round>". Xerces' Lua on the player's PC
+  finds it (a menu named `HudElementText` whose `text` model starts that way) to
+  show, in the pause menu, XERCES SETTINGS (a read-only list of what the match
+  uses), PACK-A-PUNCH WHEEL and COIN FLIP (when they are on). The entries go
+  above Restart and End Game in whichever game options list the pause menu uses,
+  as the mod menu entry does, and grow that list the same way (7.6).
+- Back to the game script the Lua sends
+  `Engine.SendMenuResponse(controller, "StartMenu_Main", response)`, which
+  arrives as the player's `menuresponse` notify. The game's own handler
+  (`zm_gametype::menu_onmenuresponse`) acts only on its own responses. A
+  response ends at its first space, so its parts are joined by ":"
+  (`xerces_wheel`, `xerces_flip:1000`, `xerces_flip:all`). The pause menu is
+  closed first (`StartMenuGoBack`, which also unpauses a solo game), so the
+  request runs at once.
+
+**Stage 2.** Both are the host's settings (`xerces_zm_wheel`,
+`xerces_zm_coinFlip`); with one off its entry is not shown, and a request for it
+gets "The host has not turned ... on". A player has one wheel or flip at a time.
+As the pause menu has closed by the time a request arrives, every refusal says
+why on the player's screen (down or out, the last spin or flip still going, and
+the reasons below).
+
+- The wheel costs 2,500 points, or during a Fire Sale
+  (`level.zombie_vars["zombie_powerup_fire_sale_on"]`) 10, which is what the
+  mystery box costs then (`zm_magicbox::fire_sale_fix`). It is a purchase
+  (`zm_score::minus_to_player_score`, so the Shopping Free gum covers it). It
+  works once a round per player, counted by rounds started (the round number
+  stops at 255, below), on the gun in hand when it is Pack-a-Punched and can
+  take an ammo mod (`level.aat_in_use`, `aat::is_exempt_weapon`). Its eight
+  slices, clockwise from the top, are Blast Furnace, nothing, Dead Wire,
+  Fireworks, nothing, Thunder Wall, Turned, nothing. An ammo mod the map does
+  not register counts as nothing. The wheel is drawn on the player's screen (a
+  dark panel, each mod's HUD icon or "NOTHING", a highlight that goes round
+  three times and slows onto the result); then `aat::acquire(weapon, name)`
+  gives the mod, with its own sound, or, for nothing, the box's teddy
+  (`level.chest_joker_model`) rises and turns in front of the player with its
+  laugh (`level.zmb_laugh_alias`). If the gun is gone by then, what the spin
+  took comes back (nothing, under Shopping Free) and so does the round's spin.
+  An ammo mod a mod registers without a HUD icon shows its name.
+- The coin flip's bet menu offers 100, 500, 1,000, 2,500, 5,000, 10,000, 25,000,
+  50,000 and ALL IN, each with what heads pays at this round. The game script
+  takes a bet of at least 100 and at most the player's points straight from the
+  score (a bet is not a purchase, so no gum makes it free), flips a coin on the
+  player's screen, and on heads pays the bet times 2 at round 1 and 0.1 more for
+  each later round, at most 5, which includes the bet, rounded down to a whole
+  point. The round is the one the menus show, set at each round's start: the
+  game raises `level.round_number` as a round ends, and between rounds the flip
+  pays what the menu said. It works the payout out in whole numbers: GSC
+  multiplies and divides in single-precision floats, where 2.1 is 2.0999999 and
+  100 x 2.1 came to 209. A win never takes a score past 4,194,303, the game's
+  own points cap (measured on 2026-11-07: a score a script sets higher reads
+  back as 4,194,303). A win the cap cuts says MAX POINTS instead of the
+  multiplier, ALL IN's description names the cap, and a player at the cap cannot
+  bet, as a win could not pay.
 
 **Rounds past 255 (for stage 3).** `zm::set_round_number` keeps the round in
 `world.roundnumber` (XORed with 115) and clamps it at 255;
@@ -1700,6 +1760,8 @@ above 255. Zombie health (`zombie_utility::ai_calculate_health`) is 150 at round
 round 163, where the game's own check keeps the last value, 2,035,642,980, for
 every later round. It never wraps, but from round 163 on a zombie needs an
 insta-kill or a very strong weapon, so stage 3 has to choose round 999's health.
+Points stop at 4,194,303 (the game's cap, above), so round 999's infinite points
+means a score kept at that cap.
 
 ---
 

@@ -67,11 +67,14 @@ hash, sent with the link, shows that the zip is the one we made.
   Max Ammo every round, guns from wall buys and the box already Pack-a-Punched,
   starting points (500, 5,000 or 50,000), no perk limit, a box that never moves,
   the power on and every door open at the start, and a zombies-left counter with
-  a round timer. All are off until you turn them on. When you host, everyone in
-  the match gets your settings, and each player sees them listed in a message
-  when they spawn. The counter and timer, and the pause menu's XERCES SETTINGS
-  (what this match uses), show for the host only for now. Not on dedicated
-  servers.
+  a round timer. Its GAMBLING tab has the Pack-a-Punch wheel and the coin flip.
+  All are off until you turn them on. When you host, everyone in the match gets
+  your settings, and each player sees them listed in a message when they spawn.
+  In the match, the pause menu has XERCES SETTINGS (what this match uses) and,
+  when they are on, PACK-A-PUNCH WHEEL (2,500 points, 10 in a Fire Sale, once a
+  round, with a Pack-a-Punched gun in hand: an ammo mod or the box's teddy) and
+  COIN FLIP (pick a bet; heads wins, and the payout grows each round). Not on
+  dedicated servers.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.

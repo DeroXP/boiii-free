@@ -58,11 +58,13 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## Zombies round settings (XERCES SETTINGS)
 
-- **The counter, the timer and the in-match settings view are the host's only.**
-  The game shows other players only text it loaded with the map, so they get the
-  host's settings as a message when they spawn, and the zombies left, round time
-  and the pause menu's XERCES SETTINGS show on the host's screen. Sending them
-  to everyone needs testing on two PCs first.
+- **Other players need Xerces for the pause menu entries.** The counter, the
+  timer, the wheel and the coin flip show on every player's screen, but the
+  pause menu's XERCES SETTINGS, PACK-A-PUNCH WHEEL and COIN FLIP come from
+  Xerces on each player's PC. A player without Xerces cannot spin or bet.
+- **Not tested with two PCs yet.** Everything here ran on one PC, as the host.
+  Not seen yet: a player who joins during a match, and one who bleeds out and
+  comes back the next round (whether their counter and timer are still there).
 - **Power On at Start flips the standard power switch.** A map that turns its
   power on another way (a quest, several switches of its own) is left as it is,
   and so are doors that only a quest or a map's own check opens.
