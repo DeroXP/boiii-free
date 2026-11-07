@@ -904,7 +904,11 @@ std::optional<std::string> rename_script(std::string buf,
   return buf;
 }
 
+// Xerces: every link, so asset_owner's index knows it is out of date.
+std::atomic<uint64_t> link_count{0};
+
 XAssetEntry *link_asset_stub(XAssetEntry *entry, const game::qboolean allow) {
+  link_count.fetch_add(1, std::memory_order_relaxed);
   if (entry->asset.type == XAssetType::BG_CACHE) {
     merge_precache(entry);
   }
@@ -962,6 +966,46 @@ const char *mod_label_stub(const char *, const char *loaded, const char *,
   }
   return utils::string::va("%s%s (and %zu more)", loaded, title.c_str(),
                            extras);
+}
+
+// asset_owner's index: the live entry of each loaded asset of a type, by its
+// header, built with one walk of the entry pool the first time a type is
+// asked for after the last link. A menu labels a hundred camos at once.
+struct owner_index {
+  uint64_t at_links = UINT64_MAX;
+  std::unordered_map<int32_t, std::unordered_map<const void *, XAssetEntry *>>
+      by_type;
+};
+std::mutex owner_mutex;
+owner_index owners;
+
+XAssetEntry *live_entry(const XAssetType type, const void *data) {
+  std::scoped_lock lock(owner_mutex);
+  const uint64_t now = link_count.load(std::memory_order_relaxed);
+  if (owners.at_links != now) {
+    owners.by_type.clear();
+    owners.at_links = now;
+  }
+  auto &index = owners.by_type[static_cast<int32_t>(type)];
+  const auto still = [&](const XAssetEntry *entry) {
+    return entry && entry->inuse && entry->asset.type == type &&
+           entry->asset.header.data == data;
+  };
+  if (const auto found = index.find(data);
+      found != index.end() && still(found->second)) {
+    return found->second;
+  }
+  // Built again when an asset is missing (a zone unloaded or loaded since):
+  // the header is the live entry's, as game.ismodrawfile finds it.
+  index.clear();
+  for (auto &item : game::db::xasset::pool::g_assetEntryPool->pool) {
+    XAssetEntry &entry = item.entry;
+    if (entry.inuse && entry.asset.type == type) {
+      index[entry.asset.header.data] = &entry;
+    }
+  }
+  const auto found = index.find(data);
+  return found != index.end() ? found->second : nullptr;
 }
 
 luaReturnCount_e lua_get(lua_State *luaVM) {
@@ -1071,6 +1115,61 @@ bool is_loaded(const std::string &list) {
 // Xerces' command pipe (src/client/xerces/ipc.cpp) asks for the same reload
 // as ModStack.Reload in the mods menu.
 void request_reload() { reload_pending = true; }
+
+std::optional<std::string> asset_owner(const int32_t type,
+                                       const std::string &name) {
+  const auto asset_type = static_cast<XAssetType>(type);
+  const void *data = game::db::xasset::DB_FindXAssetHeader(
+                         asset_type, name.c_str(), false, 0)
+                         .data;
+  // A name the type has no asset for gets a stand-in (the default image,
+  // material or model), whose owner says nothing about the name: on
+  // 2026-11-06 names that were no image, like a camo's "Topaz", came back as
+  // Hyperdimension Neptunia's. DB_IsXAssetDefault (db.cpp uses it too) tells
+  // a stand-in from the real asset.
+  if (!data || game::db::xasset::DB_IsXAssetDefault(asset_type, name.c_str())) {
+    return std::nullopt;
+  }
+  const XAssetEntry *entry = live_entry(asset_type, data);
+  if (!entry) {
+    return std::nullopt;
+  }
+  const std::string zone = zone_name(entry);
+  std::scoped_lock lock(mutex);
+  const xerces_core::zone_class found =
+      xerces_core::classify_zone(zone, current_usermap(), priorities);
+  switch (found.kind) {
+  case xerces_core::zone_kind::main_tier: {
+    std::string id = main_mod();
+    return id.empty() ? std::nullopt : std::optional(std::move(id));
+  }
+  case xerces_core::zone_kind::extra:
+    if (found.extra_index < priorities.size()) {
+      return priorities[found.extra_index];
+    }
+    return std::nullopt;
+  case xerces_core::zone_kind::usermap: {
+    const char *id = game::ugc::active_usermap->publisherId;
+    std::string text(id, strnlen(id, sizeof(game::ugc::active_usermap->publisherId)));
+    return text.empty() ? std::nullopt : std::optional(std::move(text));
+  }
+  default:
+    return std::nullopt;
+  }
+}
+
+std::string workshop_title(const std::string &id) {
+  for (const game::ugc::UGCItem *item :
+       {game::ugc::UGC_UnwrapOptionalUGCItem(
+            game::ugc::UGC_GetModByPublisherId(id.c_str())),
+        game::ugc::UGC_UnwrapOptionalUGCItem(
+            game::ugc::UGC_GetUsermapByPublisherId(id.c_str()))}) {
+    if (item && item->title[0]) {
+      return std::string(item->title);
+    }
+  }
+  return {};
+}
 
 std::string active_usermap() { return std::string(current_usermap()); }
 

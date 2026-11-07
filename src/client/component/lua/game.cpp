@@ -10,6 +10,7 @@
 #include <component/getinfo.hpp>
 #include <component/gpu.hpp>
 #include <component/lua/lua_state.hpp>
+#include <component/mod_stack.hpp>
 #include <component/name.hpp>
 #include <component/scheduler.hpp>
 #include <component/toast.hpp>
@@ -22,6 +23,8 @@
 
 #include <utils/http.hpp>
 #include <utils/string.hpp>
+
+#include <xerces_core/asset_limits.hpp>
 
 namespace game_lua {
 using namespace game::db;
@@ -253,6 +256,35 @@ luaReturnCount_e setstoreprice(lua_State *luaVM) {
 
 luaReturnCount_e ismodrawfile(lua_State *luaVM) {
   return call(luaVM, is_mod_rawfile);
+}
+
+// Xerces (DESIGN.md 7.6, read only): the Workshop id of the mod or custom map
+// whose copy of an asset the game uses now, for the menus' mod labels
+// (data/ui_scripts/mod_labels); "" for the game's own copy, an asset not
+// loaded or a type not known. type is the XAssetType name in any case:
+// "image", "material", "xmodel", "weapon_camo".
+luaReturnCount_e getassetowner(lua_State *luaVM) {
+  return call(luaVM,
+              [](const std::string &type, const std::string &name)
+                  -> std::string {
+                const std::string wanted = utils::string::to_upper(type);
+                for (const xerces_core::asset_pool_info &pool :
+                     xerces_core::asset_pools()) {
+                  if (pool.name == wanted) {
+                    return mod_stack::asset_owner(pool.type, name)
+                        .value_or(std::string{});
+                  }
+                }
+                return {};
+              });
+}
+
+// Xerces: a mod's or custom map's Workshop title by its id; "" when neither
+// is installed.
+luaReturnCount_e getmodtitle(lua_State *luaVM) {
+  return call(luaVM, [](const std::string &id) -> std::string {
+    return mod_stack::workshop_title(id);
+  });
 }
 
 luaReturnCount_e israwfile(lua_State *luaVM) {
@@ -689,6 +721,8 @@ public:
         lua_state::luaL_LoggedReg<"game", "setstoreprice", setstoreprice>(),
         lua_state::luaL_LoggedReg<"game", "ismodrawfile", ismodrawfile>(),
         lua_state::luaL_LoggedReg<"game", "israwfile", israwfile>(),
+        lua_state::luaL_LoggedReg<"game", "getassetowner", getassetowner>(),
+        lua_state::luaL_LoggedReg<"game", "getmodtitle", getmodtitle>(),
         lua_state::luaL_LoggedReg<"game", "purchasevials", purchasevials>(),
         lua_state::luaL_LoggedReg<"game", "purchasedistills",
                                   purchasedistills>(),

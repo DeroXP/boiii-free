@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -35,5 +37,15 @@ void use_own_map_scripts_first();
 // Every stacked mod's copy of an entry script (like _clientids.gsc), renamed
 // so each runs beside the others and beside the game's own copy.
 std::vector<std::pair<std::string, std::string>> script_copies();
+
+// Xerces (DESIGN.md 7.6, read only): the Workshop id of the mod (main or
+// extra) or custom map whose copy of an asset the game uses now, for the
+// menus' mod labels (data/ui_scripts/mod_labels). Nothing for the game's own
+// copy, an asset not loaded, or a name the type has no asset for (the game
+// hands out a stand-in for those). Ask for names the menus show, such as an
+// item's image. type is the engine's XAssetType value.
+std::optional<std::string> asset_owner(int32_t type, const std::string &name);
+// A mod's or custom map's Workshop title; "" when neither is installed.
+std::string workshop_title(const std::string &id);
 
 } // namespace mod_stack

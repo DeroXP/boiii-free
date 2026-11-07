@@ -959,40 +959,84 @@ vanilla alike.
   15:11) hold `weakly_canonical: Access is denied.` for `boiii.start` next to
   `boiii.exe`. The game opens that file through `_fsopen`; Xerces' path hook
   (`patches.cpp` `fsopen_adjustpath`, `path::normalize`) resolved it with the
-  throwing `std::filesystem::weakly_canonical`, and the exception ended the game.
-  Why Windows refused the file in OneDrive is not known (the file was gone
+  throwing `std::filesystem::weakly_canonical`, and the exception ended the
+  game. Why Windows refused the file in OneDrive is not known (the file was gone
   afterwards). Copied to `C:\Games\xerces-0.1.0-beta.1`, the same zip started
   and loaded a map.
 - **The flood.** The crash handler resumes the game after a crash (Rip to
   `reset_state`), which Windows cannot do for a C++ exception: it raised
   STATUS_NONCONTINUABLE_EXCEPTION (0xC0000025), which came back to the handler.
   Each of the 6 launches wrote 3 to 13 dumps, zips and crash reports, about 3 s
-  apart, until the game ended (exit code 1). The first report of each launch
-  has 0xE06D7363, the rest 0xC0000025. More than 20 reached the backend; its
+  apart, until the game ended (exit code 1). The first report of each launch has
+  0xE06D7363, the rest 0xC0000025. More than 20 reached the backend; its
   per-install limit answered 429 to the rest, which waited in the outbox.
 - **A second copy.** Started from `C:\Games` while the copy in OneDrive was
-  open, Xerces.exe only brought the open window forward (one launcher per
-  home), so two more launches still ran from OneDrive.
+  open, Xerces.exe only brought the open window forward (one launcher per home),
+  so two more launches still ran from OneDrive.
 
 Fixed on `launcher/onedrive-fix`:
 
 - `path::normalize` and the folders it compares with use the `error_code`
-  overloads: a path Windows will not resolve goes to the game's call as it
-  came, and the game log gets one `path.unresolved` line per game.
-- A noncontinuable exception gets the crash dialog in the handler instead of
-  the resume; at most three crash reports per game (a server plays on after a
+  overloads: a path Windows will not resolve goes to the game's call as it came,
+  and the game log gets one `path.unresolved` line per game.
+- A noncontinuable exception gets the crash dialog in the handler instead of the
+  resume; at most three crash reports per game (a server plays on after a
   crash).
 - Home warns for 8 s when Xerces.exe is in a OneDrive folder
   (`launcher.install.onedrive`, `onedrive_folder_of`, unit-tested).
-- A second copy of Xerces.exe started from another folder says which folder
-  the open one is in.
+- A second copy of Xerces.exe started from another folder says which folder the
+  open one is in.
 - [ ] The fixed client from a OneDrive folder in the game: does the game start
       when Windows refuses `boiii.start`?
 
-In the same play from `C:\Games`, `zm_mw4_shipment` with DS4C, Classic
-Viewmodel FOV and Hyperdimension Neptunia ran out of zone memory while loading
+In the same play from `C:\Games`, `zm_mw4_shipment` with DS4C, Classic Viewmodel
+FOV and Hyperdimension Neptunia ran out of zone memory while loading
 (`loader.out_of_memory`, exit 0xFFFFFFFF): the known DS4C limit
 (KNOWN_ISSUES.md). Larger zone memory was off.
+
+### Mod labels (2026-11-06)
+
+With your go-ahead ("Now, I'm not playing"), run by Claude from the worktree
+build (`launcher/mod-labels`, through `xerces_cli plan apply` with a test home
+in `C:\Users\Ginld\XercesDev\bench\20261106-modlabels`, your stack: DS4C,
+Classic Viewmodel FOV, Hyperdimension Neptunia; Larger zone memory on; keys and
+captures through `tools\dev\session`). A temporary probe script (not committed)
+logged each menu, list data source, item widget and the items' model fields.
+
+What the menus are:
+
+- Zombies weapon kits (DS4C's Zombies menu, the item below Dr. Monty's Factory)
+  -> a weapon -> the camo slot opens the game's `GunsmithCamoSelect`: list
+  `GunsmithWeaponOptions`, item widget `CustomizationItem_ND`, tabs
+  `CACCustomizationTabs` (DS4C renames the five tabs to its own categories).
+  Each item's `image` is the camo icon, such as `menu_camo_zm_dlc2_pap01`.
+- DS4C's pause menu -> Camos: `T7StartMenu_UISettings_Main`, lists
+  `DS4C_Camos_*`, item widget `T7StartMenu_UISettings_CamoOptions_ListItem`,
+  `image` and `camoIndex`; DS4C's BO6/BO7/MW3 and Reactive tags sit at the top
+  of each icon.
+- DS4C's pause menu -> the next entry: the character screen, list
+  `UISettingsCharacterOptions`, item widget
+  `T7StartMenu_UISettings_CharacterOptions_ListItem`, `image` (`icon_dempsey`)
+  and `characterIndex`.
+
+Owners: `game.getassetowner("image", ...)` gave DS4C (3171632315) for every camo
+and character icon in those lists and nothing for the game's own icons
+(`t7_icon_weapon_smg_fastfire`). The first build also gave an owner for names
+that are no image ("Topaz", the camo's name): the game hands out a stand-in for
+those, and the stand-in's zone was Neptunia's in the menu and Cheese Cube's in
+the match. Fixed with `DB_IsXAssetDefault` (db.cpp already uses it).
+
+- [x] The weapon kits' camo picker: "DS4C Patched" across the top of each DS4C
+      camo; no errors in the game log.
+- [x] DS4C's Camos in a match (Cheese Cube): "DS4C Patched" along the bottom,
+      clear of DS4C's own tags.
+- [x] DS4C's Characters: "DS4C Patched" across the top of each portrait.
+- [ ] Another camo or character mod in the stack (only the winner's list loads,
+      so its label names the winner); the Multiplayer pickers.
+
+The Season Pass bonus overlay (Dr. Monty's Factory) was closed by quitting the
+game, not with OK. Windows asked whether the worktree's boiii.exe may use the
+network; that prompt was left for you.
 
 ### Voice chat starts as push-to-talk (2026-11-05)
 

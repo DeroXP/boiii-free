@@ -1521,6 +1521,17 @@ scripts pass; chunk names can be faked, origin tags cannot) or become requests
 the launcher asks the user to confirm. Consent, native-code approval and friends
 or invite actions never exist in Lua.
 
+Mod labels (built 2026-11-06): `data/ui_scripts/mod_labels` puts the name of the
+mod (or custom map) that supplied each camo or character icon on that icon, in
+the game's camo picker (Zombies weapon kits, Gunsmith, Create-a-Class) and in
+DS4C's in-match camo and character screens. It reads the owner with two
+read-only calls next to `game.ismodrawfile`: `game.getassetowner(type, name)`
+(the Workshop id whose zone holds the copy of the asset the game uses, from the
+live entry's zone; "" for the game's own, a stand-in or an asset not loaded) and
+`game.getmodtitle(id)`. Only one mod's camo list and character roster load per
+stack (6.3), so the labels name the mod whose copy won; tabs per mod are not
+built.
+
 ### 7.7 Rename
 
 - **Brand (renamed):** executable and workspace names, window titles and

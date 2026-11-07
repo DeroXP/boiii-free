@@ -54,6 +54,11 @@ hash, sent with the link, shows that the zip is the one we made.
   together or maps that will not fit.
 - **Settings** has the game's options (name, field of view, FPS limit, display
   mode) and Xerces' own.
+- **In the game**, a camo or character that a mod added names that mod in a
+  small tag on its icon: in the camo picker (Zombies weapon kits, Gunsmith,
+  Create-a-Class) and in DS4C's camo and character screens. Only one mod's camo
+  list and character list load at a time, so the tag names the mod whose list
+  you are seeing.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.
