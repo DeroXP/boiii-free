@@ -537,6 +537,9 @@ plan_entry make_entry(const installed_content &content, bool requested,
   entry.zone_memory = zone_memory_of(content.zone_headers, request.mode,
                                      content.info.kind != content_kind::map)
                           .bytes;
+  entry.zone_prt = zone_memory_of(content.zone_prt, request.mode,
+                                  content.info.kind != content_kind::map)
+                       .bytes;
   entry.settings = resolve_settings(content, request, diags, fixes);
   return entry;
 }
@@ -590,16 +593,23 @@ void check_zone_memory(
     }
   };
   const plan_entry *biggest = nullptr;
+  const plan_entry *biggest_prt = nullptr;
   for (const auto &entry : out.stack) {
     memory.stack_bytes += entry.zone_memory;
+    memory.stack_prt_bytes += entry.zone_prt;
     note_unread(entry, true);
     if (entry.zone_memory > 0 &&
         (!biggest || entry.zone_memory > biggest->zone_memory)) {
       biggest = &entry;
     }
+    if (entry.zone_prt > 0 &&
+        (!biggest_prt || entry.zone_prt > biggest_prt->zone_prt)) {
+      biggest_prt = &entry;
+    }
   }
   if (out.map) {
     memory.map_bytes = out.map->zone_memory;
+    memory.map_prt_bytes = out.map->zone_prt;
     note_unread(*out.map, false);
   }
   if (!request.zone_budget) {
@@ -613,6 +623,7 @@ void check_zone_memory(
   }
   const zone_budget &budget = *request.zone_budget;
   const double stack_mib = to_mib(memory.stack_bytes);
+  const double stack_prt_mib = to_mib(memory.stack_prt_bytes);
   for (const auto &[id, items] : index) {
     // The plan's map in the version it picked, and checked whatever its
     // names say: it is the one that loads.
@@ -629,16 +640,39 @@ void check_zone_memory(
         content->info.name.empty() ? id : content->info.name;
     const double map_mib = to_mib(own ? out.map->zone_memory : use.bytes);
     const double need = budget.baseline_mib + stack_mib + map_mib;
-    if (need > budget.pool_mib) {
+    const double over = need - budget.pool_mib;
+    // The streamed-texture pool, when the build has its figures (the same
+    // headers, so the same zones are unread).
+    const double map_prt_mib =
+        to_mib(own ? out.map->zone_prt
+                   : zone_memory_of(content->zone_prt, request.mode,
+                                    content->info.kind != content_kind::map)
+                         .bytes);
+    const double prt_need =
+        budget.prt_baseline_mib + stack_prt_mib + map_prt_mib;
+    const double prt_over =
+        budget.prt_checked ? prt_need - budget.prt_pool_mib : -1.0;
+    if (over > 0 || prt_over > 0) {
       // Over without the zones not read, so over with them too.
-      memory.maps_over.push_back(
-          {id, name, need, need - budget.pool_mib,
-           budget.baseline_mib + map_mib > budget.pool_mib,
-           // Said only when every zone counted was read: a zone not read
-           // could take the rest.
-           !budget.larger_pool && budget.larger_pool_mib > 0 &&
-               need <= budget.larger_pool_mib && use.unread.empty() &&
-               memory.unread.empty()});
+      zone_memory_map map;
+      map.id = id;
+      map.name = name;
+      map.texture = prt_over > over;
+      map.need_mib = map.texture ? prt_need : need;
+      map.over_by_mib = std::max(over, prt_over);
+      map.over_without_mods =
+          budget.baseline_mib + map_mib > budget.pool_mib ||
+          (budget.prt_checked &&
+           budget.prt_baseline_mib + map_prt_mib > budget.prt_pool_mib);
+      // Said only when every zone counted was read: a zone not read could
+      // take the rest. Both pools must fit the larger zone memory.
+      map.fits_larger_pool =
+          !budget.larger_pool && budget.larger_pool_mib > 0 &&
+          need <= budget.larger_pool_mib &&
+          (!budget.prt_checked || (budget.larger_prt_pool_mib > 0 &&
+                                   prt_need <= budget.larger_prt_pool_mib)) &&
+          use.unread.empty() && memory.unread.empty();
+      memory.maps_over.push_back(std::move(map));
     } else if (!use.unread.empty()) {
       // It takes more than map_mib, by how much is unknown.
       memory.maps_unread.push_back({id, name});
@@ -651,10 +685,17 @@ void check_zone_memory(
     return a.id < b.id;
   });
 
-  const std::string most =
-      biggest ? " The mod that takes the most is " + biggest->name + " (" +
-                    whole_mib(to_mib(biggest->zone_memory)) + ")."
-              : "";
+  // The mod that takes the most of the pool a map is over in.
+  const auto most = [&](const bool texture) {
+    const plan_entry *mod = texture ? biggest_prt : biggest;
+    if (mod == nullptr) {
+      return std::string();
+    }
+    return " The mod that takes the most" +
+           std::string(texture ? " texture memory" : "") + " is " + mod->name +
+           " (" +
+           whole_mib(to_mib(texture ? mod->zone_prt : mod->zone_memory)) + ").";
+  };
   // The pool the launch has (DESIGN.md 5.4), and the setting that would make
   // room for a map that fits the larger one.
   const std::string memory_name =
@@ -666,6 +707,8 @@ void check_zone_memory(
   // over is one of these). Either kind may fit the larger zone memory.
   std::vector<std::string> with_mods;
   std::vector<std::string> with_mods_larger;
+  // The pool the most-over of those maps is over in.
+  bool with_mods_texture = false;
   std::vector<std::string> too_big;
   std::vector<std::string> too_big_larger;
   for (const auto &map : memory.maps_over) {
@@ -680,7 +723,7 @@ void check_zone_memory(
         advice = (map.fits_larger_pool
                       ? turn_on + ", remove a mod, or pick another map."
                       : std::string("Remove a mod, or pick another map.")) +
-                 most;
+                 most(map.texture);
       }
       diags.error("plan.memory.over", "/map",
                   map.name + " does not fit in " + memory_name +
@@ -689,6 +732,9 @@ void check_zone_memory(
                       over + "): the game would close while loading it. " +
                       advice);
       continue;
+    }
+    if (!map.over_without_mods && with_mods.empty()) {
+      with_mods_texture = map.texture;
     }
     (map.over_without_mods ? too_big : with_mods)
         .push_back(map.name + " (" + over + ")");
@@ -709,19 +755,20 @@ void check_zone_memory(
            ".";
   };
   if (with_mods.size() == 1) {
-    diags.warning("plan.memory.maps_over", "",
-                  "The map " + with_mods.front() + " does not fit in " +
-                      memory_name +
-                      " with these mods: the game closes while loading it. "
-                      "Remove a mod to play it, or play another map." +
-                      most + larger_note(with_mods, with_mods_larger));
+    diags.warning(
+        "plan.memory.maps_over", "",
+        "The map " + with_mods.front() + " does not fit in " + memory_name +
+            " with these mods: the game closes while loading it. "
+            "Remove a mod to play it, or play another map." +
+            most(with_mods_texture) + larger_note(with_mods, with_mods_larger));
   } else if (!with_mods.empty()) {
     diags.warning("plan.memory.maps_over", "",
                   std::to_string(with_mods.size()) + " maps do not fit in " +
                       memory_name + " with these mods: " + join_and(with_mods) +
                       ". The game closes while loading them. Remove a mod "
                       "to play them, or play another map." +
-                      most + larger_note(with_mods, with_mods_larger));
+                      most(with_mods_texture) +
+                      larger_note(with_mods, with_mods_larger));
   }
   if (too_big.size() == 1) {
     diags.warning("plan.memory.maps_too_big", "",
@@ -1369,6 +1416,8 @@ std::string plan_to_json(const plan &value, bool pretty) {
     json::set(object, "zones", static_cast<std::int64_t>(entry.zones), alloc);
     json::set(object, "zone_mib", Value(round_mib(to_mib(entry.zone_memory))),
               alloc);
+    json::set(object, "texture_mib", Value(round_mib(to_mib(entry.zone_prt))),
+              alloc);
     Value settings(rapidjson::kObjectType);
     for (const auto &[key, raw] : entry.settings) {
       auto parsed = json::parse(raw);
@@ -1468,6 +1517,36 @@ std::string plan_to_json(const plan &value, bool pretty) {
                                           stack_mib + map_mib.value_or(0))
                           : std::nullopt),
             alloc);
+  // The streamed-texture pool, when the build has its figures.
+  const bool texture = memory.budget && memory.budget->prt_checked;
+  const double stack_prt_mib = to_mib(memory.stack_prt_bytes);
+  const std::optional<double> map_prt_mib =
+      memory.map_prt_bytes ? std::optional(to_mib(*memory.map_prt_bytes))
+                           : std::nullopt;
+  Value textures(rapidjson::kObjectType);
+  json::set(textures, "checked", texture, alloc);
+  json::set(textures, "pool_mib",
+            mib_value(texture ? std::optional(memory.budget->prt_pool_mib)
+                              : std::nullopt),
+            alloc);
+  json::set(textures, "larger_pool_mib",
+            mib_value(texture && memory.budget->larger_prt_pool_mib > 0
+                          ? std::optional(memory.budget->larger_prt_pool_mib)
+                          : std::nullopt),
+            alloc);
+  json::set(textures, "baseline_mib",
+            mib_value(texture ? std::optional(memory.budget->prt_baseline_mib)
+                              : std::nullopt),
+            alloc);
+  json::set(textures, "stack_mib", mib_value(stack_prt_mib), alloc);
+  json::set(textures, "map_mib", mib_value(map_prt_mib), alloc);
+  json::set(
+      textures, "total_mib",
+      mib_value(texture ? std::optional(memory.budget->prt_baseline_mib +
+                                        stack_prt_mib + map_prt_mib.value_or(0))
+                        : std::nullopt),
+      alloc);
+  json::set(zone_memory, "textures", std::move(textures), alloc);
   Value maps_over(rapidjson::kArrayType);
   for (const auto &map : memory.maps_over) {
     Value object(rapidjson::kObjectType);
@@ -1475,6 +1554,7 @@ std::string plan_to_json(const plan &value, bool pretty) {
     json::set(object, "name", map.name, alloc);
     json::set(object, "need_mib", mib_value(map.need_mib), alloc);
     json::set(object, "over_by_mib", mib_value(map.over_by_mib), alloc);
+    json::set(object, "texture", map.texture, alloc);
     json::set(object, "over_without_mods", map.over_without_mods, alloc);
     json::set(object, "fits_larger_pool", map.fits_larger_pool, alloc);
     maps_over.PushBack(std::move(object), alloc);

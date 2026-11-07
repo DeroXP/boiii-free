@@ -37,6 +37,9 @@ struct installed_content {
   // stack's main pool, read by the catalog (0x100 bytes a file, never
   // hashed), for the zone memory check (5.3 step 5). In no hash.
   zone_header_map zone_headers;
+  // The same files and what each asks of the DB stack's streamed-texture
+  // pool (block 8), from the same headers. In no hash.
+  zone_header_map zone_prt;
 };
 
 struct plan_request {
@@ -75,6 +78,8 @@ struct plan_entry {
   // What its zones take from the DB stack's main pool in the plan's mode
   // (zone_memory_of); in no hash.
   std::uint64_t zone_memory = 0;
+  // The same from the DB stack's streamed-texture pool (block 8).
+  std::uint64_t zone_prt = 0;
   std::map<std::string, std::string> settings; // key -> canonical JSON
 };
 
@@ -110,16 +115,20 @@ struct pool_report {
   std::vector<std::string> installed_unread;
 };
 
-// A custom map that does not fit in the zone memory a plan leaves.
+// A custom map that does not fit in the zone memory a plan leaves: in the
+// main pool, the streamed-texture pool or both. need and over are the pool's
+// that is over by more (texture: the streamed-texture pool).
 struct zone_memory_map {
   std::string id;
   std::string name;
   double need_mib = 0;    // baseline + the plan's mods + the map
   double over_by_mib = 0; // need_mib - the pool
+  bool texture = false;
   // It does not fit even with no mods, so removing mods does not help.
   bool over_without_mods = false;
   // The launch does not have the larger zone memory, and with it this map
-  // would fit with these mods (zone_budget::larger_pool_mib).
+  // would fit with these mods: both pools (zone_budget::larger_pool_mib,
+  // larger_prt_pool_mib).
   bool fits_larger_pool = false;
 };
 
@@ -130,18 +139,21 @@ struct zone_memory_unread_map {
 };
 
 // Zone memory (5.3 step 5): when a custom map loads, blocks 5 and 6 of every
-// loaded zone come from one fixed pool, the DB stack's main pool, and a map
-// that does not fit makes the engine exit the game while it loads. What the
-// plan's mods and map take, and which installed maps of the mode would not
-// fit with these mods or could not be checked. Not part of plan_id or
-// content_id: it depends on every installed map and on compat/zone_memory.json,
-// not only on the plan.
+// loaded zone come from one fixed pool, the DB stack's main pool, block 8
+// from its streamed-texture pool, and a map that does not fit either makes
+// the engine exit the game while it loads. What the plan's mods and map take,
+// and which installed maps of the mode would not fit with these mods or could
+// not be checked. Not part of plan_id or content_id: it depends on every
+// installed map and on compat/zone_memory.json, not only on the plan.
 struct zone_memory_report {
   // From the request; nullopt: no figures for the build and mode, so maps
   // are not checked and maps_over is empty.
   std::optional<zone_budget> budget;
   std::uint64_t stack_bytes = 0;          // every mod in the stack
   std::optional<std::uint64_t> map_bytes; // the plan's map, when it has one
+  // The same for the streamed-texture pool.
+  std::uint64_t stack_prt_bytes = 0;
+  std::optional<std::uint64_t> map_prt_bytes;
   // Every installed custom map of the mode (the plan's own included) whose
   // zones do not fit on top of the baseline and the stack: the most over
   // first, then by id. Each map's highest installed version, or the one the

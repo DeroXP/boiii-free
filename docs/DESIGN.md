@@ -678,6 +678,21 @@ All in `xerces_core`:
    849 MiB; Super Mario 64 (813 MiB) and BACKROOMZ (1160 MiB) then overflow it,
    and the other six installed maps fit.
 
+   A second pool has the same limit (found 2026-11-07): block 8 of every loaded
+   zone, its streamed images, takes address space in the DB stack's
+   streamed-texture pool (the first `gpu_prt`, 18 GiB, flags 0x7E). MW4 Shipment
+   (Workshop 3829169329) has 10.4 GiB of block 8 and overflowed it with DS4C
+   (the engine's own shortfall: 1322 MiB) and with six mods (5950 MiB), while
+   the main pool had room (2035 and 2753 MiB used). Both figures give a stock
+   Zombies baseline of 6338 MiB (the six-mod run predicts 5951.5).
+   `compat/zone_memory.json` carries it as `prt_pool_mib` and
+   `prt_baseline_mib`; the catalog reads block 8 from the same headers
+   (`installed_content::zone_prt`), and a map is over when either pool is. Its
+   `maps_over` entry then has `texture` set, need and over are that pool's, the
+   advice names the mod that takes the most texture memory, and the plan JSON
+   has a `textures` object beside the main pool's figures. Larger zone memory
+   raises both pools, so a map fits it when both do.
+
    - `xerces_core/fastfile_header` reads the ten block sizes from a `.ff`'s
      first 0x100 bytes (`TAff0000`, version 0x251, u64 sizes at +0xA8). The
      catalog reads the header of every zone file
@@ -816,18 +831,27 @@ together.
 - What changes: with `-xerces-db-pool` on the command line (Settings > Launch,
   "Larger zone memory (experimental)"), `src/client/xerces/db_pool.cpp` detours
   both. The first pool created, if it is exactly `main`, flags 0x1E, 2 GiB, gets
-  4 GiB; the page budget, if it is exactly 5 GiB, becomes 8 GiB (the budget is
-  bookkeeping, and the page table holds at most 16 GiB). Every other call passes
-  through, including the five later 2 GiB `main` pools of other stacks. Before
-  writing, the client checks the bytes each jmp overwrites (wildcards in the
-  registry) and the whole registry pattern, and installs both detours or
-  neither. The detours only record what they see. The first frame logs
-  `xerces.db_pool` (every pool call, the budget, the size read back), and
-  `xerces.db_pool.usage` gives the pool's committed size the first time it
-  passes 2 GiB and the first time the player is in a level. The journal records
-  whether a launch had the flag. Safe mode and every "find the culprit" test
-  leave it out, and a crash with it makes the setting a suspect of its own
-  (5.6).
+  4 GiB; the first `gpu_prt` pool, if it is exactly flags 0x7E, 18 GiB, gets 30
+  GiB (2026-11-07, for MW4 Shipment: it reserves address space only, and a
+  pool's 19-bit page index caps any pool below 32 GiB); the page budget, if it
+  is exactly 5 GiB, becomes 8 GiB (the budget is bookkeeping, and the page table
+  holds at most 16 GiB). Every other call passes through, including the five
+  later 2 GiB `main` pools and the three later `gpu_prt` pools of other stacks.
+  Apart from the allocator's bounds check, the only plain-code reader of a
+  `gpu_prt` pool's size is a test of whether an address lies in it (0x1420C3AC0,
+  base and size), which a raised size keeps consistent. Before writing, the
+  client checks the bytes each jmp overwrites (wildcards in the registry) and
+  the whole registry pattern, and installs both detours or neither. The detours
+  only record what they see. The first frame logs `xerces.db_pool` (every pool
+  call, the budget, the size read back), and `xerces.db_pool.usage` gives the
+  pool's committed size the first time it passes 2 GiB and the first time the
+  player is in a level. The journal records whether a launch had the flag. Safe
+  mode and every "find the culprit" test leave it out, and a crash with it makes
+  the setting a suspect of its own (5.6). Since 2026-11-07
+  `xerces.db_pool.usage` is also logged each time the journal enters the front
+  end, a level's load or a level, and `xerces.db_pool.pools` then lists every
+  pool in use (index, name, flags, MiB committed, size): the descriptor of each
+  pool the detour recorded has the same size and page fields as the main pool's.
 - Why opt-in: it has run in the game five times only (2026-11-05: BACKROOMZ and
   Super Mario 64 with DS4C, alone and stacked, and Cheese Cube; all loaded and
   went back to the menu, docs/TESTING.md). Risks (reverse-engineering verdict,
@@ -909,15 +933,20 @@ together.
   `Loading fastfile '<zone>'` line that no later
   `FastFileLoad: Setting <zone> to XZONE_LOADED` line follows), the map,
   `fs_game`, `fs_extramods`, the mods by their names from the plan file, the
-  journal phase, the caller's RVA and the console's last 60 lines; notes the
-  crash and leaves the journal's phase, so the launcher counts a crash and
-  nothing writes `clean_exit`; suspends the other threads; shows "Black Ops III
-  ran out of memory" (not with `-headless` or `-quiet-crash`, which it reads
-  before the threads stop); and ends the process with `TerminateProcess` and the
-  engine's code, 0xFFFFFFFF. No destructor runs under the main thread, and no
-  crash dump is written. The text is put together in
-  `xerces_core/out_of_memory`. Without the signature the game ends as the engine
-  ends it.
+  journal phase, the caller's RVA and the console's last 60 lines (2026-11-07:
+  with the larger zone memory, also the main pool's use, peak and size, every
+  pool in use and `failed_pool`, the pool whose descriptor the allocator held in
+  rbx, captured first thing in the handler; and, from any pool, `shortfall`,
+  which the allocator's bounds check stores before it calls the handler, read
+  through the `mov [rip+x], rax` right before the call after checking that
+  instruction sequence byte by byte); notes the crash and leaves the journal's
+  phase, so the launcher counts a crash and nothing writes `clean_exit`;
+  suspends the other threads; shows "Black Ops III ran out of memory" (not with
+  `-headless` or `-quiet-crash`, which it reads before the threads stop); and
+  ends the process with `TerminateProcess` and the engine's code, 0xFFFFFFFF. No
+  destructor runs under the main thread, and no crash dump is written. The text
+  is put together in `xerces_core/out_of_memory`. Without the signature the game
+  ends as the engine ends it.
   - The map is the engine's active custom map (`mod_stack::active_usermap`, set
     when the map's load starts), else the `mapname` dvar. `mapname` still names
     the level before while one loads: in all four out-of-memory runs on

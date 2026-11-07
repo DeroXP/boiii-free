@@ -30,12 +30,15 @@ pool::pool_call call(const char *name, std::uint32_t flags, std::uint64_t size,
   return c;
 }
 
-// What build 0x6531394 does: the DB main pool first, then the rest.
+// What build 0x6531394 does: the DB main pool first, then the rest, the DB
+// stack's streamed-texture pool third.
 pool::report applied_report() {
   pool::report r;
   r.calls = {call("main", 0x1E, 0x80000000, 0x100000000),
              call("gpu", 0x3E, 0x100000000, 0x100000000),
-             call("main", 0x1E, 0x80000000, 0x80000000)};
+             call("gpu_prt", 0x7E, 0x480000000, 0x780000000),
+             call("main", 0x1E, 0x80000000, 0x80000000),
+             call("gpu_prt", 0x7E, 0x480000000, 0x480000000)};
   r.pool_calls = 23;
   r.budget = pool::budget_call{0x140000000, 0x200000000, 0};
   r.budget_calls = 1;
@@ -46,24 +49,42 @@ pool::report applied_report() {
 } // namespace
 
 TEST_CASE("db pool: only the first call, the stock DB main pool, grows") {
-  CHECK_EQ(pool::pool_size(true, "main", 0x1E, 0x80000000),
+  CHECK_EQ(pool::pool_size(true, false, "main", 0x1E, 0x80000000),
            std::uint64_t{0x100000000});
   // Five more "main" pools of 2 GiB with the same flags come later (other
   // stacks): they keep their size.
-  CHECK_EQ(pool::pool_size(false, "main", 0x1E, 0x80000000),
+  CHECK_EQ(pool::pool_size(false, false, "main", 0x1E, 0x80000000),
            std::uint64_t{0x80000000});
   // A first call that is anything else is left alone.
-  CHECK_EQ(pool::pool_size(true, "gpu", 0x1E, 0x80000000),
+  CHECK_EQ(pool::pool_size(true, false, "gpu", 0x1E, 0x80000000),
            std::uint64_t{0x80000000});
-  CHECK_EQ(pool::pool_size(true, "main", 0x3E, 0x80000000),
+  CHECK_EQ(pool::pool_size(true, false, "main", 0x3E, 0x80000000),
            std::uint64_t{0x80000000});
-  CHECK_EQ(pool::pool_size(true, "main", 0x1E, 0x10000000),
+  CHECK_EQ(pool::pool_size(true, false, "main", 0x1E, 0x10000000),
            std::uint64_t{0x10000000});
-  CHECK_EQ(pool::pool_size(true, "mainx", 0x1E, 0x80000000),
+  CHECK_EQ(pool::pool_size(true, false, "mainx", 0x1E, 0x80000000),
            std::uint64_t{0x80000000});
-  CHECK_EQ(pool::pool_size(true, "", 0x1E, 0x80000000),
+  CHECK_EQ(pool::pool_size(true, false, "", 0x1E, 0x80000000),
            std::uint64_t{0x80000000});
-  CHECK_EQ(pool::pool_size(true, "main", 0x1E, 0), std::uint64_t{0});
+  CHECK_EQ(pool::pool_size(true, false, "main", 0x1E, 0), std::uint64_t{0});
+}
+
+TEST_CASE("db pool: only the first stock gpu_prt pool grows, below 32 GiB") {
+  CHECK_EQ(pool::pool_size(false, true, "gpu_prt", 0x7E, 0x480000000),
+           std::uint64_t{0x780000000});
+  // The three later "gpu_prt" pools (other stacks) keep their size.
+  CHECK_EQ(pool::pool_size(false, false, "gpu_prt", 0x7E, 0x480000000),
+           std::uint64_t{0x480000000});
+  // Anything but the stock one is left alone.
+  CHECK_EQ(pool::pool_size(false, true, "gpu_prt", 0x3E, 0x480000000),
+           std::uint64_t{0x480000000});
+  CHECK_EQ(pool::pool_size(false, true, "gpu_prt", 0x7E, 0x80000000),
+           std::uint64_t{0x80000000});
+  CHECK_EQ(pool::pool_size(false, true, "gpu", 0x7E, 0x480000000),
+           std::uint64_t{0x480000000});
+  // A pool's page index is 19 bits: the raised size stays below 32 GiB.
+  CHECK(pool::raised_prt_size < pool::pool_size_ceiling);
+  CHECK(pool::raised_prt_size / pool::page_size < 0x7FFFF);
 }
 
 TEST_CASE("db pool: the page budget grows from 5 to 8 GiB, never past 16") {
@@ -124,10 +145,13 @@ TEST_CASE("db pool: the setting reaches the client's command line") {
 TEST_CASE("db pool: the report says what changed") {
   pool::report r = applied_report();
   CHECK(pool::pool_raised(r));
+  CHECK(pool::prt_raised(r));
   CHECK(pool::budget_raised(r));
   CHECK(pool::applied(r));
   const std::string text = pool::message(r);
   CHECK(text.find("4096 MiB") != std::string::npos);
+  CHECK(text.find("streamed-texture pool 30720 MiB (stock 18432 MiB)") !=
+        std::string::npos);
   CHECK(text.find("8192 MiB") != std::string::npos);
   CHECK(text.find("reads back 4096 MiB") != std::string::npos);
   const std::string data = pool::data_json(r);
@@ -135,7 +159,8 @@ TEST_CASE("db pool: the report says what changed") {
   CHECK(data.find("\"pool_calls\":23") != std::string::npos);
   CHECK(data.find("\"main_size_now\":\"0x100000000\"") != std::string::npos);
   CHECK(data.find("\"main_pages_now\":19010") != std::string::npos);
-  CHECK(data.find("\"calls_not_recorded\":20") != std::string::npos);
+  CHECK(data.find("\"calls_not_recorded\":18") != std::string::npos);
+  CHECK(data.find("\"prt_raised\":true") != std::string::npos);
   CHECK(data.find("\"bytes_given\":\"0x200000000\"") != std::string::npos);
   CHECK(json::parse(data).ok);
   // One call: its size, and the size given only when it differs.
@@ -170,6 +195,22 @@ TEST_CASE("db pool: the report says what changed") {
   CHECK(pool::message(stale).find("reads back 0x80000000") !=
         std::string::npos);
 
+  // The streamed-texture pool was not the stock one, or its reservation
+  // failed, or none was created: the rest still applies, the report says so.
+  pool::report prt = applied_report();
+  prt.calls[2] = call("gpu_prt", 0x7E, 0x80000000, 0x80000000);
+  CHECK(!pool::prt_raised(prt));
+  CHECK(!pool::applied(prt));
+  CHECK(pool::message(prt).find("first \"gpu_prt\" pool was flags 0x7E "
+                                "size 0x80000000") != std::string::npos);
+  prt.calls[2] = call("gpu_prt", 0x7E, 0x480000000, 0x780000000, 0);
+  CHECK(pool::message(prt).find("could not reserve the raised "
+                                "streamed-texture pool") != std::string::npos);
+  prt.calls.erase(prt.calls.begin() + 2);
+  prt.calls.pop_back();
+  CHECK(pool::message(prt).find("no \"gpu_prt\" pool was recorded") !=
+        std::string::npos);
+
   // The page budget was not the stock one, or never set.
   pool::report budget = applied_report();
   budget.budget = pool::budget_call{0x100000000, 0x100000000, 0};
@@ -196,6 +237,11 @@ TEST_CASE("db pool: usage above the stock 2 GiB") {
   CHECK(text.find("at most 2560 MiB") != std::string::npos);
   CHECK(pool::usage_message(100, 100, "above_stock").find("within") !=
         std::string::npos);
+  // Each phase the journal enters (whether the pool empties between maps).
+  CHECK(pool::usage_message(0x9900, 0x9900, "frontend")
+            .starts_with("In the front end, the DB main pool holds 2448 MiB"));
+  CHECK(pool::usage_message(0x9900, 0x9900, "loading_map")
+            .starts_with("As a level starts loading, the DB main pool holds"));
 }
 
 TEST_CASE("entry code: the detoured bytes and the whole pattern must match") {

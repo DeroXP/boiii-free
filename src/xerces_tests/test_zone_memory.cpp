@@ -61,6 +61,14 @@ std::string ff(std::uint64_t block5, std::uint64_t block6,
   return out;
 }
 
+// The same with block 8 (streamed images) set.
+std::string ffp(std::uint64_t block5, std::uint64_t block6,
+                std::uint64_t block8) {
+  std::string out = ff(block5, block6);
+  put64(out, fastfile_blocks_offset + 8 * 8, block8);
+  return out;
+}
+
 fs::path fresh(const std::string &name) {
   const fs::path dir = fs::temp_directory_path() / ("xerces_zonemem_" + name);
   std::error_code ec;
@@ -172,6 +180,7 @@ TEST_CASE("zone memory: a fastfile header gives its version and blocks") {
   CHECK_EQ(header->blocks[8], 4000 * MiB);
   CHECK_EQ(header->blocks[9], std::uint64_t(0));
   CHECK_EQ(header->db_main_pool_bytes(), 812 * MiB);
+  CHECK_EQ(header->db_prt_pool_bytes(), 4000 * MiB);
 
   // More than the header is fine; it is the start of a zone.
   CHECK(parse_fastfile_header(ff(1, 2, fastfile_magic, fastfile_version,
@@ -410,9 +419,14 @@ TEST_CASE("zone memory: the catalog reads every zone header, nothing else") {
   CHECK(!map.zone_headers.at("short.ff").has_value());
   CHECK(!map.zone_headers.at("other.ff").has_value());
   CHECK(!map.zone_headers.contains("deep/zm_deep.ff"));
+  // Block 8 of the same headers, for the streamed-texture pool.
+  REQUIRE_EQ(map.zone_prt.size(), std::size_t(4));
+  CHECK_EQ(map.zone_prt.at("zm_l.ff"), std::optional(4000 * MiB));
+  CHECK(!map.zone_prt.at("short.ff").has_value());
   const installed_content &tools = scan.catalog[1];
   CHECK_EQ(tools.zone_headers.at("zone/core_mod.ff"), std::optional(7 * MiB));
   CHECK_EQ(zone_memory_of(tools.zone_headers, "zm", true).bytes, 8 * MiB);
+  CHECK_EQ(zone_memory_of(tools.zone_prt, "zm", true).bytes, 8000 * MiB);
   // A header is no reason for a scan note.
   CHECK(scan.diags.items().empty());
   std::error_code ec;
@@ -480,9 +494,10 @@ TEST_CASE(
                        R"("map_mib":null,"maps_over":[{"fits_larger_pool":)"
                        R"(false,"id":"ws.204",)"
                        R"("name":"Map E","need_mib":2552,"over_by_mib":504,)"
-                       R"("over_without_mods":true},)"));
-  CHECK(contains(text, R"("pool_mib":2048,"stack_mib":453,"total_mib":1302,)"
-                       R"("unread":[]})"));
+                       R"("over_without_mods":true,"texture":false},)"));
+  CHECK(contains(text, R"("pool_mib":2048,"stack_mib":453,"textures":{)"
+                       R"("baseline_mib":null,"checked":false,)"));
+  CHECK(contains(text, R"("total_mib":1302,"unread":[]})"));
   CHECK(contains(text, R"("zone_mib":452)"));
 
   // One mod left: only the map too big on its own is over, and removing the
@@ -583,6 +598,132 @@ TEST_CASE("zone memory: the larger zone memory's budget") {
   CHECK_EQ(other->larger_pool_mib, 0.0);
 }
 
+TEST_CASE("zone memory: the streamed-texture pool's figures and budget") {
+  const zone_memory_table table = parse_zone_memory(R"({
+    "schema": "xerces.zone_memory/1",
+    "builds": [
+      {"name": "Steam", "steam_build": 24784313, "checksum": "0x6531394",
+       "db_main_pool_mib": 2048, "baseline_mib": {"zm": 849},
+       "prt_pool_mib": 18432, "prt_baseline_mib": {"zm": 6338, "mp": null}},
+      {"name": "No texture figures", "checksum": "0xABC",
+       "db_main_pool_mib": 2048, "baseline_mib": {"zm": 849}}
+    ]})");
+  REQUIRE(table.ok());
+  CHECK(table.diags.items().empty());
+  CHECK_EQ(table.builds[0].prt_pool_mib, 18432.0);
+  CHECK(!table.builds[0].prt_baseline_mib.contains("mp"));
+  const auto stock = find_zone_budget(table, "24784313", "zm");
+  REQUIRE(stock.has_value());
+  CHECK(stock->prt_checked);
+  CHECK_EQ(stock->prt_pool_mib, 18432.0);
+  CHECK_EQ(stock->prt_baseline_mib, 6338.0);
+  CHECK_EQ(stock->larger_prt_pool_mib, 30720.0);
+  const auto larger = find_zone_budget(table, "24784313", "zm", true);
+  REQUIRE(larger.has_value());
+  CHECK_EQ(larger->prt_pool_mib, 30720.0);
+  CHECK_EQ(larger->prt_baseline_mib, 6338.0);
+  // Without the figures only the main pool is checked.
+  const auto none = find_zone_budget(table, "0xabc", "zm");
+  REQUIRE(none.has_value());
+  CHECK(!none->prt_checked);
+
+  const auto codes = [](std::string_view text) {
+    std::vector<std::string> out;
+    const zone_memory_table parsed = parse_zone_memory(text);
+    for (const auto &item : parsed.diags.items()) {
+      out.push_back(item.code);
+    }
+    return out;
+  };
+  const std::string head =
+      R"({"schema":"xerces.zone_memory/1","builds":[{"name":"x",)"
+      R"("steam_build":1,"db_main_pool_mib":2048,)";
+  CHECK(codes(head + R"("prt_pool_mib":0}]})") ==
+        std::vector<std::string>{"zone_memory.prt_pool"});
+  CHECK(codes(head + R"("prt_pool_mib":"18432"}]})") ==
+        std::vector<std::string>{"zone_memory.prt_pool"});
+  CHECK(codes(head + R"("prt_baseline_mib":[1]}]})") ==
+        std::vector<std::string>{"zone_memory.baseline"});
+}
+
+TEST_CASE("zone memory: a map whose streamed textures do not fit") {
+  // MW4 Shipment with DS4C, 2026-11-07, in round figures: the main pool has
+  // room, the streamed-texture pool does not.
+  const fs::path root = fresh("textures");
+  workshop_item(root, "300", "mod", "Texture Mod",
+                {{"core_mod.ff", ffp(100 * MiB, 100 * MiB, 2400 * MiB)},
+                 {"zm_mod.ff", ffp(50 * MiB, 50 * MiB, 360 * MiB)}});
+  workshop_item(root, "400", "map", "Shipment",
+                {{"zm_shipment.ff", ffp(400 * MiB, 300 * MiB, 10650 * MiB)},
+                 {"en_zm_shipment.ff", ffp(0, 0, 2 * MiB)}});
+  workshop_item(root, "401", "map", "Huge Textures",
+                {{"zm_huge.ff", ffp(10 * MiB, 10 * MiB, 13000 * MiB)}});
+  const catalog_scan scan = scan_mods_directory(root);
+  zone_budget stock{2048, 849, false, 4096};
+  stock.prt_checked = true;
+  stock.prt_pool_mib = 18432;
+  stock.prt_baseline_mib = 6338;
+  stock.larger_prt_pool_mib = 30720;
+  plan_request request = zombies({"ws.300"});
+  request.zone_budget = stock;
+  const plan p = resolve_plan(scan.catalog, request);
+  CHECK(p.ok()); // warnings only: no map in the plan
+  REQUIRE(p.stack.size() == 1);
+  CHECK_EQ(p.stack[0].zone_prt, 2760 * MiB);
+  // Huge Textures is over even alone (6338 + 13000), Shipment only with the
+  // mod (6338 + 2760 + 10652): both by texture memory, both fit 30 GiB.
+  CHECK(over_ids(p) == (std::vector<std::string>{"ws.401", "ws.400"}));
+  for (const auto &map : p.zone_memory.maps_over) {
+    CHECK(map.texture);
+    CHECK(map.fits_larger_pool);
+  }
+  CHECK_EQ(p.zone_memory.maps_over[1].over_by_mib, 1318.0);
+  CHECK(!p.zone_memory.maps_over[1].over_without_mods);
+  CHECK(p.zone_memory.maps_over[0].over_without_mods);
+  const diagnostic *warning = find_diag(p, "plan.memory.maps_over");
+  REQUIRE(warning != nullptr);
+  CHECK(contains(warning->message,
+                 "The map Shipment (1318 MiB over) does not fit in the game's "
+                 "memory with these mods"));
+  CHECK(contains(warning->message, "The mod that takes the most texture "
+                                   "memory is Texture Mod (2760 MiB)."));
+  CHECK(contains(warning->message, "Turn on Larger zone memory (experimental) "
+                                   "in Settings to make room for it."));
+  REQUIRE(find_diag(p, "plan.memory.maps_too_big") != nullptr);
+  const std::string json = plan_to_json(p);
+  CHECK(contains(json, R"("textures":{"baseline_mib":6338,"checked":true,)"));
+  CHECK(contains(json, R"("texture":true)"));
+  CHECK(contains(json, R"("texture_mib":2760)"));
+
+  // The plan's own map: an error, with the same advice.
+  request.map = "ws.400";
+  const plan own = resolve_plan(scan.catalog, request);
+  CHECK(!own.ok());
+  const diagnostic *error = find_diag(own, "plan.memory.over");
+  REQUIRE(error != nullptr);
+  CHECK(contains(error->message, "Shipment does not fit in the game's memory "
+                                 "with these mods (1318 MiB over)"));
+  CHECK(contains(error->message, "Turn on Larger zone memory (experimental) "
+                                 "in Settings, remove a mod"));
+
+  // With the larger zone memory both maps fit.
+  zone_budget larger = stock;
+  larger.pool_mib = 4096;
+  larger.larger_pool = true;
+  larger.prt_pool_mib = 30720;
+  request.zone_budget = larger;
+  const plan on = resolve_plan(scan.catalog, request);
+  CHECK(on.ok());
+  CHECK(on.zone_memory.maps_over.empty());
+
+  // Without texture figures the textures are not checked.
+  request.zone_budget = zone_budget{2048, 849, false, 4096};
+  request.map.reset();
+  CHECK(resolve_plan(scan.catalog, request).zone_memory.maps_over.empty());
+  std::error_code ec;
+  fs::remove_all(root, ec);
+}
+
 TEST_CASE("zone memory: maps the larger zone memory makes room for") {
   const fs::path root = write_catalog("larger");
   workshop_item(
@@ -674,8 +815,9 @@ TEST_CASE("zone memory: without figures the check is skipped with a note") {
   CHECK(contains(text, R"("zone_memory":{"baseline_mib":null,"checked":false,)"
                        R"("larger_pool":false,"larger_pool_mib":null,)"
                        R"("map_mib":801,"maps_over":[],"maps_unread":[],)"
-                       R"("pool_mib":null,)"
-                       R"("stack_mib":452,"total_mib":null,"unread":[]})"));
+                       R"("pool_mib":null,"stack_mib":452,"textures":{)"
+                       R"("baseline_mib":null,"checked":false,)"));
+  CHECK(contains(text, R"("total_mib":null,"unread":[]})"));
   std::error_code ec;
   fs::remove_all(root, ec);
 }

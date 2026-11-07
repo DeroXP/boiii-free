@@ -12,8 +12,40 @@
 namespace xerces_core {
 namespace {
 const std::set<std::string, std::less<>> known_keys = {
-    "name",         "steam_build", "checksum", "db_main_pool_mib",
-    "baseline_mib", "note"};
+    "name",         "steam_build",  "checksum",         "db_main_pool_mib",
+    "baseline_mib", "prt_pool_mib", "prt_baseline_mib", "note"};
+
+// "baseline_mib" or "prt_baseline_mib": mode -> MiB, null when not measured.
+void parse_baselines(const rapidjson::Value &entry, const std::string &path,
+                     const char *key, std::map<std::string, double> &into,
+                     diagnostics &diags) {
+  const rapidjson::Value *baselines = json::member(entry, key);
+  if (baselines == nullptr) {
+    return;
+  }
+  const std::string at = json::pointer(path, key);
+  if (!baselines->IsObject()) {
+    diags.error("zone_memory.baseline", at,
+                std::string(key) + " is an object: mode -> MiB, or null.");
+    return;
+  }
+  for (auto it = baselines->MemberBegin(); it != baselines->MemberEnd(); ++it) {
+    const std::string mode(it->name.GetString(), it->name.GetStringLength());
+    const std::string where = json::pointer(at, mode);
+    if (!valid_mode(mode)) {
+      diags.error("zone_memory.mode", where,
+                  "Modes are \"zm\", \"mp\" and \"cp\".");
+    } else if (it->value.IsNull()) {
+      continue; // not measured
+    } else if (!it->value.IsNumber() || it->value.GetDouble() < 0) {
+      diags.error("zone_memory.baseline", where,
+                  "A baseline is a number of MiB, or null when not "
+                  "measured.");
+    } else {
+      into[mode] = it->value.GetDouble();
+    }
+  }
+}
 
 std::optional<std::uint64_t> decimal_number(std::string_view text) {
   std::uint64_t value = 0;
@@ -88,32 +120,17 @@ void parse_build(const rapidjson::Value &entry, const std::string &path,
   } else {
     build.db_main_pool_mib = pool->GetDouble();
   }
-  if (const rapidjson::Value *baselines = json::member(entry, "baseline_mib")) {
-    const std::string at = json::pointer(path, "baseline_mib");
-    if (!baselines->IsObject()) {
-      diags.error("zone_memory.baseline", at,
-                  "baseline_mib is an object: mode -> MiB, or null.");
+  parse_baselines(entry, path, "baseline_mib", build.baseline_mib, diags);
+  if (const rapidjson::Value *prt = json::member(entry, "prt_pool_mib")) {
+    if (!prt->IsNumber() || !(prt->GetDouble() > 0)) {
+      diags.error("zone_memory.prt_pool", json::pointer(path, "prt_pool_mib"),
+                  "prt_pool_mib is a number of MiB above 0.");
     } else {
-      for (auto it = baselines->MemberBegin(); it != baselines->MemberEnd();
-           ++it) {
-        const std::string mode(it->name.GetString(),
-                               it->name.GetStringLength());
-        const std::string where = json::pointer(at, mode);
-        if (!valid_mode(mode)) {
-          diags.error("zone_memory.mode", where,
-                      "Modes are \"zm\", \"mp\" and \"cp\".");
-        } else if (it->value.IsNull()) {
-          continue; // not measured
-        } else if (!it->value.IsNumber() || it->value.GetDouble() < 0) {
-          diags.error("zone_memory.baseline", where,
-                      "A baseline is a number of MiB, or null when not "
-                      "measured.");
-        } else {
-          build.baseline_mib[mode] = it->value.GetDouble();
-        }
-      }
+      build.prt_pool_mib = prt->GetDouble();
     }
   }
+  parse_baselines(entry, path, "prt_baseline_mib", build.prt_baseline_mib,
+                  diags);
   out.builds.push_back(std::move(build));
 }
 
@@ -257,6 +274,20 @@ std::optional<zone_budget> zone_budget_for(const zone_memory_build &build,
     if (larger_pool) {
       budget.pool_mib = budget.larger_pool_mib;
       budget.larger_pool = true;
+    }
+  }
+  // The streamed-texture pool, when the build and mode have its figures. The
+  // client raises it only from exactly the stock size, like the main pool.
+  if (const auto prt = build.prt_baseline_mib.find(std::string(mode));
+      prt != build.prt_baseline_mib.end() && build.prt_pool_mib > 0) {
+    budget.prt_checked = true;
+    budget.prt_pool_mib = build.prt_pool_mib;
+    budget.prt_baseline_mib = prt->second;
+    if (build.prt_pool_mib == to_mib(db_pool::stock_prt_size)) {
+      budget.larger_prt_pool_mib = to_mib(db_pool::raised_prt_size);
+      if (larger_pool) {
+        budget.prt_pool_mib = budget.larger_prt_pool_mib;
+      }
     }
   }
   return budget;

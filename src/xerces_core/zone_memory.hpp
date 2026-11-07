@@ -3,11 +3,13 @@
 // Zone memory, headless (docs/DESIGN.md 5.3 step 5). When a custom map loads,
 // the engine takes blocks 5 and 6 of every loaded zone (fastfile_header.hpp)
 // from one fixed pool, the DB stack's main pool (2 GiB on the September 2026
-// Steam build). A map whose zones do not fit on top of the game's own and the
-// mods' makes the engine's out-of-memory handler exit the game while the map
-// loads: players see the game vanish. compat/zone_memory.json holds the
-// figures per game build; this reads it and adds up what a mod's or a map's
-// zones take, so the planner can warn before a launch.
+// Steam build), and block 8, the zone's streamed images, from the DB stack's
+// streamed-texture pool (18 GiB). A map whose zones do not fit on top of the
+// game's own and the mods' in either pool makes the engine's out-of-memory
+// handler exit the game while the map loads: players see the game vanish.
+// compat/zone_memory.json holds the figures per game build; this reads it and
+// adds up what a mod's or a map's zones take, so the planner can warn before
+// a launch.
 
 #include <cstdint>
 #include <map>
@@ -25,11 +27,15 @@ namespace xerces_core {
 //    "builds": [{"name": "September 2026 Steam client",
 //                "steam_build": 24784313, "checksum": "0x6531394",
 //                "db_main_pool_mib": 2048,
-//                "baseline_mib": {"zm": 849, "mp": null, "cp": null}}]}
+//                "baseline_mib": {"zm": 849, "mp": null, "cp": null},
+//                "prt_pool_mib": 18432,
+//                "prt_baseline_mib": {"zm": 6338, "mp": null, "cp": null}}]}
 // A build is named by the keys compat/builds.json uses (steam_build,
 // checksum; at least one). baseline_mib: per mode, what the pool holds when a
 // custom map's own zones start loading with no mods; null, or left out, when
-// nobody has measured it. Keys starting with "_" are comments.
+// nobody has measured it. prt_pool_mib and prt_baseline_mib: the same for the
+// streamed-texture pool (both optional: without them only the main pool is
+// checked). Keys starting with "_" are comments.
 inline constexpr std::string_view zone_memory_schema = "xerces.zone_memory/1";
 
 struct zone_memory_build {
@@ -37,7 +43,9 @@ struct zone_memory_build {
   std::optional<std::uint64_t> steam_build;
   std::optional<std::uint32_t> checksum;
   double db_main_pool_mib = 0;
-  std::map<std::string, double> baseline_mib; // measured modes only
+  std::map<std::string, double> baseline_mib;     // measured modes only
+  double prt_pool_mib = 0;                        // 0: not known
+  std::map<std::string, double> prt_baseline_mib; // measured modes only
 };
 
 struct zone_memory_table {
@@ -58,6 +66,14 @@ struct zone_budget {
   // The pool the larger zone memory gives on this build (4096); 0 when it
   // does not apply: the client raises only the stock 2 GiB pool.
   double larger_pool_mib = 0;
+  // The streamed-texture pool, when the build and mode have its figures
+  // (prt_checked); with the larger zone memory, pool is the raised one.
+  bool prt_checked = false;
+  double prt_pool_mib = 0;
+  double prt_baseline_mib = 0;
+  // What the larger zone memory gives (30720); 0 when it does not apply: the
+  // client raises only the stock 18 GiB pool.
+  double larger_prt_pool_mib = 0;
 };
 
 // The entry for a game, by Steam's build number or else the exe's checksum;

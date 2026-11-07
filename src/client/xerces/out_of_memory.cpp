@@ -32,11 +32,13 @@
 #include <utils/hook.hpp>
 #include <utils/thread.hpp>
 
+#include <xerces_core/db_pool.hpp>
 #include <xerces_core/journal.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/out_of_memory.hpp>
 #include <xerces_core/sigruntime.hpp>
 
+#include "db_pool.hpp"
 #include "loader.hpp"
 #include "runtime.hpp"
 #include "signatures.hpp"
@@ -122,6 +124,57 @@ std::string caller_rva(const void *return_address) {
   return hex(at - base);
 }
 
+// The calling thread's registers as the handler was entered (the first thing
+// the stub does): the engine's pool allocator still holds the pool's
+// descriptor in rbx when its size check fails.
+thread_local CONTEXT caller_registers{};
+
+bool readable(const void *start, const std::size_t size) {
+  const auto *at = static_cast<const std::uint8_t *>(start);
+  const auto *end = at + size;
+  while (at < end) {
+    MEMORY_BASIC_INFORMATION info{};
+    if (VirtualQuery(at, &info, sizeof(info)) != sizeof(info) ||
+        info.State != MEM_COMMIT ||
+        (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0) {
+      return false;
+    }
+    at = static_cast<const std::uint8_t *>(info.BaseAddress) + info.RegionSize;
+  }
+  return true;
+}
+
+// How many bytes the pool was short, when the handler was called from the
+// engine's pool allocator: its size check stores that (sub rax, rcx; mov
+// [rip+x], rax), then clears edx, loads rcx and calls the handler. The store
+// is found from the return address and every byte of that sequence is
+// checked first; any other caller gives nothing.
+std::optional<std::int64_t> pool_shortfall(const void *return_address) {
+  const auto *ret = static_cast<const std::uint8_t *>(return_address);
+  const std::uint8_t *code = ret - 24;
+  if (!readable(code, 24)) {
+    return std::nullopt;
+  }
+  const bool matches =
+      code[0] == 0x48 && code[1] == 0x2B && code[2] == 0xC1 && // sub rax, rcx
+      code[3] == 0x48 && code[4] == 0x89 && code[5] == 0x05 && // mov [rip+x]
+      code[10] == 0x33 && code[11] == 0xD2 &&                  // xor edx, edx
+      code[12] == 0x48 && code[13] == 0x8D && code[14] == 0x0D && // lea rcx
+      code[19] == 0xE8;                                           // call
+  if (!matches) {
+    return std::nullopt;
+  }
+  std::int32_t displacement = 0;
+  std::memcpy(&displacement, code + 6, sizeof(displacement));
+  const std::uint8_t *stored = code + 10 + displacement;
+  if (!readable(stored, sizeof(std::int64_t))) {
+    return std::nullopt;
+  }
+  std::int64_t value = 0;
+  std::memcpy(&value, stored, sizeof(value));
+  return value;
+}
+
 // Logs loader.out_of_memory; returns what the player is told.
 xerces_core::out_of_memory_message report(const void *return_address) {
   const auto lines = xerces_runtime::console_last_lines(console_lines_searched);
@@ -162,6 +215,35 @@ xerces_core::out_of_memory_message report(const void *return_address) {
   const std::string map_name = xerces_core::out_of_memory_map(
       mod_stack::active_usermap(), xerces_loader::current_map());
 
+  // With the larger zone memory: how full the DB main pool was (its committed
+  // pages, as the once-a-second watch reads them), the most it held and its
+  // size, so a report shows whether this pool was the one that filled up.
+  std::string pool;
+  if (const auto usage = xerces_db_pool::main_usage()) {
+    constexpr std::uint64_t page = xerces_core::db_pool::page_size;
+    pool =
+        ",\"pool_mib\":" + std::to_string(usage->pages * page >> 20) +
+        ",\"pool_peak_mib\":" + std::to_string(usage->peak_pages * page >> 20) +
+        ",\"pool_size_mib\":" + std::to_string(usage->size >> 20);
+    // Every pool in use: the engine's check is the same for all of them.
+    pool += ",\"pools\":" + xerces_db_pool::pools_json();
+    // The pool whose descriptor rbx held: the one that was full (on
+    // 2026-11-07 the streamed-texture pool, with the main pool at 2753 of
+    // 4096 MiB).
+    if (const auto index =
+            xerces_db_pool::pool_of_descriptor(caller_registers.Rbx)) {
+      for (const auto &state : xerces_db_pool::pools()) {
+        if (state.index == *index) {
+          pool += ",\"failed_pool\":" + xerces_db_pool::pool_json(state);
+        }
+      }
+    }
+  }
+  if (const auto missing = pool_shortfall(return_address)) {
+    pool += ",\"shortfall\":" + std::to_string(*missing) +
+            ",\"shortfall_mib\":" + std::to_string(*missing >> 20);
+  }
+
   xerces_runtime::log_error(
       "loader.out_of_memory", text.summary,
       "{\"zone\":" + json::quote(zone) + ",\"map\":" + json::quote(map_name) +
@@ -169,7 +251,7 @@ xerces_core::out_of_memory_message report(const void *return_address) {
           json::quote(fs_extramods) + ",\"mods\":" + mod_array + ",\"phase\":" +
           json::quote(xerces_core::to_string(xerces_runtime::journal_phase())) +
           ",\"caller\":" + json::quote(caller_rva(return_address)) +
-          ",\"exit_code\":" + std::to_string(exit_code) +
+          ",\"exit_code\":" + std::to_string(exit_code) + pool +
           ",\"console\":" + console + "}");
   return text;
 }
@@ -178,6 +260,7 @@ xerces_core::out_of_memory_message report(const void *return_address) {
 // callers pass "" and 0 in this build, and the engine's body never reads
 // them, so neither is used here.
 [[noreturn]] void out_of_mem_error_stub(const char * /*file*/, int /*line*/) {
+  RtlCaptureContext(&caller_registers);
   const void *return_address = _ReturnAddress();
   const DWORD self = GetCurrentThreadId();
   DWORD expected = 0;
