@@ -364,8 +364,14 @@ local function createRoundHud(root, controller)
       return
     end
     left:setText(count)
-    timeLabel:setText(running == "1" and "ROUND TIME" or "LAST ROUND")
-    time:setText(clock(tonumber(seconds)))
+    if running == "1" or seconds ~= "0" then
+      timeLabel:setText(running == "1" and "ROUND TIME" or "LAST ROUND")
+      time:setText(clock(tonumber(seconds)))
+    else
+      -- Before the first round starts
+      timeLabel:setText("")
+      time:setText("")
+    end
     hud:setAlpha(1)
   end))
   root.xercesRoundHud = hud
@@ -518,6 +524,33 @@ local function open_menu(self, element, controller)
   OpenPopup(self, "XercesMatchSettingsMenu", controller)
 end
 
+-- The pause list keeps the height it was made with, so an added row would
+-- need scrolling. BOIII sizes the stock list from BoiiiStartMenuOptionCount
+-- right after it is filled (data/ui_scripts/party); a mod's own list made
+-- like it (rows 33.6 high: DS4C's) grows a row per item here.
+local PAUSE_ROW_HEIGHT = 33.6
+local function fit_pause_list(list, key, count)
+  if string.lower(key) == "startmenugameoptions" then
+    if type(BoiiiStartMenuOptionCount) == "number" then
+      BoiiiStartMenuOptionCount = count
+    end
+    return
+  end
+  local ok, _, top, _, bottom = pcall(list.getLocalRect, list)
+  if not ok or type(top) ~= "number" or type(bottom) ~= "number" then
+    return
+  end
+  local rows = (bottom - top) / PAUSE_ROW_HEIGHT
+  local visible = math.floor(rows + 0.5)
+  if math.abs(rows - visible) > 0.1 or count <= visible then
+    return
+  end
+  pcall(function()
+    list:setVerticalCount(count)
+    list:setTopBottom(true, false, top, top + count * PAUSE_ROW_HEIGHT)
+  end)
+end
+
 local function add_entry(controller, list)
   local key = list.customDataSourceHelper
   local items = key and list[key]
@@ -546,6 +579,7 @@ local function add_entry(controller, list)
     end
   end
   table.insert(items, at, { model = model, xercesSettings = true })
+  fit_pause_list(list, key, #items)
 end
 
 -- Wrapped once, the first time a pause menu's list uses it; a mod that

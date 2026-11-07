@@ -68,8 +68,7 @@ to report these again, but tell us if you see them somewhere else or worse.
   and so are doors that only a quest or a map's own check opens.
 - **Tested on Kino der Toten only, so far.** Without mods and with a seven-mod
   stack (PEGASUS on top, DS4C below it). Other maps and mods with their own box,
-  perk or Pack-a-Punch rules may do things differently. How the counter and the
-  menus look on screen has not been checked yet.
+  perk or Pack-a-Punch rules may do things differently.
 
 ## The game and Xerces
 

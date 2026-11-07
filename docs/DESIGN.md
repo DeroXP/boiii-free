@@ -1553,6 +1553,14 @@ up to the first ":" or " - " ("^3[^5PZM^3] ^9PEGASUS^7 v0.2.3.9" gives PEGASUS,
 "Avali: Solspace - Character Pack" gives AVALI); "MOD MENU" when more than 16
 characters are left. Zombies matches only.
 
+Pause lists keep the height they were made with, so an added row would push the
+last one (Quit to Desktop, End Game) out of view (seen 2026-11-07). Both added
+entries (this one and XERCES SETTINGS, 7.9) grow the list: the stock list
+through `BoiiiStartMenuOptionCount`, which `data/ui_scripts/party` sizes it from
+right after it is filled, and a mod's list whose height is a whole number of
+stock-height rows (33.6, as DS4C's) by a row per item. Another mod's list is
+left as it is.
+
 ### 7.7 Rename
 
 - **Brand (renamed):** executable and workspace names, window titles and
@@ -1678,8 +1686,8 @@ would hit the same check. So stage 1 registers nothing:
   runs>", four times a second). Other players do not get them yet; a safe way to
   send them needs the two-PC test.
 - The pause menu entry ("XERCES SETTINGS", above Restart and End Game) goes into
-  whichever game options list the pause menu uses, as the mod menu entry does
-  (7.6), the host's only.
+  whichever game options list the pause menu uses, as the mod menu entry does,
+  and grows that list the same way (7.6); the host's only.
 
 **Rounds past 255 (for stage 3).** `zm::set_round_number` keeps the round in
 `world.roundnumber` (XORed with 115) and clamps it at 255;

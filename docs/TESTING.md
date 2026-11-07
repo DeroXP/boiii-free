@@ -1192,9 +1192,24 @@ and ended round 1 by killing the zombies.
       prints its own errors while the map loads (also `_fixed_box.gsc`, before
       any setting acts) and when the test script kills zombies without an
       attacker.
-- [ ] Not seen yet, because your PC was locked during the runs and every
-      screenshot came out black: how the round HUD (top left), the XERCES
-      SETTINGS screens, the "Max Ammo" text and the settings message look.
+- [x] How it looks, seen once your PC was unlocked (the first runs were made
+      while it was locked, and every screenshot came out black), from
+      full-screen captures (`capture-dpi.ps1`: the screen is 3840x2160 at 150%,
+      and the session's `capture.ps1 -Screen` only saw its top-left 2560x1440).
+      The lobby screen shows all eight settings and the description panel. In
+      the match the round HUD sits top left (grey ZOMBIES LEFT and ROUND TIME or
+      LAST ROUND, white values), no timer line before round 1. The game's own
+      "Max Ammo!" shows at each round's start with the stock refilled. The
+      settings message is one line in the game messages. The pause menu's
+      read-only XERCES SETTINGS lists all eight with each description in full.
+      With your stack the HUD stays clear of PEGASUS's and DS4C's panels (level,
+      tokens, the Blue Door tracker).
+- [x] Found and fixed there: the added pause entries pushed the last row out of
+      view: Quit to Desktop in the stock pause menu, End Game in DS4C's. Both
+      entries (XERCES SETTINGS and the mod menu entry) now grow the list. The
+      stock list grows through BOIII's own row count; DS4C's list, whose rows
+      are as high as the stock ones (33.6), grows a row per added item. Seen
+      after the fix: all nine rows without mods, all seven in DS4C's pause menu.
 
 Tried and taken out: registering the settings event (`xerces_settings`) and the
 HUD labels with the engine as the map loads (DESIGN.md 7.9). The server's and
