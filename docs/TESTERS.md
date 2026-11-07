@@ -63,6 +63,15 @@ hash, sent with the link, shows that the zip is the one we made.
   open their menu from a button in their own pause menu, which another mod's
   pause menu (DS4C's) leaves out. Xerces then adds an entry named after the mod,
   such as "PEGASUS MENU", to the pause menu you get.
+- **XERCES SETTINGS (Zombies).** In the Zombies lobby, next to BOIII SETTINGS:
+  Max Ammo every round, guns from wall buys and the box already Pack-a-Punched,
+  starting points (500, 5,000 or 50,000), no perk limit, a box that never moves,
+  the power on and every door open at the start, and a zombies-left counter with
+  a round timer. All are off until you turn them on. When you host, everyone in
+  the match gets your settings, and each player sees them listed in a message
+  when they spawn. The counter and timer, and the pause menu's XERCES SETTINGS
+  (what this match uses), show for the host only for now. Not on dedicated
+  servers.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.

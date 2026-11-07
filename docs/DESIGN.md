@@ -1584,6 +1584,115 @@ logs, asks about config and backups, and says account deletion is separate.
 Unsigned installers trigger SmartScreen; `TRUST.md` says so. A portable zip is
 published as well.
 
+### 7.9 Zombies round settings (stage 1 built 2026-11-07)
+
+Settings that change how a Zombies match plays, asked for and decided by the
+user on 2026-11-07. They are all off by default, the host's settings apply to
+everyone in the match, and they apply to solo and private matches only (the game
+script returns at once on a dedicated server). They come in four stages, each
+built on its own branch, tested in the game with the user's stack and pushed
+only when the user says so:
+
+1. The XERCES SETTINGS menu and the simple toggles (built, below).
+2. A double Pack-a-Punch wheel (2,500 points, once per round, on a gun already
+   Pack-a-Punched; 8 slices: the five ammo mods and 3 "nothing" slices that show
+   the mystery box's teddy bear and play its laugh) and a coin flip (the
+   player's bet, at least 100 points; 50/50; a win pays the bet times 2 at round
+   1, plus 0.1 per round, at most 5).
+3. Round skips (special and prime rounds, +400 points each, a majority vote in
+   co-op, a Max Ammo with a special-round skip), a random loadout each round
+   (two guns from the map's box), self-revives (one per player, refilled every
+   10 rounds) and round 999 (a majority vote between exfil, which ends the game
+   with a win, and going on with only smart zombies, every perk, infinite ammo
+   and infinite points).
+4. Smart zombies (pack hunters, burst sprinters and ambushers): none before
+   round 20, 10% at round 20 rising evenly to 99% at round 998, all of them at
+   round 999, each type with its own eye glow or aura from effects every map
+   already loads.
+
+**Stage 1.** Eight saved dvars, registered by
+`src/client/xerces/round_settings.cpp` with the archive flag:
+`xerces_zm_maxAmmo`, `xerces_zm_autoPap`, `xerces_zm_startPoints` (0 keeps the
+map's own), `xerces_zm_noPerkLimit`, `xerces_zm_boxStays`, `xerces_zm_powerOn`,
+`xerces_zm_doorsOpen` and `xerces_zm_roundHud`.
+`data/ui_scripts/xerces_settings` is the menu: in the front end a settings
+screen like BOIII SETTINGS (one ZOMBIES tab for now), whose button
+`data/ui_scripts/frontend_menus` adds after BOIII SETTINGS in the Zombies
+lobbies (`UI_ZMLOBBYONLINE`, `UI_ZMLOBBYLANGAME`), with or without mods.
+
+`data/custom_scripts/zm/xerces_rounds.gsc` reads the dvars once, as the match
+loads, and uses only scripts the core Zombies script uses itself, so it links on
+every Zombies map. Each toggle goes through a hook the game's own scripts read,
+not a replaced script:
+
+- Max Ammo every round: at `start_of_round` it does what the Max Ammo power-up
+  does for every player (`givemaxammo` on each weapon but hero weapons, the same
+  exclusions, `zmb_max_ammo` notifies) with the game's own "Max Ammo" HUD text.
+- Auto Pack-a-Punch: wall buys and the box give guns through
+  `zm_weapons::weapon_give`, which notifies `weapon_give`. At the end of that
+  frame a gun that can be upgraded and is not yet is swapped for its upgrade the
+  way the Pack-a-Punch machine hands one over (`give_build_kit_weapon`, so it
+  gets the map's camo, then start ammo; no ammo mod, as on a first upgrade).
+  Hero weapons, offhand and melee weapons, ballistic knives, shields and guns
+  with their own give callback are left alone.
+- Starting points: `level.player_starting_points` for players who join later,
+  and each player's score when the black screen ends.
+- No perk limit: `level.perk_purchase_limit` and
+  `level.get_player_perk_purchase_limit` both give 99.
+- Box stays: `level._zombiemode_chest_joker_chance_override_func` returns -1, so
+  `treasure_chest_should_move` never moves it (the `magic_chest_movable` dvar is
+  left alone, as a dvar would outlive the match).
+- Power on: a `trigger` notify from a player to every `use_elec_switch`, which
+  runs the map's own power-on (`zm_power::electric_switch` or the map's
+  `level.temporary_power_switch_logic`). Maps that power up another way are left
+  as they are.
+- Doors open: a forced `trigger` notify to every `zombie_door` and
+  `zombie_debris`. A forced door opens for free (`door_buy`), but debris charges
+  its cost unless `zombie_unlock_all` is set, so it is set for the few seconds
+  this takes and put back. A map's own door check still applies; electric doors
+  open with the power.
+- Round HUD: zombies left (`get_current_zombie_count` plus `level.zombie_total`)
+  and the round's time, between `start_of_round` and `end_of_round` (the last
+  round's time shows between rounds).
+
+**What reaches the other players.** The game only sends a LUI event or shows a
+HUD label whose name it loaded from the map's zones
+(`#precache("eventstring", ...)` and `#precache("string", ...)` lines, which the
+game's linker turns into zone data; Xerces' compiler parses them and drops
+them). `LUINotifyEvent` with another name stops the thread with "LUI event name
+(string) is not precached", and a label is set to nothing unless a hidden engine
+dvar (hash `0xefd7ca2e`, off) lets the engine register it on the fly.
+Registering the names through the engine's own functions (`0x1400A3FF0` for LUI
+events, `0x1400A4690` for localized strings, build 0x6531394) was tried on
+2026-11-07: the game then compares the server's and the client's lists ("BG
+Cache Diff ... Mismatched") and ends the map at once, and a player joining later
+would hit the same check. So stage 1 registers nothing:
+
+- Every player gets the host's settings as a game message when they first spawn
+  (`IPrintLn`, plain text), such as "Xerces settings: Max Ammo every round, Auto
+  Pack-a-Punch, 5,000 starting points".
+- The round HUD and the pause menu's read-only XERCES SETTINGS are drawn by the
+  host's own menus from two dvars that a listen server shares with the host's
+  client: `xerces_zm_match` ("<mask> <starting points>", what the script
+  applied) and `xerces_zm_hud` ("<zombies left> <seconds> <1 while a round
+  runs>", four times a second). Other players do not get them yet; a safe way to
+  send them needs the two-PC test.
+- The pause menu entry ("XERCES SETTINGS", above Restart and End Game) goes into
+  whichever game options list the pause menu uses, as the mod menu entry does
+  (7.6), the host's only.
+
+**Rounds past 255 (for stage 3).** `zm::set_round_number` keeps the round in
+`world.roundnumber` (XORed with 115) and clamps it at 255;
+`zm::get_round_number` reads it back, and once the round logic starts a game
+thread copies it into `level.round_number` every 0.05 s, so a script cannot
+raise `level.round_number` past 255 on its own. Round 999 needs both functions
+replaced by a Xerces counter, with Xerces' own round number on the HUD
+above 255. Zombie health (`zombie_utility::ai_calculate_health`) is 150 at round
+1, +100 a round to 950 at round 9, then +10% a round; it would pass 2^31 at
+round 163, where the game's own check keeps the last value, 2,035,642,980, for
+every later round. It never wraps, but from round 163 on a zombie needs an
+insta-kill or a very strong weapon, so stage 3 has to choose round 999's health.
+
 ---
 
 ## 8. Packs, profiles and safety nets (goal 6 and extras)

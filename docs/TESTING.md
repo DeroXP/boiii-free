@@ -1151,6 +1151,56 @@ without a "press a key" prompt: a test script that waited for one left the
 player standing until the zombies ended the game, so it now pauses as soon as
 the player is in.
 
+### Zombies round settings, stage 1 (2026-11-07)
+
+DESIGN.md 7.9, built on `launcher/round-system`. Run by Claude with your
+go-ahead ("Yes, I'm not playing") on Kino der Toten (`zm_theater`, it has a
+power switch, doors, debris, wall buys and a moving box), from the worktree
+build through the test home `C:\Users\Ginld\XercesDev\bench\20261106-modlabels`.
+The runner is `C:\Users\Ginld\XercesDev\bench\20261107-rounds\rounds-run.ps1`.
+It passes all eight settings on (5,000 starting points) as launcher dvars, so
+they were `+set` for that session only and the game's `config.cfg` kept its own
+lines (`xerces_launch_dvars`). A test-only game script and Lua file, copied into
+the worktree's `data\` for each run and removed after it, reported what the
+settings did as game messages. The test script gave a gun from the map's list
+through `zm_weapons::weapon_give` (as a wall buy does), emptied the gun in hand
+and ended round 1 by killing the zombies.
+
+- [x] No mods: the score is 5,000 and the perk limit 99 when the black screen
+      ends; the power is on (the switch was used and removed); all 12 door
+      triggers and every debris pile are open; `zombie_unlock_all` is back to 0;
+      the box's move chance is overridden; the gun came Pack-a-Punched (the base
+      gun gone, two primaries); the emptied gun had 208 rounds in stock 1 s into
+      round 2.
+- [x] No mods: "Xerces settings: Max Ammo every round, Auto Pack-a-Punch, 5,000
+      starting points, No perk limit, Box stays, Power on, Doors open, Round
+      HUD" in the game messages.
+- [x] No mods: `xerces_zm_match` was "127 5000" and `xerces_zm_hud` went from "8
+      0 1" to "8 5 1" in round 2, the same in the host's Lua, where the round
+      HUD element exists.
+- [x] No mods: the pause menu reads Resume, Direct Connect, Change Map, Kick
+      Players, Restart, Game Tweaks, XERCES SETTINGS, Main Menu, Quit to
+      Desktop, and its read-only XERCES SETTINGS opens.
+- [x] Front end, with and without mods: XERCES SETTINGS follows BOIII SETTINGS
+      in both Zombies lobbies (with your stack: after DS4C's Barracks, Join
+      Discord and BOIII SETTINGS), and the menu opens.
+- [x] Your stack with PEGASUS on top (PEGASUS, DS4C, Classic Viewmodel FOV,
+      Hyperdimension Neptunia, im_oxo QOL, Avali, Ascendance): every result
+      above is the same, and DS4C's pause menu reads Resume, DS4C Camos, DS4C
+      Mod Options, XERCES SETTINGS, PEGASUS MENU, Restart Level, End Game.
+- [x] No script error from Xerces' script in any run. With the stack, DS4C
+      prints its own errors while the map loads (also `_fixed_box.gsc`, before
+      any setting acts) and when the test script kills zombies without an
+      attacker.
+- [ ] Not seen yet, because your PC was locked during the runs and every
+      screenshot came out black: how the round HUD (top left), the XERCES
+      SETTINGS screens, the "Max Ammo" text and the settings message look.
+
+Tried and taken out: registering the settings event (`xerces_settings`) and the
+HUD labels with the engine as the map loads (DESIGN.md 7.9). The server's and
+client's lists then differed ("BG Cache Diff for LocalizedStrings - Mismatched")
+and the game left the map at once.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The

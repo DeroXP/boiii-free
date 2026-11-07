@@ -56,6 +56,21 @@ to report these again, but tell us if you see them somewhere else or worse.
   blocked), but any other DLL a mod loads runs on your PC with your rights.
   Xerces does not ask first yet. Only turn on mods you trust.
 
+## Zombies round settings (XERCES SETTINGS)
+
+- **The counter, the timer and the in-match settings view are the host's only.**
+  The game shows other players only text it loaded with the map, so they get the
+  host's settings as a message when they spawn, and the zombies left, round time
+  and the pause menu's XERCES SETTINGS show on the host's screen. Sending them
+  to everyone needs testing on two PCs first.
+- **Power On at Start flips the standard power switch.** A map that turns its
+  power on another way (a quest, several switches of its own) is left as it is,
+  and so are doors that only a quest or a map's own check opens.
+- **Tested on Kino der Toten only, so far.** Without mods and with a seven-mod
+  stack (PEGASUS on top, DS4C below it). Other maps and mods with their own box,
+  perk or Pack-a-Punch rules may do things differently. How the counter and the
+  menus look on screen has not been checked yet.
+
 ## The game and Xerces
 
 - **Tested on one PC only.** This zip ran in the game on 2026-11-06 on one PC
