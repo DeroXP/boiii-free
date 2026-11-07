@@ -1,7 +1,8 @@
 // Servers (docs/DESIGN.md 7.3, 11.1, 11.10; D14): join a self-hosted or LAN
 // server by its address, favourites and recent servers. There is no
-// matchmaking and no network code here: a join only hands "+connect
-// host:port" to the game through services::launch. The host decides which
+// matchmaking and no network code here: a join only hands "+set xerces_join
+// host:port" to the game through services::launch, and the game connects
+// once its main menu is up (xerces/join_after_menu.cpp). The host decides which
 // mods load (the game switches to the host's when it joins), so "Join
 // modded" only picks what the game starts with. The public list stays in the
 // game's own server browser until Xerces' backend lists servers (M6).

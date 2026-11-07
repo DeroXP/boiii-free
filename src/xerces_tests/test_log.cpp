@@ -67,6 +67,15 @@ TEST_CASE("logs: server addresses are replaced") {
   CHECK_EQ(redact_addresses_in_json(R"({"cmd":"+connect \"host\""})"),
            R"({"cmd":"+connect \")" + a + R"(\""})");
   CHECK_EQ(redact_addresses("+connected"), "+connected");
+  // The launcher's join since 0.1.0-beta.6.
+  CHECK_EQ(redact_addresses("-launch +set xerces_join dave.example.org"),
+           "-launch +set xerces_join " + a);
+  CHECK_EQ(redact_addresses("+set XERCES_JOIN \"myserver:27017\""),
+           "+set XERCES_JOIN \"" + a + "\"");
+  CHECK_EQ(redact_addresses_in_json(R"({"cmd":"+set xerces_join host:1"})"),
+           R"({"cmd":"+set xerces_join )" + a + R"("})");
+  CHECK_EQ(redact_addresses("my_xerces_join home"), "my_xerces_join home");
+  CHECK_EQ(redact_addresses("xerces_joined home"), "xerces_joined home");
 
   // Things that only look a little like addresses stay.
   const std::vector<std::string> kept = {

@@ -34,7 +34,7 @@ std::string redact_profile(std::string_view text, std::string_view profile);
 //   - IPv6 addresses in brackets ("[::1]:27017"), and without brackets when
 //     they hold "::" or all eight groups;
 //   - a host name with a dot and a port ("friend.example.org:27017");
-//   - whatever follows "+connect", the launcher's join command;
+//   - whatever follows "+connect" or "xerces_join", the join commands;
 //   - each of `known` (addresses the caller knows the person used, such as
 //     their favourite and recent servers), with or without its port, where
 //     it stands as a whole word.

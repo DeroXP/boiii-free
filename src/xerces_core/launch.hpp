@@ -21,7 +21,8 @@ struct launch_options {
   std::vector<std::string> extra_flags; // each "-name", letters, digits, - _
   // Extra "+set <dvar> <value>" pairs from settings, after the mod dvars.
   std::vector<std::pair<std::string, std::string>> dvars;
-  // "+connect <host:port>" last: join a self-hosted server (DESIGN.md 11.1).
+  // "+set xerces_join <host:port>" last: join a self-hosted server once the
+  // main menu is up (DESIGN.md 11.10).
   std::optional<std::string> connect;
 };
 

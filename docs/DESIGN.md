@@ -2168,6 +2168,16 @@ since 2026-11-05); 11.3 and 11.4 still apply later. The two-PC test is
   from `<home>\config\installed.json`, which every launch writes from the
   launcher's catalog; a game not started by the launcher sends none. The index
   is as fresh as the plan file.
+- **Join from Servers waits for the main menu** (since 2026-11-07,
+  `src/client/xerces/join_after_menu.cpp`). The launcher passes
+  `+set xerces_join <address>`, and the game runs `connect <address>` 3 s after
+  its main menu first shows (`gpu::on_main_menu`), once; with no menu in 10
+  minutes it drops the join. Before, the launcher passed `+connect`, which the
+  engine runs as it starts: on a second PC with a new profile the joining game
+  crashed three times in a row about 90 s in, in `Storage_SerializeTransferData`
+  under `CL_CheckForResend` (a null read as the handshake sent the player's
+  stats), while `connect` typed at its main menu joined the same host. Logs and
+  bundles hide the address after `xerces_join` as after `+connect`.
 - **The joiner's check** (`src/client/xerces/join.cpp`,
   `xerces_core/join_check.hpp`). Before the host's mods load, everything the
   host runs that is missing here (main mod, stacked mods, custom map) is named

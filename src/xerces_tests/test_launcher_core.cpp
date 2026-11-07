@@ -182,13 +182,20 @@ TEST_CASE("launch: a plan with errors or no id does not launch") {
   CHECK_EQ(plan_file_id("sha256:abc"), std::string("abc"));
 }
 
-TEST_CASE("launch: a server address goes last as +connect") {
+TEST_CASE("launch: a server address goes last as xerces_join, not +connect") {
   launch_options options;
   options.connect = "192.168.1.20:27017";
   const launch_command cmd = build_launch_command(nullptr, options);
   REQUIRE(cmd.ok());
+  REQUIRE(cmd.args.size() >= 3);
   CHECK_EQ(cmd.args.back(), std::string("192.168.1.20:27017"));
-  CHECK_EQ(cmd.args[cmd.args.size() - 2], std::string("+connect"));
+  CHECK_EQ(cmd.args[cmd.args.size() - 2], std::string("xerces_join"));
+  CHECK_EQ(cmd.args[cmd.args.size() - 3], std::string("+set"));
+  // The engine would run +connect as it starts, before the profile's stats
+  // are loaded; the client joins once its main menu is up instead.
+  for (const std::string &arg : cmd.args) {
+    CHECK(arg != "+connect");
+  }
 
   CHECK(valid_server_address("host.example:28960"));
   CHECK(valid_server_address("10.0.0.1"));

@@ -311,19 +311,37 @@ std::size_t known_length(std::string_view text, std::size_t at,
   return 0;
 }
 
+// Length of a join keyword at text[at], or 0: "+connect" (the console's join,
+// and the launcher's up to 0.1.0-beta.5) or "xerces_join" (the launcher's
+// "+set xerces_join <address>" since), as a whole word.
+std::size_t join_word_length(std::string_view text, std::size_t at) {
+  for (const std::string_view word :
+       {std::string_view("+connect"), std::string_view("xerces_join")}) {
+    if (!starts_with_case_insensitive(text, at, word)) {
+      continue;
+    }
+    const std::size_t end = at + word.size();
+    if (end < text.size() && is_word(text[end])) {
+      continue;
+    }
+    if (word.front() != '+' && at > 0 && is_word(text[at - 1])) {
+      continue;
+    }
+    return word.size();
+  }
+  return 0;
+}
+
 std::string redact_plain(std::string_view text,
                          const std::vector<std::string> &forms) {
-  constexpr std::string_view connect = "+connect";
   std::string out;
   out.reserve(text.size());
   std::size_t i = 0;
   while (i < text.size()) {
-    // "+connect <address>": the launcher's join command, whatever the address
-    // looks like (a host name without a port included).
-    if (text[i] == '+' && starts_with_case_insensitive(text, i, connect) &&
-        (i + connect.size() == text.size() ||
-         !is_word(text[i + connect.size()]))) {
-      std::size_t end = i + connect.size();
+    // "+connect <address>" and "xerces_join <address>": the join commands,
+    // whatever the address looks like (a host name without a port included).
+    if (const std::size_t word = join_word_length(text, i); word != 0) {
+      std::size_t end = i + word;
       while (end < text.size() && (text[end] == ' ' || text[end] == '\t')) {
         ++end;
       }

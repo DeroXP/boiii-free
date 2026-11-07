@@ -121,9 +121,9 @@ Never attach game files or files from the Workshop folder.
 
 ## Playing with other testers
 
-Joining another tester's game has not been tested with Xerces yet: it needs two
-PCs, and that test has not been run (KNOWN_ISSUES.txt). If you try it, tell us
-how it went.
+Joining another tester's game has been tried once, on two PCs on 2026-11-07: a
+modded Zombies game, with the host's port forwarded by hand (KNOWN_ISSUES.txt).
+If you try it, tell us how it went.
 
 - **Hosting.** Launch the game from Home. In the Zombies or Multiplayer online
   lobby (not Play Local), press the button under the map button that reads
@@ -139,12 +139,19 @@ how it went.
   keeps forwarding the port: open and close the lobby again, or remove the
   "Xerces lobby (Black Ops III)" entry in the router's settings.
 - **Joining.** In Xerces, Servers, type the host's address and port, for example
-  `192.168.1.20:27017`, then Join vanilla. The host decides which mods load:
-  your game loads the host's mods, in the host's order, if you have them. A mod
-  or map you lack is named in a dialog that opens its Workshop page in Steam, so
-  you can subscribe and join again; nothing is downloaded from the host. If the
-  game already runs, close it first, or type `connect <address>` in the game's
-  console.
+  `192.168.1.20:27017`, then Join vanilla or Join modded. Xerces starts the
+  game, and the game joins once its main menu is up (with big mods that takes a
+  minute or so). The host decides which mods load: your game loads the host's
+  mods, in the host's order, if you have them. A mod or map you lack is named in
+  a dialog that opens its Workshop page in Steam, so you can subscribe and join
+  again; nothing is downloaded from the host. If the game already runs, close it
+  first, or type `connect <address>` in the game's console at the main menu.
+- **Turn off a VPN to host.** With a VPN on (NordVPN and the like), the address
+  you share is the VPN's, not your router's, and your game's answers leave
+  through the VPN, so nobody can join. Turn it off while you host.
+- **Changing maps.** Pick the next map from the lobby with everyone in it. When
+  the host's game restarts or crashes, the others are dropped: the host opens
+  the lobby again (DIRECT CONNECT: OPEN) and they join again.
 - **Anyone who can reach an open lobby can join it.** Without a password, that
   is everyone who has your address. To ask for one, type
   `set net_password <password>` in the game's console after each start of the

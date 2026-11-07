@@ -147,7 +147,8 @@ public:
   // launch crashed). Writes the plan file and the journal (with the mode and
   // a fresh launch id, passed in XERCES_LAUNCH_ID), then starts the client
   // from the game folder; if Windows refuses, the old journal is put back.
-  // connect: join a self-hosted server ("+connect host:port", Servers).
+  // connect: join a self-hosted server once the game's main menu is up
+  // ("+set xerces_join host:port", Servers).
   // mods: launch these instead of the profile's list.
   launch_outcome launch(const std::string &mode, bool modded, bool mods_off,
                         const std::optional<std::string> &connect = {},

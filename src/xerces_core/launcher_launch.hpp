@@ -130,7 +130,7 @@ struct launch_inputs {
   // search tests the whole stack without them first, so a crash a setting
   // causes is never blamed on a mod.
   bool crash_followup = false;
-  std::optional<std::string> connect; // "+connect host:port" (Servers)
+  std::optional<std::string> connect; // "+set xerces_join host:port" (Servers)
   // Instead of the profile's (a culprit-search test, with crash_followup).
   const std::vector<std::string> *mods = nullptr;
   bool dry_launch = false;

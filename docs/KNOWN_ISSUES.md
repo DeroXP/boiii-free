@@ -78,18 +78,28 @@ to report these again, but tell us if you see them somewhere else or worse.
   borderless, and "Precise FPS limit (experimental)" held about 235 FPS at a 240
   limit with slightly less even frames. Leave both off unless we ask you to test
   them.
-- **Joining another tester's game is not tested yet.** Opening a lobby to direct
-  connect, the router's port (UPnP) and the address it shows, joining by address
-  (Servers), the dialogs that name a mod or map you lack, the network password
-  and playing a custom map together all need a second PC, and none has been
-  tried with Xerces (README.txt, Playing with other testers). Two limits are
-  known: while a lobby is open, anyone who can reach it can join, and a password
-  is checked on the joins Xerces handles but not on the game's own lobby join,
-  so close the lobby when you are done. Whether the router's port closes by
-  itself when you leave the lobby for the main menu is not seen yet; closing the
-  lobby or quitting the game closes it. After a crash with the lobby open the
-  router keeps forwarding the port until the lobby is opened and closed again
-  (README.txt, Playing with other testers).
+- **Joining another tester's game has been tried once.** On 2026-11-07 a second
+  PC joined a modded Zombies lobby (four mods) by typing `connect <address>` at
+  its main menu and played a custom map. The host's router had no UPnP ("No UPnP
+  router found"), so its UDP port was forwarded by hand, and the host had to
+  turn its VPN off. Found there and fixed in this build: Join in Servers started
+  the game with the join already in it, and the joining game crashed about a
+  minute and a half later, as it sent its stats before it had loaded them; the
+  game now joins once its main menu is up. Not tried yet: the router's port
+  through UPnP, Join in Servers since that fix, the dialogs that name a mod or
+  map you lack, and the network password. Two limits are known: while a lobby is
+  open, anyone who can reach it can join, and a password is checked on the joins
+  Xerces handles but not on the game's own lobby join, so close the lobby when
+  you are done. Whether the router's port closes by itself when you leave the
+  lobby for the main menu is not seen yet; closing the lobby or quitting the
+  game closes it. After a crash with the lobby open the router keeps forwarding
+  the port until the lobby is opened and closed again (README.txt, Playing with
+  other testers).
+- **Multiplayer with Zombies mods can close the game.** On a tester's PC with
+  four Zombies mods loaded, switching the main menu to Multiplayer ended with
+  "Could not allocate asset - increase XASSET_ENTRY_POOL_SIZE" and the game
+  closed. Launch Multiplayer from Home instead (with mods that support it, or
+  without mods).
 - **Crash reports are new.** Two real crashes went from the game to the Xerces
   server in our tests, but leaving chat and names out of a report was checked
   with tests only, not with other players in a match. If the crash dialog or a

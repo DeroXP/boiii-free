@@ -190,13 +190,17 @@ launch_command build_launch_command(const plan *resolved,
 
   if (options.connect) {
     // valid_server_address allows only host, IP and port characters, so no
-    // ';', '+', '"' or '/' reaches the command line through it either.
+    // ';', '+', '"' or '/' reaches the command line through it either. Not
+    // "+connect": the engine runs that as it starts, before the profile's
+    // stats are loaded, and the join crashed there (2026-11-07). The client
+    // joins this one once its main menu is up (xerces/join_after_menu.cpp).
     if (!valid_server_address(*options.connect)) {
       out.diags.error("launch.connect.invalid", "",
                       "\"" + *options.connect +
                           "\" is not a server address (host:port).");
     } else {
-      out.args.push_back("+connect");
+      out.args.push_back("+set");
+      out.args.push_back("xerces_join");
       out.args.push_back(*options.connect);
     }
   }
