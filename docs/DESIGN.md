@@ -1592,7 +1592,7 @@ logs, asks about config and backups, and says account deletion is separate.
 Unsigned installers trigger SmartScreen; `TRUST.md` says so. A portable zip is
 published as well.
 
-### 7.9 Zombies round settings (stages 1 and 2 built 2026-11-07)
+### 7.9 Zombies round settings (stages 1 to 3 built 2026-11-07)
 
 Settings that change how a Zombies match plays, asked for and decided by the
 user on 2026-11-07. They are all off by default, the host's settings apply to
@@ -1613,7 +1613,7 @@ only when the user says so:
    (two guns from the map's box), self-revives (one per player, refilled every
    10 rounds) and round 999 (a majority vote between exfil, which ends the game
    with a win, and going on with only smart zombies, every perk, infinite ammo
-   and infinite points).
+   and infinite points). Built, below.
 4. Smart zombies (pack hunters, burst sprinters and ambushers): none before
    round 20, 10% at round 20 rising evenly to 99% at round 998, all of them at
    round 999, each type with its own eye glow or aura from effects every map
@@ -1623,12 +1623,13 @@ only when the user says so:
 with the archive flag: `xerces_zm_maxAmmo`, `xerces_zm_autoPap`,
 `xerces_zm_startPoints` (0 keeps the map's own), `xerces_zm_noPerkLimit`,
 `xerces_zm_boxStays`, `xerces_zm_powerOn`, `xerces_zm_doorsOpen` and
-`xerces_zm_roundHud`, and for stage 2 `xerces_zm_wheel` and
-`xerces_zm_coinFlip`. `data/ui_scripts/xerces_settings` is the menu: in the
-front end a settings screen like BOIII SETTINGS, with a ZOMBIES and a GAMBLING
-tab, whose button `data/ui_scripts/frontend_menus` adds after BOIII SETTINGS in
-the Zombies lobbies (`UI_ZMLOBBYONLINE`, `UI_ZMLOBBYLANGAME`), with or without
-mods.
+`xerces_zm_roundHud`, for stage 2 `xerces_zm_wheel` and `xerces_zm_coinFlip`,
+and for stage 3 `xerces_zm_roundSkips`, `xerces_zm_randomLoadout`,
+`xerces_zm_selfRevives` and `xerces_zm_round999`.
+`data/ui_scripts/xerces_settings` is the menu: in the front end a settings
+screen like BOIII SETTINGS, with ZOMBIES, GAMBLING and ROUNDS tabs, whose button
+`data/ui_scripts/frontend_menus` adds after BOIII SETTINGS in the Zombies
+lobbies (`UI_ZMLOBBYONLINE`, `UI_ZMLOBBYLANGAME`), with or without mods.
 
 `data/custom_scripts/zm/xerces_rounds.gsc` reads the dvars once, as the match
 loads, and uses only scripts the core Zombies script uses itself, so it links on
@@ -1691,23 +1692,29 @@ and `black` are on every Zombies map.
 - Every player gets the host's settings as a game message when they first spawn
   (`IPrintLn`, plain text), such as "Xerces settings: Max Ammo every round, Auto
   Pack-a-Punch, 5,000 starting points".
-- The round HUD is four `HudElementText` per player, updated four times a
-  second, sending only what changed.
+- The round HUD is four `HudElementText` per player (two more each for stage 3's
+  SELF-REVIVES and ROUND lines), updated four times a second, sending only what
+  changed.
 - Each player also gets a hidden `HudElementText` (alpha 0) whose text is
-  "XERCES <mask> <starting points> <round>". Xerces' Lua on the player's PC
-  finds it (a menu named `HudElementText` whose `text` model starts that way) to
-  show, in the pause menu, XERCES SETTINGS (a read-only list of what the match
-  uses), PACK-A-PUNCH WHEEL and COIN FLIP (when they are on). The entries go
-  above Restart and End Game in whichever game options list the pause menu uses,
-  as the mod menu entry does, and grow that list the same way (7.6).
+  "XERCES <mask> <starting points> <round> <skip> <vote>" (skip: 1 on a prime
+  round and 2 on a special round that can be skipped; vote: 1 while the round
+  999 vote is open). Xerces' Lua on the player's PC finds it (a menu named
+  `HudElementText` whose `text` model starts that way; a host on an older Xerces
+  sends the first three numbers only) to show, in the pause menu, XERCES
+  SETTINGS (a read-only list of what the match uses), PACK-A-PUNCH WHEEL and
+  COIN FLIP (when they are on), SKIP ROUND (on a round that can be skipped) and
+  EXFIL and KEEP GOING (while the round 999 vote is open). The entries go above
+  Restart and End Game in whichever game options list the pause menu uses, as
+  the mod menu entry does, and grow that list the same way (7.6).
 - Back to the game script the Lua sends
   `Engine.SendMenuResponse(controller, "StartMenu_Main", response)`, which
   arrives as the player's `menuresponse` notify. The game's own handler
   (`zm_gametype::menu_onmenuresponse`) acts only on its own responses. A
   response ends at its first space, so its parts are joined by ":"
-  (`xerces_wheel`, `xerces_flip:1000`, `xerces_flip:all`). The pause menu is
-  closed first (`StartMenuGoBack`, which also unpauses a solo game), so the
-  request runs at once.
+  (`xerces_wheel`, `xerces_flip:1000`, `xerces_flip:all`, `xerces_skip`,
+  `xerces_exfil`, `xerces_keep`). The pause menu is closed first
+  (`StartMenuGoBack`, which also unpauses a solo game), so the request runs at
+  once.
 
 **Stage 2.** Both are the host's settings (`xerces_zm_wheel`,
 `xerces_zm_coinFlip`); with one off its entry is not shown, and a request for it
@@ -1749,19 +1756,71 @@ the reasons below).
   multiplier, ALL IN's description names the cap, and a player at the cap cannot
   bet, as a win could not pay.
 
-**Rounds past 255 (for stage 3).** `zm::set_round_number` keeps the round in
-`world.roundnumber` (XORed with 115) and clamps it at 255;
-`zm::get_round_number` reads it back, and once the round logic starts a game
-thread copies it into `level.round_number` every 0.05 s, so a script cannot
-raise `level.round_number` past 255 on its own. Round 999 needs both functions
-replaced by a Xerces counter, with Xerces' own round number on the HUD
-above 255. Zombie health (`zombie_utility::ai_calculate_health`) is 150 at round
-1, +100 a round to 950 at round 9, then +10% a round; it would pass 2^31 at
-round 163, where the game's own check keeps the last value, 2,035,642,980, for
-every later round. It never wraps, but from round 163 on a zombie needs an
-insta-kill or a very strong weapon, so stage 3 has to choose round 999's health.
-Points stop at 4,194,303 (the game's cap, above), so round 999's infinite points
-means a score kept at that cap.
+**Stage 3.** Four more host settings: Random Loadout and Self-Revives on the
+ZOMBIES tab, Round Skips and Rounds to 999 on the ROUNDS tab. Each goes through
+hooks the game's own scripts read; none replaces a game script.
+
+- Xerces counts the rounds. `zm::set_round_number` keeps the round in
+  `world.roundnumber` (XORed with 115) and clamps it at 255, and once the round
+  logic starts a game thread copies it into `level.round_number` every 0.05 s,
+  so the game's round stops at 255. At each `start_of_round` Xerces takes the
+  game's round below 255 and adds one a round from there. Prime rounds,
+  self-revive refills and round 999 go by that count. With Rounds to 999 on,
+  past round 255 the HUD gets a ROUND line with it (the game's own HUD stays at
+  255), and a game over shows Xerces' end screen in place of the game's (which
+  would say 255 rounds): `zm::end_game` leaves its own out when
+  `level._supress_survived_screen` is set and runs `level.custom_end_screen`.
+  Zombie health is the game's: it stops growing at round 163, at 2,035,642,980
+  (`zombie_utility::ai_calculate_health`: 150 at round 1, +100 a round to 950 at
+  round 9, then +10% a round, kept at its last value once it would pass 2^31).
+- Round skips. A round that sets the game's `special_round` flag (every map's
+  dog, parasite, spider and similar rounds do) or whose number is prime can be
+  skipped. As it starts, every player sees "PRIME ROUND 7: SKIP IT FROM THE
+  PAUSE MENU FOR 400 POINTS" (or "SPECIAL ROUND: ... AND A MAX AMMO"), and the
+  pause menu gets SKIP ROUND. Each player's SKIP ROUND is a vote, and more than
+  half the players skips; solo, one press. Round 999 cannot be skipped. A skip
+  ends the round the way the Round Robbin gum does (`zm_bgb_round_robbin`): no
+  more spawns this round (`level.zombie_total` 0, `kill_round`), `last_ai_down`
+  with the last zombie, then every zombie dies except Round Robbin's own
+  exceptions. On a special round `last_ai_down` is what drops the round's own
+  Max Ammo where its last enemy was, as when that enemy dies; nothing listens
+  for it on other rounds, so a prime skip drops none. A special round's first
+  enemies come a few seconds in, so a skip waits for them. Each player who is up
+  gets exactly 400 points (`zm_score::add_to_player_score`, which Double Points
+  does not multiply).
+- Random loadout. At each round's start, once a player is up and not drinking a
+  perk or holding a power-up's gun, two guns are drawn evenly from those the
+  mystery box would give that player
+  (`zm_magicbox::treasure_chest_canplayerreceiveweapon`: in the box, under its
+  wonder-weapon limits and any mod's own box rules, never a gun the player has).
+  The box's own pick (`treasure_chest_chooseweightedrandomweapon`) is not used:
+  it lets a mod order the guns, and with DS4C its first gun was always the same,
+  which left one gun a round. The two replace the player's guns and come the way
+  the box hands one over (`zm_weapons::weapon_give(weapon, 0, 1)`), so Auto
+  Pack-a-Punch upgrades them. Hero weapons, equipment and knives stay.
+- Self-revives. Each player starts with one and is back to one at rounds 10, 20,
+  30 and so on. Down with one, the player sees HOLD USE TO REVIVE YOURSELF and
+  holds the use button 1.5 s to get up through the game's own revive
+  (`zm_laststand::auto_revive`, as solo Quick Revive does). The HUD's
+  SELF-REVIVES line shows how many are left. Solo Quick Revive goes first. When
+  the last player up goes down, `zm::player_damage_override` asks
+  `level.check_end_solo_game_override` (solo) and
+  `level._game_module_game_end_check` (co-op) whether the game ends: Xerces'
+  answers keep it going while a player who is not out has a self-revive, after
+  asking any check the map or mode set. If that player bleeds out instead and
+  nobody is up, Xerces ends the game (`pre_end_game`, `end_game`), as the game
+  would have.
+- Round 999. When it starts, every player sees "ROUND 999: EXFIL OR KEEP GOING?
+  VOTE IN THE PAUSE MENU", and the pause menu gets EXFIL and KEEP GOING. More
+  than half the players decides; with no decision by the round's end it keeps
+  going. Exfil ends the game as a win, with an end screen of EXFIL, YOU WIN and
+  the rounds survived. Keep going gives every player every perk (each of
+  `level._custom_perks` through `zm_perks::give_perk`, again whenever one is
+  missing), infinite ammo (the clip and stock topped up four times a second) and
+  infinite points (the score held at 4,194,303, the game's cap). Stage 4's smart
+  zombies take over from there.
+- The notices are one more `HudElementText` per player, centred under the HUD;
+  the self-revive prompt is another, shown while it applies.
 
 ---
 

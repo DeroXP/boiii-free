@@ -54,6 +54,20 @@ public:
            "Zombies, when you host: a coin flip in the pause menu: bet points "
            "on a 50/50; a win pays the bet times 2 at round 1, 0.1 more each "
            "round, up to 5.");
+    on_off("xerces_zm_roundSkips",
+           "Zombies, when you host: special rounds and prime-numbered rounds "
+           "can be skipped from the pause menu for 400 points (a special round "
+           "also drops its Max Ammo); in co-op more than half must vote.");
+    on_off("xerces_zm_randomLoadout",
+           "Zombies, when you host: at each round's start everyone's guns are "
+           "swapped for two the mystery box picks.");
+    on_off("xerces_zm_selfRevives",
+           "Zombies, when you host: everyone has one self-revive, back every "
+           "10 rounds; down with one, hold Use to get up.");
+    on_off("xerces_zm_round999",
+           "Zombies, when you host: the round count goes past 255; at round "
+           "999 everyone votes to exfil and win, or keep going with every "
+           "perk, infinite ammo and infinite points.");
   }
 };
 } // namespace xerces_round_settings

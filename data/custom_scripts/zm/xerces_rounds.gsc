@@ -16,6 +16,10 @@
 #using scripts\shared\flag_shared;
 #using scripts\shared\laststand_shared;
 #using scripts\shared\system_shared;
+#using scripts\shared\util_shared;
+#using scripts\zm\_zm_laststand;
+#using scripts\zm\_zm_magicbox;
+#using scripts\zm\_zm_perks;
 #using scripts\zm\_zm_score;
 #using scripts\zm\_zm_utility;
 #using scripts\zm\_zm_weapons;
@@ -34,6 +38,10 @@
 #define MASK_ROUND_HUD 64
 #define MASK_WHEEL 128
 #define MASK_COIN_FLIP 256
+#define MASK_ROUND_SKIPS 512
+#define MASK_RANDOM_LOADOUT 1024
+#define MASK_SELF_REVIVES 2048
+#define MASK_ROUND_999 4096
 
 #define NO_PERK_LIMIT 99
 #define WHEEL_COST 2500
@@ -42,6 +50,19 @@
 #define MIN_BET 100
 // The game's own points cap: a score set higher reads back as this (measured 2026-11-07)
 #define MAX_SCORE 4194303
+
+// Round skips: what a skip pays each player, exactly (zm_score::add_to_player_score, which Double Points does not
+// touch), and the kinds of round that can be skipped
+#define SKIP_POINTS 400
+#define SKIP_NONE 0
+#define SKIP_PRIME 1
+#define SKIP_SPECIAL 2
+// The game's round number stops here (zm::set_round_number), and Xerces counts on to the last round's vote
+#define GAME_ROUND_CAP 255
+#define FINAL_ROUND 999
+// Self-revives: back to one every this many rounds, and how long the use button is held
+#define SELF_REVIVE_EVERY 10
+#define SELF_REVIVE_HOLD_MS 1500
 
 // HudElementText's alignment in its box, from x to x + width (seen in the game on 2026-11-07)
 #define ALIGN_LEFT 1
@@ -66,12 +87,22 @@ function __init__()
 	s.round_hud = GetDvarInt("xerces_zm_roundHud") != 0;
 	s.wheel = GetDvarInt("xerces_zm_wheel") != 0;
 	s.coin_flip = GetDvarInt("xerces_zm_coinFlip") != 0;
+	s.round_skips = GetDvarInt("xerces_zm_roundSkips") != 0;
+	s.random_loadout = GetDvarInt("xerces_zm_randomLoadout") != 0;
+	s.self_revives = GetDvarInt("xerces_zm_selfRevives") != 0;
+	s.round_999 = GetDvarInt("xerces_zm_round999") != 0;
 	if (s.start_points < 0)
 		s.start_points = 0;
-	// The round as of its start_of_round (the game raises level.round_number as the last one ends), and how many
-	// rounds have started, which keeps counting where the round number stops (255)
+	// The round as of its start_of_round (the game raises level.round_number as the last one ends), counted on by
+	// Xerces where the game's stops (255), and how many rounds have started
 	s.round = 1;
 	s.rounds_started = 0;
+	// This round's skip (SKIP_*), whether the round 999 vote is open, and what it decided
+	s.skip = SKIP_NONE;
+	s.vote = 0;
+	s.exfil = 0;
+	s.endless = 0;
+	s.notice_id = 0;
 
 	s.mask = 0;
 	if (s.max_ammo)
@@ -92,6 +123,14 @@ function __init__()
 		s.mask += MASK_WHEEL;
 	if (s.coin_flip)
 		s.mask += MASK_COIN_FLIP;
+	if (s.round_skips)
+		s.mask += MASK_ROUND_SKIPS;
+	if (s.random_loadout)
+		s.mask += MASK_RANDOM_LOADOUT;
+	if (s.self_revives)
+		s.mask += MASK_SELF_REVIVES;
+	if (s.round_999)
+		s.mask += MASK_ROUND_999;
 	level.xerces_rounds = s;
 
 	callback::on_connect(&on_player_connect);
@@ -120,6 +159,10 @@ function main()
 		level thread max_ammo_every_round();
 	if (s.round_hud)
 		level thread round_hud();
+	if (s.self_revives)
+		install_self_revive_checks();
+	if (s.round_999)
+		install_end_screen();
 	level thread close_on_end_game();
 
 	if (s.power_on)
@@ -148,23 +191,40 @@ function on_player_spawned()
 		self thread watch_auto_pap();
 }
 
-// Once per player, from the end of the black screen: the data for Xerces' menus, the round HUD and the settings message
+// Once per player, from the end of the black screen: the data for Xerces' menus, the HUD, the settings message and a
+// self-revive
 function first_spawn()
 {
 	self endon("disconnect");
 	wait_for_flag("initial_blackscreen_passed");
+	s = level.xerces_rounds;
 	self.xerces_data = self lui_text(data_text(), ALIGN_LEFT, 0, 0, 10, 10, (1, 1, 1), 0);
-	if (level.xerces_rounds.round_hud)
-		self create_round_hud();
+	if (s.self_revives)
+	{
+		self.xerces_self_revives = 1;
+		self thread self_revive_watch();
+	}
+	self create_hud();
 	wait 4;
 	self show_settings();
 }
 
-// "XERCES <mask> <starting points> <round>", which data/ui_scripts/xerces_settings reads
+// "XERCES <mask> <starting points> <round> <skip> <vote>", which data/ui_scripts/xerces_settings reads: the round's
+// skip (SKIP_*) and whether the round 999 vote is open
 function data_text()
 {
 	s = level.xerces_rounds;
-	return "XERCES " + s.mask + " " + s.start_points + " " + s.round;
+	return "XERCES " + s.mask + " " + s.start_points + " " + s.round + " " + s.skip + " " + s.vote;
+}
+
+function update_data_text()
+{
+	text = data_text();
+	foreach (player in GetPlayers())
+	{
+		if (isdefined(player.xerces_data))
+			player SetLUIMenuData(player.xerces_data, "text", text);
+	}
 }
 
 // The host's settings, once per player, as a game message
@@ -192,6 +252,14 @@ function show_settings()
 		text = add_setting(text, "Pack-a-Punch wheel");
 	if (s.coin_flip)
 		text = add_setting(text, "Coin flip");
+	if (s.round_skips)
+		text = add_setting(text, "Round skips");
+	if (s.random_loadout)
+		text = add_setting(text, "Random loadout");
+	if (s.self_revives)
+		text = add_setting(text, "Self-revives");
+	if (s.round_999)
+		text = add_setting(text, "Rounds to 999");
 	if (text != "")
 		self IPrintLn("Xerces settings: " + text);
 }
@@ -464,7 +532,8 @@ function zombies_left()
 	return left;
 }
 
-// A round runs from zm::round_think's start_of_round to its end_of_round
+// A round runs from zm::round_think's start_of_round to its end_of_round. The game's round number stops at 255
+// (zm::set_round_number), so from there Xerces' count goes one up each round.
 function round_watch()
 {
 	level endon("end_game");
@@ -472,38 +541,138 @@ function round_watch()
 	for (;;)
 	{
 		level waittill("start_of_round");
-		s.round = level.round_number;
+		if (level.round_number < GAME_ROUND_CAP)
+			s.round = level.round_number;
+		else
+			s.round++;
 		s.rounds_started++;
 		s.round_start = GetTime();
 		s.round_seconds = 0;
 		s.round_running = 1;
-		// The round, for the coin flip's payout in Xerces' menus
-		foreach (player in GetPlayers())
-		{
-			if (isdefined(player.xerces_data))
-				player SetLUIMenuData(player.xerces_data, "text", data_text());
-		}
+		round_started();
+		// The round and its skip, for the coin flip's payout and the pause menu entries in Xerces' menus
+		update_data_text();
 
 		level waittill("end_of_round");
 		s.round_seconds = int((GetTime() - s.round_start) / 1000);
 		s.round_running = 0;
+		round_ended();
 	}
 }
 
-// Zombies left and the round time, top left. Between rounds it shows the last round's time.
-function create_round_hud()
+// What stage 3 does as a round starts: the self-revive refill, the round's skip, the random loadouts, the round past
+// 255 on the HUD, and the round 999 vote
+function round_started()
 {
+	s = level.xerces_rounds;
+	if (s.self_revives && s.round % SELF_REVIVE_EVERY == 0)
+		refill_self_revives();
+	if (s.round_skips)
+		open_skip();
+	if (s.random_loadout)
+	{
+		foreach (player in GetPlayers())
+			player thread random_loadout();
+	}
+	if (s.round_999)
+	{
+		if (s.round > GAME_ROUND_CAP)
+		{
+			// The game's own end screen would say 255 rounds
+			level._supress_survived_screen = 1;
+			foreach (player in GetPlayers())
+				player update_round_row();
+		}
+		if (s.round == FINAL_ROUND)
+			open_final_vote();
+	}
+}
+
+function round_ended()
+{
+	s = level.xerces_rounds;
+	if (s.skip != SKIP_NONE)
+	{
+		s.skip = SKIP_NONE;
+		clear_votes();
+		update_data_text();
+	}
+	// Round 999 ended with no decision: it keeps going
+	if (s.vote)
+		level thread keep_going();
+}
+
+// Top left: zombies left and the round's time (the round HUD setting; between rounds the last round's time), the
+// self-revives left, and past round 255 the round itself, which the game's own HUD stops at 255. Under them, centred,
+// a line for the round's notices.
+function create_hud()
+{
+	s = level.xerces_rounds;
+	if (!s.round_hud && !s.self_revives && !s.round_skips && !s.round_999)
+		return;
 	grey = (0.75, 0.75, 0.75);
 	white = (1, 1, 1);
 	hud = SpawnStruct();
-	hud.left_label = self lui_text("ZOMBIES LEFT", ALIGN_LEFT, 24, 20, 150, 24, grey, 1);
-	hud.left = self lui_text("", ALIGN_LEFT, 180, 20, 160, 24, white, 1);
-	hud.time_label = self lui_text("", ALIGN_LEFT, 24, 50, 150, 24, grey, 1);
-	hud.time = self lui_text("", ALIGN_LEFT, 180, 50, 160, 24, white, 1);
-	hud.shown_left = "";
-	hud.shown_label = "";
-	hud.shown_time = "";
+	hud.menus = [];
+	y = 20;
+	if (s.round_hud)
+	{
+		hud.left_label = self hud_text(hud, "ZOMBIES LEFT", 24, y, grey);
+		hud.left = self hud_text(hud, "", 180, y, white);
+		y += 30;
+		hud.time_label = self hud_text(hud, "", 24, y, grey);
+		hud.time = self hud_text(hud, "", 180, y, white);
+		y += 30;
+		hud.shown_left = "";
+		hud.shown_label = "";
+		hud.shown_time = "";
+	}
+	if (s.self_revives)
+	{
+		hud.revives_label = self hud_text(hud, "SELF-REVIVES", 24, y, grey);
+		hud.revives = self hud_text(hud, "", 180, y, white);
+		y += 30;
+	}
+	if (s.round_999)
+	{
+		hud.round_label = self hud_text(hud, "", 24, y, grey);
+		hud.round = self hud_text(hud, "", 180, y, white);
+	}
+	hud.notice = self lui_text("", ALIGN_CENTER, 140, 130, 1000, 24, (1, 0.85, 0.3), 1);
+	hud.menus[hud.menus.size] = hud.notice;
 	self.xerces_hud = hud;
+	if (s.self_revives)
+		self update_revives_row();
+	if (s.round_999)
+		self update_round_row();
+}
+
+function hud_text(hud, text, x, y, color)
+{
+	menu = self lui_text(text, ALIGN_LEFT, x, y, 150, 24, color, 1);
+	hud.menus[hud.menus.size] = menu;
+	return menu;
+}
+
+function update_revives_row()
+{
+	if (!isdefined(self.xerces_hud) || !isdefined(self.xerces_hud.revives))
+		return;
+	count = 0;
+	if (isdefined(self.xerces_self_revives))
+		count = self.xerces_self_revives;
+	self SetLUIMenuData(self.xerces_hud.revives, "text", "" + count);
+}
+
+function update_round_row()
+{
+	if (!isdefined(self.xerces_hud) || !isdefined(self.xerces_hud.round))
+		return;
+	round = level.xerces_rounds.round;
+	if (round <= GAME_ROUND_CAP)
+		return;
+	self SetLUIMenuData(self.xerces_hud.round_label, "text", "ROUND");
+	self SetLUIMenuData(self.xerces_hud.round, "text", "" + round);
 }
 
 function round_hud()
@@ -528,7 +697,7 @@ function round_hud()
 		}
 		foreach (player in GetPlayers())
 		{
-			if (isdefined(player.xerces_hud))
+			if (isdefined(player.xerces_hud) && isdefined(player.xerces_hud.left))
 				player update_round_hud(left, label, time);
 		}
 		wait 0.25;
@@ -565,13 +734,18 @@ function close_on_end_game()
 		if (!isdefined(hud))
 			continue;
 		player.xerces_hud = undefined;
-		player lui_close(array(hud.left_label, hud.left, hud.time_label, hud.time));
+		player lui_close(hud.menus);
+		if (isdefined(player.xerces_prompt))
+		{
+			player CloseLUIMenu(player.xerces_prompt);
+			player.xerces_prompt = undefined;
+		}
 	}
 }
 
-// Requests from Xerces' menus on the player's PC (data/ui_scripts/xerces_settings): "xerces_wheel" and
-// "xerces_flip:<points|all>", sent as menu responses under StartMenu_Main. A response ends at its first space
-// (seen in the game on 2026-11-07), so the parts are joined by ":".
+// Requests from Xerces' menus on the player's PC (data/ui_scripts/xerces_settings): "xerces_wheel",
+// "xerces_flip:<points|all>", "xerces_skip", "xerces_exfil" and "xerces_keep", sent as menu responses under
+// StartMenu_Main. A response ends at its first space (seen in the game on 2026-11-07), so the parts are joined by ":".
 function menu_responses()
 {
 	self endon("disconnect");
@@ -587,6 +761,12 @@ function menu_responses()
 			self thread wheel_request();
 		else if (words[0] == "xerces_flip" && words.size > 1)
 			self thread coin_flip_request(words[1]);
+		else if (words[0] == "xerces_skip")
+			self skip_request();
+		else if (words[0] == "xerces_exfil")
+			self final_vote_request("exfil");
+		else if (words[0] == "xerces_keep")
+			self final_vote_request("keep");
 	}
 }
 
@@ -902,4 +1082,545 @@ function coin_flip(bet)
 	wait 2;
 	self lui_close(menus);
 	self.xerces_busy = 0;
+}
+
+// Stage 3 (DESIGN.md 7.9): round skips, random loadouts, self-revives and round 999
+
+// A line on every player's screen under the HUD, cleared after the given seconds unless a newer one replaced it
+function notice_all(text, seconds)
+{
+	s = level.xerces_rounds;
+	s.notice_id++;
+	foreach (player in GetPlayers())
+	{
+		if (isdefined(player.xerces_hud))
+			player SetLUIMenuData(player.xerces_hud.notice, "text", text);
+	}
+	level thread clear_notice(s.notice_id, seconds);
+}
+
+function clear_notice(id, seconds)
+{
+	level endon("end_game");
+	wait seconds;
+	if (level.xerces_rounds.notice_id != id)
+		return;
+	foreach (player in GetPlayers())
+	{
+		if (isdefined(player.xerces_hud))
+			player SetLUIMenuData(player.xerces_hud.notice, "text", "");
+	}
+}
+
+// Each player's vote: "skip", or "exfil" or "keep" in the round 999 vote. More than half the players decides.
+function clear_votes()
+{
+	foreach (player in GetPlayers())
+		player.xerces_vote = undefined;
+}
+
+function count_votes(choice)
+{
+	votes = 0;
+	foreach (player in GetPlayers())
+	{
+		if (isdefined(player.xerces_vote) && player.xerces_vote == choice)
+			votes++;
+	}
+	return votes;
+}
+
+function is_majority(votes)
+{
+	return votes * 2 > GetPlayers().size;
+}
+
+function is_prime(number)
+{
+	if (number < 2)
+		return false;
+	for (divisor = 2; divisor * divisor <= number; divisor++)
+	{
+		if (number % divisor == 0)
+			return false;
+	}
+	return true;
+}
+
+// The maps' special rounds (dogs, parasites, spiders and the like) all set the game's special_round flag
+function skip_kind()
+{
+	if (level flag::exists("special_round") && level flag::get("special_round"))
+		return SKIP_SPECIAL;
+	if (is_prime(level.xerces_rounds.round))
+		return SKIP_PRIME;
+	return SKIP_NONE;
+}
+
+function open_skip()
+{
+	s = level.xerces_rounds;
+	clear_votes();
+	s.skip = SKIP_NONE;
+	// Round 999's vote decides that round
+	if (s.round_999 && s.round == FINAL_ROUND)
+		return;
+	s.skip = skip_kind();
+	if (s.skip == SKIP_SPECIAL)
+		notice_all("SPECIAL ROUND: SKIP IT FROM THE PAUSE MENU FOR 400 POINTS AND A MAX AMMO", 8);
+	else if (s.skip == SKIP_PRIME)
+		notice_all("PRIME ROUND " + s.round + ": SKIP IT FROM THE PAUSE MENU FOR 400 POINTS", 8);
+}
+
+// A vote to skip this round; in solo it is the only vote, so the round goes at once
+function skip_request()
+{
+	s = level.xerces_rounds;
+	if (!s.round_skips)
+	{
+		self IPrintLnBold("The host has not turned round skips on");
+		return;
+	}
+	if (IS_TRUE(s.skipping))
+		return;
+	if (s.skip == SKIP_NONE)
+	{
+		self IPrintLnBold("Only special rounds and prime rounds can be skipped");
+		return;
+	}
+	if (isdefined(self.xerces_vote))
+	{
+		self IPrintLnBold("You voted: waiting for the others");
+		return;
+	}
+	self.xerces_vote = "skip";
+	votes = count_votes("skip");
+	if (is_majority(votes))
+		level thread skip_round();
+	else
+		notice_all("SKIP THIS ROUND: " + votes + " OF " + GetPlayers().size + " PLAYERS VOTED", 8);
+}
+
+// Ends the round the way the Round Robbin gum does (zm_bgb_round_robbin): no more spawns this round, last_ai_down with
+// the last zombie, then every zombie dies. On a special round last_ai_down is what drops the round's own Max Ammo, as
+// when its last enemy dies; nothing listens for it on other rounds. Each player who is up gets SKIP_POINTS.
+function skip_round()
+{
+	level endon("end_game");
+	s = level.xerces_rounds;
+	if (IS_TRUE(s.skipping))
+		return;
+	s.skipping = 1;
+	kind = s.skip;
+	round = s.rounds_started;
+	// A special round's first enemies come a few seconds in
+	for (i = 0; i < 300 && s.rounds_started == round && s.round_running && !round_has_zombies(); i++)
+		wait 0.1;
+	if (s.rounds_started != round || !s.round_running || !round_has_zombies())
+	{
+		s.skipping = 0;
+		// Still the same round: the votes go, so the players can vote again
+		if (s.rounds_started == round && s.round_running)
+		{
+			clear_votes();
+			notice_all("THE ROUND COULD NOT BE SKIPPED YET: VOTE AGAIN", 6);
+		}
+		return;
+	}
+	s.skip = SKIP_NONE;
+	clear_votes();
+	update_data_text();
+
+	level.zombie_total = 0;
+	level notify("kill_round");
+	PlaySoundAtPosition("zmb_bgb_round_robbin", (0, 0, 0));
+	wait 0.1;
+	// last_ai_down goes with an enemy that can die, then they die; one still in its spawn effect is shielded (a dog
+	// arriving in its lightning) and dies once it is out. Without a single such enemy, the round's own last death sends
+	// last_ai_down.
+	announced = 0;
+	for (i = 0; i < 100; i++)
+	{
+		zombies = GetAITeamArray(level.zombie_team);
+		if (!announced)
+		{
+			last = undefined;
+			foreach (zombie in zombies)
+			{
+				if (dies_in_skip(zombie))
+					last = zombie;
+			}
+			if (isdefined(last))
+			{
+				announced = 1;
+				level.last_ai_origin = last.origin;
+				level notify("last_ai_down", last);
+				util::wait_network_frame();
+			}
+		}
+		remaining = 0;
+		foreach (zombie in zombies)
+		{
+			if (dies_in_skip(zombie))
+				zombie DoDamage(zombie.health + 666, zombie.origin);
+			else if (isdefined(zombie) && IsAlive(zombie) && !IS_TRUE(zombie.ignore_round_robbin_death))
+				remaining++;
+		}
+		if (remaining == 0)
+			break;
+		wait 0.1;
+	}
+	foreach (player in GetPlayers())
+	{
+		if (zm_utility::is_player_valid(player))
+			player zm_score::add_to_player_score(SKIP_POINTS);
+	}
+	if (kind == SKIP_SPECIAL)
+		notice_all("ROUND SKIPPED: 400 POINTS, AND THE ROUND'S MAX AMMO", 6);
+	else
+		notice_all("ROUND SKIPPED: 400 POINTS", 6);
+	s.skipping = 0;
+}
+
+// At least one enemy the skip can kill: the round's last_ai_down needs one (a special round ends on it), and an enemy
+// still in its spawn effect is shielded
+function round_has_zombies()
+{
+	if (!level flag::get("spawn_zombies"))
+		return false;
+	foreach (zombie in GetAITeamArray(level.zombie_team))
+	{
+		if (dies_in_skip(zombie))
+			return true;
+	}
+	return false;
+}
+
+// Round Robbin's own exceptions
+function dies_in_skip(zombie)
+{
+	if (!isdefined(zombie) || !IsAlive(zombie))
+		return false;
+	if (IS_TRUE(zombie.ignore_round_robbin_death) || IS_TRUE(zombie.marked_for_death))
+		return false;
+	return !zm_utility::is_magic_bullet_shield_enabled(zombie);
+}
+
+// Each round the player's guns go for two new ones, drawn evenly from the guns the mystery box would give this player
+// (zm_magicbox::treasure_chest_canplayerreceiveweapon: in the box, under its wonder weapon limits, a mod's own box rules,
+// never a gun the player has), handed over the way the box does (zm_weapons::weapon_give), so Auto Pack-a-Punch
+// upgrades them. The box's own pick is not used: a mod can order it so that its first gun is always the same (seen
+// with DS4C, which gave one gun a round). Hero weapons, equipment and knives stay.
+function random_loadout()
+{
+	self endon("disconnect");
+	level endon("end_game");
+	// After the round's own start and, for round 1, after the black screen, which ends with the map handing out its
+	// starting pistol; and not while the player is down, out, drinking a perk or holding a power-up's gun
+	wait_for_flag("initial_blackscreen_passed");
+	wait 1;
+	for (i = 0; i < 200 && !self can_swap_guns(); i++)
+		wait 0.1;
+	if (!self can_swap_guns())
+		return;
+	candidates = [];
+	foreach (weapon in GetArrayKeys(level.zombie_weapons))
+	{
+		if (zm_magicbox::treasure_chest_canplayerreceiveweapon(self, weapon, undefined))
+			candidates[candidates.size] = weapon;
+	}
+	picks = [];
+	while (picks.size < 2 && candidates.size > 0)
+	{
+		index = RandomInt(candidates.size);
+		picks[picks.size] = candidates[index];
+		rest = [];
+		for (i = 0; i < candidates.size; i++)
+		{
+			if (i != index)
+				rest[rest.size] = candidates[i];
+		}
+		candidates = rest;
+	}
+	if (picks.size == 0)
+		return;
+	foreach (weapon in self GetWeaponsListPrimaries())
+	{
+		if (!zm_utility::is_hero_weapon(weapon))
+			self TakeWeapon(weapon);
+	}
+	foreach (weapon in picks)
+		self zm_weapons::weapon_give(weapon, 0, 1);
+}
+
+function can_swap_guns()
+{
+	if (!zm_utility::is_player_valid(self) || IS_TRUE(self.has_powerup_weapon))
+		return false;
+	return !isdefined(self.is_drinking) || self.is_drinking <= 0;
+}
+
+// Self-revives: one each, back to one every SELF_REVIVE_EVERY rounds
+function refill_self_revives()
+{
+	refilled = 0;
+	foreach (player in GetPlayers())
+	{
+		if (!isdefined(player.xerces_self_revives) || player.xerces_self_revives >= 1)
+			continue;
+		player.xerces_self_revives = 1;
+		player update_revives_row();
+		refilled = 1;
+	}
+	if (refilled)
+		notice_all("SELF-REVIVES REFILLED", 6);
+}
+
+function self_revive_watch()
+{
+	self endon("disconnect");
+	for (;;)
+	{
+		self waittill("player_downed");
+		self thread self_revive_offer();
+	}
+}
+
+// A player who goes down with a self-revive holds the use button to get up, through the game's own revive
+// (zm_laststand::auto_revive, as solo Quick Revive does). Solo Quick Revive goes first.
+function self_revive_offer()
+{
+	self endon("disconnect");
+	level endon("end_game");
+	if (!isdefined(self.xerces_self_revives) || self.xerces_self_revives < 1)
+		return;
+	if (level flag::get("solo_game") && isdefined(self.lives) && self.lives > 0 && self HasPerk("specialty_quickrevive"))
+		return;
+	self.xerces_prompt = self lui_text("HOLD USE TO REVIVE YOURSELF", ALIGN_CENTER, 340, 470, 600, 26, (1, 1, 1), 1);
+	self thread end_game_if_bled_out();
+	held = 0;
+	revived = 0;
+	while (self laststand::player_is_in_laststand())
+	{
+		if (self UseButtonPressed())
+			held += 50;
+		else
+			held = 0;
+		if (held >= SELF_REVIVE_HOLD_MS)
+		{
+			revived = 1;
+			break;
+		}
+		wait 0.05;
+	}
+	if (isdefined(self.xerces_prompt))
+	{
+		self CloseLUIMenu(self.xerces_prompt);
+		self.xerces_prompt = undefined;
+	}
+	if (!revived)
+		return;
+	self.xerces_self_revives--;
+	self update_revives_row();
+	self zm_laststand::auto_revive(self);
+}
+
+// The game was kept going for this player's self-revive (install_self_revive_checks). If they bleed out instead and
+// nobody is up, the game ends here, as it would have when they went down.
+function end_game_if_bled_out()
+{
+	self endon("disconnect");
+	self endon("player_revived");
+	level endon("end_game");
+	self waittill("bled_out");
+	wait 0.5;
+	foreach (player in GetPlayers())
+	{
+		if (zm_utility::is_player_valid(player))
+			return;
+		if (player laststand::player_is_in_laststand() && isdefined(player.xerces_self_revives) && player.xerces_self_revives > 0)
+			return;
+	}
+	level notify("pre_end_game");
+	util::wait_network_frame();
+	level notify("end_game");
+}
+
+// zm::player_damage_override asks these when the last player up goes down: a player who can still self-revive keeps
+// the game going (solo: level.check_end_solo_game_override true; co-op: level._game_module_game_end_check false). A
+// check the map or mode had is asked first.
+function install_self_revive_checks()
+{
+	s = level.xerces_rounds;
+	s.old_solo_end_check = level.check_end_solo_game_override;
+	level.check_end_solo_game_override = &solo_game_continues;
+	s.old_game_end_check = level._game_module_game_end_check;
+	level._game_module_game_end_check = &game_ends;
+}
+
+function solo_game_continues()
+{
+	s = level.xerces_rounds;
+	if (isdefined(s.old_solo_end_check) && [[s.old_solo_end_check]]())
+		return true;
+	return someone_can_self_revive();
+}
+
+function game_ends()
+{
+	s = level.xerces_rounds;
+	if (isdefined(s.old_game_end_check) && ![[s.old_game_end_check]]())
+		return false;
+	return !someone_can_self_revive();
+}
+
+// Everyone is down or out when these are asked, so a player who is not out and has a self-revive left can still get up
+function someone_can_self_revive()
+{
+	foreach (player in GetPlayers())
+	{
+		if (player.sessionstate == "spectator")
+			continue;
+		if (isdefined(player.xerces_self_revives) && player.xerces_self_revives > 0)
+			return true;
+	}
+	return false;
+}
+
+// Round 999: exfil (the game ends as a win) or keep going, by more than half the players; no decision by the round's
+// end keeps going
+function open_final_vote()
+{
+	s = level.xerces_rounds;
+	s.vote = 1;
+	clear_votes();
+	notice_all("ROUND 999: EXFIL OR KEEP GOING? VOTE IN THE PAUSE MENU", 15);
+}
+
+function final_vote_request(choice)
+{
+	s = level.xerces_rounds;
+	if (!s.round_999 || !s.vote)
+	{
+		self IPrintLnBold("There is no vote now");
+		return;
+	}
+	if (isdefined(self.xerces_vote))
+	{
+		self IPrintLnBold("You voted: waiting for the others");
+		return;
+	}
+	self.xerces_vote = choice;
+	exfil = count_votes("exfil");
+	keep = count_votes("keep");
+	if (is_majority(exfil))
+		level thread exfil();
+	else if (is_majority(keep))
+		level thread keep_going();
+	else
+		notice_all("EXFIL " + exfil + ", KEEP GOING " + keep + ", OF " + GetPlayers().size + " PLAYERS", 10);
+}
+
+// The game ends as a win, with Xerces' end screen in place of the game's (install_end_screen)
+function exfil()
+{
+	s = level.xerces_rounds;
+	if (!s.vote)
+		return;
+	s.vote = 0;
+	s.exfil = 1;
+	clear_votes();
+	update_data_text();
+	level._supress_survived_screen = 1;
+	notice_all("EXFIL", 5);
+	wait 2;
+	level notify("pre_end_game");
+	util::wait_network_frame();
+	level notify("end_game");
+}
+
+// Every player gets every perk, infinite ammo and infinite points from here on (stage 4's smart zombies come then)
+function keep_going()
+{
+	s = level.xerces_rounds;
+	if (!s.vote)
+		return;
+	s.vote = 0;
+	s.endless = 1;
+	clear_votes();
+	update_data_text();
+	notice_all("KEEP GOING: EVERY PERK, INFINITE AMMO AND INFINITE POINTS", 8);
+	level thread endless();
+}
+
+function endless()
+{
+	level endon("end_game");
+	tick = 0;
+	for (;;)
+	{
+		foreach (player in GetPlayers())
+		{
+			if (!zm_utility::is_player_valid(player))
+				continue;
+			player.score = MAX_SCORE;
+			player.pers["score"] = player.score;
+			foreach (weapon in player GetWeaponsList(1))
+			{
+				if (!refills(weapon) || !player HasWeapon(weapon))
+					continue;
+				if (weapon.clipsize > 0)
+					player SetWeaponAmmoClip(weapon, weapon.clipsize);
+				player GiveMaxAmmo(weapon);
+			}
+			if (tick % 4 == 0)
+				player give_every_perk();
+		}
+		tick++;
+		wait 0.25;
+	}
+}
+
+function give_every_perk()
+{
+	if (!isdefined(level._custom_perks))
+		return;
+	foreach (perk in GetArrayKeys(level._custom_perks))
+	{
+		if (!self HasPerk(perk) && !self zm_perks::has_perk_paused(perk))
+			self zm_perks::give_perk(perk, 0);
+	}
+}
+
+// After an exfil, and for a game over past round 255, the end screen is Xerces': the game's own would say 255 rounds.
+// zm::end_game leaves its own out when level._supress_survived_screen is set and runs level.custom_end_screen.
+function install_end_screen()
+{
+	s = level.xerces_rounds;
+	s.old_end_screen = level.custom_end_screen;
+	level.custom_end_screen = &end_screen;
+}
+
+function end_screen()
+{
+	s = level.xerces_rounds;
+	if (isdefined(s.old_end_screen))
+		level [[s.old_end_screen]]();
+	if (!IS_TRUE(level._supress_survived_screen) || (!s.exfil && s.round <= GAME_ROUND_CAP))
+		return;
+	// Above the game's end-of-game scoreboard, which starts about y 258
+	title = "GAME OVER";
+	if (s.exfil)
+		title = "EXFIL";
+	foreach (player in GetPlayers())
+	{
+		if (s.exfil)
+		{
+			player lui_text(title, ALIGN_CENTER, 240, 150, 800, 44, (1, 1, 1), 1);
+			player lui_text("YOU WIN", ALIGN_CENTER, 240, 196, 800, 26, (0.5, 1, 0.5), 1);
+		}
+		else
+			player lui_text(title, ALIGN_CENTER, 240, 170, 800, 44, (1, 1, 1), 1);
+		player lui_text("YOU SURVIVED " + with_commas(s.round) + " ROUNDS", ALIGN_CENTER, 240, 224, 800, 26, (1, 1, 1), 1);
+	}
 }

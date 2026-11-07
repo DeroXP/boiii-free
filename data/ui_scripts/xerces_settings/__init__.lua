@@ -5,7 +5,9 @@
 -- the host's settings. In the front end this menu changes them; its button is
 -- in the Zombies lobbies (data/ui_scripts/frontend_menus). In a Zombies match
 -- each player's pause menu gets XERCES SETTINGS, showing the settings the
--- match uses, and the Pack-a-Punch wheel and coin flip when they are on.
+-- match uses, the Pack-a-Punch wheel and coin flip when they are on, SKIP
+-- ROUND on a round that can be skipped, and EXFIL and KEEP GOING while the
+-- round 999 vote is open.
 if type(LUI) ~= "table" or type(LUI.UIList) ~= "table" or __xercesSettingsInstalled then
   return
 end
@@ -21,6 +23,8 @@ end
 -- front end lists it
 local WHEEL_BIT = 128
 local COIN_FLIP_BIT = 256
+local ROUND_SKIPS_BIT = 512
+local ROUND_999_BIT = 4096
 local SETTINGS = {
   {
     dvar = "xerces_zm_maxAmmo",
@@ -77,6 +81,34 @@ local SETTINGS = {
     bit = 64,
     tab = "zombies",
     description = "Shows how many zombies are left in the round and how long it has taken, top left.",
+  },
+  {
+    dvar = "xerces_zm_randomLoadout",
+    name = "Random Loadout",
+    bit = 1024,
+    tab = "zombies",
+    description = "At the start of each round everyone's guns are swapped for two the mystery box picks.",
+  },
+  {
+    dvar = "xerces_zm_selfRevives",
+    name = "Self-Revives",
+    bit = 2048,
+    tab = "zombies",
+    description = "Everyone has one self-revive, back every 10 rounds. Down with one, hold Use to get up.",
+  },
+  {
+    dvar = "xerces_zm_roundSkips",
+    name = "Round Skips",
+    bit = ROUND_SKIPS_BIT,
+    tab = "rounds",
+    description = "Special rounds (dogs and the like) and prime-numbered rounds can be skipped from the pause menu for 400 points each, plus a Max Ammo on a special round. In co-op more than half must vote for it.",
+  },
+  {
+    dvar = "xerces_zm_round999",
+    name = "Rounds to 999",
+    bit = ROUND_999_BIT,
+    tab = "rounds",
+    description = "The round count goes past the game's 255. At round 999 everyone votes: exfil and win, or keep going with every perk, infinite ammo and infinite points.",
   },
   {
     dvar = "xerces_zm_wheel",
@@ -181,6 +213,7 @@ if Engine.GetCurrentMap() == "core_frontend" then
   end
   settingsSource("XercesSettingsZombies", "zombies")
   settingsSource("XercesSettingsGambling", "gambling")
+  settingsSource("XercesSettingsRounds", "rounds")
 
   DataSources.XercesSettingsTabs = DataSourceHelpers.ListSetup("XercesSettingsTabs", function(controller)
     local function tab(name, dataSourceName, title)
@@ -193,6 +226,7 @@ if Engine.GetCurrentMap() == "core_frontend" then
       { models = { tabIcon = CoD.buttonStrings.shoulderl }, properties = { m_mouseDisabled = true } },
       tab("ZOMBIES", "XercesSettingsZombies", "Zombies, when you host"),
       tab("GAMBLING", "XercesSettingsGambling", "Gambling, when you host"),
+      tab("ROUNDS", "XercesSettingsRounds", "Rounds, when you host"),
       { models = { tabIcon = CoD.buttonStrings.shoulderr }, properties = { m_mouseDisabled = true } },
     }
   end, true)
@@ -238,7 +272,7 @@ if Engine.GetCurrentMap() == "core_frontend" then
     local tabs = CoD.FE_TabBar.new(self, controller)
     tabs:setLeftRight(true, false, 0, 2496)
     tabs:setTopBottom(true, false, 84, 123)
-    tabs.Tabs.grid:setHorizontalCount(4)
+    tabs.Tabs.grid:setHorizontalCount(5)
     tabs.Tabs.grid:setDataSource("XercesSettingsTabs")
     self:addElement(tabs)
     self.TabList = tabs
@@ -295,8 +329,10 @@ if Engine.GetCurrentMap() == "core_frontend" then
 end
 
 -- In a match. The host's game opens a hidden HudElementText for each player
--- whose text is "XERCES <mask> <starting points> <round>"
--- (xerces_rounds.gsc data_text). The game sends a script menu's text as it
+-- whose text is "XERCES <mask> <starting points> <round> <skip> <vote>"
+-- (xerces_rounds.gsc data_text): skip is 1 on a prime round and 2 on a special
+-- round that can be skipped, vote is 1 while the round 999 vote is open. The
+-- game sends a script menu's text as it
 -- is, where a new LUI event name would be refused (docs/DESIGN.md 7.9). The
 -- wheel and coin flip go back to the game script as menu responses under
 -- StartMenu_Main, which the game's own handler ignores.
@@ -317,9 +353,19 @@ local function matchData()
       local text = ok and model and Engine.GetModel(model, "text")
       local value = text and Engine.GetModelValue(text)
       if type(value) == "string" then
-        local mask, points, round = string.match(value, "^XERCES (%d+) (%d+) (%d+)$")
+        -- A host on an older Xerces sends the first three only
+        local mask, points, round, skip, vote = string.match(value, "^XERCES (%d+) (%d+) (%d+) (%d+) (%d+)$")
+        if not mask then
+          mask, points, round = string.match(value, "^XERCES (%d+) (%d+) (%d+)$")
+        end
         if mask then
-          found = { mask = tonumber(mask), points = tonumber(points), round = tonumber(round) }
+          found = {
+            mask = tonumber(mask),
+            points = tonumber(points),
+            round = tonumber(round),
+            skip = tonumber(skip or "0"),
+            vote = tonumber(vote or "0"),
+          }
           return
         end
       end
@@ -560,6 +606,15 @@ local function openCoinFlip(self, element, controller, param, menu)
   OpenPopup(self, "XercesCoinFlipMenu", controller)
 end
 
+-- A vote that the game script counts: the pause menu closes first, as for
+-- the wheel
+local function sendVote(response)
+  return function(self, element, controller, param, menu)
+    StartMenuGoBack(menu, controller)
+    Engine.SendMenuResponse(controller, "StartMenu_Main", response)
+  end
+end
+
 -- The pause list keeps the height it was made with, so an added row would
 -- need scrolling. BOIII sizes the stock list from BoiiiStartMenuOptionCount
 -- right after it is filled (data/ui_scripts/party); a mod's own list made
@@ -608,6 +663,13 @@ local function add_entries(controller, list)
   end
   if hasBit(match.mask, COIN_FLIP_BIT) then
     table.insert(entries, { id = "xercesCoinFlip", text = "^3COIN FLIP", action = openCoinFlip })
+  end
+  if hasBit(match.mask, ROUND_SKIPS_BIT) and match.skip > 0 then
+    table.insert(entries, { id = "xercesSkip", text = "^3SKIP ROUND", action = sendVote("xerces_skip") })
+  end
+  if hasBit(match.mask, ROUND_999_BIT) and match.vote == 1 then
+    table.insert(entries, { id = "xercesExfil", text = "^3EXFIL", action = sendVote("xerces_exfil") })
+    table.insert(entries, { id = "xercesKeepGoing", text = "^3KEEP GOING", action = sendVote("xerces_keep") })
   end
 
   local at = #items + 1

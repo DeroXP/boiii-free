@@ -1331,6 +1331,85 @@ it turns up in a player's crash report.
 Not tested yet: the refund under Shopping Free, rounds past 255, an ammo mod
 without an icon, and everything that needs a second player (KNOWN_ISSUES.md).
 
+### Zombies round settings, stage 3 (2026-11-07)
+
+DESIGN.md 7.9 stage 3 (round skips, random loadouts, self-revives, rounds to
+999), on `launcher/round-system`. Run by Claude with your go-ahead ("you can
+start now") on Kino der Toten, through
+`C:\Users\Ginld\XercesDev\bench\20261107-rounds\stage3-run.ps1` (no mods) and
+`soak3-run.ps1` (your stack). Settings on as launcher dvars: Round HUD, Round
+Skips, Random Loadout, Self-Revives and Rounds to 999. A test-only game script
+(`probe5\` without mods, `probe6\` with your stack, copied into the worktree's
+`data\` for each run and removed after it) kept the test player standing,
+reported as game messages, forced a dog round (`level.next_dog_round`), downed
+the player, and moved the game's round to its 255 cap and Xerces' count to 998
+for the last vote. In the match only keys were used: Down and Enter on the pause
+menu by row count, and the use key held 2.3 s for the self-revive. Lua ran from
+the console only in the lobby. Captures are of the game window alone
+(`capture-game-dpi.ps1`), so they cannot show anything else on your screen.
+
+- [x] Lobby, without mods: XERCES SETTINGS has ZOMBIES (now with Random Loadout
+      and Self-Revives), GAMBLING and a ROUNDS tab with Round Skips and Rounds
+      to 999, each with its description.
+- [x] Round skips, without mods. Round 2 (prime): "PRIME ROUND 2: SKIP IT FROM
+      THE PAUSE MENU FOR 400 POINTS" under the HUD, SKIP ROUND after XERCES
+      SETTINGS in the pause menu; Enter on it ended the round with exactly 400
+      points and no Max Ammo dropped. Round 3 (prime) through the menu response:
+      the same. Round 4, a dog round: "SPECIAL ROUND: ... AND A MAX AMMO"; Enter
+      on SKIP ROUND once its dogs were out ended the round with 400 points and
+      the round's own Max Ammo dropped ("ROUND SKIPPED: 400 POINTS, AND THE
+      ROUND'S MAX AMMO"). Round 6 (neither): the request was refused with
+      nothing given.
+- [x] Random loadout, without mods: from round 1 every round swapped both guns
+      for two box guns (among them a Ray Gun, the Thundergun, rifles, SMGs,
+      shotguns, a launcher), different each round.
+- [x] Self-revives, without mods: the HUD's SELF-REVIVES 1; downed (solo, no
+      Quick Revive) the game went on, HOLD USE TO REVIVE YOURSELF showed, and
+      holding use got the player up with 0 left; round 10 put it back to 1.
+- [x] Rounds to 999, without mods: with the game's round at 255 and Xerces'
+      count at 999 the HUD shows ROUND 999 (the game's own chalk stays at 255),
+      "ROUND 999: EXFIL OR KEEP GOING? VOTE IN THE PAUSE MENU", and EXFIL and
+      KEEP GOING in the pause menu. KEEP GOING: 8 of 8 perks, a full clip, the
+      score at 4,194,303 and back there after spending. A game over then shows
+      GAME OVER and YOU SURVIVED 999 ROUNDS above the game's scoreboard (the
+      game's own would say 255). EXFIL (a second run): the game ended with
+      EXFIL, YOU WIN and YOU SURVIVED 999 ROUNDS.
+- [x] Your stack (PEGASUS on top), keys only, 8 rounds: DS4C's pause menu reads
+      Resume, DS4C Camos, DS4C Mod Options, XERCES SETTINGS, then SKIP ROUND on
+      a round that can be skipped (EXFIL and KEEP GOING at round 999), PEGASUS
+      MENU, Restart Level, End Game, all in view. Down and Enter on SKIP ROUND
+      skipped rounds 2, 3 and 5 (prime) and a dog round at 7 (special), 400
+      points each. The self-revive got the player up (a round that started while
+      they were down swapped their guns once they were up). Every round gave two
+      box guns, with DS4C's attachments on them. At round 999 KEEP GOING held
+      the score at 4,194,303. No crash, no Lua error. DS4C's copy of
+      `_zm_weapons` printed a script error ("pair 'undefined' and 'bo6'") when
+      the random loadout handed over a gun; the gun came as usual.
+- [x] No script error from Xerces' scripts and no crash in the runs without mods
+      that pressed keys only.
+
+Found and fixed during these runs:
+
+- A dog in its spawn effect is shielded, so a skip right after the dogs came
+  could find nothing to kill, leave out `last_ai_down`, and the dog round never
+  ended. The skip now waits for an enemy it can kill, sends `last_ai_down` with
+  it and kills the rest as their shields drop.
+- The end screen's ROUNDS line sat on the game's scoreboard; it is above it now.
+- With your stack the random loadout gave one gun a round, Ray Gun Mark II and
+  the Thundergun in turn: DS4C orders the box's own pick so that its first gun
+  is always the same, and the second pick matched the first. The two guns are
+  now drawn evenly from the guns the box would give the player.
+- A skip that had to wait more than 30 s for enemies left the votes counted with
+  no skip; the votes are cleared then, with a notice to vote again.
+
+One run without mods that read the pause menu through Lua from the console
+closed silently in the match (no crash dump), as the crashed stack runs of stage
+2 did; the runs after it press keys only.
+
+Not tested yet: everything that needs a second player (votes, joining, a
+self-revive while others are up), a map other than Kino der Toten, and rounds
+reached by playing past 255.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The
