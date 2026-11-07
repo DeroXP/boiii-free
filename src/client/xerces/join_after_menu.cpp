@@ -8,9 +8,10 @@
 // Storage_SerializeTransferData, under CL_CheckForResend, as the handshake
 // sent the player's stats, which the game had not loaded yet. A "connect"
 // typed at the main menu joined the same host. The launcher now passes
-// "+set xerces_join <address>"; this waits for the main menu (the check the
-// startup timing uses, gpu::on_main_menu), and a few seconds more, then runs
-// "connect <address>" as the console does, once.
+// "+set xerces_join <address>"; this reads the address from the command line
+// (as mod_stack.cpp reads fs_extramods), waits for the main menu (the check
+// the startup timing uses, gpu::on_main_menu), and a few seconds more, then
+// runs "connect <address>" as the console does, once.
 
 #include "runtime.hpp"
 
@@ -21,6 +22,8 @@
 #include <game/utils.hpp>
 
 #include <loader/component_loader.hpp>
+
+#include <utils/string.hpp>
 
 #include <xerces_core/launch.hpp>
 
@@ -35,19 +38,32 @@ constexpr std::chrono::milliseconds settle = 3s;
 // "connect" in the console).
 constexpr std::chrono::minutes give_up = 10min;
 
+std::string address{}; // from the command line; "" for a launch without a join
 std::chrono::steady_clock::time_point started{};
 std::optional<std::chrono::steady_clock::time_point> menu_since{};
+
+// The value after the last "+set xerces_join" on the command line, or "".
+std::string command_line_address() {
+  int32_t count = 0;
+  LPWSTR *const argv = CommandLineToArgvW(GetCommandLineW(), &count);
+  std::string result;
+  for (int32_t i = 0; argv && i + 2 < count; ++i) {
+    if (_wcsicmp(argv[i], L"+set") == 0 &&
+        _wcsicmp(argv[i + 1], L"xerces_join") == 0) {
+      result = utils::string::convert(argv[i + 2]);
+    }
+  }
+  LocalFree(argv);
+  return result;
+}
 
 // The main thread, every 100 ms, until the join has run or is dropped.
 bool poll() {
   const auto now = std::chrono::steady_clock::now();
   if (now - started > give_up) {
-    if (const auto value = game::get_dvar_string(dvar_name);
-        value && !value->empty()) {
-      xerces_runtime::log_warn("xerces.join.dropped",
-                               "no main menu in 10 minutes: the join the "
-                               "launcher asked for is dropped");
-    }
+    xerces_runtime::log_warn("xerces.join.dropped",
+                             "no main menu in 10 minutes: the join the "
+                             "launcher asked for is dropped");
     return scheduler::cond_end;
   }
   if (!gpu::on_main_menu()) {
@@ -62,11 +78,6 @@ bool poll() {
     return scheduler::cond_continue;
   }
 
-  const auto value = game::get_dvar_string(dvar_name);
-  const std::string address = value ? std::string(*value) : std::string();
-  if (address.empty()) {
-    return scheduler::cond_end; // a launch without a join
-  }
   // The launcher checked it, but the value goes into a console command.
   if (!xerces_core::valid_server_address(address)) {
     xerces_runtime::log_warn("xerces.join.invalid",
@@ -92,10 +103,21 @@ public:
     if (!game::is_client()) {
       return;
     }
-    game::register_dvar_string(
-        dvar_name, "", game::DvarFlags{},
-        "The server the launcher's Join asked for; joined once the main menu "
-        "is up.");
+    address = command_line_address();
+    // On the main thread, as the other components register theirs: the
+    // engine's dvars are not set up yet in post_unpack (registering here
+    // crashed at start, 2026-11-07).
+    scheduler::once(
+        [] {
+          game::register_dvar_string(
+              dvar_name, address.c_str(), game::dvarFlags_e::NONE,
+              "The server the launcher's Join asked for; joined once the "
+              "main menu is up.");
+        },
+        scheduler::main);
+    if (address.empty()) {
+      return;
+    }
     started = std::chrono::steady_clock::now();
     scheduler::schedule(poll, scheduler::main, 100ms);
   }

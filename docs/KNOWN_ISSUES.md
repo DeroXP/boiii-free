@@ -33,9 +33,10 @@ to report these again, but tell us if you see them somewhere else or worse.
   two mods share). The Zombies camos in the weapon kits are tagged PEGASUS,
   whose copies of those icons win. In a match you get DS4C's pause menu, and
   PEGASUS's own menu is under "PEGASUS MENU" there.
-- **PEGASUS asks for unsafe Lua.** In a match the game asks whether to allow
-  unsafe Lua functions (file access): PEGASUS tries to open a file. No keeps it
-  blocked; the match played normally in our tests that way.
+- **PEGASUS asks for unsafe Lua.** As the main menu loads and in a match, the
+  game asks whether to allow unsafe Lua functions (file access): PEGASUS tries
+  to open a file. The menu waits until you answer. No keeps it blocked; the
+  menus and the match played normally in our tests that way.
 - **A mod's menu file in the lobby.** When a mod's copy of a Lua file the menus
   and the lobby share fails in the lobby (Ascendance's), Xerces uses the game's
   own copy there and the mod's copy in the menus, and the game log says so
@@ -85,16 +86,17 @@ to report these again, but tell us if you see them somewhere else or worse.
   turn its VPN off. Found there and fixed in this build: Join in Servers started
   the game with the join already in it, and the joining game crashed about a
   minute and a half later, as it sent its stats before it had loaded them; the
-  game now joins once its main menu is up. Not tried yet: the router's port
-  through UPnP, Join in Servers since that fix, the dialogs that name a mod or
-  map you lack, and the network password. Two limits are known: while a lobby is
-  open, anyone who can reach it can join, and a password is checked on the joins
-  Xerces handles but not on the game's own lobby join, so close the lobby when
-  you are done. Whether the router's port closes by itself when you leave the
-  lobby for the main menu is not seen yet; closing the lobby or quitting the
-  game closes it. After a crash with the lobby open the router keeps forwarding
-  the port until the lobby is opened and closed again (README.txt, Playing with
-  other testers).
+  game now joins a few seconds after its main menu is up (past the title
+  screen), which was checked on one PC against an address nobody answered. Not
+  tried yet: the router's port through UPnP, Join in Servers since that fix, the
+  dialogs that name a mod or map you lack, and the network password. Two limits
+  are known: while a lobby is open, anyone who can reach it can join, and a
+  password is checked on the joins Xerces handles but not on the game's own
+  lobby join, so close the lobby when you are done. Whether the router's port
+  closes by itself when you leave the lobby for the main menu is not seen yet;
+  closing the lobby or quitting the game closes it. After a crash with the lobby
+  open the router keeps forwarding the port until the lobby is opened and closed
+  again (README.txt, Playing with other testers).
 - **Multiplayer with Zombies mods can close the game.** On a tester's PC with
   four Zombies mods loaded, switching the main menu to Multiplayer ended with
   "Could not allocate asset - increase XASSET_ENTRY_POOL_SIZE" and the game

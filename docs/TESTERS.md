@@ -140,12 +140,13 @@ If you try it, tell us how it went.
   "Xerces lobby (Black Ops III)" entry in the router's settings.
 - **Joining.** In Xerces, Servers, type the host's address and port, for example
   `192.168.1.20:27017`, then Join vanilla or Join modded. Xerces starts the
-  game, and the game joins once its main menu is up (with big mods that takes a
-  minute or so). The host decides which mods load: your game loads the host's
-  mods, in the host's order, if you have them. A mod or map you lack is named in
-  a dialog that opens its Workshop page in Steam, so you can subscribe and join
-  again; nothing is downloaded from the host. If the game already runs, close it
-  first, or type `connect <address>` in the game's console at the main menu.
+  game; press a key at its title screen, and the game joins a few seconds after
+  its main menu is up (with big mods the menu takes a minute or so). The host
+  decides which mods load: your game loads the host's mods, in the host's order,
+  if you have them. A mod or map you lack is named in a dialog that opens its
+  Workshop page in Steam, so you can subscribe and join again; nothing is
+  downloaded from the host. If the game already runs, close it first, or type
+  `connect <address>` in the game's console at the main menu.
 - **Turn off a VPN to host.** With a VPN on (NordVPN and the like), the address
   you share is the VPN's, not your router's, and your game's answers leave
   through the VPN, so nobody can join. Turn it off while you host.

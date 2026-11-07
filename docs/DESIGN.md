@@ -2170,14 +2170,17 @@ since 2026-11-05); 11.3 and 11.4 still apply later. The two-PC test is
   is as fresh as the plan file.
 - **Join from Servers waits for the main menu** (since 2026-11-07,
   `src/client/xerces/join_after_menu.cpp`). The launcher passes
-  `+set xerces_join <address>`, and the game runs `connect <address>` 3 s after
-  its main menu first shows (`gpu::on_main_menu`), once; with no menu in 10
-  minutes it drops the join. Before, the launcher passed `+connect`, which the
-  engine runs as it starts: on a second PC with a new profile the joining game
-  crashed three times in a row about 90 s in, in `Storage_SerializeTransferData`
-  under `CL_CheckForResend` (a null read as the handshake sent the player's
-  stats), while `connect` typed at its main menu joined the same host. Logs and
-  bundles hide the address after `xerces_join` as after `+connect`.
+  `+set xerces_join <address>`; the client reads it from the command line (as
+  `mod_stack.cpp` reads `fs_extramods`; the dvar is registered on the main
+  thread, since registering it in `post_unpack` crashed at start) and runs
+  `connect <address>` 3 s after its main menu first shows (`gpu::on_main_menu`,
+  which is after the title screen's key press), once; with no menu in 10 minutes
+  it drops the join. Before, the launcher passed `+connect`, which the engine
+  runs as it starts: on a second PC with a new profile the joining game crashed
+  three times in a row about 90 s in, in `Storage_SerializeTransferData` under
+  `CL_CheckForResend` (a null read as the handshake sent the player's stats),
+  while `connect` typed at its main menu joined the same host. Logs and bundles
+  hide the address after `xerces_join` as after `+connect`.
 - **The joiner's check** (`src/client/xerces/join.cpp`,
   `xerces_core/join_check.hpp`). Before the host's mods load, everything the
   host runs that is missing here (main mod, stacked mods, custom map) is named

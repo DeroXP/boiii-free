@@ -1151,6 +1151,35 @@ without a "press a key" prompt: a test script that waited for one left the
 player standing until the zombies ended the game, so it now pauses as soon as
 the player is in.
 
+### Join from Servers after the main menu (2026-11-07)
+
+A tester's game crashed three times in a row joining from Servers (crash reports
+on the backend: a null read in `Storage_SerializeTransferData` under
+`CL_CheckForResend`, about 90 s after launch), while `connect` typed at the main
+menu joined the same host. Built on `launcher/join-after-menu` (DESIGN.md
+11.10). Run by Claude with your go-ahead ("Yes, run it"), from the worktree
+build through the test home in
+`C:\Users\Ginld\XercesDev\bench\20261106-modlabels`, with
+`+set xerces_join 203.0.113.7:27017` (a documentation address nothing answers)
+passed through the home's `dvars` setting: the same argument Join now passes
+(`C:\Users\Ginld\XercesDev\bench\20261107-join\join-run.ps1`).
+
+- [x] The first build crashed 8 s in, in the component's `post_unpack`: it
+      registered the dvar before the engine's dvars exist. Fixed: the dvar is
+      registered on the main thread and the address read from the command line.
+- [x] Without mods: the command line had `+set xerces_join` and no `+connect`.
+      The game waited on the title screen (no main menu until a key) and joined
+      (`xerces.join.connect` in the game log) 3.8 s after Enter; the console
+      said "Connect failed: No response from server", and the game stayed at the
+      main menu. No crash dump in over 3 minutes.
+- [x] Your stack (PEGASUS on top, 7 mods): PEGASUS's unsafe-Lua prompt opened as
+      the main menu loaded and held it until answered (No); the join came 3.6 s
+      later, the game showed its "Connect failed" toast and stayed at the menu.
+      No crash dump in over 3 minutes.
+- [ ] A join to a real host from Servers, on two PCs. Only a host that answers
+      reaches the handshake where the tester's game crashed, so this is the
+      check that shows the crash is gone.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The
