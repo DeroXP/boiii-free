@@ -24,6 +24,18 @@ to report these again, but tell us if you see them somewhere else or worse.
   higher mod's list wins, but each gun's camo looks come from whichever mod has
   that gun, so a camo picked from DS4C's list can show one of Ascendance's on
   some guns (seen on the Vesper). Use one camo mod at a time if that matters.
+- **PEGASUS only runs as the top mod.** PEGASUS checks as the game starts that
+  it is the top mod and closes the game otherwise, which ends in a crash. That
+  check is the mod's own and Xerces leaves it alone: the Mods screen warns and
+  offers "Move to the top". With PEGASUS on top and DS4C below it, PEGASUS's
+  menus replace DS4C's, so DS4C's PROGRESSION entry in the Zombies menu is gone
+  and the main menu's Multiplayer button reads "Legacy camos" (a DS4C text the
+  two mods share). The Zombies camos in the weapon kits are tagged PEGASUS,
+  whose copies of those icons win. In a match you get DS4C's pause menu, and
+  PEGASUS's own menu is under "PEGASUS MENU" there.
+- **PEGASUS asks for unsafe Lua.** In a match the game asks whether to allow
+  unsafe Lua functions (file access): PEGASUS tries to open a file. No keeps it
+  blocked; the match played normally in our tests that way.
 - **A mod's menu file in the lobby.** When a mod's copy of a Lua file the menus
   and the lobby share fails in the lobby (Ascendance's), Xerces uses the game's
   own copy there and the mod's copy in the menus, and the game log says so

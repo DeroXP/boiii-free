@@ -1089,6 +1089,68 @@ Ascendance also ships per-gun camo assets, and where only Ascendance has a gun's
 camo asset its looks follow Ascendance's numbering (the research of 2026-11-06
 predicted this; KNOWN_ISSUES.md).
 
+### PEGASUS and the mod menu entry (2026-11-07)
+
+You reported a crash with PEGASUS (2804432292) in your stack (crash report
+6dce0b83 on the backend: an access violation reading address 0 at
+BlackOps3.exe+0x15CC412CF, 5 s after the front end). Reproduced with your
+go-ahead; the crash needs Enter on the start screen.
+
+- **Why.** PEGASUS's own `ui/uieditor/menus/lobby/lobby.lua` compares
+  `Engine.DvarString(nil, "fs_game")` with 2804432292, 3674642576, 3765563609
+  and "pegasus" and runs `Engine.Exec(c, "quit")` otherwise. Below DS4C the game
+  quits while it builds the menu and crashes doing so. PEGASUS alone and PEGASUS
+  on top of DS4C reach the menu. The check is the mod author's, so Xerces leaves
+  it alone (no faked `fs_game`).
+- **PEGASUS on top of your stack** (0.1.0-beta.4, PEGASUS, DS4C, Classic
+  Viewmodel FOV, Hyperdimension Neptunia, im_oxo QOL, Avali, Ascendance; test
+  home in `C:\Users\Ginld\XercesDev\bench\20261106-modlabels`): menus, weapon
+  kits and a Cheese Cube match, no crash. The front end is PEGASUS's (DS4C's
+  PROGRESSION entry is gone), the main menu's Multiplayer button reads "Legacy
+  camos" (DS4C's text), the Zombies camos in the weapon kits are tagged PEGASUS,
+  and the match has PEGASUS's HUD with DS4C's pause menu.
+- **PEGASUS's menu.** Its button is in its own copy of
+  `ui/uieditor/widgets/startmenu/startmenu_gameoptions_zm.lua` (list
+  `ModStartMenuGameOptions`, "^9MOD OPTIONS" ->
+  `NavigateToMenu(..., "StartMenu_ModSettings_Main", ...)`). DS4C's pause menu
+  (`t7startmenu_main.lua`, tabs `StartMenuTabs_Death`) uses its own
+  `StartMenu_GameOptions_ZM_Death` with list `StartMenuGameOptions_Death`, so
+  the button never shows. Avali ships the same template ("^6Character Menu"),
+  hidden the same way under DS4C. Opened with a test `lua_exec` file
+  (`NavigateToMenu` from the open `StartMenu_Main`, a child of
+  `LUI.roots.UIRoot0`; BO3 has no `LUI.FlowManager`), PEGASUS's menu worked:
+  Camo and Character tabs, and Back returned to the pause menu.
+
+Built on `launcher/mod-menu`: `data/ui_scripts/mod_menu` (DESIGN.md 7.6) and the
+planner's `plan.stack.top_only` warning with a "Move to the top" fix (DESIGN.md
+5.3 step 4). Run by Claude with your go-ahead ("Yes, I'm not playing"), from the
+worktree build through the same test home:
+
+- [x] PEGASUS on top of your stack: "PEGASUS MENU" between Mod Options and
+      Restart Level in DS4C's pause menu, all six rows on screen; it opens
+      PEGASUS's Camo and Character menu, Back returns to the pause menu, and the
+      entry shows once when the pause menu opens again.
+- [x] Your stack without PEGASUS (DS4C on top): "AVALI MENU" in DS4C's pause
+      menu opens Avali's Character Select; Back returns.
+- [x] PEGASUS alone: its own pause menu with its own "MOD OPTIONS" and no added
+      entry.
+- [x] No Lua error in the console in any of the three; no crash dump.
+- [x] Launcher, test home with DS4C above PEGASUS: Home counts 1 warning; the
+      Mods screen shows the warning under PEGASUS in the load order and in its
+      details, with "Move to the top". Clicking it put PEGASUS first (saved in
+      the test home's `launcher.json`), the plan showed 0 warnings, and the
+      status line read "[PZM] PEGASUS v0.2.3.9 moved to the top".
+- [x] `xerces_cli plan resolve` with copies of the two mods' `workshop.json`:
+      the warning and `fix: move_to_top ws.2804432292` with DS4C on top, nothing
+      with PEGASUS on top.
+
+In the matches with PEGASUS, the game asked whether to allow unsafe Lua
+functions (PEGASUS opens a file); Claude answered No each time, which keeps them
+blocked, and the match played. With DS4C on top and no PEGASUS the match starts
+without a "press a key" prompt: a test script that waited for one left the
+player standing until the zombies ended the game, so it now pauses as soon as
+the player is in.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The

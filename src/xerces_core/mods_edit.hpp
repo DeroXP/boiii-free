@@ -133,8 +133,9 @@ mods_attribute(const plan &resolved,
 // - allow_conflict on both mods of the pair (the planner files it under the
 //   smaller id), also on one that is in the plan only as a dependency;
 // - reset_setting on the mod whose stored value it drops, a dependency too;
-// - the rest filed under the mod (remove, reorder, unpin, ...) only while it
-//   is enabled or is the plan's map, since they act on the load order;
+// - the rest filed under the mod (remove, reorder, move_to_top, unpin, ...)
+//   only while it is enabled or is the plan's map, since they act on the load
+//   order;
 // - a missing, pinned or outdated dependency's install, update and unpin,
 //   which the planner files under the dependency's id, on every mod in the
 //   plan that needs it, install and update with this mod's own range.

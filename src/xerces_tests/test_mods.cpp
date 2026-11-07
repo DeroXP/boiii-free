@@ -231,6 +231,29 @@ TEST_CASE("mods: which mod offers which fix") {
                 "lib.gone", "^2"));
 }
 
+TEST_CASE("mods: a mod that must be the top mod offers to move there") {
+  // PEGASUS (Workshop 2804432292) quits the game unless it is fs_game.
+  installed_content pegasus = content("ws.2804432292", "PEGASUS", "2804432292");
+  pegasus.info.workshop_id = 2804432292;
+  pegasus.info.legacy = true;
+  pegasus.content_hash = "sha256:" + std::string(64, '0');
+  const std::vector<installed_content> catalog = {
+      declared(R"("id":"aa.mod","version":"1.0.0")"), pegasus};
+  mode_profile profile;
+  profile.mods = {"aa.mod", "ws.2804432292"};
+  const plan below = resolve_plan(catalog, request_of(profile));
+  CHECK(has_fix(mods_fixes_for(below, "ws.2804432292", true, &catalog[1]),
+                "move_to_top", "ws.2804432292", ""));
+  CHECK(!has_fix(mods_fixes_for(below, "aa.mod", true, &catalog[0]),
+                 "move_to_top", "ws.2804432292", ""));
+
+  // Moved to the top, the warning and the fix are gone.
+  CHECK(mods_move(profile, 1, 0));
+  const plan fixed = resolve_plan(catalog, request_of(profile));
+  CHECK(!fixed.diags.has("plan.stack.top_only"));
+  CHECK(mods_fixes_for(fixed, "ws.2804432292", true, &catalog[1]).empty());
+}
+
 TEST_CASE("mods: a hand edit detaches the pack and saves positions") {
   launcher_config config = packed_config();
   mode_profile &zm = profile_for(config, "zm");

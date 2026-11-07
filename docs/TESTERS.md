@@ -59,6 +59,10 @@ hash, sent with the link, shows that the zip is the one we made.
   Create-a-Class) and in DS4C's camo and character screens. Only one mod's camo
   list and character list load at a time, so the tag names the mod whose list
   you are seeing.
+- **A mod's own menu in a match.** Some mods (PEGASUS, the Avali character pack)
+  open their menu from a button in their own pause menu, which another mod's
+  pause menu (DS4C's) leaves out. Xerces then adds an entry named after the mod,
+  such as "PEGASUS MENU", to the pause menu you get.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.

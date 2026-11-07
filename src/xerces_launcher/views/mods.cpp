@@ -1357,6 +1357,8 @@ private:
       label = owner_->tr("Remove from the load order");
     } else if (fix.kind == "reorder" && enabled(fix.detail)) {
       label = owner_->tr("Move below") + " " + name_of(fix.detail);
+    } else if (fix.kind == "move_to_top") {
+      label = owner_->tr("Move to the top");
     } else if (fix.kind == "allow_conflict") {
       // Named: a mod can conflict with more than one other.
       label = owner_->tr("Allow the conflict with") + " " +
@@ -1598,6 +1600,17 @@ private:
             return name + " " + owner_->tr("moved below") + " " +
                    name_of(fix.detail);
           });
+    } else if (fix.kind == "move_to_top") {
+      // The mod closes the game unless it is the top mod (fs_game).
+      edit(
+          [&](xc::mode_profile &p) {
+            const auto from = std::ranges::find(p.mods, fix.id);
+            if (from == p.mods.end() || from == p.mods.begin()) {
+              return false;
+            }
+            return xc::mods_move(p, std::size_t(from - p.mods.begin()), 0);
+          },
+          [&] { return name + " " + owner_->tr("moved to the top"); });
     } else if (fix.kind == "unpin") {
       edit([&](xc::mode_profile &p) { return xc::mods_unpin(p, fix.id); },
            [&] { return name + " " + owner_->tr("is no longer pinned"); });

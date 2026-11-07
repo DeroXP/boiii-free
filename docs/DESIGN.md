@@ -652,7 +652,12 @@ All in `xerces_core`:
 4. Validate against mod-stack's limits: every stacked mod's folder name or
    Workshop id is at most 37 characters (mod-stack skips longer ones, because
    its aliases must stay under 60 characters) and has no comma; a main mod is
-   set.
+   set. A Workshop mod known to run only as the main mod gets a warning
+   (`plan.stack.top_only`) with a "Move to the top" fix (`move_to_top`) when it
+   is stacked under another (built 2026-11-07). PEGASUS (2804432292) is the one
+   known: its own `ui/uieditor/menus/lobby/lobby.lua` compares `fs_game` with
+   its ids and runs `quit` otherwise, and the game then crashes building the
+   menu. The check is the mod's own, so Xerces leaves it alone.
 5. Budget: count the zones the plan adds from the files actually present (each
    stacked zone, its language variant and `_patch` variant) on top of the stock
    zones of the plan's mode and map, against the engine's 64-slot table (63
@@ -1531,6 +1536,22 @@ live entry's zone; "" for the game's own, a stand-in or an asset not loaded) and
 `game.getmodtitle(id)`. Only one mod's camo list and character roster load per
 stack (6.3), so the labels name the mod whose copy won; tabs per mod are not
 built.
+
+Mod menu entry (built 2026-11-07): mods made from the common mod-settings
+template (PEGASUS, the Avali character pack) ship a menu,
+`StartMenu_ModSettings_Main`, and open it from a button in their own copy of the
+pause menu's game options list (data source `ModStartMenuGameOptions`, in
+`ui/uieditor/widgets/startmenu/startmenu_gameoptions_zm.lua`). A mod with its
+own pause menu leaves that list out, and the button with it: DS4C's uses
+`StartMenuGameOptions_Death`. `data/ui_scripts/mod_menu` then adds `<MOD> MENU`
+to the pause list in use (any data source named `*StartMenuGameOptions*` but the
+template's own), above Restart and End Game. It opens the menu the way the mod's
+own button does (`NavigateToMenu`), and Back returns to the pause menu. The name
+is the Workshop title of the mod whose copy of the menu's rawfile the game uses
+(`game.getassetowner`), without colour codes, `[tags]` and a trailing version,
+up to the first ":" or " - " ("^3[^5PZM^3] ^9PEGASUS^7 v0.2.3.9" gives PEGASUS,
+"Avali: Solspace - Character Pack" gives AVALI); "MOD MENU" when more than 16
+characters are left. Zombies matches only.
 
 ### 7.7 Rename
 

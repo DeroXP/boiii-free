@@ -202,6 +202,29 @@ TEST_CASE("planner: mod-stack's limits on stacked mods") {
   CHECK(result.diags.has("plan.stack.comma"));
 }
 
+TEST_CASE("planner: a mod that only runs as the top mod is named below it") {
+  // PEGASUS (Workshop 2804432292) quits the game unless it is fs_game.
+  installed_content pegasus = make(mod("ws.2804432292", "0.0.0"), "2804432292");
+  pegasus.info.workshop_id = 2804432292;
+  pegasus.info.legacy = true;
+  const std::vector<installed_content> catalog = {make(mod("a.mod", "1.0.0")),
+                                                  pegasus};
+  const plan below =
+      resolve_plan(catalog, request_for({"a.mod", "ws.2804432292"}));
+  CHECK(below.ok()); // a warning: the player may still launch
+  CHECK(below.diags.has("plan.stack.top_only"));
+  CHECK(std::ranges::any_of(below.fixes, [](const fix_action &f) {
+    return f.kind == "move_to_top" && f.id == "ws.2804432292" &&
+           f.detail.empty();
+  }));
+
+  const plan on_top =
+      resolve_plan(catalog, request_for({"ws.2804432292", "a.mod"}));
+  CHECK(on_top.ok());
+  CHECK(!on_top.diags.has("plan.stack.top_only"));
+  CHECK(on_top.fixes.empty());
+}
+
 TEST_CASE("planner: the zone budget counts the files that are present") {
   const std::vector<installed_content> catalog = {
       make(mod("a.mod", "1.0.0"), "a.mod",

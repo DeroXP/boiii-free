@@ -160,8 +160,9 @@ struct zone_memory_report {
 
 // Something the player can do to fix a problem (9.4).
 struct fix_action {
-  // install, update, unpin, remove, reorder, allow_conflict (detail: the
-  // other mod), reset_setting (detail: the setting's key), update_xerces
+  // install, update, unpin, remove, reorder (id below detail), move_to_top,
+  // allow_conflict (detail: the other mod), reset_setting (detail: the
+  // setting's key), update_xerces
   std::string kind;
   std::string id;
   std::string detail;

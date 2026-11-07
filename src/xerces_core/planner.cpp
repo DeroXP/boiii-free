@@ -18,6 +18,20 @@ using catalog_index =
 
 constexpr std::size_t search_step_budget = 100000;
 
+// Workshop mods that close the game unless they are the top mod (fs_game).
+// PEGASUS's ui/uieditor/menus/lobby/lobby.lua compares fs_game with its own
+// ids and runs "quit" otherwise, and the game then crashes building the menu
+// (seen on 2026-11-07; its check also accepts 3674642576, 3765563609 and the
+// folder name "pegasus", copies of it not installed here). The check is the
+// mod's own: Xerces leaves it alone and tells the player instead.
+constexpr std::uint64_t top_only_workshop_ids[] = {2804432292};
+
+bool top_only(const manifest &info) {
+  return info.workshop_id &&
+         std::ranges::find(top_only_workshop_ids, *info.workshop_id) !=
+             std::end(top_only_workshop_ids);
+}
+
 catalog_index index_catalog(const std::vector<installed_content> &catalog) {
   catalog_index index;
   for (const auto &item : catalog) {
@@ -1192,6 +1206,14 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
       diags.error("plan.stack.comma", "",
                   entry.name + "'s folder name contains a comma, which "
                                "fs_extramods cannot carry.");
+    }
+    if (top_only(selected.at(entry.id)->info)) {
+      diags.warning("plan.stack.top_only", "/mods",
+                    entry.name +
+                        " closes the game when it is not the top mod: the "
+                        "mod checks that itself as the game starts. Move it "
+                        "to the top.");
+      out.fixes.push_back({"move_to_top", entry.id, ""});
     }
   }
 
