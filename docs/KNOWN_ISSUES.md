@@ -19,6 +19,15 @@ to report these again, but tell us if you see them somewhere else or worse.
   played that way in our tests, twice each, plus one smaller map. Those five
   runs are all the testing that setting has had. Turn it off again if the game
   crashes with it on.
+- **Two camo mods: a camo can look like another.** DS4C and Ascendance both
+  replace the camo list and use the same camo numbers for different camos. The
+  higher mod's list wins, but each gun's camo looks come from whichever mod has
+  that gun, so a camo picked from DS4C's list can show one of Ascendance's on
+  some guns (seen on the Vesper). Use one camo mod at a time if that matters.
+- **A mod's menu file in the lobby.** When a mod's copy of a Lua file the menus
+  and the lobby share fails in the lobby (Ascendance's), Xerces uses the game's
+  own copy there and the mod's copy in the menus, and the game log says so
+  (`lua.lobby.game_copy`). Tell us if a mod's lobby behaves differently.
 - **DS4C prints script errors on custom maps.** Lines such as "undefined is not
   a field object" or "has unmatching types" fill the console while you play. The
   game keeps running. They come from DS4C's scripts.
@@ -43,9 +52,9 @@ to report these again, but tell us if you see them somewhere else or worse.
   has not met other hardware, other mods or a person playing for long yet.
 - **Keep Xerces out of OneDrive.** Unzipped into a folder OneDrive syncs
   (`...\OneDrive\Documents\...`), the first beta zip crashed at every start,
-  with mods or without. This build no longer crashes there that way and warns
-  on Home, but it has not been tried in a OneDrive folder yet: unzip it to a
-  folder such as `C:\Games\Xerces`.
+  with mods or without. This build no longer crashes there that way and warns on
+  Home, but it has not been tried in a OneDrive folder yet: unzip it to a folder
+  such as `C:\Games\Xerces`.
 - **Some crashes are not explained yet.** In our tests the game sometimes closed
   while a map was starting, with no crash report, and ran fine the next time.
   Once in 12 quits with mods the game crashed while closing; the next start of

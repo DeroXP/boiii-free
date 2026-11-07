@@ -1031,12 +1031,63 @@ the match. Fixed with `DB_IsXAssetDefault` (db.cpp already uses it).
 - [x] DS4C's Camos in a match (Cheese Cube): "DS4C Patched" along the bottom,
       clear of DS4C's own tags.
 - [x] DS4C's Characters: "DS4C Patched" across the top of each portrait.
-- [ ] Another camo or character mod in the stack (only the winner's list loads,
-      so its label names the winner); the Multiplayer pickers.
+- [x] Another camo or character mod in the stack: with DS4C, Ascendance,
+      Hyperdimension Neptunia, Avali and im_oxo QOL (after the Ascendance fix,
+      below), DS4C's camo list and character list win and every label reads
+      "DS4C Patched".
+- [ ] The Multiplayer pickers.
 
 The Season Pass bonus overlay (Dr. Monty's Factory) was closed by quitting the
 game, not with OK. Windows asked whether the worktree's boiii.exe may use the
 network; that prompt was left for you.
+
+### Ascendance at start (2026-11-06)
+
+You asked for a test of 0.1.0-beta.3 with DS4C Patched, Ascendance (Aesthetic
+oJumpy, 3000417367), Hyperdimension Neptunia, Avali: Solspace and im_oxo Zombies
+QOL. Run by Claude with the beta.3 package and a test home
+(`C:\Users\Ginld\XercesDev\bench\20261106-modlabels`, `bisect.ps1` and
+`probe-run.ps1` there).
+
+- **The crash.** Every launch with Ascendance crashed about 5 s after the window
+  came up, before the menu: Ascendance alone, with DS4C in either order, Larger
+  zone memory on or off (EXCEPTION_BREAKPOINT at BlackOps3.exe+0x141D3C84B,
+  after "LobbyVM script execution error ... lua/shared/luareadonlytables.lua:1:
+  function expected instead of nil"). DS4C with im_oxo, with Avali, and with
+  both character packs reached the menu.
+- **Why.** Ascendance ships its own `lua/shared/luareadonlytables.lua` (17,419
+  bytes, its menu colours in front of the game's read-only-table code), which
+  calls `EnableGlobals()` on its first line. A temporary probe ran a check in
+  each Lua engine as it loaded: the menus' engine has `EnableGlobals`,
+  `DisableGlobals`, `CoD` and `LUI`; the lobby's engine has none of them and no
+  metatable on `_G`, in every start. Xerces loads the mod stack as the game
+  starts (`fs_game`), before the lobby engine first runs, so the lobby engine
+  gets the mod's copy (the game's own copy, 659 bytes in `core_patch`, stays
+  linked behind it, not in use). A mod loaded from the Mods menu after the lobby
+  engine started would not reach it.
+- **The fix** (`ui_scripting.cpp` `try_mod_copy_in_lobby`, `mod_stack.cpp`
+  `game_copy`): in the lobby engine, a module whose copy in use is a mod's is
+  first required in protected mode. If it fails, the lobby engine reads that
+  file from the game's own zones from then on (in the Lua file reader, for that
+  read only; its loader gets the file without `Lua_CoD_GetRawFile` or
+  `DB_FindXAssetHeader`), the menus keep the mod's copy, and the game log says
+  `lua.lobby.game_copy` with the file, the mod and the error. The lobby's
+  `require` keeps a module under its lower-case name and marks it loaded before
+  it runs, so both names are cleared before the retry. A mod's copy that works
+  in the lobby engine is kept, as upstream added for AAE's lobby scripts.
+- [x] Ascendance alone: the menu, in Ascendance's blue theme with its own
+      entries ("DISCORD SERVER").
+- [x] All five: the menu (DS4C's, with Ascendance's highlight colour), the
+      weapon kits' camo picker with "DS4C Patched" labels, a match on Cheese
+      Cube with DS4C's Camos and Characters, no Lua error and no crash.
+- [ ] Ascendance's `T7AAO.dll` (not on the block list): nothing in the console
+      showed it loading in these runs.
+
+With DS4C and Ascendance together, the Vesper's preview showed an orange camo
+for DS4C's "Topaz" (yellow without Ascendance): DS4C's camo list wins, but
+Ascendance also ships per-gun camo assets, and where only Ascendance has a gun's
+camo asset its looks follow Ascendance's numbering (the research of 2026-11-06
+predicted this; KNOWN_ISSUES.md).
 
 ### Voice chat starts as push-to-talk (2026-11-05)
 

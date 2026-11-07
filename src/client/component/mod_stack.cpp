@@ -1158,6 +1158,50 @@ std::optional<std::string> asset_owner(const int32_t type,
   }
 }
 
+const void *game_copy(const int32_t type, const std::string &name) {
+  const auto asset_type = static_cast<XAssetType>(type);
+  const void *data = game::db::xasset::DB_FindXAssetHeader(
+                         asset_type, name.c_str(), false, 0)
+                         .data;
+  if (!data || game::db::xasset::DB_IsXAssetDefault(asset_type, name.c_str())) {
+    return nullptr;
+  }
+  const XAssetEntry *entry = live_entry(asset_type, data);
+  if (!entry) {
+    return nullptr;
+  }
+  std::scoped_lock lock(mutex);
+  const auto from_game = [&](const XAssetEntry *candidate) {
+    return xerces_core::classify_zone(zone_name(candidate), current_usermap(),
+                                      priorities)
+               .kind == xerces_core::zone_kind::stock;
+  };
+  if (from_game(entry)) {
+    return nullptr;
+  }
+  // The copies that lost stay linked behind the live entry through
+  // nextOverride, in priority order (DB_OverrideAsset inserts each copy that
+  // loses there; seen in its disassembly on 2026-11-06). The engine marks them
+  // not in use (inuse 0), but their data stays in their zone: on 2026-11-06
+  // the game's own lua/shared/luareadonlytables.lua (core_patch, 659 bytes)
+  // sat right behind Ascendance's. So a copy counts while its zone is loaded.
+  // The bound only guards against a broken chain.
+  auto &pool = game::db::xasset::pool::g_assetEntryPool->pool;
+  uint32_t index = entry->nextOverride;
+  for (int steps = 0; index != 0 &&
+                      index < game::db::xasset::pool::XASSET_ENTRY_POOL_LENGTH &&
+                      steps < 256;
+       ++steps) {
+    const XAssetEntry *candidate = &pool[index].entry;
+    if (candidate->asset.type == asset_type && candidate->asset.header.data &&
+        from_game(candidate) && zone_alive(zone_name(candidate))) {
+      return candidate->asset.header.data;
+    }
+    index = candidate->nextOverride;
+  }
+  return nullptr;
+}
+
 std::string workshop_title(const std::string &id) {
   for (const game::ugc::UGCItem *item :
        {game::ugc::UGC_UnwrapOptionalUGCItem(

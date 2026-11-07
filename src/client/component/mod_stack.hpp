@@ -48,4 +48,10 @@ std::optional<std::string> asset_owner(int32_t type, const std::string &name);
 // A mod's or custom map's Workshop title; "" when neither is installed.
 std::string workshop_title(const std::string &id);
 
+// The game's own copy of an asset a mod or custom map replaced: the header of
+// the highest copy from the game's zones, linked behind the one in use.
+// nullptr when the copy in use is the game's own or the game has none. For
+// the lobby Lua engine's fallback (ui_scripting.cpp, lobby_game_copies).
+const void *game_copy(int32_t type, const std::string &name);
+
 } // namespace mod_stack

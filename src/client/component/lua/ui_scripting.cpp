@@ -9,6 +9,7 @@
 #include <game/impl/ugc/ugc.hpp>
 
 #include <game/ui_scripting/execution.hpp>
+#include <game/ui_scripting/stack_guard.hpp>
 
 #include "ui_scripting.hpp"
 
@@ -29,6 +30,9 @@
 
 #include <frozen/string.h>
 #include <frozen/unordered_set.h>
+
+#include <xerces/runtime.hpp>
+#include <xerces_core/json.hpp>
 
 #include <atomic>
 #include <cmath>
@@ -871,6 +875,169 @@ if LUI.createMenu.Loading and not __boiiiLoadingWrapped then
 end
 )";
 
+// Xerces: mods' copies of Lua files in the lobby's Lua engine (2026-11-06,
+// docs/TESTING.md "Ascendance at start"). Xerces loads the mod stack as the
+// game starts (fs_game), before the lobby engine first runs, so the lobby
+// engine gets each mod's copy of the Lua files the two engines share. A copy
+// written for the menus' engine fails there: Ascendance's
+// lua/shared/luareadonlytables.lua calls EnableGlobals, which only the menus'
+// engine has (seen in both engines on 2026-11-06), and the game crashed at
+// every start. So in the lobby engine a mod's copy of a module is first tried
+// in protected mode; if it fails, the lobby engine gets that file from the
+// game's own zones, as it would if the mod had been loaded from the Mods menu
+// after the lobby engine started. The menus keep the mod's copy, and the game
+// log says what happened. A mod's copy that works in the lobby engine is kept
+// (AAE's lobby scripts rely on it).
+std::mutex lobby_copies_mutex;
+// rawfile name -> the mod whose copy of it failed in the lobby engine
+std::unordered_map<std::string, std::string> lobby_game_copies;
+thread_local bool lobby_attempt = false;
+
+// "lua/Shared\\LuaEnums" -> "lua/shared/luaenums.lua", as rawfiles are named.
+std::string rawfile_key(const std::string_view name) {
+  std::string key(name);
+  for (char &c : key) {
+    c = c == '\\' ? '/'
+                  : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  if (!key.ends_with(".lua")) {
+    key += ".lua";
+  }
+  return key;
+}
+
+bool plain_module_name(const std::string_view module) {
+  return !module.empty() && module.size() < 200 &&
+         std::ranges::all_of(module, [](const char c) {
+           return std::isalnum(static_cast<unsigned char>(c)) || c == '_' ||
+                  c == '.' || c == '/' || c == '-';
+         });
+}
+
+// Runs a chunk in any of the game's Lua engines, protected; its string
+// result. "load failed" or "call failed" when the chunk itself did not run.
+std::string run_in_state(lua_State *state, const std::string_view code,
+                         const char *name) {
+  const detail::api_stack_guard guard{state};
+  const HksBytecodeSharingMode mode = state->m_global->m_bytecodeSharingMode;
+  state->m_global->m_bytecodeSharingMode = HksBytecodeSharingMode::ON;
+  HksCompilerSettings settings{};
+  const int32_t loaded =
+      hksi_hksL_loadbuffer(state, &settings, code.data(), code.size(), name);
+  state->m_global->m_bytecodeSharingMode = mode;
+  if (loaded != 0) {
+    return "load failed";
+  }
+  if (hksi_lua_pcall(state, 0, 1, 0) != 0) {
+    return "call failed";
+  }
+  std::string out;
+  if (state->m_apistack.top > guard.saved_top()) {
+    size_t len = 0;
+    if (const char *text =
+            hks_obj_tolstring(state, &state->m_apistack.top[-1], &len)) {
+      out.assign(text, len);
+    }
+  }
+  return out;
+}
+
+// The game's own copy of a Lua file for the lobby engine, while the mod whose
+// copy failed there is still the one whose copy the game uses.
+const void *lobby_game_copy(const char *filename) {
+  const std::string file = rawfile_key(filename);
+  std::string mod;
+  {
+    std::scoped_lock lock(lobby_copies_mutex);
+    const auto found = lobby_game_copies.find(file);
+    if (found == lobby_game_copies.end()) {
+      return nullptr;
+    }
+    mod = found->second;
+  }
+  constexpr auto rawfile = static_cast<int32_t>(xasset::XAssetType::RAWFILE);
+  const std::optional<std::string> owner = mod_stack::asset_owner(rawfile, file);
+  if (!owner || *owner != mod) {
+    return nullptr;
+  }
+  return mod_stack::game_copy(rawfile, file);
+}
+
+void try_mod_copy_in_lobby(lua_State *state, const char *module) {
+  if (lobby_attempt || !module || state != *s_lobbyLuaVM ||
+      !plain_module_name(module)) {
+    return;
+  }
+  std::string path = module;
+  std::ranges::replace(path, '.', '/');
+  const std::string file = rawfile_key(path);
+  constexpr auto rawfile = static_cast<int32_t>(xasset::XAssetType::RAWFILE);
+  const std::optional<std::string> owner = mod_stack::asset_owner(rawfile, file);
+  if (!owner) {
+    return; // the game's own copy, or one Xerces itself ships
+  }
+  {
+    std::scoped_lock lock(lobby_copies_mutex);
+    const auto found = lobby_game_copies.find(file);
+    if (found != lobby_game_copies.end() && found->second == *owner) {
+      return;
+    }
+  }
+
+  // The lobby engine's require keeps a module under its lower-case name and
+  // marks it loaded before it runs, so a module that failed stays "loaded"
+  // (seen on 2026-11-06: lua.shared.luareadonlytables = true after the error).
+  const std::string quoted = "\"" + std::string(module) + "\"";
+  const std::string code =
+      "local name = " + quoted + "\n"
+      "local loaded = package and package.loaded\n"
+      "if loaded and (loaded[name] or loaded[string.lower(name)]) then return "
+      "\"\" end\n"
+      "local ok, err = pcall(require, name)\n"
+      "if ok then return \"\" end\n"
+      "if loaded then loaded[name] = nil loaded[string.lower(name)] = nil end\n"
+      "return \"error: \" .. tostring(err)\n";
+  lobby_attempt = true;
+  const std::string result = run_in_state(state, code, "xerces_lobby_check");
+  lobby_attempt = false;
+  if (!result.starts_with("error: ")) {
+    if (!result.empty()) {
+      xerces_runtime::log_warn("lua.lobby.check_failed",
+                               "Could not try a mod's copy of " + file +
+                                   " in the lobby's Lua: " + result);
+    }
+    return;
+  }
+
+  const std::string error = result.substr(7);
+  const std::string data =
+      "{\"file\":" + xerces_core::json::quote(file) +
+      ",\"mod\":" + xerces_core::json::quote(*owner) +
+      ",\"error\":" + xerces_core::json::quote(error) + "}";
+  if (!mod_stack::game_copy(rawfile, file)) {
+    xerces_runtime::log_warn("lua.lobby.mod_copy_failed",
+                             "A mod's copy of " + file +
+                                 " fails in the lobby's Lua and the game has "
+                                 "no copy of its own",
+                             data);
+    return;
+  }
+  {
+    std::scoped_lock lock(lobby_copies_mutex);
+    lobby_game_copies[file] = *owner;
+  }
+  xerces_runtime::log_warn("lua.lobby.game_copy",
+                           "A mod's copy of " + file +
+                               " fails in the lobby's Lua; the lobby uses the "
+                               "game's own copy, the menus keep the mod's",
+                           data);
+  game::com::Com_Printf(game::consoleChannel_e::CHANNEL_DONT_FILTER,
+                        game::consoleLabel_e::DEFAULT,
+                        "^3Xerces: the lobby uses the game's own %s (the "
+                        "mod's copy failed there: %s)\n",
+                        file.c_str(), error.c_str());
+}
+
 void *hks_package_require_stub(lua_State *state) {
   const std::string script = get_current_script(state);
   const std::string root = get_root_script(script);
@@ -883,6 +1050,12 @@ void *hks_package_require_stub(lua_State *state) {
           : nullptr;
   const bool is_loading =
       module && _stricmp(module, "ui_mp.T6.HUD.Loading") == 0;
+
+  if (module) {
+    // Copied first: the protected attempt runs Lua in this engine.
+    const std::string module_name = module;
+    try_mod_copy_in_lobby(state, module_name.c_str());
+  }
 
   void *result = hks_package_require_hook.invoke<void *>(state);
   if (is_loading) {
@@ -2160,6 +2333,18 @@ inline const uint8_t *
 Lua_CoD_FFReader_EnforceOverride(lua_State *luaVM, RawFile *ud, size_t *size) {
   if (ud == nullptr) {
     return nullptr;
+  }
+  // Xerces: a file whose mod copy failed in the lobby engine is read from the
+  // game's own copy there (lobby_game_copies). The lobby engine's loader gets
+  // the file without Lua_CoD_GetRawFile or DB_FindXAssetHeader (seen on
+  // 2026-11-06), so the bytes are swapped where they are read, for this read
+  // only: the asset keeps the mod's copy, which the menus use.
+  if (ud->name && ud->name[0] && luaVM && luaVM == *s_lobbyLuaVM) {
+    if (const auto *copy =
+            static_cast<const RawFile *>(lobby_game_copy(ud->name))) {
+      *size = copy->len;
+      return *size == 0 ? nullptr : copy->buffer;
+    }
   }
   if (ud->name && ud->name[0]) {
     RawFile *override = script::get_loaded_rawfile(ud->name);
