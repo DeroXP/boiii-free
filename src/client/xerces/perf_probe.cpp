@@ -304,8 +304,8 @@ void write_run(const finished_run &done) {
 // the samples go into a fixed array, and the addresses are turned into
 // module+offset only when a run is written.
 constexpr std::size_t stall_stack_depth = 14;
-constexpr std::size_t stall_sample_max = 6000;
-constexpr double stall_threshold_ms = 40.0; // a frame this long is sampled
+constexpr std::size_t stall_sample_max = 20000;
+double stall_threshold_ms = 40.0; // a frame this long is sampled; XERCES_BENCH_STALL_MS
 constexpr double stall_interval_ms = 8.0;   // between samples of one frame
 
 struct stall_sample {
@@ -320,19 +320,10 @@ std::atomic_bool sampling{false}; // a run is going (mirror of run.active)
 stall_sample *stall_samples = nullptr;         // stall_sample_max entries
 std::atomic<std::uint32_t> stall_count{0};     // written by the sampler only
 
-void sample_main_thread(HANDLE thread, std::int64_t now, std::int64_t age) {
-  const std::uint32_t slot = stall_count.load(std::memory_order_relaxed);
-  if (slot >= stall_sample_max) {
-    return;
-  }
-  stall_sample &out = stall_samples[slot];
-  out = {};
-  CONTEXT context{};
-  context.ContextFlags = CONTEXT_CONTROL;
-  if (SuspendThread(thread) == static_cast<DWORD>(-1)) {
-    return;
-  }
-  if (GetThreadContext(thread, &context)) {
+// Unwinds into out.pc. A fault while reading the stopped thread's stack ends
+// the walk with what was found: the sampler must never take the game down.
+void walk_stack(CONTEXT &context, stall_sample &out) {
+  __try {
     while (out.depth < stall_stack_depth && context.Rip) {
       out.pc[out.depth++] = context.Rip;
       DWORD64 image_base = 0;
@@ -346,6 +337,26 @@ void sample_main_thread(HANDLE thread, std::int64_t now, std::int64_t age) {
       RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, context.Rip, function,
                        &context, &handler_data, &establisher_frame, nullptr);
     }
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+  }
+}
+
+void sample_main_thread(HANDLE thread, std::int64_t now, std::int64_t age) {
+  const std::uint32_t slot = stall_count.load(std::memory_order_relaxed);
+  if (slot >= stall_sample_max) {
+    return;
+  }
+  stall_sample &out = stall_samples[slot];
+  out = {};
+  CONTEXT context{};
+  // The unwinder reads the integer registers too (a frame pointer, the saved
+  // ones): a control-only context made it fault (beta.16).
+  context.ContextFlags = CONTEXT_FULL;
+  if (SuspendThread(thread) == static_cast<DWORD>(-1)) {
+    return;
+  }
+  if (GetThreadContext(thread, &context)) {
+    walk_stack(context, out);
   }
   ResumeThread(thread);
   if (out.depth > 0) {
@@ -685,6 +696,13 @@ void arm() {
     }
   }
 
+  if (const auto text = env(L"XERCES_BENCH_STALL_MS")) {
+    // For testing the sampler: a low value samples nearly every frame.
+    const double value = _wtof(text->c_str());
+    if (value >= 1.0 && value <= 1000.0) {
+      stall_threshold_ms = value;
+    }
+  }
   frequency = qpc_frequency();
   mains = new xerces_core::frame_ring<std::int64_t>(main_ring_log2);
   frames.store(new xerces_core::frame_ring<frame_sample>(frame_ring_log2),
