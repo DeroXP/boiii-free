@@ -129,7 +129,7 @@ Open an issue at <https://github.com/DeroXP/boiii-free/issues>, or tell us in
 the tester channel. Please include:
 
 - the Xerces version (About, or the top of the game's main menu), for example
-  `Xerces 0.1.0-beta.7 (3f09512d)`;
+  `Xerces 0.1.0-beta.8 (3f09512d)`;
 - what you did, what you expected and what happened;
 - the mods you had on, in their order, the mode and the map;
 - Diagnostics > Copy report, pasted in;
