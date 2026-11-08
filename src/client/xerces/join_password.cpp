@@ -240,8 +240,9 @@ void receive_proof(const game::net::netadr_t &sender,
     log_check("join.password.host", "a joiner passed the check", "ok");
     break;
   case result::wrong:
-    printf("[Join] A joiner gave a wrong password\n");
-    log_check("join.password.host", "a joiner gave a wrong password", "wrong");
+    printf("[Join] A joiner gave a wrong password or ticket\n");
+    log_check("join.password.host", "a joiner gave a wrong password or ticket",
+              "wrong");
     break;
   case result::address:
     printf("[Join] A joiner's answer names another host's address\n");

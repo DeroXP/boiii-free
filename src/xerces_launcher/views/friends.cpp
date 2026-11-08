@@ -609,11 +609,17 @@ private:
     handle_.DirtyAllVariables();
   }
 
-  // The running stack as a pack for an invite, or "" (vanilla, or nothing
-  // enabled).
+  // The stack the running game loaded, as a pack for an invite (from the
+  // launch's journal, not the profile, which may have changed since or been
+  // launched without mods), or "" for a game without mods.
   std::string current_pack_json() const {
     services &svc = owner_->svc();
-    const core::plan plan = svc.resolve(game_mode_);
+    const auto journal = svc.last_journal();
+    if (!svc.game_running() || !journal || journal->stack.empty() ||
+        journal->safe_mode) {
+      return {};
+    }
+    const core::plan plan = svc.resolve(game_mode_, &journal->stack);
     if (!plan.ok() || plan.stack.empty()) {
       return {};
     }

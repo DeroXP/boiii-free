@@ -34,8 +34,15 @@ struct target {
 std::mutex targets_mutex;
 std::vector<target> targets;
 
+// The lobby open to direct connect, or a match this game runs. Not the front
+// end, which runs as a local server too (seen 2026-11-07: game::
+// server_running() was true at the main menu).
 bool hosting() {
-  return game::server_running() || !nat::joinable_lobby().empty();
+  if (!nat::joinable_lobby().empty()) {
+    return true;
+  }
+  return game::server_running() && game::com::Com_IsInGame() &&
+         !game::com::Com_IsRunningUILevel();
 }
 
 // Every second on the main thread.

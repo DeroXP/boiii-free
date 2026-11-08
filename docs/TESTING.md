@@ -1605,6 +1605,53 @@ Not tested yet: an invite reaching a friend on another PC and their join into a
 real lobby, the address from UPnP or from the live backend, the live backend and
 its socket over Railway's edge, and a mod stack.
 
+### Friends, stages 2 to 4 (2026-11-07)
+
+DESIGN.md 10.12, on `launcher/friends` and `launcher/friends-backend`. The same
+bench, homes and local backend as stage 1 (now with migration 0004).
+
+- [x] Backend: `tests/test_links.py` (links, the share page, knocks, invites
+      allowed by an accepted knock, declined and blocked knocks kept quiet,
+      export, rate limits, the punch push with IPv4 and IPv6, an accepted invite
+      lasting an hour); 454 tests pass.
+- [x] Unit tests (566 pass): tickets in the host's guard (any of several keys;
+      none lets nobody in), session text 2, link and pack codes in every pasted
+      form, the new calls and pushes against a fake backend, the invite pack
+      check (by id, by Workshop folder, a mods folder that only looks like one),
+      the ticket on the command line and redacted in the log.
+- [x] Two launchers, no game (`friends-run4.ps1`): A made a link; the share page
+      answered 200 with the `xerces://join/<code>` button and its own CSP; a
+      second start of Xerces for home B with `xerces://join/<code>` handed it to
+      B's open window, which asked "Ask to join?" naming alicetest and Zombies;
+      Ask to join knocked, A showed "Asking to join: bobtest · Zombies" and the
+      footer line, and Ignore declined it (the backend's knock: declined). "Who
+      can join" switched and was saved.
+- [x] The joiner (`friends-run5.ps1`, invites from alicetest sent through the
+      API as a host's launcher sends them, `craft_invites.py`): an invite whose
+      pack names a mod that is nowhere showed "Joining alicetest's lobby", the
+      mod, and "not on the Workshop"; Cancel ended it. The next invite from
+      alicetest, while B followed her, was taken at once ("following a host's
+      invite"); every mod was here, and the dry launch started with her one mod
+      (`fs_game 2804432292`, not B's seven) and
+      `+set xerces_join_ticket <address>` (the ticket redacted).
+- [x] The host game (`game-run3.ps1`, mods off, Zombies lobby open): `host` said
+      `main_menu` and `invite_only`; a punch at the main menu was refused (the
+      front end counts as a running server, so `punch.cpp` checks for a lobby or
+      a match); a stand-in joiner (`joiner_check.py`, the join check over UDP
+      from 127.0.0.1) got `open` with invite-only off, then `wrong` without the
+      ticket and `ok` with it once `guests` set invite-only and the ticket; a
+      bad ticket was refused; a punch to this PC's LAN address started
+      (`xerces.punch.start`), one to 127.0.0.1 was refused; launcher A, signed
+      in, turned invite-only on by itself (`join.invite_only`); `quit` closed
+      the game in 4 s with a clean exit in the journal.
+
+Not tested yet: the punch's packets themselves (a listener on the LAN address
+would have asked the firewall), a real joiner's game answering with a ticket,
+two PCs behind two routers, the restart into the host's mods, Rejoin after a
+real crash, a host's game restarting with its last lobby's players invited
+again, the Workshop pages opening, "Open invite links in Xerces" (it writes
+HKCU, so it was left alone), and the live backend.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The
