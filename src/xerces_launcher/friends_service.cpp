@@ -268,6 +268,8 @@ void friends_service::tick() {
     game_mode_ = mode;
     if (!running) {
       work_.hosting = false;
+      work_.in_match = false;
+      work_.joined = 0;
       game_pid_ = 0;
       guests_told_ = false;
     }
@@ -324,8 +326,16 @@ void friends_service::tick() {
         });
       }
     }
-    if (hosting != work_.hosting) {
+    const int joined =
+        static_cast<int>(std::ranges::count_if(party_, [&](const auto &entry) {
+          return entry.second.pid == host.pid;
+        }));
+    const bool in_match = host.reached && host.in_match;
+    if (hosting != work_.hosting || in_match != work_.in_match ||
+        joined != work_.joined) {
       work_.hosting = hosting;
+      work_.in_match = in_match;
+      work_.joined = joined;
       publish();
     }
   }

@@ -1652,6 +1652,19 @@ real crash, a host's game restarting with its last lobby's players invited
 again, the Workshop pages opening, "Open invite links in Xerces" (it writes
 HKCU, so it was left alone), and the live backend.
 
+Discord (`discord-run1.ps1`, launcher A, no game, with the Discord app running
+on this PC):
+
+- [x] Show on Discord, turned on: `launcher.discord.ready` (connected to the
+      Discord app), and `HKCU\Software\Classes\discord-1568827390010859623`
+      written with `"<Xerces.exe>" --home "<home>"`. Turned off: disconnected,
+      the key gone again, and `friends_discord` saved as false.
+- [x] Unit tests: the join secret `xerces1 <code>` and nothing else taken back
+      (567 pass).
+
+Not tested yet: the presence on a profile with the game running, and Ask to Join
+between two Discord accounts.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The

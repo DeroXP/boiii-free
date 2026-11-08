@@ -118,6 +118,11 @@ std::optional<std::string> link_code_from(std::string_view text);
 // The same for a pack code, "XRC-XXXXXXXX".
 std::optional<std::string> pack_code_from(std::string_view text);
 
+// Discord's join secret for an invite link (Ask to Join), "xerces1
+// XJN-XXXXXXXX", and the link's code back from one; nothing else is taken.
+std::string discord_join_secret(std::string_view link_code);
+std::optional<std::string> link_from_discord_secret(std::string_view secret);
+
 struct invite_link {
   std::string code;
   std::string path; // "/join/<code>", on the backend

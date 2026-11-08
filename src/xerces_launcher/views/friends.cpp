@@ -14,6 +14,7 @@
 #include <RmlUi/Core.h>
 
 #include <algorithm>
+#include <ctime>
 #include <memory>
 #include <string>
 #include <vector>
@@ -24,6 +25,7 @@
 #include <xerces_core/pack.hpp>
 
 #include "../app.hpp"
+#include "../discord.hpp"
 #include "../friends_service.hpp"
 #include "../link_protocol.hpp"
 #include "../log.hpp"
@@ -66,6 +68,11 @@ constexpr double rejoin_seconds = 3.0 * 60 * 60;
 constexpr double rescan_every = 8.0;
 // A game asked to quit for a join gets this long to close.
 constexpr double quit_wait = 60.0;
+// A player let in on Discord asks through the link; their knock is let in at
+// once within this long.
+constexpr double discord_accept_seconds = 180.0;
+
+int party_max(const std::string &mode) { return mode == "mp" ? 18 : 4; }
 
 class friends_view final : public view {
 public:
@@ -141,6 +148,7 @@ public:
     model.Bind("links_open_text", &links_open_text_);
     model.Bind("lobby_guests", &lobby_guests_);
     model.Bind("follow_text", &follow_text_);
+    model.Bind("discord_text", &discord_text_);
 
     model.BindEventCallback("act", [this](Rml::DataModelHandle, Rml::Event &,
                                           const Rml::VariantList &args) {
@@ -185,6 +193,9 @@ public:
       join_invite(received.id, false);
     };
     service_->on_knock = [this](const account::knock_info &knock) {
+      if (let_in_from_discord(knock)) {
+        return;
+      }
       owner_->notify(knock.from_username + " " +
                          owner_->tr("asks to join your lobby. Let them in "
                                     "from Friends."),
@@ -207,6 +218,9 @@ public:
     service_->on_news = [this](const std::string &text) {
       owner_->notify(text, false, "friends news");
     };
+    if (config.friends_discord) {
+      start_discord();
+    }
     refresh_settings();
     return true;
   }
@@ -227,8 +241,13 @@ public:
       if (was_running_ && !running) {
         game_stopped();
       }
+      if (!was_running_ && running) {
+        game_started_at_ = static_cast<std::int64_t>(std::time(nullptr));
+      }
       was_running_ = running;
+      update_discord();
     }
+    discord_.pump();
     if (owner_->join_link_rev() != seen_link_rev_) {
       seen_link_rev_ = owner_->join_link_rev();
       if (const std::string code = owner_->take_join_link(); !code.empty()) {
@@ -642,6 +661,124 @@ private:
     return core::pack_to_json(value);
   }
 
+  // ------------------------------------------------------------ Discord
+  void start_discord() {
+    const auto &paths = owner_->svc().paths();
+    discord_presence::handlers handlers;
+    handlers.join_request = [this](const std::string &user_id,
+                                   const std::string &name) {
+      discord_request(user_id, name);
+    };
+    handlers.join_game = [this](const std::string &secret) {
+      discord_join(secret);
+    };
+    handlers.connection = [this](bool) { refresh_settings(); };
+    discord_.start(paths.program, paths.home, std::move(handlers));
+  }
+
+  // What the Discord profile shows: the game's mode and where it is; with
+  // the lobby open and a link, a party and the join secret (Ask to Join).
+  // Nothing while the game is closed.
+  void update_discord() {
+    if (!discord_.started()) {
+      return;
+    }
+    const friends_snapshot &s = service_->snapshot();
+    if (!s.game_running) {
+      discord_.show(std::nullopt);
+      party_id_.clear();
+      link_asked_ = false;
+      return;
+    }
+    discord_activity activity;
+    activity.details = mode_name(game_mode_);
+    activity.state = s.in_match  ? "In a match"
+                     : s.hosting ? "In the lobby, open to friends"
+                                 : "In the menus";
+    activity.started = game_started_at_;
+    if (s.hosting && !s.in_match && s.signed_in) {
+      if (s.link) {
+        if (party_id_.empty()) {
+          party_id_ = account::new_ticket();
+        }
+        activity.party_id = party_id_;
+        activity.party_max = party_max(game_mode_);
+        activity.party_size = std::min(1 + s.joined, activity.party_max);
+        activity.join_secret = account::discord_join_secret(s.link->code);
+      } else if (!link_asked_) {
+        // Ask to Join carries the player's invite link: make one.
+        link_asked_ = true;
+        service_->make_link(game_mode_, {});
+      }
+    }
+    discord_.show(activity);
+  }
+
+  // The host: someone on Discord asks to join.
+  void discord_request(const std::string &user_id, const std::string &name) {
+    owner_->dialog(
+        "Let them join?",
+        name + " " + owner_->tr("asks on Discord to join your lobby."),
+        {"Let in", "No"}, [this, user_id](int choice) {
+          const bool yes = choice == 0;
+          discord_.respond(user_id, yes);
+          log_info("launcher.discord.request", yes ? "let a Discord friend in"
+                                                   : "turned a Discord "
+                                                     "friend down");
+          if (yes) {
+            discord_accepts_.push_back(owner_->now() + discord_accept_seconds);
+          }
+        });
+  }
+
+  // The host: a knock right after a Discord yes is that player's.
+  bool let_in_from_discord(const account::knock_info &knock) {
+    const double now = owner_->now();
+    std::erase_if(discord_accepts_,
+                  [now](double until) { return until < now; });
+    if (discord_accepts_.empty() || !service_->snapshot().hosting) {
+      return false;
+    }
+    discord_accepts_.erase(discord_accepts_.begin());
+    service_->let_in(knock.id, knock.from_user_id, current_pack_json(),
+                     report(owner_->tr("Let in from Discord:") + " " +
+                            knock.from_username + "."));
+    return true;
+  }
+
+  // The joiner: the host let this player in on Discord. Ask through the
+  // host's link; the host's Xerces lets the knock in, and its invite is
+  // taken at once (follow).
+  void discord_join(const std::string &secret) {
+    const auto code = account::link_from_discord_secret(secret);
+    if (!code) {
+      log_warn("launcher.discord.join", "a Discord join without a Xerces link");
+      return;
+    }
+    owner_->show("friends");
+    if (!service_->snapshot().signed_in) {
+      owner_->notify(owner_->tr("Sign in to Xerces to join through Discord."),
+                     true);
+      return;
+    }
+    service_->look_up_link(
+        *code, [this, code = *code](const account::outcome &result,
+                                    std::optional<account::link_owner> owner) {
+          if (!result.ok || !owner) {
+            owner_->notify(result.status == 404
+                               ? owner_->tr("That lobby is not open any "
+                                            "more.")
+                               : result.message,
+                           true, "discord join lookup failed: " + result.code);
+            return;
+          }
+          service_->knock(code, owner->host_user_id,
+                          report(owner_->tr("Joining") + " " +
+                                 owner->host_username +
+                                 owner_->tr("'s lobby...")));
+        });
+  }
+
   // ------------------------------------------------------- invite links
   void open_link(const std::string &code) {
     if (!service_->snapshot().signed_in) {
@@ -687,6 +824,10 @@ private:
     lobby_guests_ =
         owner_->tr(config.friends_invite_only ? "Invited players" : "Anyone");
     follow_text_ = owner_->tr(config.friends_follow ? "On" : "Off");
+    discord_text_ = owner_->tr(!config.friends_discord ? "Off"
+                               : discord_.connected()  ? "On"
+                                                       : "On, Discord closed");
+    handle_.DirtyVariable("discord_text");
     const auto &paths = owner_->svc().paths();
     switch (link_protocol::current(paths.program, paths.home)) {
     case link_protocol::state::here:
@@ -928,6 +1069,21 @@ private:
       link_input_.clear();
       handle_.DirtyVariable("link_input");
       open_link(*code);
+    } else if (action == "discord") {
+      services &svc = owner_->svc();
+      auto &config = svc.config();
+      config.friends_discord = !config.friends_discord;
+      if (config.friends_discord) {
+        start_discord();
+      } else {
+        discord_.stop(true);
+        party_id_.clear();
+        link_asked_ = false;
+      }
+      if (!svc.save_config()) {
+        owner_->notify(owner_->tr(svc.config_error()), true);
+      }
+      refresh_settings();
     } else if (action == "lobby guests" || action == "follow") {
       services &svc = owner_->svc();
       auto &config = svc.config();
@@ -1072,6 +1228,11 @@ private:
   std::string game_mode_ = "zm";
   std::optional<pending_join> join_;
   std::optional<last_join> last_;
+  discord_presence discord_;
+  std::int64_t game_started_at_ = 0;
+  std::string party_id_;
+  bool link_asked_ = false;
+  std::vector<double> discord_accepts_; // until when each Discord yes holds
 
   bool available_ = true;
   bool signed_in_ = false;
@@ -1112,6 +1273,7 @@ private:
   Rml::String links_open_text_;
   Rml::String lobby_guests_;
   Rml::String follow_text_;
+  Rml::String discord_text_;
 };
 } // namespace
 

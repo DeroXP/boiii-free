@@ -58,7 +58,11 @@ struct friends_snapshot {
   account::privacy_settings privacy;
   std::vector<account::invite> invites; // incoming and pending
   bool game_running = false;
-  bool hosting = false; // the game hosts a lobby others can join by address
+  bool hosting = false;  // the game hosts a lobby others can join by address
+  bool in_match = false; // the game plays a match (not its menus)
+  // Players who joined this game's lobby through an invite from here (their
+  // hole punch came), for Discord's party size.
+  int joined = 0;
   // Invite links (10.12): this player's live link, players asking to join
   // through it, and the hosts this player asked.
   std::optional<account::invite_link> link;

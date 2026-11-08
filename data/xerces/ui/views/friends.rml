@@ -197,10 +197,14 @@
 				<button id="follow-hosts" class="small-button" data-event-click="act('follow')"><span>{{follow_text}}</span></button>
 			</div>
 			<div class="privacy-row">
+				<div class="privacy-text">Show on Discord</div>
+				<button id="discord-toggle" class="small-button" data-event-click="act('discord')"><span>{{discord_text}}</span></button>
+			</div>
+			<div class="privacy-row">
 				<div class="privacy-text">Open invite links in Xerces</div>
 				<button id="links-open" class="small-button" data-event-click="act('links open')"><span>{{links_open_text}}</span></button>
 			</div>
-			<div class="aside-note quiet">Invited players: only players you invite from Xerces get into your lobby, each with a ticket of their own. Follow: when a host you joined invites you again (a new lobby, other mods), Xerces joins at once.</div>
+			<div class="aside-note quiet">Invited players: only players you invite from Xerces get into your lobby, each with a ticket of their own. Follow: when a host you joined invites you again (a new lobby, other mods), Xerces joins at once. Discord: your profile shows your game, and while your lobby is open your Discord friends can Ask to Join; you choose. They need Xerces with Show on Discord on too.</div>
 		</div>
 
 		<div>

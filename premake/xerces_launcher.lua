@@ -83,6 +83,8 @@ includedirs({
   root_path("src"),
   root_path("deps/rapidjson/include"),
   root_path("deps/zstd/lib"),
+  -- Discord's local RPC (MIT), for presence and Ask to Join (DESIGN.md 10.12).
+  root_path("deps/discord-rpc/include"),
   path.join(rmlui, "Include"),
   path.join(rmlui, "Backends"),
   -- xerces_version.h, which premake5.lua writes from VERSION and git (xerces_core/version.hpp).
@@ -103,6 +105,7 @@ warnings("Off")
 filter({})
 links({
   "xerces_core",
+  "discord-rpc",
   "zstd",
   "zlib",
   "xerces_rmlui",

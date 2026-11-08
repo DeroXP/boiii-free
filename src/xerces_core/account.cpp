@@ -341,6 +341,26 @@ std::optional<std::string> pack_code_from(std::string_view text) {
   return code_from(text, "XRC");
 }
 
+namespace {
+constexpr std::string_view discord_secret_prefix = "xerces1 ";
+} // namespace
+
+std::string discord_join_secret(std::string_view link_code) {
+  return std::string(discord_secret_prefix) + std::string(link_code);
+}
+
+std::optional<std::string> link_from_discord_secret(std::string_view secret) {
+  if (!secret.starts_with(discord_secret_prefix)) {
+    return std::nullopt;
+  }
+  const std::string_view code = secret.substr(discord_secret_prefix.size());
+  // The code itself, not a link: a secret is only ever made from one.
+  if (code.find('/') != std::string_view::npos) {
+    return std::nullopt;
+  }
+  return code_from(code, "XJN");
+}
+
 std::optional<game_session> parse_session_text(std::string_view text) {
   std::vector<std::string_view> parts;
   std::size_t start = 0;

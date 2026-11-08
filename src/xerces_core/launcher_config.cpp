@@ -28,6 +28,7 @@ const std::set<std::string, std::less<>> known_keys = {
     "send_crash_reports",
     "friends_invite_only",
     "friends_follow",
+    "friends_discord",
 };
 
 bool valid_mode(std::string_view mode) {
@@ -189,6 +190,7 @@ launcher_config_result parse_launcher_config(std::string_view text) {
   c.send_crash_reports = bool_of(root, "send_crash_reports", true);
   c.friends_invite_only = bool_of(root, "friends_invite_only", true);
   c.friends_follow = bool_of(root, "friends_follow", true);
+  c.friends_discord = bool_of(root, "friends_discord", false);
   if (const auto *favorites = json::member(root, "favorites");
       favorites != nullptr && favorites->IsArray()) {
     for (const auto &item : favorites->GetArray()) {
@@ -293,6 +295,7 @@ std::string launcher_config_to_json(const launcher_config &c) {
   json::set(doc, "send_crash_reports", c.send_crash_reports, alloc);
   json::set(doc, "friends_invite_only", c.friends_invite_only, alloc);
   json::set(doc, "friends_follow", c.friends_follow, alloc);
+  json::set(doc, "friends_discord", c.friends_discord, alloc);
 
   rapidjson::Value favorites(rapidjson::kArrayType);
   for (const auto &server : c.favorites) {

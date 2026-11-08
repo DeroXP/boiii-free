@@ -72,6 +72,9 @@ struct launcher_config {
   // a host this player joined or asked to join lately is taken at once.
   bool friends_invite_only = true;
   bool friends_follow = true;
+  // The game on the player's Discord profile, with Ask to Join while the
+  // lobby is open (DESIGN.md 10.12). Off until the player turns it on.
+  bool friends_discord = false;
 
   std::vector<favorite_server> favorites;
   std::vector<std::string> recent_servers; // host:port, newest first

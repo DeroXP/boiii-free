@@ -2377,8 +2377,8 @@ until `xerces-design` is pushed.
 
 The rest of the friend plan (10.11). On 2026-11-07 the user chose hole punching
 for stage 3 rather than a relay (free, no server carries game traffic; a strict
-router still needs a forwarded port or UPnP), and to make a Discord application
-for Discord join (not built yet: it waits for the application's id).
+router still needs a forwarded port or UPnP), and made the Xerces application on
+Discord's developer portal for Discord join (id 1568827390010859623).
 
 - **The host's mods travel with the invite.** Invite shares the stack the host
   plays as a pack on the backend (`POST /v1/packs`, the same pack format as
@@ -2457,6 +2457,26 @@ for Discord join (not built yet: it waits for the application's id).
   when another game process opens a lobby within 6 hours (the host restarted,
   perhaps with other mods), they are invited again, with the new mods. So a
   party follows its host from game to game.
+- **Discord.** "Show on Discord" (off until the player turns it on, launcher
+  setting `friends_discord`) connects the launcher to the Discord app on this PC
+  through the vendored MIT `discord-rpc` (local IPC; the game's upstream
+  `discord.cpp` with Ezz's application stays off, D14). While the game runs the
+  player's profile shows its mode and "In the menus", "In the lobby, open to
+  friends" or "In a match", since when, and the art asset `xerces` if the portal
+  has one. While the lobby is open (not in a match) and the player is signed in,
+  the presence also carries a party (a random id per session, its size 1 plus
+  the players whose punch came in this game, at most 4, or 18 in Multiplayer)
+  and the join secret `xerces1 <invite link code>` (the player's link, made when
+  there is none), which is what gives Discord friends Ask to Join; Discord hands
+  the secret only to a player the host let in. The host gets "Let them join?"
+  with the Discord name and answers within Discord's 30 s. The joiner's Discord
+  gives their Xerces the secret (starting it, through the launch command
+  registered under `HKCU\Software\Classes\discord-<id>`, when it is closed);
+  Xerces knocks on the link without another question, the host's Xerces lets in
+  one knock per Discord yes for 3 minutes, and the invite that follows is taken
+  at once (follow). Both players need Xerces with Show on Discord on. Off clears
+  the presence, disconnects and deletes the launch command's key. Discord names
+  are shown, never logged.
 - **Rejoin after a crash.** When the game ends without a clean exit within 3
   hours of joining a friend, Friends offers Rejoin, which starts the game with
   the same mods, address and ticket (the host keeps it 3 hours).

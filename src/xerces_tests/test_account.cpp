@@ -179,6 +179,21 @@ TEST_CASE("account: invite link and pack codes, however they are pasted") {
   CHECK(!pack_code_from("XJN-AB12CD34").has_value());
 }
 
+TEST_CASE("account: Discord's join secret carries the link's code only") {
+  CHECK_EQ(discord_join_secret("XJN-AB12CD34"),
+           std::string("xerces1 XJN-AB12CD34"));
+  CHECK_EQ(link_from_discord_secret("xerces1 XJN-AB12CD34").value_or(""),
+           std::string("XJN-AB12CD34"));
+  CHECK_EQ(link_from_discord_secret("xerces1 xjn-ab12cd34").value_or(""),
+           std::string("XJN-AB12CD34"));
+  for (const char *bad :
+       {"", "XJN-AB12CD34", "xerces2 XJN-AB12CD34", "xerces1 ",
+        "xerces1 https://x.example/join/XJN-AB12CD34", "xerces1 XRC-AB12CD34",
+        "xerces1 XJN-AB12CD34;quit"}) {
+    CHECK(!link_from_discord_secret(bad).has_value());
+  }
+}
+
 TEST_CASE("account: packs, links, knocks and the hole punch") {
   fake_backend backend;
   client api("https://example.test", backend.transport());

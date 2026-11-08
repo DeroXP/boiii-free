@@ -142,7 +142,8 @@ to report these again, but tell us if you see them somewhere else or worse.
   punching are not proven between two routers. A router that changes the port
   for each destination (some mobile and carrier networks) still needs the port
   forwarded, as direct connect does. Friends only see you while Xerces is open.
-  Discord join is not built yet.
+  Discord's Ask to Join has not been tried between two Discord accounts yet;
+  connecting to the Discord app has.
 - **Multiplayer with Zombies mods can close the game.** On a tester's PC with
   four Zombies mods loaded, switching the main menu to Multiplayer ended with
   "Could not allocate asset - increase XASSET_ENTRY_POOL_SIZE" and the game

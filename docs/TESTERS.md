@@ -211,11 +211,14 @@ If you try it, tell us how it went.
   open) or Ignore them. "Open invite links in Xerces" lets a click on a link
   open Xerces. **Follow hosts you join** (on by default): when a friend you
   played with invites you again, Xerces joins at once. After a crash in a
-  friend's lobby, Friends offers Rejoin. Keep Xerces open while you play, or
-  friends see you offline and invites wait (Settings, "Close Xerces when the
-  game starts" off). Remove and Block are next to each friend; the privacy
-  buttons on Friends say who may send you requests, see you online and invite
-  you.
+  friend's lobby, Friends offers Rejoin. **Show on Discord** (off until you turn
+  it on, on both PCs): your Discord profile shows your game, and while your
+  lobby is open your Discord friends get Ask to Join; you answer "Let them
+  join?" in Xerces, and they join as with an invite. Keep Xerces open while you
+  play, or friends see you offline and invites wait (Settings, "Close Xerces
+  when the game starts" off). Remove and Block are next to each friend; the
+  privacy buttons on Friends say who may send you requests, see you online and
+  invite you.
 - The first time you host or join, Windows asks whether "BOIII" may use your
   networks. That is Xerces' game client (boiii.exe, it keeps that name for now).
   Allow it, on private networks at least; offline play does not need it.
@@ -255,6 +258,11 @@ If you try it, tell us how it went.
   not encrypted (it never was); tickets keep others out of your lobby. On your
   PC, Xerces keeps your sign-in in `%LOCALAPPDATA%\Xerces\config\account.dat`,
   encrypted for your Windows account; Sign out deletes it.
+- **Discord**, only with Show on Discord on: Xerces tells the Discord app on
+  your PC what you play (the mode, whether you are in a lobby or a match, since
+  when), and Discord shows it to your Discord friends; while your lobby is open
+  it also gets your invite link's code, which Discord passes only to a friend
+  you let join. Discord gets nothing from Xerces with it off.
 - Links you click (GitHub issues, Black Ops III's store page, the licence) open
   in your browser or in Steam.
 
