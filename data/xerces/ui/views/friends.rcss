@@ -1,0 +1,78 @@
+/* Friends (DESIGN.md 7.3): the same two columns as Servers, a wide primary
+   column (the account, invites, requests, friends) and a narrow aside
+   (privacy, blocked, how invites work). Rules, not boxes; the accent marks
+   only the main action, the focus ring and problems. */
+
+#friends-main
+{
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	gap: 40dp;
+	padding: 32dp 32dp 40dp 32dp;
+	box-sizing: border-box;
+}
+.friends-primary { flex: 999 1 560dp; max-width: 880dp; }
+.friends-aside { flex: 1 1 260dp; display: flex; flex-direction: column; gap: 40dp; }
+
+/* -------------------------------------------------------------- account */
+.account-form { max-width: 440dp; }
+.field-label { margin-top: 20dp; margin-bottom: 8dp; }
+input.account-field { width: 100%; min-height: 44dp; padding: 11dp 14dp; font-size: 15dp; line-height: 20dp; }
+.field-problem { margin-top: 10dp; font-size: 13dp; line-height: 18dp; color: var(--accent-text); }
+.field-note { margin-top: 10dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.account-actions { margin-top: 20dp; }
+
+.account-line
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 16dp;
+	margin-top: 12dp;
+	padding-bottom: 12dp;
+	border-bottom: 1dp var(--line);
+}
+.account-name { font-size: 18dp; font-weight: 600; line-height: 24dp; }
+.account-state { flex: 1 1 auto; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.account-state.live { color: var(--text); }
+#sign-out { min-height: 36dp; font-size: 13dp; }
+
+/* -------------------------------------------------------------- friends */
+.friend-row
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 14dp;
+	padding: 12dp 0dp;
+	border-bottom: 1dp var(--line);
+}
+.presence-dot { display: block; width: 8dp; height: 8dp; border-radius: 4dp; background-color: var(--line); }
+.presence-dot.on { background-color: var(--accent); }
+.friend-text { flex: 1 1 auto; }
+.friend-name { font-size: 15dp; font-weight: 600; line-height: 20dp; word-break: break-word; }
+.friend-row.offline .friend-name { color: var(--text2); }
+.friend-status { margin-top: 3dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+.row-actions { display: flex; flex-direction: row; align-items: center; gap: 8dp; }
+.invite-note { margin-top: 12dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; color: var(--text2); }
+
+.add-fields { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12dp; }
+input.add-name { flex: 1 1 240dp; width: 240dp; min-height: 40dp; }
+.add-button { min-height: 40dp; }
+
+/* ---------------------------------------------------------------- aside */
+.privacy-row
+{
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 12dp;
+	padding: 10dp 0dp;
+	border-bottom: 1dp var(--line);
+}
+.privacy-text { flex: 1 1 auto; font-size: 14dp; line-height: 20dp; }
+.aside-note { padding: 12dp 0dp; font-size: 14dp; line-height: 20dp; color: var(--text2); }
+.aside-note.quiet { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 18dp; }
+#friends-refresh { margin-top: 4dp; }

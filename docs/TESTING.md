@@ -1532,6 +1532,53 @@ Not tested yet: a player who moves and shoots, co-op (the pack's choice of
 player), a Monkey Bomb or other point of interest drawing smart zombies, a
 turned zombie, maps other than Kino der Toten, and rounds reached by playing.
 
+### Friends, stage 1 (2026-11-07)
+
+DESIGN.md 10.11, on `launcher/friends` (client) and `launcher/friends-backend`
+(the backend's `GET /v1/me/address`). Run by Claude on one PC: two launchers,
+each with its own home (`C:\Users\Ginld\XercesDev\bench\20261107-friends`, homes
+A and B), both `--dry-launch` so nothing started the game, driven by check
+scripts (`friends-run.ps1`, `friends-run2.ps1`), against the backend run on this
+PC (`scratch\friends-local\run-backend.ps1`: 127.0.0.1:8090, throwaway keys, a
+scratch SQLite file; `XERCES_CRASH_URL` points the launchers at it). Two test
+accounts made there, alicetest (A) and bobtest (B). The live backend was not
+used.
+
+- [x] Unit tests: the saved sign-in is DPAPI-encrypted (neither the token nor
+      the name is in the file) and read back; a damaged file is no sign-in;
+      usernames and passwords are checked as the backend does; the invite text
+      and its checks; sign-in, sign-up and their errors; an old access token is
+      renewed and the refresh token rotates; a 401 gets one fresh token, then
+      the sign-in ends; the backend's list and settings shapes; ids and invites
+      refused before anything is sent; the socket's messages. 560 in all pass.
+      Backend: 12 new tests for `/v1/me/address` (433 in all pass).
+- [x] Sign-up on both, then A sends B a request: B's launcher hears it at once
+      (a footer line, the request under Friend requests); B accepts and A hears
+      that ("bobtest is now your friend" style line); both list the other as
+      "Online in Xerces" with the dot lit.
+- [x] An invite from B to A (through the API, as B's launcher sends it, with a
+      documentation address): A shows "bobtest invited you to Zombies" under
+      Invites with Join and Decline, and the footer says so. Join started the
+      dry launch with `+set xerces_join <address>` (the log hides the address)
+      and the invite left the list.
+- [x] Privacy: A set "Who sees you online" to Nobody; B showed A as Offline. Set
+      back to Friends, B showed A online again (second run).
+- [x] A restart: both launchers came back signed in from `account.dat`, with
+      their lists and presence.
+- [x] Block (after its dialog): B left A's friends and showed under Blocked;
+      Unblock removed it there (a block also ends the friendship, as the backend
+      does). Sign out (after its dialog): back to the sign-in form, the socket
+      closed, and `account.dat` deleted.
+- [x] B, started after the block, listed no friends.
+
+Found and fixed: B still listed A after A blocked B, until B's lists were read
+again (the backend tells nobody they were removed or blocked); the launcher now
+reads the lists every 60 s. That refresh itself was not watched in a run.
+
+Not tested yet: everything with the game (Invite while hosting an open lobby,
+the address from UPnP or from the backend, the toast, Join into a running game),
+two PCs, the live backend, and the socket over Railway's edge.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The

@@ -2,50 +2,139 @@
 <head>
 	<title>Friends</title>
 	<link type="text/template" href="../shell.rml"/>
-	<style>
-		.friends-columns { display: flex; flex-direction: row; flex-wrap: wrap; gap: 40dp; margin-top: 40dp; }
-		.friends-column { flex: 1 1 360dp; max-width: 560dp; }
-		.friends-item { padding: 14dp 0dp; border-bottom: 1dp var(--line); }
-		.friends-item-title { font-size: 15dp; font-weight: 600; line-height: 20dp; }
-		.friends-item-text { margin-top: 4dp; font-size: 13dp; line-height: 19dp; color: var(--text2); }
-	</style>
+	<link type="text/rcss" href="friends.rcss"/>
 </head>
-<!-- Friends (docs/DESIGN.md 7.3): arrives with Xerces accounts in M5. Until
-     then this page says what is off in this build (D14) and what will come,
-     and nothing on it talks to a network. -->
-<body template="shell">
-<div class="page">
-	<div class="page-title">Friends</div>
-	<div class="page-sub">Friends, presence and invites arrive with Xerces accounts. Until then Xerces sends nothing about you for them (crash reports are in Settings, Privacy), and joining a friend works through Servers with their address.</div>
+<!-- Friends (docs/DESIGN.md 7.3, 10): a Xerces account, friends with
+     presence, requests, invites, blocks and privacy. Data: the "friends"
+     model in src/xerces_launcher/views/friends.cpp; the network work is
+     src/xerces_launcher/friends_service.cpp's. -->
+<body template="shell" data-model="friends">
+<div id="friends-main">
+	<div class="friends-primary">
+		<div class="page-title">Friends</div>
 
-	<div class="friends-columns">
-		<div class="friends-column">
-			<div class="label section-label">Off in this build</div>
-			<div class="friends-item">
-				<div class="friends-item-title">Friend presence and invites</div>
-				<div class="friends-item-text">BOIII sent your friend code to its masters every few seconds. Xerces builds leave that out.</div>
-			</div>
-			<div class="friends-item">
-				<div class="friends-item-title">Connecting through BOIII's servers</div>
-				<div class="friends-item-text">The rendezvous that helped two players behind routers find each other is off too. Direct connect and LAN still work.</div>
+		<div data-if="!available">
+			<div class="page-sub">This build has no Xerces server to talk to, so friends and invites are off. Joining a friend works through Servers with their address.</div>
+		</div>
+
+		<div data-if="available &amp;&amp; !signed_in">
+			<div class="page-sub">With a Xerces account your friends see when you are online or in a game, and you can invite each other to your lobby. Offline and LAN play never need one.</div>
+			<div class="section account-form">
+				<div class="panel-head"><span class="panel-title">Sign in or make an account</span></div>
+				<div class="label field-label">Username</div>
+				<input id="login-name" type="text" class="text account-field" maxlength="24" data-value="login_name"/>
+				<div class="label field-label">Password</div>
+				<input id="login-password" type="password" class="text account-field" maxlength="128" data-value="login_password"/>
+				<div class="field-problem" data-if="form_problem != ''">{{form_problem}}</div>
+				<div class="field-note">A username has 3 to 24 letters, digits, '_', '.' or '-'. A new password needs at least 10 characters. Xerces keeps your sign-in on this PC, encrypted for your Windows account, and never your password.</div>
+				<div class="toolbar account-actions">
+					<button id="sign-in" class="primary-button default-focus" data-event-click="act('sign in')"><span>Sign in</span></button>
+					<button id="sign-up" class="outline" data-event-click="act('sign up')"><span>Make an account</span></button>
+				</div>
 			</div>
 		</div>
-		<div class="friends-column">
-			<div class="label section-label">Coming with accounts</div>
-			<div class="friends-item">
-				<div class="friends-item-title">Friend requests, presence and parties</div>
-				<div class="friends-item-text">Optional, with privacy settings and block and report.</div>
+
+		<div data-if="available &amp;&amp; signed_in">
+			<div class="account-line">
+				<span class="account-name">{{username}}</span>
+				<span class="account-state" data-class-live="connected">{{connection}}</span>
+				<button id="sign-out" class="link" data-event-click="act('sign out')"><span>Sign out</span></button>
 			</div>
-			<div class="friends-item">
-				<div class="friends-item-title">Invites that bring the right mods</div>
-				<div class="friends-item-text">An invite carries the pack, so Xerces can tell you which Workshop items to get in Steam first.</div>
+
+			<div class="section" data-if="invites.size > 0">
+				<div class="panel-head"><span class="panel-title">Invites</span></div>
+				<div class="friend-row invite-row" data-for="v, i : invites">
+					<div class="friend-text"><div class="friend-name">{{v.text}}</div></div>
+					<div class="row-actions">
+						<button class="small-button" data-attr-id="'invite-join-' + i" data-event-click="row('join', i)"><span>Join</span></button>
+						<button class="small-button" data-attr-id="'invite-ignore-' + i" data-event-click="row('ignore', i)"><span>Decline</span></button>
+					</div>
+				</div>
+			</div>
+
+			<div class="section" data-if="incoming.size > 0">
+				<div class="panel-head"><span class="panel-title">Friend requests</span></div>
+				<div class="friend-row" data-for="r, i : incoming">
+					<div class="friend-text"><div class="friend-name">{{r.name}}</div></div>
+					<div class="row-actions">
+						<button class="small-button" data-attr-id="'request-accept-' + i" data-event-click="row('accept', i)"><span>Accept</span></button>
+						<button class="small-button" data-attr-id="'request-decline-' + i" data-event-click="row('decline', i)"><span>Decline</span></button>
+					</div>
+				</div>
+			</div>
+
+			<div class="section">
+				<div class="panel-head">
+					<span class="panel-title">Friends</span>
+					<span class="panel-count">{{friend_count}}</span>
+				</div>
+				<div class="friend-row" data-for="f, i : friends" data-class-offline="!f.online">
+					<span class="presence-dot" data-class-on="f.online"></span>
+					<div class="friend-text">
+						<div class="friend-name">{{f.name}}</div>
+						<div class="friend-status">{{f.status}}</div>
+					</div>
+					<div class="row-actions">
+						<button class="small-button" data-if="hosting" data-attr-id="'friend-invite-' + i" data-event-click="row('invite', i)"><span>Invite</span></button>
+						<button class="small-button" data-attr-id="'friend-remove-' + i" data-event-click="row('remove', i)"><span>Remove</span></button>
+						<button class="small-button" data-attr-id="'friend-block-' + i" data-event-click="row('block', i)"><span>Block</span></button>
+					</div>
+				</div>
+				<div class="empty-note" data-if="friends.size == 0">No friends yet. Send a request with their Xerces username below.</div>
+				<div class="invite-note">{{invite_note}}</div>
+
+				<div class="label field-label">Add a friend</div>
+				<div class="add-fields">
+					<input id="add-name" type="text" class="text add-name" maxlength="24" data-attr-placeholder="add_placeholder" data-value="add_name"/>
+					<button id="add-friend" class="outline add-button" data-event-click="act('add')"><span>Send request</span></button>
+				</div>
+			</div>
+
+			<div class="section" data-if="outgoing.size > 0">
+				<div class="panel-head"><span class="panel-title">Requests you sent</span></div>
+				<div class="friend-row" data-for="r, i : outgoing">
+					<div class="friend-text"><div class="friend-name">{{r.name}}</div></div>
+					<div class="row-actions">
+						<button class="small-button" data-attr-id="'request-cancel-' + i" data-event-click="row('cancel', i)"><span>Cancel</span></button>
+					</div>
+				</div>
 			</div>
 		</div>
 	</div>
 
-	<div class="section toolbar">
-		<button id="friends-servers" class="outline default-focus"><span>Open Servers</span></button>
-		<button id="friends-home" class="link"><span>Back to Home</span></button>
+	<div class="friends-aside" data-if="available &amp;&amp; signed_in">
+		<div>
+			<div class="panel-head"><span class="panel-title">Privacy</span></div>
+			<div class="privacy-row">
+				<div class="privacy-text">Friend requests from</div>
+				<button id="privacy-requests" class="small-button" data-event-click="act('privacy requests')"><span>{{privacy_requests}}</span></button>
+			</div>
+			<div class="privacy-row">
+				<div class="privacy-text">Who sees you online</div>
+				<button id="privacy-presence" class="small-button" data-event-click="act('privacy presence')"><span>{{privacy_presence}}</span></button>
+			</div>
+			<div class="privacy-row">
+				<div class="privacy-text">Game invites from</div>
+				<button id="privacy-invites" class="small-button" data-event-click="act('privacy invites')"><span>{{privacy_invites}}</span></button>
+			</div>
+			<div class="aside-note quiet">Friends see only whether you are online or in a game, its mode, and whether its lobby is open. An invite gives the friend your lobby's internet address and port, as direct connect does.</div>
+		</div>
+
+		<div data-if="blocks.size > 0">
+			<div class="panel-head"><span class="panel-title">Blocked</span></div>
+			<div class="friend-row" data-for="b, i : blocks">
+				<div class="friend-text"><div class="friend-name">{{b.name}}</div></div>
+				<div class="row-actions">
+					<button class="small-button" data-attr-id="'unblock-' + i" data-event-click="row('unblock', i)"><span>Unblock</span></button>
+				</div>
+			</div>
+		</div>
+
+		<div>
+			<div class="panel-head"><span class="panel-title">Invites</span></div>
+			<div class="aside-note">Host a Zombies or Multiplayer lobby, open it to direct connect, then press Invite next to a friend. They get a toast in the game and an entry here; Join has their game join yours from its main menu, or starts it with the join.</div>
+			<button id="friends-refresh" class="small-button" data-event-click="act('refresh')"><span>Refresh</span></button>
+		</div>
 	</div>
 </div>
 </body>

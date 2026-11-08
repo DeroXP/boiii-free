@@ -191,7 +191,20 @@ If you try it, tell us how it went.
   reach the host: let someone else host, or everyone joins one VPN that puts
   them on the same network. Players on the host's own network can always join
   with the local address.
-- Friend invites are off in this build (the Friends screen says why).
+- **Friends and invites.** On the Friends tab, make a Xerces account (a
+  username, and a password of at least 10 characters) or sign in. Add friends by
+  their Xerces username; they accept on their Friends tab. While Xerces is open
+  you see whether each friend is online, in a game and which mode, and whether
+  their lobby is open. To invite: host as above with the lobby open, then press
+  Invite next to a friend. The invite gives them your lobby's address (the
+  router's, from UPnP, or the internet address Xerces' server sees with your
+  game's port, which you then forward by hand as above). They get a toast in the
+  game and an entry on Friends; Join there has their game join yours from its
+  main menu, or starts it with the join. Invites last 10 minutes. Keep Xerces
+  open while you play, or friends see you offline and invites wait (Settings,
+  "Close Xerces when the game starts" off). Remove and Block are next to each
+  friend; the privacy buttons on Friends say who may send you requests, see you
+  online and invite you.
 - The first time you host or join, Windows asks whether "BOIII" may use your
   networks. That is Xerces' game client (boiii.exe, it keeps that name for now).
   Allow it, on private networks at least; offline play does not need it.
@@ -216,6 +229,16 @@ If you try it, tell us how it went.
 - **Playing together.** Servers you join, and players who join your lobby, see
   your IP address. While your lobby is open the game asks your router to forward
   its port (UPnP). Voice chat reaches the other players.
+- **Friends**, once you sign in: your username and password go to Xerces'
+  server, which keeps a hash of the password, never the password itself. While
+  Xerces is open it keeps a connection to that server and tells your friends
+  whether you are online or in a game, its mode, and whether its lobby is open
+  (or nothing, with "Who sees you online" set to Nobody). An invite you send
+  gives that friend your lobby's address and port; to find it without UPnP,
+  Xerces asks the server which internet address it sees (the server neither
+  stores nor logs it). On your PC, Xerces keeps your sign-in in
+  `%LOCALAPPDATA%\Xerces\config\account.dat`, encrypted for your Windows
+  account; Sign out deletes it.
 - Links you click (GitHub issues, Black Ops III's store page, the licence) open
   in your browser or in Steam.
 

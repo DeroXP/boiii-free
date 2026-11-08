@@ -1,85 +1,22 @@
-// The crash reports' HTTP transport (crash_outbox.hpp): WinHTTP, a system
-// DLL, so no TLS or HTTP library ships with Xerces for it. HTTPS uses the
-// system's certificate store; plain HTTP is allowed to local addresses only,
-// for tests against a backend on this PC (crash_base_url_from).
+// The backend's HTTP transport (crash_outbox.hpp), for crash reports and
+// accounts (account.hpp): WinHTTP, a system DLL, so no TLS or HTTP library
+// ships with Xerces for it. HTTPS uses the system's certificate store; plain
+// HTTP is allowed to local addresses only, for tests against a backend on
+// this PC (crash_base_url_from).
 
 #include "crash_outbox.hpp"
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-
-#include <winhttp.h>
-
 #include <cstdlib>
 
-#pragma comment(lib, "winhttp.lib")
+#include "winhttp_util.hpp"
 
 namespace xerces_core {
-namespace {
-std::wstring wide(std::string_view text) {
-  if (text.empty()) {
-    return {};
-  }
-  const int size = MultiByteToWideChar(
-      CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
-  std::wstring out(static_cast<std::size_t>(size), L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
-                      out.data(), size);
-  return out;
-}
-
-std::string narrow(const std::wstring &text) {
-  if (text.empty()) {
-    return {};
-  }
-  const int size = WideCharToMultiByte(CP_UTF8, 0, text.data(),
-                                       static_cast<int>(text.size()), nullptr,
-                                       0, nullptr, nullptr);
-  std::string out(static_cast<std::size_t>(size), '\0');
-  WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
-                      out.data(), size, nullptr, nullptr);
-  return out;
-}
-
-std::string last_error(const char *what) {
-  return std::string(what) + " failed (" + std::to_string(GetLastError()) + ")";
-}
-
-struct handle {
-  HINTERNET value = nullptr;
-  explicit handle(HINTERNET h) : value(h) {}
-  ~handle() {
-    if (value) {
-      WinHttpCloseHandle(value);
-    }
-  }
-  handle(const handle &) = delete;
-  handle &operator=(const handle &) = delete;
-  explicit operator bool() const { return value != nullptr; }
-};
-
-bool local_host(const std::wstring &host) {
-  return host == L"127.0.0.1" || host == L"localhost" || host == L"::1" ||
-         host == L"[::1]";
-}
-
-// The Xerces backend's host (crash_default_base without "https://").
-bool backend_host(const std::wstring &host) {
-  std::wstring low = host;
-  for (wchar_t &c : low) {
-    if (c >= L'A' && c <= L'Z') {
-      c = static_cast<wchar_t>(c - L'A' + L'a');
-    }
-  }
-  constexpr std::string_view scheme = "https://";
-  return low == wide(crash_default_base.substr(scheme.size()));
-}
-} // namespace
+using winhttp::backend_host;
+using winhttp::handle;
+using winhttp::last_error;
+using winhttp::local_host;
+using winhttp::narrow;
+using winhttp::wide;
 
 http_response winhttp_send(const http_request &request) {
   http_response out;
@@ -99,7 +36,7 @@ http_response winhttp_send(const http_request &request) {
   const bool secure = parts.nScheme == INTERNET_SCHEME_HTTPS;
   // The backend (docs/ENDPOINTS.md) or this PC, nowhere else.
   if (!local_host(host) && !backend_host(host)) {
-    out.error = "crash reports go to the Xerces backend or this PC only";
+    out.error = "requests go to the Xerces backend or this PC only";
     return out;
   }
   if (!secure && !local_host(host)) {

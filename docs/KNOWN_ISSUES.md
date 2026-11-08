@@ -133,6 +133,12 @@ to report these again, but tell us if you see them somewhere else or worse.
   closing the lobby or quitting the game closes it. After a crash with the lobby
   open the router keeps forwarding the port until the lobby is opened and closed
   again (README.txt, Playing with other testers).
+- **Friends and invites are new and only tested without the game.** Accounts,
+  friend requests, presence, privacy, block and sign-out worked with two
+  launchers on one PC against a test server; Invite while your lobby is open,
+  the toast in the game and Join into a running game have not run yet, nor two
+  PCs. An invite still needs your port forwarded when the router has no UPnP, as
+  direct connect does. Friends only see you while Xerces is open.
 - **Multiplayer with Zombies mods can close the game.** On a tester's PC with
   four Zombies mods loaded, switching the main menu to Multiplayer ended with
   "Could not allocate asset - increase XASSET_ENTRY_POOL_SIZE" and the game

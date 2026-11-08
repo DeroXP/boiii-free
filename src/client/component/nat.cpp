@@ -1201,6 +1201,10 @@ std::string joinable_lobby() {
   return open_to_friends && lobby_host_info() ? "party" : "";
 }
 
+hosting_state hosting() {
+  return {!joinable_lobby().empty(), local_port(), upnp::external_endpoint()};
+}
+
 void join_match_lobby(const game::net::netadr_t &host,
                       std::function<void()> fallback) {
   const auto deadline = std::chrono::steady_clock::now() + 20s;

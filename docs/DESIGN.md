@@ -2310,6 +2310,66 @@ verified before the first deploy: the Docker build (no Docker on the build PC),
 how Railway's edge fills `X-Forwarded-For` (the README's forged-header check),
 and the Markdown formatting check (no Node on the build PC).
 
+### 10.11 Friends in the launcher, stage 1 (2026-11-07)
+
+The friend plan the user approved on 2026-11-07 has five stages: 0, joining from
+Servers once the main menu is up (11.10); 1, accounts, friends, presence and
+invites in Xerces (this section); 2, invite links and the missing-mod check with
+a restart and rejoin; 3, encrypted join tickets and a relay, so nobody forwards
+a port; 4, a party that follows its host. Steam's own invites and Join Game stay
+out: the Steam code is fenced, a Steam lobby under BO3's app id is the official
+matchmaking, and Steam would start BO3 rather than Xerces.
+
+- **Accounts.** The Friends tab signs in or makes an account on the backend's
+  M5a routes (10.3): username and password, checked here by the backend's own
+  rules first (`xerces_core/account.hpp`). The sign-in is kept in
+  `<home>\config\account.dat`: the account's id, name and refresh token,
+  encrypted with DPAPI for the current Windows user (with entropy "Xerces
+  account v1"); the access token lives in memory only, the password nowhere. A
+  refresh token that rotates is saved again; one the backend refuses signs out.
+  Sign out revokes it on the backend and deletes the file.
+- **One worker, one listener.** `src/xerces_launcher/friends_service.cpp` makes
+  every call on a worker thread (the REST API over `winhttp_send`, now shared
+  with crash reports, and the game's pipe), and a second thread only receives
+  the account socket (`/v1/ws`, `xerces_core/websocket.hpp`, WinHTTP's own
+  WebSocket: wss to the backend, ws to this PC for tests, as the requests). The
+  screen reads a snapshot the worker posts; nothing on the UI thread waits on
+  the network. The socket reconnects with a growing wait (2 s to 60 s), at once
+  after a 4401 (token ran out); every 25 s a ping, and a fresh access token over
+  the socket when the old one is about to end; the lists again every 60 s, as
+  nothing tells a player they were removed or blocked.
+- **Presence.** While Xerces is open and signed in: "online", or "in_game" with
+  the mode (from the launch journal) and `joinable` when the running game hosts
+  a lobby others can join by address. The game says that over its pipe (new
+  method `host`: `nat::hosting()`, the lobby open to direct connect or a match
+  it hosts, its UDP port, and the router's outside endpoint while UPnP forwards
+  it), asked every 5 s while it runs. Nothing else about the player or the PC is
+  sent. Friends who hide their presence, or who are offline, show "Offline".
+- **Invites.** Invite (next to each friend while the game hosts an open lobby)
+  sends the backend's invite (10.3) with the session text
+  `xerces/1 <host:port> <mode> <modded 0|1>`. The address is UPnP's outside
+  endpoint when the router gave one; otherwise the public address the backend
+  sees (`GET /v1/me/address`, new: signed-in callers only, the exact IP from the
+  same proxy rule as the rate limits, 503 when it is not a global address, 30
+  per hour) with the game's port, which the host then forwards by hand as for
+  direct connect. The friend's launcher shows the invite on Friends and in the
+  footer, and, while their game runs, a toast in the game (pipe method
+  `notify`). Join has a running game connect from its main menu (pipe method
+  `join`, refused elsewhere, as a join before the menu crashed); otherwise it
+  starts the game with the join, as Join in Servers does. The invite is marked
+  accepted on the backend after the running game took it, so one the game could
+  not take yet stays to try again.
+- **Safety.** Remove and Block ask first; Blocked lists the blocks with Unblock;
+  the three privacy settings (requests from everyone or nobody, presence and
+  invites to friends or nobody) are buttons that switch. Logs name no friend:
+  notices that name one log a fixed line instead.
+
+Tested on one PC on 2026-11-07, with two launchers (two homes, two test
+accounts) against the backend run locally (docs/TESTING.md). Not tested: the
+game's side (Invite while hosting, the toast, Join into a running game), two
+PCs, and the live backend, which does not have `/v1/me/address` until
+`xerces-design` is pushed.
+
 ---
 
 ## 11. Self-hosted servers and netcode (goal 9)

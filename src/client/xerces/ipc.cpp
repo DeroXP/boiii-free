@@ -11,9 +11,19 @@
 //   reload  {"extras": ["id", ...]} sets the extra mods and reloads them, as
 //           the mods menu's ModStack.Set and ModStack.Reload do; front end only
 //   unload  no extra mods, then the same reload; front end only
+//   host    whether others can join this game by address now, its UDP port
+//           and the router's outside address while UPnP forwards the port
+//           (friends' invites, docs/DESIGN.md 7.3)
+//   join    {"address": "host:port"} joins that lobby as "connect" in the
+//           console does; at the main menu only (an invite accepted in
+//           Xerces while the game runs)
+//   notify  {"title", "text"} shows a toast (an invite came in)
 
+#include <component/gpu.hpp>
 #include <component/mod_stack.hpp>
+#include <component/nat.hpp>
 #include <component/scheduler.hpp>
+#include <component/toast.hpp>
 #include <game/game.hpp>
 #include <game/utils.hpp>
 #include <loader/component_loader.hpp>
@@ -22,6 +32,7 @@
 #include <xerces_core/ipc.hpp>
 #include <xerces_core/journal.hpp>
 #include <xerces_core/json.hpp>
+#include <xerces_core/launch.hpp>
 
 #include "perf.hpp"
 #include "runtime.hpp"
@@ -145,9 +156,77 @@ std::optional<std::string> extras_param(const std::string &params,
   return list;
 }
 
+std::string host_json() {
+  const nat::hosting_state state = nat::hosting();
+  return std::string("{\"in_match\":") + (in_match() ? "true" : "false") +
+         ",\"mapped\":" + json::quote(state.mapped_endpoint) +
+         ",\"open\":" + (state.open ? "true" : "false") +
+         ",\"port\":" + std::to_string(state.port) + "}";
+}
+
+// A string member of the params object, at most max_bytes and without
+// control characters; nullopt (with error) otherwise.
+std::optional<std::string> text_param(const std::string &params,
+                                      std::string_view name,
+                                      std::size_t max_bytes,
+                                      std::string *error) {
+  const auto parsed = json::parse(params);
+  const auto value = parsed.ok && parsed.document.IsObject()
+                         ? json::get_string(parsed.document, name)
+                         : std::nullopt;
+  if (!value || value->empty() || value->size() > max_bytes ||
+      std::ranges::any_of(*value, [](char c) {
+        return static_cast<unsigned char>(c) < 0x20 || c == 0x7f;
+      })) {
+    *error = std::string(name) + " must be a short line of text";
+    return std::nullopt;
+  }
+  return value;
+}
+
 std::string handle(const ipc::request &request) {
   if (request.method == "status") {
     return on_main(request, status_json);
+  }
+  if (request.method == "host") {
+    return on_main(request, host_json);
+  }
+  if (request.method == "join") {
+    std::string error;
+    const auto address = text_param(request.params, "address", 64, &error);
+    if (!address || !xerces_core::valid_server_address(*address)) {
+      return ipc::make_error(request.id, ipc::invalid_params,
+                             error.empty() ? "address is not host:port"
+                                           : error);
+    }
+    std::string response = on_main(request, [address]() -> std::string {
+      // As xerces/join_after_menu.cpp: a join before the main menu sends
+      // stats the game has not loaded yet.
+      if (in_match() || !gpu::on_main_menu()) {
+        return "!refused";
+      }
+      xerces_runtime::log_info("xerces.join.invite",
+                               "joining the lobby of an invite");
+      const std::string command = "connect " + *address + "\n";
+      game::cbuf::Cbuf_AddText(game::LOCAL_CLIENT_0, command.c_str());
+      return "{\"joining\":true}";
+    });
+    if (response.find("\"message\":\"refused\"") != std::string::npos) {
+      return ipc::make_error(request.id, ipc::refused,
+                             "the game joins from its main menu only");
+    }
+    return response;
+  }
+  if (request.method == "notify") {
+    std::string error;
+    const auto title = text_param(request.params, "title", 80, &error);
+    const auto text =
+        title ? text_param(request.params, "text", 200, &error) : std::nullopt;
+    if (!title || !text) {
+      return ipc::make_error(request.id, ipc::invalid_params, error);
+    }
+    toast::info(*title, *text);
+    return ipc::make_result(request.id, "{\"shown\":true}");
   }
   if (request.method == "mods") {
     return on_main(request, mods_json);

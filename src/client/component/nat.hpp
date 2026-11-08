@@ -25,6 +25,16 @@ bool set_open_to_friends(bool enabled);
 // when this game hosts no lobby.
 bool set_open_to_direct_connect(bool enabled);
 std::string joinable_lobby();
+// Xerces (friends' invites, docs/DESIGN.md 7.3): whether others can join
+// this game by address now (it hosts a lobby open to direct connect, or a
+// match), its UDP port, and the router's outside address and port while
+// UPnP forwards it ("" otherwise). Main thread only.
+struct hosting_state {
+  bool open = false;
+  uint16_t port = 0;
+  std::string mapped_endpoint;
+};
+hosting_state hosting();
 void join_match_lobby(const game::net::netadr_t &host,
                       std::function<void()> fallback);
 bool is_lobby_peer(const game::net::netadr_t &address);
