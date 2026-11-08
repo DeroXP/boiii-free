@@ -404,14 +404,27 @@ void friends_service::handle(const std::string &message) {
       // The player is likely in the game: say it there too.
       if (work_.game_running) {
         const auto game = account::parse_session_text(received.session);
-        std::string error;
-        call_game("notify",
-                  "{\"text\":" +
-                      json::quote(received.from_username + " invited you to " +
-                                  mode_name(game ? game->mode : "zm") +
-                                  ". Join from Friends in Xerces.") +
-                      ",\"title\":\"Xerces invite\"}",
-                  &error);
+        std::string response;
+        // The toast shows about 36 characters of title and 26 of text, one
+        // line each (seen in the game): "Invite from" and a 24-character
+        // name, then "Multiplayer, join in Xerces" at most.
+        const bool reached = call_game(
+            "notify",
+            "{\"text\":" +
+                json::quote(std::string(mode_name(game ? game->mode : "zm")) +
+                            ", join in Xerces") +
+                ",\"title\":" +
+                json::quote("Invite from " + received.from_username) + "}",
+            &response);
+        const auto parsed =
+            reached ? ipc::parse_response(response) : std::nullopt;
+        if (parsed && parsed->ok) {
+          log_info("launcher.friends.game_toast", "the game showed the invite");
+        } else {
+          log_warn("launcher.friends.game_toast",
+                   "the game did not show the invite: " +
+                       (parsed ? parsed->message : response));
+        }
       }
     }
   } else if (push->type == "error") {

@@ -2364,11 +2364,15 @@ matchmaking, and Steam would start BO3 rather than Xerces.
   invites to friends or nobody) are buttons that switch. Logs name no friend:
   notices that name one log a fixed line instead.
 
+`xerces_cli host`, `join --address` and `notify --title --text` call the same
+pipe methods, for tests. The toast shows about 36 characters of title and 26 of
+text: "Invite from <name>" over "<Mode>, join in Xerces".
+
 Tested on one PC on 2026-11-07, with two launchers (two homes, two test
-accounts) against the backend run locally (docs/TESTING.md). Not tested: the
-game's side (Invite while hosting, the toast, Join into a running game), two
-PCs, and the live backend, which does not have `/v1/me/address` until
-`xerces-design` is pushed.
+accounts) against the backend run locally, and with the game: the open lobby
+seen as joinable, the toast, Join into a running game (docs/TESTING.md). Not
+tested: two PCs, and the live backend, which does not have `/v1/me/address`
+until `xerces-design` is pushed.
 
 ---
 

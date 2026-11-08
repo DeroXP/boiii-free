@@ -1575,9 +1575,35 @@ Found and fixed: B still listed A after A blocked B, until B's lists were read
 again (the backend tells nobody they were removed or blocked); the launcher now
 reads the lists every 60 s. That refresh itself was not watched in a run.
 
-Not tested yet: everything with the game (Invite while hosting an open lobby,
-the address from UPnP or from the backend, the toast, Join into a running game),
-two PCs, the live backend, and the socket over Railway's edge.
+With the game, run by Claude with your go-ahead ("Run it"), the same local
+backend, the game started under home A from the worktree build with mods off
+(`game-run.ps1`, `game-run2.ps1`; keys only to the game window):
+
+- [x] Hosting: in the Zombies lobby, `friends_open` (the DIRECT CONNECT button's
+      command; the router answered no UPnP, as at home). Launcher A saw the open
+      lobby within seconds ("Your lobby is open ...", Invite next to bobtest),
+      and launcher B showed "alicetest · Playing Zombies · lobby open". Invite
+      answered "Xerces could not tell your internet address: The server cannot
+      tell your public address.": right for a backend on this PC, which sees
+      127.0.0.1. The live backend sees the real address.
+- [x] The pipe methods through `xerces_cli` (new `host`, `join`, `notify`): at
+      the main menu `host` said not open, port 27017, nothing mapped; `notify`
+      showed the toast; `join --address 203.0.113.7:27017` showed the game's
+      "Connecting 203.0.113.7:27017" toast, then "Connect failed: No response"
+      in the console (nothing answers at that address).
+- [x] An invite from bobtest while A's game ran: A's launcher had the game show
+      it ("the game showed the invite" in its log, the toast seen in a capture),
+      and Join had the running game connect (`xerces.join.invite` in the game
+      log, the same connect).
+- [x] The toast's text: the game shows about 36 characters of title and 26 of
+      text, one line each. The first text ("bobtest invited you to Zombies. Join
+      from Friends in Xerces.") was cut; now the title is "Invite from" and the
+      name, the text "Zombies, join in Xerces". The longest, a 24-character name
+      and Multiplayer, fits (capture).
+
+Not tested yet: an invite reaching a friend on another PC and their join into a
+real lobby, the address from UPnP or from the live backend, the live backend and
+its socket over Railway's edge, and a mod stack.
 
 ### Voice chat starts as push-to-talk (2026-11-05)
 

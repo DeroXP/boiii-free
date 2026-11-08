@@ -1052,6 +1052,9 @@ int cmd_diag_bundle(const arguments &args) {
 // The live commands (15.2): talk to the running game over its pipe.
 //   status [--json]                     build, signatures, plan, phase, mods
 //   load --extras a,b | reload [--extras a,b] | unload   front end only
+//   host                                whether its lobby can be joined now
+//   join --address host:port            join a lobby; main menu only
+//   notify --title T --text X           a toast in the game
 int cmd_live(const arguments &args, const std::string &command) {
   const fs::path run = xerces_home(args) / "run";
   const auto entries = ipc::live_run_entries(run);
@@ -1064,6 +1067,23 @@ int cmd_live(const arguments &args, const std::string &command) {
   }
   std::string method = command;
   std::string params = "{}";
+  if (command == "join") {
+    const auto address = args.get("--address");
+    if (!address) {
+      std::cerr << "join needs --address host:port.\n";
+      return exit_error;
+    }
+    params = "{\"address\":" + json::quote(*address) + "}";
+  } else if (command == "notify") {
+    const auto title = args.get("--title");
+    const auto text = args.get("--text");
+    if (!title || !text) {
+      std::cerr << "notify needs --title and --text.\n";
+      return exit_error;
+    }
+    params = "{\"text\":" + json::quote(*text) +
+             ",\"title\":" + json::quote(*title) + "}";
+  }
   if (command == "load" || command == "reload") {
     method = "reload";
     if (const auto extras = args.get("--extras")) {
@@ -1411,7 +1431,8 @@ int main(int argc, char **argv) {
       return cmd_crash(args, action);
     }
     if (group == "status" || group == "load" || group == "reload" ||
-        group == "unload") {
+        group == "unload" || group == "host" || group == "join" ||
+        group == "notify") {
       return cmd_live(args, group);
     }
     const std::set<std::string> live = {"status", "mods",   "plan",  "load",
