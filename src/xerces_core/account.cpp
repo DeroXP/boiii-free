@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <system_error>
 
+#include "join_password.hpp"
 #include "json.hpp"
 #include "launch.hpp"
 #include "launcher_home.hpp"
@@ -89,8 +90,72 @@ invite invite_of(const rapidjson::Value &object) {
   out.to_user_id = text_of(object, "to_user_id");
   out.to_username = text_of(object, "to_username");
   out.session = text_of(object, "session");
+  out.pack_code = text_of(object, "pack_code");
   out.status = text_of(object, "status");
   return out;
+}
+
+knock_info knock_of(const rapidjson::Value &object) {
+  knock_info out;
+  out.id = text_of(object, "id");
+  out.from_user_id = text_of(object, "from_user_id");
+  out.from_username = text_of(object, "from_username");
+  out.to_user_id = text_of(object, "to_user_id");
+  out.to_username = text_of(object, "to_username");
+  out.mode = text_of(object, "mode");
+  out.status = text_of(object, "status");
+  return out;
+}
+
+std::vector<knock_info> knocks_of(const rapidjson::Value *array) {
+  std::vector<knock_info> out;
+  if (!array || !array->IsArray()) {
+    return out;
+  }
+  for (const auto &item : array->GetArray()) {
+    out.push_back(knock_of(item));
+  }
+  return out;
+}
+
+invite_link link_of(const rapidjson::Value &object) {
+  return invite_link{text_of(object, "code"), text_of(object, "path"),
+                     text_of(object, "mode")};
+}
+
+bool lower_hex(std::string_view text, std::size_t size) {
+  return text.size() == size && std::ranges::all_of(text, [](char c) {
+           return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+         });
+}
+
+// "<prefix>-XXXXXXXX" in Crockford base32 (backend/app/schemas.py
+// normalize_pack_code): any case, the dash optional, O as 0, I and L as 1.
+std::optional<std::string> code_from(std::string_view text,
+                                     std::string_view prefix) {
+  std::string upper;
+  for (const char c : text) {
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+      upper += static_cast<char>((c >= 'a' && c <= 'z') ? c - 'a' + 'A' : c);
+    }
+  }
+  if (!upper.starts_with(prefix)) {
+    return std::nullopt;
+  }
+  std::string body;
+  for (const char c : std::string_view(upper).substr(prefix.size())) {
+    if (c == '-') {
+      continue;
+    }
+    body += c == 'O' ? '0' : (c == 'I' || c == 'L') ? '1' : c;
+  }
+  constexpr std::string_view alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  if (body.size() != 8 || !std::ranges::all_of(body, [&](char c) {
+        return alphabet.find(c) != std::string_view::npos;
+      })) {
+    return std::nullopt;
+  }
+  return std::string(prefix) + "-" + body;
 }
 
 std::vector<friend_request> requests_of(const rapidjson::Value *array) {
@@ -250,8 +315,30 @@ std::string check_new_password(std::string_view password) {
 
 // --------------------------------------------------------- invite text
 std::string session_text(const game_session &value) {
-  return "xerces/1 " + value.address + " " + value.mode + " " +
-         (value.modded ? "1" : "0");
+  const std::string common =
+      value.address + " " + value.mode + " " + (value.modded ? "1" : "0");
+  if (value.ticket.empty()) {
+    return "xerces/1 " + common;
+  }
+  return "xerces/2 " + common + " " + value.ticket;
+}
+
+std::string new_ticket() { return join_password::random_token(); }
+
+std::optional<std::string> link_code_from(std::string_view text) {
+  // A link that ends in the code: take what follows the last '/'.
+  while (!text.empty() && (text.back() == '/' || text.back() == ' ')) {
+    text.remove_suffix(1);
+  }
+  if (const std::size_t slash = text.rfind('/');
+      slash != std::string_view::npos) {
+    text = text.substr(slash + 1);
+  }
+  return code_from(text, "XJN");
+}
+
+std::optional<std::string> pack_code_from(std::string_view text) {
+  return code_from(text, "XRC");
 }
 
 std::optional<game_session> parse_session_text(std::string_view text) {
@@ -267,14 +354,17 @@ std::optional<game_session> parse_session_text(std::string_view text) {
     }
     start = space + 1;
   }
-  if (parts.size() != 4 || parts[0] != "xerces/1" ||
-      !valid_server_address(parts[1]) ||
+  const bool v1 = parts.size() == 4 && parts[0] == "xerces/1";
+  const bool v2 =
+      parts.size() == 5 && parts[0] == "xerces/2" && lower_hex(parts[4], 32);
+  if ((!v1 && !v2) || !valid_server_address(parts[1]) ||
       (parts[2] != "zm" && parts[2] != "mp" && parts[2] != "cp") ||
       (parts[3] != "0" && parts[3] != "1")) {
     return std::nullopt;
   }
   return game_session{std::string(parts[1]), std::string(parts[2]),
-                      parts[3] == "1"};
+                      parts[3] == "1",
+                      v2 ? std::string(parts[4]) : std::string()};
 }
 
 // ------------------------------------------------------------ the calls
@@ -626,7 +716,8 @@ outcome client::list_invites(invites &out) {
 }
 
 outcome client::send_invite(std::string_view to_user_id,
-                            const game_session &game) {
+                            const game_session &game,
+                            std::string_view pack_code, invite *out) {
   if (!safe_id(to_user_id)) {
     return bad_id();
   }
@@ -636,10 +727,29 @@ outcome client::send_invite(std::string_view to_user_id,
     out.message = "The game to invite to is not a lobby address.";
     return out;
   }
-  return call("POST", "/v1/invites",
-              "{\"session\":" + json::quote(session_text(game)) +
-                  ",\"to_user_id\":" + json::quote(to_user_id) + "}",
-              nullptr, true);
+  std::string body = "{";
+  if (!pack_code.empty()) {
+    const auto code = pack_code_from(pack_code);
+    if (!code) {
+      outcome out;
+      out.code = "invalid_request";
+      out.message = "That is not a pack code.";
+      return out;
+    }
+    body += "\"pack_code\":" + json::quote(*code) + ",";
+  }
+  body += "\"session\":" + json::quote(session_text(game)) +
+          ",\"to_user_id\":" + json::quote(to_user_id) + "}";
+  std::string answer;
+  outcome result = call("POST", "/v1/invites", body, &answer, true);
+  if (result.ok && out) {
+    const auto parsed = parse_object(answer);
+    if (!parsed.ok || !parsed.document.IsObject()) {
+      return not_understood();
+    }
+    *out = invite_of(parsed.document);
+  }
+  return result;
 }
 
 outcome client::accept_invite(std::string_view invite_id, invite *out) {
@@ -682,6 +792,194 @@ outcome client::own_address(std::string &out) {
   return result;
 }
 
+namespace {
+outcome bad_code(std::string_view what) {
+  outcome out;
+  out.code = "invalid_request";
+  out.message = "That is not " + std::string(what) + ".";
+  return out;
+}
+} // namespace
+
+outcome client::create_pack(const std::string &pack_json, std::string &code) {
+  const auto pack = json::parse(pack_json);
+  if (!pack.ok || !pack.document.IsObject()) {
+    return bad_code("a pack");
+  }
+  std::string body;
+  outcome result =
+      call("POST", "/v1/packs",
+           "{\"pack\":" + json::canonical(pack.document) + "}", &body, true);
+  if (!result.ok) {
+    return result;
+  }
+  const auto parsed = parse_object(body);
+  const auto returned = parsed.ok
+                            ? pack_code_from(text_of(parsed.document, "code"))
+                            : std::nullopt;
+  if (!returned) {
+    return not_understood();
+  }
+  code = *returned;
+  return result;
+}
+
+outcome client::fetch_pack(std::string_view code, std::string &pack_json) {
+  const auto canonical = pack_code_from(code);
+  if (!canonical) {
+    return bad_code("a pack code");
+  }
+  std::string body;
+  outcome result = call("GET", "/v1/packs/" + *canonical, {}, &body, false);
+  if (!result.ok) {
+    return result;
+  }
+  const auto parsed = parse_object(body);
+  const auto *pack = parsed.ok && parsed.document.IsObject()
+                         ? json::member(parsed.document, "pack")
+                         : nullptr;
+  if (!pack || !pack->IsObject()) {
+    return not_understood();
+  }
+  pack_json = json::canonical(*pack);
+  return result;
+}
+
+outcome client::punch(std::string_view invite_id, const std::uint16_t port,
+                      bool *delivered) {
+  if (!safe_id(invite_id)) {
+    return bad_id();
+  }
+  if (port == 0) {
+    return bad_code("a port");
+  }
+  std::string body;
+  outcome result =
+      call("POST", "/v1/invites/" + std::string(invite_id) + "/punch",
+           "{\"port\":" + std::to_string(port) + "}", &body, true);
+  if (result.ok && delivered) {
+    const auto parsed = parse_object(body);
+    const auto *value = parsed.ok && parsed.document.IsObject()
+                            ? json::member(parsed.document, "delivered")
+                            : nullptr;
+    *delivered = value && value->IsBool() && value->GetBool();
+  }
+  return result;
+}
+
+outcome client::create_link(std::string_view mode, invite_link &out) {
+  if (mode != "zm" && mode != "mp" && mode != "cp") {
+    return bad_code("a game mode");
+  }
+  std::string body;
+  outcome result = call("POST", "/v1/links",
+                        "{\"mode\":" + json::quote(mode) + "}", &body, true);
+  if (!result.ok) {
+    return result;
+  }
+  const auto parsed = parse_object(body);
+  if (!parsed.ok || !parsed.document.IsObject()) {
+    return not_understood();
+  }
+  out = link_of(parsed.document);
+  if (!link_code_from(out.code)) {
+    return not_understood();
+  }
+  return result;
+}
+
+outcome client::own_link(std::optional<invite_link> &out) {
+  std::string body;
+  outcome result = call("GET", "/v1/links", {}, &body, true);
+  if (!result.ok) {
+    return result;
+  }
+  const auto parsed = parse_object(body);
+  if (!parsed.ok || !parsed.document.IsObject()) {
+    return not_understood();
+  }
+  const auto *value = json::member(parsed.document, "link");
+  out.reset();
+  if (value && value->IsObject()) {
+    out = link_of(*value);
+  }
+  return result;
+}
+
+outcome client::delete_link() {
+  return call("DELETE", "/v1/links", {}, nullptr, true);
+}
+
+outcome client::link(std::string_view code, link_owner &out) {
+  const auto canonical = link_code_from(code);
+  if (!canonical) {
+    return bad_code("an invite link");
+  }
+  std::string body;
+  outcome result = call("GET", "/v1/links/" + *canonical, {}, &body, true);
+  if (!result.ok) {
+    return result;
+  }
+  const auto parsed = parse_object(body);
+  if (!parsed.ok || !parsed.document.IsObject()) {
+    return not_understood();
+  }
+  out = link_owner{text_of(parsed.document, "code"),
+                   text_of(parsed.document, "host_user_id"),
+                   text_of(parsed.document, "host_username"),
+                   text_of(parsed.document, "mode")};
+  return result;
+}
+
+outcome client::knock(std::string_view code, knock_info *out) {
+  const auto canonical = link_code_from(code);
+  if (!canonical) {
+    return bad_code("an invite link");
+  }
+  std::string body;
+  outcome result =
+      call("POST", "/v1/links/" + *canonical + "/knock", {}, &body, true);
+  if (result.ok && out) {
+    const auto parsed = parse_object(body);
+    if (!parsed.ok || !parsed.document.IsObject()) {
+      return not_understood();
+    }
+    *out = knock_of(parsed.document);
+  }
+  return result;
+}
+
+outcome client::knocks(knock_list &out) {
+  std::string body;
+  outcome result = call("GET", "/v1/knocks", {}, &body, true);
+  if (!result.ok) {
+    return result;
+  }
+  const auto parsed = parse_object(body);
+  if (!parsed.ok || !parsed.document.IsObject()) {
+    return not_understood();
+  }
+  out.incoming = knocks_of(json::member(parsed.document, "incoming"));
+  out.outgoing = knocks_of(json::member(parsed.document, "outgoing"));
+  return result;
+}
+
+outcome client::accept_knock(std::string_view knock_id) {
+  if (!safe_id(knock_id)) {
+    return bad_id();
+  }
+  return call("POST", "/v1/knocks/" + std::string(knock_id) + "/accept", {},
+              nullptr, true);
+}
+
+outcome client::decline_knock(std::string_view knock_id) {
+  if (!safe_id(knock_id)) {
+    return bad_id();
+  }
+  return call("POST", "/v1/knocks/" + std::string(knock_id) + "/decline", {},
+              nullptr, true);
+}
+
 // -------------------------------------------------------- the socket
 std::string auth_message(std::string_view access_token) {
   return "{\"token\":" + json::quote(access_token) + ",\"type\":\"auth\"}";
@@ -718,6 +1016,12 @@ std::optional<push> parse_push(std::string_view text) {
     out.now = presence_of(doc);
   } else if (out.type == "invite") {
     out.received = invite_of(doc);
+  } else if (out.type == "knock") {
+    out.knocked = knock_of(doc);
+  } else if (out.type == "punch") {
+    out.invite_id = text_of(doc, "invite_id");
+    out.from_user_id = text_of(doc, "from_user_id");
+    out.address = text_of(doc, "address");
   } else if (out.type == "hello") {
     if (const auto *friends = json::member(doc, "friends");
         friends && friends->IsArray()) {

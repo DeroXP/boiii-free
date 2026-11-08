@@ -13,6 +13,7 @@
 // the startup timing uses, gpu::on_main_menu), and a few seconds more, then
 // runs "connect <address>" as the console does, once.
 
+#include "join_password.hpp"
 #include "runtime.hpp"
 
 #include <component/gpu.hpp>
@@ -32,6 +33,7 @@ namespace {
 using namespace std::chrono_literals;
 
 constexpr const char *dvar_name = "xerces_join";
+constexpr const char *ticket_dvar_name = "xerces_join_ticket";
 // From the first frame the menu shows to the join.
 constexpr std::chrono::milliseconds settle = 3s;
 // No main menu by then: the join is dropped (the player can still type
@@ -39,17 +41,19 @@ constexpr std::chrono::milliseconds settle = 3s;
 constexpr std::chrono::minutes give_up = 10min;
 
 std::string address{}; // from the command line; "" for a launch without a join
+// The invite's ticket for that host (join_password.hpp), from the command
+// line too ("+set xerces_join_ticket <ticket>"); "" without one.
+std::string ticket{};
 std::chrono::steady_clock::time_point started{};
 std::optional<std::chrono::steady_clock::time_point> menu_since{};
 
-// The value after the last "+set xerces_join" on the command line, or "".
-std::string command_line_address() {
+// The value after the last "+set <name>" on the command line, or "".
+std::string command_line_value(const wchar_t *name) {
   int32_t count = 0;
   LPWSTR *const argv = CommandLineToArgvW(GetCommandLineW(), &count);
   std::string result;
   for (int32_t i = 0; argv && i + 2 < count; ++i) {
-    if (_wcsicmp(argv[i], L"+set") == 0 &&
-        _wcsicmp(argv[i + 1], L"xerces_join") == 0) {
+    if (_wcsicmp(argv[i], L"+set") == 0 && _wcsicmp(argv[i + 1], name) == 0) {
       result = utils::string::convert(argv[i + 2]);
     }
   }
@@ -89,6 +93,9 @@ bool poll() {
   xerces_runtime::log_info("xerces.join.connect",
                            "main menu up: joining the server the launcher "
                            "named");
+  if (!ticket.empty()) {
+    xerces_join_password::set_join_ticket(address, ticket);
+  }
   const std::string command = "connect " + address + "\n";
   game::cbuf::Cbuf_AddText(game::LOCAL_CLIENT_0, command.c_str());
   return scheduler::cond_end;
@@ -103,7 +110,8 @@ public:
     if (!game::is_client()) {
       return;
     }
-    address = command_line_address();
+    address = command_line_value(L"xerces_join");
+    ticket = command_line_value(L"xerces_join_ticket");
     // On the main thread, as the other components register theirs: the
     // engine's dvars are not set up yet in post_unpack (registering here
     // crashed at start, 2026-11-07).
@@ -113,6 +121,9 @@ public:
               dvar_name, address.c_str(), game::dvarFlags_e::NONE,
               "The server the launcher's Join asked for; joined once the "
               "main menu is up.");
+          game::register_dvar_string(
+              ticket_dvar_name, "", game::dvarFlags_e::NONE,
+              "The invite's ticket for the server in xerces_join.");
         },
         scheduler::main);
     if (address.empty()) {

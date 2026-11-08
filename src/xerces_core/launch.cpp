@@ -202,6 +202,19 @@ launch_command build_launch_command(const plan *resolved,
       out.args.push_back("+set");
       out.args.push_back("xerces_join");
       out.args.push_back(*options.connect);
+      if (options.join_ticket) {
+        const std::string &ticket = *options.join_ticket;
+        if (ticket.size() != 32 || !std::ranges::all_of(ticket, [](char c) {
+              return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+            })) {
+          out.diags.error("launch.ticket.invalid", "",
+                          "The invite's ticket is not 32 hex digits.");
+        } else {
+          out.args.push_back("+set");
+          out.args.push_back("xerces_join_ticket");
+          out.args.push_back(ticket);
+        }
+      }
     }
   }
 

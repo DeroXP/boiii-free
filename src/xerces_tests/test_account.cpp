@@ -133,6 +133,158 @@ TEST_CASE("account: an invite's session names the lobby and nothing else") {
   }
 }
 
+TEST_CASE("account: an invite's session may carry a ticket (version 2)") {
+  const std::string ticket = "0123456789abcdef0123456789abcdef";
+  const game_session game{"70.246.76.146:27017", "mp", false, ticket};
+  CHECK_EQ(session_text(game), "xerces/2 70.246.76.146:27017 mp 0 " + ticket);
+  const auto back = parse_session_text(session_text(game));
+  REQUIRE(back.has_value());
+  CHECK_EQ(back->ticket, ticket);
+  CHECK(!back->modded);
+  // Version 1 has none.
+  CHECK(parse_session_text("xerces/1 1.2.3.4:27017 zm 1")->ticket.empty());
+  for (const std::string &bad : std::vector<std::string>{
+           "xerces/2 1.2.3.4:27017 zm 1", "xerces/2 1.2.3.4:27017 zm 1 abc",
+           "xerces/2 1.2.3.4:27017 zm 1 " + ticket + "0",
+           "xerces/2 1.2.3.4:27017 zm 1 0123456789ABCDEF0123456789ABCDEF",
+           "xerces/1 1.2.3.4:27017 zm 1 " + ticket}) {
+    CHECK(!parse_session_text(bad).has_value());
+  }
+  const std::string fresh = new_ticket();
+  CHECK_EQ(fresh.size(), std::size_t(32));
+  CHECK(fresh != new_ticket());
+}
+
+TEST_CASE("account: invite link and pack codes, however they are pasted") {
+  CHECK_EQ(link_code_from("XJN-AB12CD34").value_or(""),
+           std::string("XJN-AB12CD34"));
+  CHECK_EQ(link_code_from(" xjn-ab12cd34 ").value_or(""),
+           std::string("XJN-AB12CD34"));
+  CHECK_EQ(link_code_from("xjnab12cd34").value_or(""),
+           std::string("XJN-AB12CD34"));
+  // Crockford look-alikes, as the backend reads them.
+  CHECK_EQ(link_code_from("XJN-OIL2CD34").value_or(""),
+           std::string("XJN-0112CD34"));
+  CHECK_EQ(link_code_from("https://x.example/join/XJN-AB12CD34").value_or(""),
+           std::string("XJN-AB12CD34"));
+  CHECK_EQ(link_code_from("xerces://join/XJN-AB12CD34/").value_or(""),
+           std::string("XJN-AB12CD34"));
+  for (const char *bad :
+       {"", "XJN-", "XJN-AB12CD3", "XJN-AB12CD345", "XJN-AB12CDU4",
+        "XRC-AB12CD34", "XJN-AB12;D34", "https://x.example/join/"}) {
+    CHECK(!link_code_from(bad).has_value());
+  }
+  CHECK_EQ(pack_code_from("xrc-ab12cd34").value_or(""),
+           std::string("XRC-AB12CD34"));
+  CHECK(!pack_code_from("XJN-AB12CD34").has_value());
+}
+
+TEST_CASE("account: packs, links, knocks and the hole punch") {
+  fake_backend backend;
+  client api("https://example.test", backend.transport());
+  api.resume(session{alice_id, "alice", "refresh-1"});
+  backend.answer(200, tokens("a", "r", false));
+
+  // A pack: sent as the backend wants it, its code read back.
+  backend.answer(201, R"({"code":"XRC-AB12CD34","expires_at":"x"})");
+  std::string code;
+  REQUIRE(api.create_pack(R"({"schema":1,"name":"n","mods":[]})", code).ok);
+  CHECK_EQ(code, std::string("XRC-AB12CD34"));
+  CHECK_EQ(backend.seen.back().url,
+           std::string("https://example.test/v1/packs"));
+  CHECK(backend.seen.back().body.starts_with(R"({"pack":{)"));
+  CHECK(!api.create_pack("not json", code).ok);
+
+  // Fetching needs no sign-in and hands back the pack's own JSON.
+  backend.answer(200,
+                 R"({"code":"XRC-AB12CD34","pack":{"name":"n","schema":1},)"
+                 R"("created_at":"x","expires_at":"y"})");
+  std::string pack_json;
+  REQUIRE(api.fetch_pack("xrc-ab12cd34", pack_json).ok);
+  CHECK_EQ(pack_json, std::string(R"({"name":"n","schema":1})"));
+  CHECK_EQ(backend.seen.back().url,
+           std::string("https://example.test/v1/packs/XRC-AB12CD34"));
+  CHECK(header(backend.seen.back(), "Authorization").empty());
+  const std::size_t before = backend.seen.size();
+  CHECK(!api.fetch_pack("../admin", pack_json).ok);
+  CHECK_EQ(backend.seen.size(), before);
+
+  // An invite with a pack code and a ticket gives back its id.
+  backend.answer(201,
+                 std::string(R"({"id":"0a0b0c0d-0000-4000-8000-000000000001",)"
+                             R"("from_user_id":")") +
+                     alice_id + R"(","status":"pending"})");
+  invite sent;
+  REQUIRE(api.send_invite(bob_id,
+                          game_session{"70.246.76.146:27017", "zm", true,
+                                       "0123456789abcdef0123456789abcdef"},
+                          "xrc-ab12cd34", &sent)
+              .ok);
+  CHECK_EQ(sent.id, std::string("0a0b0c0d-0000-4000-8000-000000000001"));
+  CHECK(backend.seen.back().body.find(R"("pack_code":"XRC-AB12CD34")") !=
+        std::string::npos);
+  CHECK(backend.seen.back().body.find("xerces/2 70.246.76.146:27017 zm 1 "
+                                      "0123456789abcdef") != std::string::npos);
+
+  // The punch.
+  backend.answer(200, R"({"delivered":true})");
+  bool delivered = false;
+  REQUIRE(
+      api.punch("0a0b0c0d-0000-4000-8000-000000000001", 28960, &delivered).ok);
+  CHECK(delivered);
+  CHECK_EQ(backend.seen.back().url,
+           std::string("https://example.test/v1/invites/"
+                       "0a0b0c0d-0000-4000-8000-000000000001/punch"));
+  CHECK_EQ(backend.seen.back().body, std::string(R"({"port":28960})"));
+  CHECK(!api.punch("x/y", 1).ok);
+  CHECK(!api.punch("0a0b", 0).ok);
+
+  // Links.
+  backend.answer(201, R"({"code":"XJN-AB12CD34","path":"/join/XJN-AB12CD34",)"
+                      R"("mode":"zm","expires_at":"x"})");
+  invite_link link;
+  REQUIRE(api.create_link("zm", link).ok);
+  CHECK_EQ(link.path, std::string("/join/XJN-AB12CD34"));
+  CHECK(!api.create_link("xx", link).ok);
+  backend.answer(200, R"({"link":null})");
+  std::optional<invite_link> own = link;
+  REQUIRE(api.own_link(own).ok);
+  CHECK(!own.has_value());
+  backend.answer(
+      200, std::string(R"({"code":"XJN-AB12CD34","host_user_id":")") + bob_id +
+               R"(","host_username":"bob","mode":"mp","expires_at":"x"})");
+  link_owner owner;
+  REQUIRE(api.link("https://example.test/join/xjn-ab12cd34", owner).ok);
+  CHECK_EQ(owner.host_username, std::string("bob"));
+  CHECK_EQ(backend.seen.back().url,
+           std::string("https://example.test/v1/links/XJN-AB12CD34"));
+
+  // Knocks.
+  backend.answer(201,
+                 std::string(R"({"id":"0a0b0c0d-0000-4000-8000-000000000002",)"
+                             R"("from_user_id":")") +
+                     alice_id + R"(","from_username":"alice","to_user_id":")" +
+                     bob_id +
+                     R"(","to_username":"bob","mode":"mp",)"
+                     R"("status":"pending"})");
+  knock_info knocked;
+  REQUIRE(api.knock("XJN-AB12CD34", &knocked).ok);
+  CHECK_EQ(knocked.to_username, std::string("bob"));
+  CHECK_EQ(backend.seen.back().url,
+           std::string("https://example.test/v1/links/XJN-AB12CD34/knock"));
+  backend.answer(200, R"({"incoming":[{"id":"k1","from_username":"carol",)"
+                      R"("mode":"zm","status":"pending"}],"outgoing":[]})");
+  knock_list knocks;
+  REQUIRE(api.knocks(knocks).ok);
+  REQUIRE_EQ(knocks.incoming.size(), std::size_t(1));
+  CHECK_EQ(knocks.incoming[0].from_username, std::string("carol"));
+  backend.answer(200, "{}");
+  CHECK(api.accept_knock("0a0b0c0d-0000-4000-8000-000000000002").ok);
+  CHECK(backend.seen.back().url.ends_with(
+      "/v1/knocks/0a0b0c0d-0000-4000-8000-000000000002/accept"));
+  CHECK(!api.decline_knock("../x").ok);
+}
+
 TEST_CASE("account: signing in keeps the tokens and says so") {
   fake_backend backend;
   client api("https://example.test/", backend.transport());
@@ -341,6 +493,22 @@ TEST_CASE("account: socket messages") {
   REQUIRE(invited.has_value());
   CHECK_EQ(invited->received.from_username, std::string("bob"));
   CHECK(parse_session_text(invited->received.session).has_value());
+
+  const auto knocked = parse_push(
+      std::string(R"({"type":"knock","id":"k-1","from_user_id":")") + bob_id +
+      R"(","from_username":"bob","to_user_id":")" + alice_id +
+      R"(","to_username":"alice","mode":"zm","status":"pending"})");
+  REQUIRE(knocked.has_value());
+  CHECK_EQ(knocked->knocked.from_username, std::string("bob"));
+  CHECK_EQ(knocked->knocked.mode, std::string("zm"));
+
+  const auto punched = parse_push(
+      std::string(R"({"type":"punch","invite_id":"i-1","from_user_id":")") +
+      bob_id + R"(","address":"8.8.8.8:28960"})");
+  REQUIRE(punched.has_value());
+  CHECK_EQ(punched->invite_id, std::string("i-1"));
+  CHECK_EQ(punched->address, std::string("8.8.8.8:28960"));
+  CHECK_EQ(punched->from_user_id, std::string(bob_id));
 
   CHECK(!parse_push("not json").has_value());
   CHECK(!parse_push("{}").has_value());

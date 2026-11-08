@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <deque>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -225,6 +226,12 @@ public:
   // that matches uses the challenge up, whatever comes next. ok admits peer.
   result_message check(std::string_view peer, const proof_message &answer,
                        const key &password_key, const own_addresses &own,
+                       clock::time_point now);
+  // The same, passing an answer made with any of keys: the password's and
+  // each live invite ticket's (DESIGN.md 10.13). With no keys nobody passes
+  // (a wrong answer).
+  result_message check(std::string_view peer, const proof_message &answer,
+                       std::span<const key> keys, const own_addresses &own,
                        clock::time_point now);
 
   // Whether a lobby join or connect from peer ("a.b.c.d:port" for an ip

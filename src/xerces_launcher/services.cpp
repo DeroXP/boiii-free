@@ -507,10 +507,11 @@ std::vector<const xerces_core::installed_content *> services::maps() const {
 }
 
 // ------------------------------------------------------------------- launch
-xerces_core::launch_inputs services::inputs(
-    const std::string &mode, bool modded, bool mods_off,
-    const std::optional<std::string> &connect,
-    const std::vector<std::string> *mods) const {
+xerces_core::launch_inputs
+services::inputs(const std::string &mode, bool modded, bool mods_off,
+                 const std::optional<std::string> &connect,
+                 const std::vector<std::string> *mods,
+                 const std::optional<std::string> &join_ticket) const {
   xerces_core::launch_inputs in;
   in.paths = &paths_;
   in.config = &config_;
@@ -520,6 +521,7 @@ xerces_core::launch_inputs services::inputs(
   in.modded = modded;
   in.mods_off = mods_off;
   in.connect = connect;
+  in.join_ticket = join_ticket;
   in.mods = mods;
   in.dry_launch = dry_launch_;
   return in;
@@ -547,8 +549,9 @@ bool services::game_running() const {
 launch_outcome services::launch(const std::string &mode, bool modded,
                                 bool mods_off,
                                 const std::optional<std::string> &connect,
-                                const std::vector<std::string> *mods) {
-  return start(inputs(mode, modded, mods_off, connect, mods));
+                                const std::vector<std::string> *mods,
+                                const std::optional<std::string> &join_ticket) {
+  return start(inputs(mode, modded, mods_off, connect, mods, join_ticket));
 }
 
 launch_outcome services::start(const xerces_core::launch_inputs &in) {

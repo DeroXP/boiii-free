@@ -150,9 +150,11 @@ public:
   // connect: join a self-hosted server once the game's main menu is up
   // ("+set xerces_join host:port", Servers).
   // mods: launch these instead of the profile's list.
+  // join_ticket: a friend's invite's ticket for the host in connect.
   launch_outcome launch(const std::string &mode, bool modded, bool mods_off,
                         const std::optional<std::string> &connect = {},
-                        const std::vector<std::string> *mods = nullptr);
+                        const std::vector<std::string> *mods = nullptr,
+                        const std::optional<std::string> &join_ticket = {});
   // The command line the launch would use, without starting anything.
   launch_outcome preview_launch(const std::string &mode, bool modded,
                                 bool mods_off,
@@ -231,10 +233,11 @@ public:
 private:
   // launch() and the culprit tests: launch_game and the process handle.
   launch_outcome start(const xerces_core::launch_inputs &in);
-  xerces_core::launch_inputs inputs(const std::string &mode, bool modded,
-                                    bool mods_off,
-                                    const std::optional<std::string> &connect,
-                                    const std::vector<std::string> *mods) const;
+  xerces_core::launch_inputs
+  inputs(const std::string &mode, bool modded, bool mods_off,
+         const std::optional<std::string> &connect,
+         const std::vector<std::string> *mods,
+         const std::optional<std::string> &join_ticket = {}) const;
   void load_config();
   // The scan worker's body (refresh): the cache, detection, the pre-flight
   // next to the catalog scan, the save; posts finish_scan.

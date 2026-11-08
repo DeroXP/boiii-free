@@ -1,11 +1,15 @@
 // Friends (docs/DESIGN.md 7.3, 10): a Xerces account, the friends list with
-// presence, friend requests, blocks, privacy, and game invites. The network
-// work is friends_service's, on its own threads; this screen shows its
-// snapshot and turns clicks into its actions.
+// presence, friend requests, blocks, privacy, game invites and invite links.
+// The network work is friends_service's, on its own threads; this screen
+// shows its snapshot and turns clicks into its actions.
 //
-// An invite carries the host's lobby address (account.hpp game_session).
-// Accepting one has the running game join from its main menu, or starts the
-// game with the join (as Join in Servers does).
+// Joining (10.12, 10.13): an invite carries the host's lobby address, a
+// ticket for that one invite, and the host's mods as a pack. Join fetches
+// the pack and checks which mods are here; missing ones are got the way a
+// player gets any mod, from their Workshop pages in Steam (subscribe, Steam
+// downloads). Then the running game joins from its main menu, or restarts
+// with the host's mods first (the player agrees), or the game starts with
+// the join. A crash in a friend's lobby offers to rejoin it.
 
 #include <RmlUi/Core.h>
 
@@ -15,14 +19,19 @@
 #include <vector>
 
 #include <xerces_core/crash_outbox.hpp>
+#include <xerces_core/invite_pack.hpp>
 #include <xerces_core/log.hpp>
+#include <xerces_core/pack.hpp>
 
 #include "../app.hpp"
 #include "../friends_service.hpp"
+#include "../link_protocol.hpp"
 #include "../log.hpp"
 
 namespace xerces_launcher {
 namespace {
+namespace core = xerces_core;
+
 struct friend_row {
   Rml::String id, name, status;
   bool online = false;
@@ -32,6 +41,10 @@ struct person_row {
 };
 struct invite_row {
   Rml::String id, text;
+};
+struct mod_row {
+  Rml::String name;
+  bool on_workshop = false;
 };
 
 const char *mode_name(const std::string &mode) {
@@ -46,6 +59,13 @@ std::string trimmed(const std::string &text) {
   const auto last = text.find_last_not_of(" \t\r\n");
   return text.substr(first, last - first + 1);
 }
+
+// After a crash, Rejoin is offered for this long after the join.
+constexpr double rejoin_seconds = 3.0 * 60 * 60;
+// While mods download, the folders are scanned again this often.
+constexpr double rescan_every = 8.0;
+// A game asked to quit for a join gets this long to close.
+constexpr double quit_wait = 60.0;
 
 class friends_view final : public view {
 public:
@@ -71,9 +91,14 @@ public:
       row.RegisterMember("id", &invite_row::id);
       row.RegisterMember("text", &invite_row::text);
     }
+    if (auto row = model.RegisterStruct<mod_row>()) {
+      row.RegisterMember("name", &mod_row::name);
+      row.RegisterMember("on_workshop", &mod_row::on_workshop);
+    }
     model.RegisterArray<Rml::Vector<friend_row>>();
     model.RegisterArray<Rml::Vector<person_row>>();
     model.RegisterArray<Rml::Vector<invite_row>>();
+    model.RegisterArray<Rml::Vector<mod_row>>();
 
     model.Bind("available", &available_);
     model.Bind("signed_in", &signed_in_);
@@ -98,6 +123,24 @@ public:
     model.Bind("privacy_requests", &privacy_requests_);
     model.Bind("privacy_presence", &privacy_presence_);
     model.Bind("privacy_invites", &privacy_invites_);
+    // Joining a lobby.
+    model.Bind("join_active", &join_active_);
+    model.Bind("join_title", &join_title_);
+    model.Bind("join_status", &join_status_);
+    model.Bind("join_ready", &join_ready_);
+    model.Bind("join_mods", &join_mods_);
+    model.Bind("join_pages", &join_pages_);
+    model.Bind("rejoin", &rejoin_);
+    model.Bind("rejoin_text", &rejoin_text_);
+    // Links and knocks.
+    model.Bind("knocks", &knocks_);
+    model.Bind("has_link", &has_link_);
+    model.Bind("link_url", &link_url_);
+    model.Bind("link_input", &link_input_);
+    model.Bind("link_placeholder", &link_placeholder_);
+    model.Bind("links_open_text", &links_open_text_);
+    model.Bind("lobby_guests", &lobby_guests_);
+    model.Bind("follow_text", &follow_text_);
 
     model.BindEventCallback("act", [this](Rml::DataModelHandle, Rml::Event &,
                                           const Rml::VariantList &args) {
@@ -113,10 +156,14 @@ public:
     });
     handle_ = model.GetModelHandle();
     add_placeholder_ = owner_->tr("Their Xerces username");
+    link_placeholder_ = owner_->tr("A link or XJN- code");
 
     service_ = std::make_unique<friends_service>(
         xerces_core::crash_base_url(), owner.svc().paths().home,
         [&owner](std::function<void()> task) { owner.post(std::move(task)); });
+    const auto &config = owner.svc().config();
+    service_->set_invite_only(config.friends_invite_only);
+    service_->set_follow(config.friends_follow);
     service_->on_invite = [this](const account::invite &received) {
       const auto game = account::parse_session_text(received.session);
       owner_->notify(received.from_username + " " +
@@ -125,25 +172,71 @@ public:
                          ". " + owner_->tr("Join from Friends."),
                      false, "an invite came in");
     };
+    service_->on_auto_join = [this](const account::invite &received) {
+      // A host this player asked to join, or joined lately: no second
+      // question. A join already under way keeps its place.
+      if (join_ || busy_) {
+        service_->on_invite(received);
+        return;
+      }
+      owner_->notify(received.from_username + " " +
+                         owner_->tr("let you in. Joining..."),
+                     false, "following a host's invite");
+      join_invite(received.id, false);
+    };
+    service_->on_knock = [this](const account::knock_info &knock) {
+      owner_->notify(knock.from_username + " " +
+                         owner_->tr("asks to join your lobby. Let them in "
+                                    "from Friends."),
+                     false, "someone knocked");
+    };
+    service_->on_party_back = [this](const std::vector<std::string> &ids) {
+      // The game restarted: the players of its last lobby follow, with the
+      // mods it runs now.
+      const std::string pack = current_pack_json();
+      for (const std::string &user_id : ids) {
+        service_->invite(user_id, pack, [this](const account::outcome &r) {
+          if (r.ok) {
+            owner_->notify(owner_->tr("Invited your last lobby's players to "
+                                      "this one."),
+                           false, "party invited again");
+          }
+        });
+      }
+    };
     service_->on_news = [this](const std::string &text) {
       owner_->notify(text, false, "friends news");
     };
+    refresh_settings();
     return true;
   }
 
   void update(double now) override {
+    services &svc = owner_->svc();
     // The game's state, for presence and Invite, once a second.
     if (now >= next_game_check_) {
       next_game_check_ = now + 1.0;
-      services &svc = owner_->svc();
       const bool running = svc.game_running();
       std::string mode = owner_->mode();
       if (const auto journal = svc.last_journal();
           running && journal && !journal->mode.empty()) {
         mode = journal->mode;
       }
+      game_mode_ = mode;
       service_->set_game(running, mode);
+      if (was_running_ && !running) {
+        game_stopped();
+      }
+      was_running_ = running;
     }
+    if (owner_->join_link_rev() != seen_link_rev_) {
+      seen_link_rev_ = owner_->join_link_rev();
+      if (const std::string code = owner_->take_join_link(); !code.empty()) {
+        owner_->show("friends");
+        open_link(code);
+      }
+    }
+    update_join(now);
     if (service_->rev() != seen_rev_) {
       seen_rev_ = service_->rev();
       refresh();
@@ -151,6 +244,461 @@ public:
   }
 
 private:
+  // ------------------------------------------------------------ joining
+  enum class join_stage {
+    mods,       // waiting for the host's mods to download
+    ready,      // everything is here: Join goes
+    restarting, // the game was asked to quit, to start with the host's mods
+  };
+  struct pending_join {
+    friends_service::join_plan plan;
+    std::vector<std::string> launch_mods; // the pack's, as installed here
+    std::vector<core::invite_pack_check::missing_mod> missing;
+    bool has_pack = false;
+    join_stage stage = join_stage::ready;
+    std::size_t next_page = 0;
+    double next_scan = 0;
+    double quit_deadline = 0;
+    std::uint64_t seen_catalog = 0;
+  };
+  // The last join, for Rejoin after a crash.
+  struct last_join {
+    friends_service::join_plan plan;
+    std::vector<std::string> launch_mods;
+    bool has_pack = false;
+    double when = 0;
+  };
+
+  void join_invite(const std::string &id, bool asked) {
+    busy_ = true;
+    handle_.DirtyVariable("busy");
+    service_->accept_invite(
+        id, [this, asked](const account::outcome &result,
+                          std::optional<friends_service::join_plan> plan) {
+          busy_ = false;
+          handle_.DirtyVariable("busy");
+          if (!result.ok || !plan) {
+            owner_->notify(result.message, true,
+                           "invite join failed: " + result.code);
+            return;
+          }
+          start_join(std::move(*plan), asked);
+        });
+  }
+
+  void start_join(friends_service::join_plan plan, bool asked) {
+    pending_join join;
+    join.plan = std::move(plan);
+    if (join.plan.pack_missing) {
+      owner_->notify(owner_->tr("The host's mod list could not be fetched. "
+                                "Joining with your own mods."),
+                     true, "invite pack missing");
+    }
+    if (!join.plan.pack_json.empty()) {
+      const core::pack_result parsed = core::parse_pack(join.plan.pack_json);
+      if (parsed.ok()) {
+        join.has_pack = true;
+        const core::invite_pack_check check =
+            core::check_invite_pack(parsed.value, owner_->svc().catalog());
+        join.launch_mods = check.launch_mods;
+        join.missing = check.missing;
+      } else {
+        owner_->notify(owner_->tr("The host's mod list could not be read. "
+                                  "Joining with your own mods."),
+                       true, "invite pack unreadable");
+      }
+    }
+    join.seen_catalog = owner_->svc().catalog_rev();
+    join.stage = join.missing.empty() ? join_stage::ready : join_stage::mods;
+    join_ = std::move(join);
+    rejoin_ = false;
+    handle_.DirtyVariable("rejoin");
+    if (join_->stage == join_stage::mods) {
+      owner_->show("friends");
+      if (asked) {
+        open_next_page(); // the player pressed Join: the first page opens
+      }
+      show_join();
+      return;
+    }
+    show_join();
+    go();
+  }
+
+  void open_next_page() {
+    if (!join_) {
+      return;
+    }
+    for (; join_->next_page < join_->missing.size(); ++join_->next_page) {
+      const auto &mod = join_->missing[join_->next_page];
+      if (mod.workshop_id) {
+        if (owner_->open_url(core::workshop_page_url(*mod.workshop_id))) {
+          owner_->notify(owner_->tr("Opened a Workshop page in Steam. "
+                                    "Subscribe, and Steam downloads it."));
+        } else {
+          owner_->notify(owner_->tr("Steam could not be opened."), true);
+        }
+        ++join_->next_page;
+        return;
+      }
+    }
+    join_->next_page = 0; // round again for a page closed too soon
+  }
+
+  void update_join(double now) {
+    if (!join_) {
+      return;
+    }
+    services &svc = owner_->svc();
+    if (join_->stage == join_stage::mods) {
+      if (svc.catalog_rev() != join_->seen_catalog) {
+        join_->seen_catalog = svc.catalog_rev();
+        recheck_mods();
+        return;
+      }
+      if (now >= join_->next_scan && !svc.catalog().scanning) {
+        join_->next_scan = now + rescan_every;
+        svc.start_scan();
+      }
+    } else if (join_->stage == join_stage::restarting) {
+      if (!svc.game_running()) {
+        launch_join();
+      } else if (now >= join_->quit_deadline) {
+        join_->stage = join_stage::ready;
+        owner_->notify(owner_->tr("The game did not close. Close it, then "
+                                  "press Join."),
+                       true);
+        show_join();
+      }
+    }
+  }
+
+  void recheck_mods() {
+    const core::pack_result parsed = core::parse_pack(join_->plan.pack_json);
+    if (!parsed.ok()) {
+      return;
+    }
+    const core::invite_pack_check check =
+        core::check_invite_pack(parsed.value, owner_->svc().catalog());
+    join_->launch_mods = check.launch_mods;
+    join_->missing = check.missing;
+    if (join_->next_page > join_->missing.size()) {
+      join_->next_page = 0;
+    }
+    if (check.complete()) {
+      join_->stage = join_stage::ready;
+      owner_->notify(owner_->tr("Every mod is here. Joining..."));
+      show_join();
+      go();
+      return;
+    }
+    show_join();
+  }
+
+  // Everything is here: the running game joins, restarts first, or starts.
+  void go() {
+    if (!join_) {
+      return;
+    }
+    services &svc = owner_->svc();
+    if (!svc.game_running()) {
+      launch_join();
+      return;
+    }
+    if (!same_stack_running()) {
+      owner_->dialog(
+          "Restart the game to join?",
+          join_->has_pack
+              ? "Your friend's lobby runs other mods than your game. The game "
+                "closes and starts again with theirs, then joins."
+              : "Your friend's lobby runs without mods. The game closes and "
+                "starts again without them, then joins.",
+          {"Restart and join", "Cancel"}, [this](int choice) {
+            if (!join_) {
+              return;
+            }
+            if (choice != 0) {
+              join_->stage = join_stage::ready;
+              show_join();
+              return;
+            }
+            service_->quit_game([this](const account::outcome &result) {
+              if (!join_) {
+                return;
+              }
+              if (!result.ok) {
+                owner_->notify(result.message, true, "quit for join failed");
+                return;
+              }
+              join_->stage = join_stage::restarting;
+              join_->quit_deadline = owner_->now() + quit_wait;
+              show_join();
+            });
+          });
+      return;
+    }
+    busy_ = true;
+    handle_.DirtyVariable("busy");
+    service_->join_running(join_->plan, [this](const account::outcome &result) {
+      busy_ = false;
+      handle_.DirtyVariable("busy");
+      if (!result.ok) {
+        owner_->notify(result.message, true, "join in the running game failed");
+        show_join(); // Join stays, to try again from the main menu
+        return;
+      }
+      owner_->notify(owner_->tr("The game is joining your friend's lobby."));
+      finish_join();
+    });
+  }
+
+  // Whether the running game runs what the join needs: the pack's mods, or
+  // no mods for a vanilla lobby. Without a pack (an older host, or the pack
+  // could not be fetched) the running game joins as it is.
+  bool same_stack_running() const {
+    const auto journal = owner_->svc().last_journal();
+    if (!journal) {
+      return true;
+    }
+    if (!join_->plan.game.modded) {
+      return journal->stack.empty() || journal->safe_mode;
+    }
+    if (!join_->has_pack) {
+      return true;
+    }
+    const core::plan wanted =
+        owner_->svc().resolve(join_->plan.game.mode, &join_->launch_mods);
+    return wanted.ok() && wanted.plan_id == journal->plan_id;
+  }
+
+  // The game starts with the host's mods and the join; the hole punch
+  // follows once its menu is up.
+  void launch_join() {
+    services &svc = owner_->svc();
+    const auto &game = join_->plan.game;
+    bool modded = game.modded;
+    const std::vector<std::string> *mods = nullptr;
+    if (modded && join_->has_pack) {
+      mods = &join_->launch_mods;
+      modded = !join_->launch_mods.empty();
+    } else if (modded) {
+      const core::plan plan = svc.resolve(game.mode);
+      modded = plan.ok() && !plan.stack.empty();
+    }
+    log_info("launcher.friends.join",
+             std::string(core::redacted_address) +
+                 (modded ? (mods ? " with the host's mods" : " modded")
+                         : " vanilla"));
+    const std::optional<std::string> ticket =
+        game.ticket.empty() ? std::nullopt : std::optional(game.ticket);
+    const launch_outcome outcome =
+        svc.launch(game.mode, modded, false, game.address, mods, ticket);
+    if (!(outcome.started || outcome.dry_run)) {
+      owner_->notify(owner_->tr(outcome.message), true);
+      join_->stage = join_stage::ready;
+      show_join();
+      return;
+    }
+    service_->watch_join(join_->plan);
+    owner_->notify(owner_->tr("Starting the game to join your friend."));
+    finish_join();
+    if (outcome.started && svc.config().close_on_launch) {
+      owner_->win().request_close();
+    }
+  }
+
+  void finish_join() {
+    last_ = last_join{join_->plan, join_->launch_mods, join_->has_pack,
+                      owner_->now()};
+    join_.reset();
+    show_join();
+  }
+
+  void cancel_join() {
+    join_.reset();
+    show_join();
+  }
+
+  // The game closed. A crash soon after joining a friend offers Rejoin.
+  void game_stopped() {
+    if (!last_ || owner_->now() - last_->when > rejoin_seconds || join_) {
+      return;
+    }
+    const auto journal = owner_->svc().last_journal();
+    if (!journal || journal->phase == core::launch_phase::clean_exit) {
+      return;
+    }
+    rejoin_ = true;
+    rejoin_text_ = owner_->tr("The game closed while you played in") + " " +
+                   last_->plan.host_username + owner_->tr("'s lobby.");
+    handle_.DirtyVariable("rejoin");
+    handle_.DirtyVariable("rejoin_text");
+    owner_->notify(owner_->tr("Rejoin your friend's lobby from Friends."),
+                   false, "rejoin offered");
+  }
+
+  void rejoin() {
+    if (!last_) {
+      return;
+    }
+    rejoin_ = false;
+    handle_.DirtyVariable("rejoin");
+    pending_join join;
+    join.plan = last_->plan;
+    join.launch_mods = last_->launch_mods;
+    join.has_pack = last_->has_pack;
+    join.stage = join_stage::ready;
+    join_ = std::move(join);
+    show_join();
+    go();
+  }
+
+  void show_join() {
+    join_active_ = join_.has_value();
+    join_mods_.clear();
+    join_pages_ = false;
+    if (join_) {
+      join_title_ = owner_->tr("Joining") + " " + join_->plan.host_username +
+                    owner_->tr("'s lobby");
+      for (const auto &mod : join_->missing) {
+        join_mods_.push_back({mod.id, mod.workshop_id.has_value()});
+        join_pages_ = join_pages_ || mod.workshop_id.has_value();
+      }
+      switch (join_->stage) {
+      case join_stage::mods: {
+        const std::size_t count = join_->missing.size();
+        const std::size_t off = std::ranges::count_if(
+            join_->missing, [](const auto &m) { return !m.workshop_id; });
+        join_status_ =
+            count == 1
+                ? owner_->tr("One of your friend's mods is not here yet.")
+                : std::to_string(count) + " " +
+                      owner_->tr("of your friend's mods are not here yet.");
+        if (off < count) {
+          join_status_ += " " + owner_->tr("Subscribe on each Workshop page; "
+                                           "the join starts by itself once "
+                                           "Steam has downloaded them.");
+        }
+        if (off > 0) {
+          join_status_ +=
+              " " + owner_->tr(off == count
+                                   ? "It is not on the Workshop: ask your "
+                                     "friend where to get it. The join starts "
+                                     "once it is in the game's mods folder."
+                                   : "Some are not on the Workshop: ask your "
+                                     "friend where to get them, for the "
+                                     "game's mods folder.");
+        }
+        break;
+      }
+      case join_stage::ready:
+        join_status_ = owner_->tr("Ready. Join has the game join from its "
+                                  "main menu, or starts it.");
+        break;
+      case join_stage::restarting:
+        join_status_ = owner_->tr("The game is closing; it starts again with "
+                                  "your friend's mods.");
+        break;
+      }
+      join_ready_ = join_->stage == join_stage::ready;
+    } else {
+      join_title_.clear();
+      join_status_.clear();
+      join_ready_ = false;
+    }
+    handle_.DirtyAllVariables();
+  }
+
+  // The running stack as a pack for an invite, or "" (vanilla, or nothing
+  // enabled).
+  std::string current_pack_json() const {
+    services &svc = owner_->svc();
+    const core::plan plan = svc.resolve(game_mode_);
+    if (!plan.ok() || plan.stack.empty()) {
+      return {};
+    }
+    std::map<std::string, std::uint64_t> workshop_ids;
+    for (const auto &entry : plan.stack) {
+      if (const auto *content = svc.catalog().find(entry.id);
+          content && content->info.workshop_id) {
+        workshop_ids[entry.id] = *content->info.workshop_id;
+      }
+    }
+    core::pack value =
+        core::pack_from_plan(plan, service_->snapshot().username + "'s lobby",
+                             core::new_pack_id(), workshop_ids);
+    value.mode = game_mode_;
+    if (svc.game().steam_build) {
+      value.game_build = std::to_string(*svc.game().steam_build);
+    }
+    // The same stack gives the same JSON (so the same code) all session.
+    value.id = "00000000-0000-4000-8000-000000000000";
+    return core::pack_to_json(value);
+  }
+
+  // ------------------------------------------------------- invite links
+  void open_link(const std::string &code) {
+    if (!service_->snapshot().signed_in) {
+      owner_->notify(owner_->tr("Sign in to Xerces to use an invite link."),
+                     true);
+      return;
+    }
+    busy_ = true;
+    handle_.DirtyVariable("busy");
+    service_->look_up_link(
+        code, [this, code](const account::outcome &result,
+                           std::optional<account::link_owner> owner) {
+          busy_ = false;
+          handle_.DirtyVariable("busy");
+          if (!result.ok || !owner) {
+            owner_->notify(result.status == 404
+                               ? owner_->tr("That invite link has expired or "
+                                            "does not exist.")
+                               : result.message,
+                           true, "invite link lookup failed: " + result.code);
+            return;
+          }
+          const std::string host_id = owner->host_user_id;
+          owner_->dialog(
+              "Ask to join?",
+              owner->host_username + " " + owner_->tr("invites you to") + " " +
+                  owner_->tr(mode_name(owner->mode)) + ". " +
+                  owner_->tr("Ask them to let you in? Once they do, Xerces "
+                             "joins their lobby."),
+              {"Ask to join", "Cancel"}, [this, code, host_id](int choice) {
+                if (choice != 0) {
+                  return;
+                }
+                service_->knock(code, host_id,
+                                report(owner_->tr("Asked. You join once they "
+                                                  "let you in.")));
+              });
+        });
+  }
+
+  void refresh_settings() {
+    const auto &config = owner_->svc().config();
+    lobby_guests_ =
+        owner_->tr(config.friends_invite_only ? "Invited players" : "Anyone");
+    follow_text_ = owner_->tr(config.friends_follow ? "On" : "Off");
+    const auto &paths = owner_->svc().paths();
+    switch (link_protocol::current(paths.program, paths.home)) {
+    case link_protocol::state::here:
+      links_open_text_ = owner_->tr("On");
+      break;
+    case link_protocol::state::elsewhere:
+      links_open_text_ = owner_->tr("Another copy");
+      break;
+    case link_protocol::state::off:
+      links_open_text_ = owner_->tr("Off");
+      break;
+    }
+    handle_.DirtyVariable("lobby_guests");
+    handle_.DirtyVariable("follow_text");
+    handle_.DirtyVariable("links_open_text");
+  }
+
+  // ------------------------------------------------------------ the data
   void refresh() {
     const friends_snapshot &s = service_->snapshot();
     available_ = s.available;
@@ -169,10 +717,10 @@ private:
                          "lobby to direct connect.")
         : !s.hosting
             ? owner_->tr("In the game, set your lobby's DIRECT CONNECT to "
-                         "open; then Invite sends a friend its address.")
+                         "open; then Invite sends a friend a way in.")
             : owner_->tr("Your lobby is open: Invite sends a friend its "
-                         "address. Without UPnP, forward the game's UDP port "
-                         "on your router as for direct connect.");
+                         "address, your mods and a ticket only they can "
+                         "use.");
 
     friends_.clear();
     std::size_t online = 0;
@@ -196,15 +744,25 @@ private:
     invites_.clear();
     for (const auto &received : s.invites) {
       const auto game = account::parse_session_text(received.session);
-      invites_.push_back(
-          {received.id, received.from_username + " " +
-                            owner_->tr("invited you to") + " " +
-                            owner_->tr(mode_name(game ? game->mode : "zm"))});
+      std::string text = received.from_username + " " +
+                         owner_->tr("invited you to") + " " +
+                         owner_->tr(mode_name(game ? game->mode : "zm"));
+      if (!received.pack_code.empty()) {
+        text += " " + owner_->tr("with mods");
+      }
+      invites_.push_back({received.id, text});
     }
     blocks_.clear();
     for (const auto &blocked : s.blocks) {
       blocks_.push_back({blocked.user_id, blocked.username});
     }
+    knocks_.clear();
+    for (const auto &knock : s.knocks) {
+      knocks_.push_back({knock.id, knock.from_username + " \xC2\xB7 " +
+                                       owner_->tr(mode_name(knock.mode))});
+    }
+    has_link_ = s.link.has_value();
+    link_url_ = s.link ? service_->link_url(*s.link) : std::string();
     privacy_requests_ = owner_->tr(
         s.privacy.friend_requests == "nobody" ? "Nobody" : "Everyone");
     privacy_presence_ =
@@ -252,6 +810,10 @@ private:
   }
 
   void act(const std::string &action) {
+    if (action == "join cancel") {
+      cancel_join(); // always, even while a call is out
+      return;
+    }
     if (busy_) {
       return;
     }
@@ -326,6 +888,76 @@ private:
         return;
       }
       service_->set_privacy(next, report(owner_->tr("Privacy saved.")));
+    } else if (action == "join go") {
+      if (join_ && join_->stage == join_stage::ready) {
+        go();
+      }
+    } else if (action == "join next") {
+      open_next_page();
+    } else if (action == "rejoin") {
+      rejoin();
+    } else if (action == "rejoin close") {
+      rejoin_ = false;
+      handle_.DirtyVariable("rejoin");
+    } else if (action == "link make") {
+      service_->make_link(game_mode_.empty() ? "zm" : game_mode_,
+                          report(owner_->tr("Invite link made. Copy it and "
+                                            "share it.")));
+    } else if (action == "link stop") {
+      service_->stop_link(report(owner_->tr("The invite link stopped "
+                                            "working.")));
+    } else if (action == "link copy") {
+      if (!link_url_.empty()) {
+        owner_->copy_text(link_url_);
+        owner_->notify(owner_->tr("Invite link copied."), false,
+                       "invite link copied");
+      }
+    } else if (action == "link join") {
+      const std::string text = trimmed(link_input_);
+      const auto code = account::link_code_from(text);
+      if (!code) {
+        owner_->notify(owner_->tr("That is not an invite link."), true);
+        return;
+      }
+      link_input_.clear();
+      handle_.DirtyVariable("link_input");
+      open_link(*code);
+    } else if (action == "lobby guests" || action == "follow") {
+      services &svc = owner_->svc();
+      auto &config = svc.config();
+      if (action == "follow") {
+        config.friends_follow = !config.friends_follow;
+        service_->set_follow(config.friends_follow);
+      } else {
+        config.friends_invite_only = !config.friends_invite_only;
+        service_->set_invite_only(config.friends_invite_only);
+      }
+      if (!svc.save_config()) {
+        owner_->notify(owner_->tr(svc.config_error()), true);
+      }
+      refresh_settings();
+    } else if (action == "links open") {
+      const auto &paths = owner_->svc().paths();
+      std::string error;
+      const bool here = link_protocol::current(paths.program, paths.home) ==
+                        link_protocol::state::here;
+      const bool ok =
+          here ? link_protocol::turn_off(&error)
+               : link_protocol::turn_on(paths.program, paths.home, &error);
+      if (!ok) {
+        owner_->notify(owner_->tr("Windows did not take the change:") + " " +
+                           error,
+                       true, "link protocol change failed");
+      } else {
+        log_info("launcher.friends.link_protocol",
+                 here ? "xerces:// links no longer open Xerces"
+                      : "xerces:// links open this Xerces");
+        owner_->notify(here ? owner_->tr("Invite links no longer open "
+                                         "Xerces.")
+                            : owner_->tr("Invite links now open this "
+                                         "Xerces."));
+      }
+      refresh_settings();
     }
   }
 
@@ -336,6 +968,14 @@ private:
   }
 
   void row(const std::string &action, int index) {
+    if (action == "mod page") {
+      if (join_ && index >= 0 && std::size_t(index) < join_->missing.size() &&
+          join_->missing[index].workshop_id) {
+        owner_->open_url(
+            core::workshop_page_url(*join_->missing[index].workshop_id));
+      }
+      return;
+    }
     if (busy_) {
       return;
     }
@@ -354,7 +994,8 @@ private:
     } else if (action == "invite") {
       if (const auto *r = at(friends_, index)) {
         service_->invite(
-            r->id, report(owner_->tr("Invite sent to") + " " + r->name + "."));
+            r->id, current_pack_json(),
+            report(owner_->tr("Invite sent to") + " " + r->name + "."));
       }
     } else if (action == "remove" || action == "block") {
       const auto *r = at(friends_, index);
@@ -388,58 +1029,30 @@ private:
       }
     } else if (action == "join") {
       if (const auto *r = at(invites_, index)) {
-        join_invite(r->id);
+        if (join_) {
+          owner_->notify(owner_->tr("Another join is under way. Cancel it "
+                                    "first."),
+                         true);
+          return;
+        }
+        join_invite(r->id, true);
       }
     } else if (action == "ignore") {
       if (const auto *r = at(invites_, index)) {
         service_->decline_invite(r->id, report({}));
       }
-    }
-  }
-
-  void join_invite(const std::string &id) {
-    busy_ = true;
-    handle_.DirtyVariable("busy");
-    service_->accept_invite(
-        id, [this](const account::outcome &result,
-                   std::optional<friends_service::join_plan> plan) {
-          busy_ = false;
-          handle_.DirtyVariable("busy");
-          if (!result.ok || !plan) {
-            owner_->notify(result.message, true,
-                           "invite join failed: " + result.code);
-            return;
-          }
-          if (plan->joined_running_game) {
-            owner_->notify(owner_->tr("The game is joining your friend's "
-                                      "lobby."));
-            return;
-          }
-          launch_join(plan->game);
-        });
-  }
-
-  // As Join in Servers: the game starts with the join, and connects once its
-  // main menu is up. The host decides which mods load.
-  void launch_join(const account::game_session &game) {
-    services &svc = owner_->svc();
-    bool modded = game.modded;
-    if (modded) {
-      const xerces_core::plan plan = svc.resolve(game.mode);
-      modded = plan.ok() && !plan.stack.empty();
-    }
-    log_info("launcher.friends.join",
-             std::string(xerces_core::redacted_address) +
-                 (modded ? " modded" : " vanilla"));
-    const launch_outcome outcome =
-        svc.launch(game.mode, modded, false, game.address);
-    if (!(outcome.started || outcome.dry_run)) {
-      owner_->notify(owner_->tr(outcome.message), true);
-      return;
-    }
-    owner_->notify(owner_->tr("Starting the game to join your friend."));
-    if (outcome.started && svc.config().close_on_launch) {
-      owner_->win().request_close();
+    } else if (action == "let in") {
+      const auto &knocks = service_->snapshot().knocks;
+      if (index >= 0 && std::size_t(index) < knocks.size()) {
+        const auto &knock = knocks[index];
+        service_->let_in(
+            knock.id, knock.from_user_id, current_pack_json(),
+            report(owner_->tr("Let in:") + " " + knock.from_username + "."));
+      }
+    } else if (action == "knock ignore") {
+      if (const auto *r = at(knocks_, index)) {
+        service_->ignore_knock(r->id, report({}));
+      }
     }
   }
 
@@ -447,7 +1060,12 @@ private:
   Rml::DataModelHandle handle_;
   std::unique_ptr<friends_service> service_;
   std::uint64_t seen_rev_ = 0;
+  std::uint64_t seen_link_rev_ = 0;
   double next_game_check_ = 0;
+  bool was_running_ = false;
+  std::string game_mode_ = "zm";
+  std::optional<pending_join> join_;
+  std::optional<last_join> last_;
 
   bool available_ = true;
   bool signed_in_ = false;
@@ -472,6 +1090,22 @@ private:
   Rml::String privacy_requests_;
   Rml::String privacy_presence_;
   Rml::String privacy_invites_;
+  bool join_active_ = false;
+  Rml::String join_title_;
+  Rml::String join_status_;
+  bool join_ready_ = false;
+  Rml::Vector<mod_row> join_mods_;
+  bool join_pages_ = false;
+  bool rejoin_ = false;
+  Rml::String rejoin_text_;
+  Rml::Vector<person_row> knocks_;
+  bool has_link_ = false;
+  Rml::String link_url_;
+  Rml::String link_input_;
+  Rml::String link_placeholder_;
+  Rml::String links_open_text_;
+  Rml::String lobby_guests_;
+  Rml::String follow_text_;
 };
 } // namespace
 

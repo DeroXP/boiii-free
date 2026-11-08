@@ -1053,8 +1053,12 @@ int cmd_diag_bundle(const arguments &args) {
 //   status [--json]                     build, signatures, plan, phase, mods
 //   load --extras a,b | reload [--extras a,b] | unload   front end only
 //   host                                whether its lobby can be joined now
-//   join --address host:port            join a lobby; main menu only
+//   join --address host:port [--ticket T]  join a lobby; main menu only
 //   notify --title T --text X           a toast in the game
+//   guests [--invite-only on|off] [--ticket T --seconds N]
+//                                       who may join this game's lobby
+//   punch --address a.b.c.d:port        open the router to a joiner
+//   quit                                the game quits (as its console)
 int cmd_live(const arguments &args, const std::string &command) {
   const fs::path run = xerces_home(args) / "run";
   const auto entries = ipc::live_run_entries(run);
@@ -1073,7 +1077,35 @@ int cmd_live(const arguments &args, const std::string &command) {
       std::cerr << "join needs --address host:port.\n";
       return exit_error;
     }
+    params = "{\"address\":" + json::quote(*address);
+    if (const auto ticket = args.get("--ticket")) {
+      params += ",\"ticket\":" + json::quote(*ticket);
+    }
+    params += "}";
+  } else if (command == "punch") {
+    const auto address = args.get("--address");
+    if (!address) {
+      std::cerr << "punch needs --address a.b.c.d:port.\n";
+      return exit_error;
+    }
     params = "{\"address\":" + json::quote(*address) + "}";
+  } else if (command == "guests") {
+    rapidjson::Document doc(rapidjson::kObjectType);
+    if (const auto on = args.get("--invite-only")) {
+      if (*on != "on" && *on != "off") {
+        std::cerr << "--invite-only takes on or off.\n";
+        return exit_error;
+      }
+      json::set(doc, "invite_only", *on == "on", doc.GetAllocator());
+    }
+    if (const auto ticket = args.get("--ticket")) {
+      json::set(doc, "ticket", *ticket, doc.GetAllocator());
+      const auto seconds = args.get("--seconds");
+      json::set(doc, "seconds",
+                std::int64_t{seconds ? std::atoll(seconds->c_str()) : 600},
+                doc.GetAllocator());
+    }
+    params = json::canonical(doc);
   } else if (command == "notify") {
     const auto title = args.get("--title");
     const auto text = args.get("--text");
@@ -1432,7 +1464,8 @@ int main(int argc, char **argv) {
     }
     if (group == "status" || group == "load" || group == "reload" ||
         group == "unload" || group == "host" || group == "join" ||
-        group == "notify") {
+        group == "notify" || group == "guests" || group == "punch" ||
+        group == "quit") {
       return cmd_live(args, group);
     }
     const std::set<std::string> live = {"status", "mods",   "plan",  "load",

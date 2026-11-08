@@ -512,6 +512,14 @@ result_message host_guard::check(std::string_view peer,
                                  const key &password_key,
                                  const own_addresses &own,
                                  const clock::time_point now) {
+  return check(peer, answer, std::span<const key>(&password_key, 1), own, now);
+}
+
+result_message host_guard::check(std::string_view peer,
+                                 const proof_message &answer,
+                                 const std::span<const key> keys,
+                                 const own_addresses &own,
+                                 const clock::time_point now) {
   result_message reply{answer.session, result::stale, 0};
   const auto found = std::find_if(
       challenges_.begin(), challenges_.end(), [&](const issued &entry) {
@@ -551,8 +559,15 @@ result_message host_guard::check(std::string_view peer,
     reply.wait_seconds = 60;
     return reply;
   }
-  if (!proof_matches(password_key, answer.nonce, answer.host_address,
-                     answer.session, answer.proof)) {
+  // Every key is tried, so the time taken says nothing about which one
+  // matched.
+  bool matched = false;
+  for (const key &candidate : keys) {
+    matched = proof_matches(candidate, answer.nonce, answer.host_address,
+                            answer.session, answer.proof) ||
+              matched;
+  }
+  if (!matched) {
     wrong->events.push_back(now);
     forget_old(wrong_all_, now);
     wrong_all_.events.push_back(now);

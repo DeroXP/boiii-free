@@ -34,7 +34,9 @@
 #include <xerces_core/json.hpp>
 #include <xerces_core/launch.hpp>
 
+#include "join_password.hpp"
 #include "perf.hpp"
+#include "punch.hpp"
 #include "runtime.hpp"
 #include "signatures.hpp"
 
@@ -159,6 +161,9 @@ std::optional<std::string> extras_param(const std::string &params,
 std::string host_json() {
   const nat::hosting_state state = nat::hosting();
   return std::string("{\"in_match\":") + (in_match() ? "true" : "false") +
+         ",\"invite_only\":" +
+         (xerces_join_password::invite_only() ? "true" : "false") +
+         ",\"main_menu\":" + (gpu::on_main_menu() ? "true" : "false") +
          ",\"mapped\":" + json::quote(state.mapped_endpoint) +
          ",\"open\":" + (state.open ? "true" : "false") +
          ",\"port\":" + std::to_string(state.port) + "}";
@@ -199,11 +204,17 @@ std::string handle(const ipc::request &request) {
                              error.empty() ? "address is not host:port"
                                            : error);
     }
-    std::string response = on_main(request, [address]() -> std::string {
+    // The invite's ticket for this host (join_password.hpp), if it has one.
+    std::string ticket_error;
+    const auto ticket = text_param(request.params, "ticket", 64, &ticket_error);
+    std::string response = on_main(request, [address, ticket]() -> std::string {
       // As xerces/join_after_menu.cpp: a join before the main menu sends
       // stats the game has not loaded yet.
       if (in_match() || !gpu::on_main_menu()) {
         return "!refused";
+      }
+      if (ticket) {
+        xerces_join_password::set_join_ticket(*address, *ticket);
       }
       xerces_runtime::log_info("xerces.join.invite",
                                "joining the lobby of an invite");
@@ -230,6 +241,66 @@ std::string handle(const ipc::request &request) {
   }
   if (request.method == "mods") {
     return on_main(request, mods_json);
+  }
+  if (request.method == "guests") {
+    // Who may join this game's lobby (join_password.hpp): invite_only, and
+    // a ticket for an invite just sent, good for `seconds`.
+    const auto parsed = json::parse(request.params);
+    if (!parsed.ok || !parsed.document.IsObject()) {
+      return ipc::make_error(request.id, ipc::invalid_params,
+                             "params must be an object");
+    }
+    const auto &params = parsed.document;
+    if (params.HasMember("invite_only")) {
+      if (!params["invite_only"].IsBool()) {
+        return ipc::make_error(request.id, ipc::invalid_params,
+                               "invite_only must be true or false");
+      }
+      xerces_join_password::set_invite_only(params["invite_only"].GetBool());
+    }
+    if (params.HasMember("ticket")) {
+      const auto ticket = json::get_string(params, "ticket");
+      const int seconds =
+          params.HasMember("seconds") && params["seconds"].IsInt()
+              ? params["seconds"].GetInt()
+              : 0;
+      if (!ticket || !xerces_join_password::add_ticket(
+                         *ticket, std::chrono::seconds(seconds))) {
+        return ipc::make_error(request.id, ipc::invalid_params,
+                               "ticket must be 32 hex digits, seconds 1 to "
+                               "86400");
+      }
+    }
+    return ipc::make_result(
+        request.id,
+        std::string("{\"invite_only\":") +
+            (xerces_join_password::invite_only() ? "true" : "false") + "}");
+  }
+  if (request.method == "punch") {
+    std::string error;
+    const auto address = text_param(request.params, "address", 64, &error);
+    if (!address) {
+      return ipc::make_error(request.id, ipc::invalid_params, error);
+    }
+    std::string response = on_main(request, [address]() -> std::string {
+      return xerces_punch::start(*address) ? "{\"punching\":true}" : "!refused";
+    });
+    if (response.find("\"message\":\"refused\"") != std::string::npos) {
+      return ipc::make_error(request.id, ipc::refused,
+                             "not hosting, or not a public IPv4 address");
+    }
+    return response;
+  }
+  if (request.method == "quit") {
+    // The launcher asks the player first (a join that needs other mods
+    // restarts the game). The engine's own quit, as the console runs it, so
+    // it counts as a clean exit (loader.cpp).
+    return on_main(request, []() -> std::string {
+      xerces_runtime::log_info("xerces.quit", "the launcher asked the game "
+                                              "to quit");
+      game::cbuf::Cbuf_AddText(game::LOCAL_CLIENT_0, "quit\n");
+      return "{\"quitting\":true}";
+    });
   }
   if (request.method == "reload" || request.method == "unload") {
     std::string error;

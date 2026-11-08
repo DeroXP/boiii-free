@@ -156,6 +156,7 @@ launch_outcome preview_launch(const launch_inputs &in) {
   const launcher_config &config = followup ? *followup : *in.config;
   launch_options options;
   options.connect = in.connect;
+  options.join_ticket = in.join_ticket;
   options.nointro = config.nointro;
   options.mods_off = in.mods_off;
   options.extra_flags = config.extra_flags;

@@ -560,7 +560,9 @@ void handle_connect_query_response(const bool success,
     xerces_join_password::show(outcome::newer, 0);
     return;
   case host_need::checked:
-    if (!network_password::is_password_set()) {
+    // An invite's ticket for this host answers too (DESIGN.md 10.13).
+    if (!network_password::is_password_set() &&
+        !xerces_join_password::has_ticket_for(target)) {
       xerces_join_password::show(outcome::needed, 0);
       return;
     }

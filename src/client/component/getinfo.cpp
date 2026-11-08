@@ -30,6 +30,7 @@
 #include <game/utils.hpp>
 
 #include <xerces/join.hpp>
+#include <xerces/join_password.hpp>
 #include <xerces_core/join_password.hpp>
 #include <xerces_core/version.hpp>
 
@@ -155,7 +156,9 @@ struct component final : generic_component {
                                               usermapId));
       }
 
-      if (network_password::is_password_set()) {
+      // An invite-only lobby checks every joiner the same way (DESIGN.md
+      // 10.13): a ticket's answer passes like the password's.
+      if (xerces_join_password::locked()) {
         // Xerces (DESIGN.md 11.10): the host checks the password itself
         // (xerces/join_password.hpp) and publishes no hash of it. Older
         // clients find a hash no password gives, so their own check stops

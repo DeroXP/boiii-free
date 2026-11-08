@@ -312,11 +312,13 @@ std::size_t known_length(std::string_view text, std::size_t at,
 }
 
 // Length of a join keyword at text[at], or 0: "+connect" (the console's join,
-// and the launcher's up to 0.1.0-beta.5) or "xerces_join" (the launcher's
-// "+set xerces_join <address>" since), as a whole word.
+// and the launcher's up to 0.1.0-beta.5), "xerces_join" (the launcher's
+// "+set xerces_join <address>" since) or "xerces_join_ticket" (an invite's
+// ticket for that host, which is a secret too), as a whole word.
 std::size_t join_word_length(std::string_view text, std::size_t at) {
   for (const std::string_view word :
-       {std::string_view("+connect"), std::string_view("xerces_join")}) {
+       {std::string_view("+connect"), std::string_view("xerces_join_ticket"),
+        std::string_view("xerces_join")}) {
     if (!starts_with_case_insensitive(text, at, word)) {
       continue;
     }

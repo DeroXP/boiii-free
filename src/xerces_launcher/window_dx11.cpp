@@ -354,6 +354,18 @@ LRESULT CALLBACK window_procedure(HWND handle, UINT message, WPARAM w_param,
   case WM_CLOSE:
     s->running = false;
     return 0;
+  case WM_COPYDATA: {
+    // A second start of Xerces passing an invite link (app.cpp run()). Only
+    // a short code; the app checks it before anything uses it.
+    const auto *data = reinterpret_cast<const COPYDATASTRUCT *>(l_param);
+    if (data && data->dwData == copy_data_join_link && data->lpData &&
+        data->cbData > 0 && data->cbData <= 64 && s->callbacks.join_link) {
+      s->callbacks.join_link(
+          std::string(static_cast<const char *>(data->lpData), data->cbData));
+      return TRUE;
+    }
+    break;
+  }
   case WM_GETMINMAXINFO: {
     auto *info = reinterpret_cast<MINMAXINFO *>(l_param);
     const UINT dpi = window_dpi(handle);

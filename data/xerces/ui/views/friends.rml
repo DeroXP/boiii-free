@@ -5,9 +5,9 @@
 	<link type="text/rcss" href="friends.rcss"/>
 </head>
 <!-- Friends (docs/DESIGN.md 7.3, 10): a Xerces account, friends with
-     presence, requests, invites, blocks and privacy. Data: the "friends"
-     model in src/xerces_launcher/views/friends.cpp; the network work is
-     src/xerces_launcher/friends_service.cpp's. -->
+     presence, requests, invites, invite links, blocks and privacy. Data:
+     the "friends" model in src/xerces_launcher/views/friends.cpp; the
+     network work is src/xerces_launcher/friends_service.cpp's. -->
 <body template="shell" data-model="friends">
 <div id="friends-main">
 	<div class="friends-primary">
@@ -39,6 +39,43 @@
 				<span class="account-name">{{username}}</span>
 				<span class="account-state" data-class-live="connected">{{connection}}</span>
 				<button id="sign-out" class="link" data-event-click="act('sign out')"><span>Sign out</span></button>
+			</div>
+
+			<div class="section join-panel" data-if="join_active">
+				<div class="panel-head"><span class="panel-title">{{join_title}}</span></div>
+				<div class="join-status">{{join_status}}</div>
+				<div class="friend-row" data-for="m, i : join_mods">
+					<div class="friend-text"><div class="friend-name">{{m.name}}</div></div>
+					<div class="row-actions">
+						<button class="small-button" data-if="m.on_workshop" data-attr-id="'join-mod-' + i" data-event-click="row('mod page', i)"><span>Workshop page</span></button>
+					</div>
+				</div>
+				<div class="toolbar join-actions">
+					<button id="join-go" class="primary-button" data-if="join_ready" data-event-click="act('join go')"><span>Join</span></button>
+					<button id="join-next" class="outline" data-if="join_pages" data-event-click="act('join next')"><span>Open the next Workshop page</span></button>
+					<button id="join-cancel" class="outline" data-event-click="act('join cancel')"><span>Cancel</span></button>
+				</div>
+			</div>
+
+			<div class="section join-panel" data-if="rejoin &amp;&amp; !join_active">
+				<div class="panel-head"><span class="panel-title">Rejoin</span></div>
+				<div class="join-status">{{rejoin_text}}</div>
+				<div class="toolbar join-actions">
+					<button id="rejoin" class="primary-button" data-event-click="act('rejoin')"><span>Rejoin</span></button>
+					<button id="rejoin-close" class="outline" data-event-click="act('rejoin close')"><span>Not now</span></button>
+				</div>
+			</div>
+
+			<div class="section" data-if="knocks.size > 0">
+				<div class="panel-head"><span class="panel-title">Asking to join</span></div>
+				<div class="friend-row" data-for="k, i : knocks">
+					<div class="friend-text"><div class="friend-name">{{k.name}}</div></div>
+					<div class="row-actions">
+						<button class="small-button" data-if="hosting" data-attr-id="'knock-let-' + i" data-event-click="row('let in', i)"><span>Let in</span></button>
+						<button class="small-button" data-attr-id="'knock-ignore-' + i" data-event-click="row('knock ignore', i)"><span>Ignore</span></button>
+					</div>
+				</div>
+				<div class="invite-note" data-if="!hosting">Open your lobby to direct connect in the game to let them in.</div>
 			</div>
 
 			<div class="section" data-if="invites.size > 0">
@@ -131,8 +168,44 @@
 		</div>
 
 		<div>
+			<div class="panel-head"><span class="panel-title">Invite link</span></div>
+			<div data-if="has_link">
+				<div class="link-url">{{link_url}}</div>
+				<div class="toolbar link-actions">
+					<button id="link-copy" class="small-button" data-event-click="act('link copy')"><span>Copy</span></button>
+					<button id="link-new" class="small-button" data-event-click="act('link make')"><span>New link</span></button>
+					<button id="link-stop" class="small-button" data-event-click="act('link stop')"><span>Stop</span></button>
+				</div>
+			</div>
+			<button id="link-make" class="small-button" data-if="!has_link" data-event-click="act('link make')"><span>Make an invite link</span></button>
+			<div class="aside-note">Anyone with the link can ask to join your lobby, friend or not; you choose who gets in. A link lasts a day.</div>
+			<div class="label field-label">Join with a link</div>
+			<div class="add-fields">
+				<input id="link-input" type="text" class="text add-name" maxlength="200" data-attr-placeholder="link_placeholder" data-value="link_input"/>
+				<button id="link-join" class="outline add-button" data-event-click="act('link join')"><span>Ask to join</span></button>
+			</div>
+		</div>
+
+		<div>
+			<div class="panel-head"><span class="panel-title">Your lobby</span></div>
+			<div class="privacy-row">
+				<div class="privacy-text">Who can join</div>
+				<button id="lobby-guests" class="small-button" data-event-click="act('lobby guests')"><span>{{lobby_guests}}</span></button>
+			</div>
+			<div class="privacy-row">
+				<div class="privacy-text">Follow hosts you join</div>
+				<button id="follow-hosts" class="small-button" data-event-click="act('follow')"><span>{{follow_text}}</span></button>
+			</div>
+			<div class="privacy-row">
+				<div class="privacy-text">Open invite links in Xerces</div>
+				<button id="links-open" class="small-button" data-event-click="act('links open')"><span>{{links_open_text}}</span></button>
+			</div>
+			<div class="aside-note quiet">Invited players: only players you invite from Xerces get into your lobby, each with a ticket of their own. Follow: when a host you joined invites you again (a new lobby, other mods), Xerces joins at once.</div>
+		</div>
+
+		<div>
 			<div class="panel-head"><span class="panel-title">Invites</span></div>
-			<div class="aside-note">Host a Zombies or Multiplayer lobby, open it to direct connect, then press Invite next to a friend. They get a toast in the game and an entry here; Join has their game join yours from its main menu, or starts it with the join.</div>
+			<div class="aside-note">Host a lobby, open it to direct connect, then press Invite next to a friend. They get a toast in the game and an entry here. Join gets your mods from the Workshop if they lack any, then joins from the main menu or starts the game. Xerces asks your router to let them in; if your router refuses, forward the game's UDP port as for direct connect.</div>
 			<button id="friends-refresh" class="small-button" data-event-click="act('refresh')"><span>Refresh</span></button>
 		</div>
 	</div>

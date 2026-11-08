@@ -2356,9 +2356,8 @@ matchmaking, and Steam would start BO3 rather than Xerces.
   footer, and, while their game runs, a toast in the game (pipe method
   `notify`). Join has a running game connect from its main menu (pipe method
   `join`, refused elsewhere, as a join before the menu crashed); otherwise it
-  starts the game with the join, as Join in Servers does. The invite is marked
-  accepted on the backend after the running game took it, so one the game could
-  not take yet stays to try again.
+  starts the game with the join, as Join in Servers does. (Stage 2 changed this:
+  the invite is accepted first, 10.12.)
 - **Safety.** Remove and Block ask first; Blocked lists the blocks with Unblock;
   the three privacy settings (requests from everyone or nobody, presence and
   invites to friends or nobody) are buttons that switch. Logs name no friend:
@@ -2373,6 +2372,99 @@ accounts) against the backend run locally, and with the game: the open lobby
 seen as joinable, the toast, Join into a running game (docs/TESTING.md). Not
 tested: two PCs, and the live backend, which does not have `/v1/me/address`
 until `xerces-design` is pushed.
+
+### 10.12 Friends, stages 2 to 4: mods, tickets, hole punching, links (2026-11-07)
+
+The rest of the friend plan (10.11). On 2026-11-07 the user chose hole punching
+for stage 3 rather than a relay (free, no server carries game traffic; a strict
+router still needs a forwarded port or UPnP), and to make a Discord application
+for Discord join (not built yet: it waits for the application's id).
+
+- **The host's mods travel with the invite.** Invite shares the stack the host
+  plays as a pack on the backend (`POST /v1/packs`, the same pack format as
+  Packs, 8.1, with each mod's Workshop id) and puts its code in the invite's
+  `pack_code`; the same stack gives the same code all session. The joiner's
+  launcher fetches the pack and `xerces_core/invite_pack.hpp` matches it against
+  the catalog, by id and then by Workshop id. Missing mods are got the way a
+  player gets any mod: Join opens the first missing mod's Workshop page in Steam
+  (`steam://url/CommunityFilePage/<id>`), the Friends tab lists the rest with a
+  Workshop page button each, the player subscribes and Steam downloads. Nothing
+  goes around Steam. The launcher scans the folders again every 8 s and joins by
+  itself once every mod is here. A mod that is not on the Workshop is named, for
+  the player to ask the host about. The game then starts with the pack's mods in
+  the pack's order (`launch_inputs::mods`), not the joiner's profile.
+- **Restart and rejoin.** When the joiner's game already runs, the launcher
+  compares the plan it runs (the journal's plan id) with the pack's. The same:
+  the running game joins from its main menu. Different (or mods loaded for a
+  vanilla lobby): the launcher asks "Restart the game to join?", then asks the
+  game to quit (new pipe method `quit`, the engine's own quit, so a clean exit)
+  and starts it with the host's mods and the join once it is gone (60 s at
+  most). An invite is now accepted on the backend before anything joins, as the
+  pack and the hole punch need it; an accepted invite lasts an hour.
+- **Tickets: only invited players get in.** Every invite carries a ticket of its
+  own, 16 random bytes, in session text version 2:
+  `xerces/2 <host:port> <mode> <modded> <ticket>`. Before the invite goes, the
+  host's launcher gives the ticket to its game (pipe method `guests`, kept 3
+  hours). With "Who can join: Invited players" (the default, launcher setting
+  `friends_invite_only`) and the player signed in, the launcher also turns the
+  game's invite-only on, and the host checks every joiner with the password
+  check of 11.10: a challenge, and an answer keyed by PBKDF2 of the ticket (or
+  of `net_password`, if set) and the host's salt, compared in constant time
+  against every live ticket. The ticket never travels to the host again, a wrong
+  one counts like a wrong password, and a passed address stays let in until the
+  game quits. The joiner's game answers with the ticket for that host only (pipe
+  `join`'s `ticket`, or `+set xerces_join_ticket` with the launch, which the log
+  redacts like the address). Tickets keep strangers out of the lobby; they do
+  not encrypt the game's traffic, which Black Ops III sends as it always has (as
+  it does over Steam). The invite itself (address, ticket, pack code) goes over
+  TLS to the one player invited.
+- **Hole punching.** Without UPnP the invite names the address the backend sees
+  and the game's port. When the joiner's game is at its main menu (or about to
+  take a join in a running game), its launcher sends its game's port to the
+  backend (`POST /v1/invites/{id}/punch`); the backend pushes the joiner's
+  public address and that port to the host's launcher (socket message `punch`),
+  which hands it to its game (pipe method `punch`). The host's game sends
+  `xercesPunch 1` from its own socket to that address once a second for three
+  minutes, or until its lobby closes (`src/client/xerces/punch.cpp`, 16 targets
+  at most, public IPv4 only). That opens the host's router to the joiner when
+  the router keeps the game's port, as most do; routers that change the port per
+  destination still need a forwarded port or UPnP. Both games drop the packets
+  without a word. Only invites sent from that launcher are punched for, and
+  neither address is stored or logged.
+- **Invite links and knocks.** Make an invite link (Friends, aside) gives a link
+  like `https://<backend>/join/XJN-XXXXXXXX`, good for a day, one at a time (New
+  link replaces it, Stop ends it). The page names nobody and runs no script; its
+  button opens `xerces://join/<code>`. Following a link (or pasting it into
+  "Join with a link") asks the signed-in player "Ask to join?", and Ask to join
+  knocks: the host gets "<name> asks to join" on Friends and as a toast in the
+  game. Let in (while the lobby is open) accepts the knock and sends a normal
+  invite, with mods and a ticket; that invite is allowed for an hour although
+  they are not friends, whatever their invite setting. Ignore declines it, which
+  the one who knocked never learns. A knock across a block goes nowhere,
+  answered like any other.
+- **xerces:// links.** "Open invite links in Xerces" (off until the player turns
+  it on) writes `HKCU\Software\Classes\xerces` for this Windows user only:
+  `"<Xerces.exe>" --home "<home>" --join-link "%1"`; turning it off deletes the
+  key. A link that starts Xerces while it runs reaches the open window
+  (WM_COPYDATA, the code only, checked again there), which shows Friends and the
+  question. Xerces takes only `xerces://join/<code>` and keeps only a
+  well-formed code.
+- **Follow the host.** With "Follow hosts you join" on (the default,
+  `friends_follow`), an invite from a host the player joined in the last 6
+  hours, or knocked on in the last hour, is taken at once: no question, the mods
+  check and the join run as for Join. The host's side: players whose punch
+  reached this launcher are remembered with the game process that hosted them;
+  when another game process opens a lobby within 6 hours (the host restarted,
+  perhaps with other mods), they are invited again, with the new mods. So a
+  party follows its host from game to game.
+- **Rejoin after a crash.** When the game ends without a clean exit within 3
+  hours of joining a friend, Friends offers Rejoin, which starts the game with
+  the same mods, address and ticket (the host keeps it 3 hours).
+
+The game's new pipe methods, and `xerces_cli guests`, `punch` and `quit`:
+`guests {invite_only, ticket, seconds}`, `punch {address}`, `quit`; `host` now
+also says `invite_only` and `main_menu`, and `join` takes an optional `ticket`.
+The backend side: `backend/README.md` (links, knocks, punch, the share page).
 
 ---
 

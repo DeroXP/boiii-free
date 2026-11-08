@@ -945,7 +945,9 @@ void receive_lobby_denied(const game::net::netadr_t &sender,
   const bool checked = lobby_joining.after_password_check;
   std::function<void()> fallback = std::exchange(game_join_fallback, {});
   using xerces_join_password::outcome;
-  if (checked || !network_password::is_password_set() ||
+  if (checked ||
+      (!network_password::is_password_set() &&
+       !xerces_join_password::has_ticket_for(sender)) ||
       xerces_join_password::skip_check_for_test()) {
     printf("[Friends] The host refused the join: no password check passed\n");
     xerces_join_password::show(outcome::refused, 0);

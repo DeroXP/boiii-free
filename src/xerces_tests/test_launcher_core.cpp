@@ -197,6 +197,16 @@ TEST_CASE("launch: a server address goes last as xerces_join, not +connect") {
     CHECK(arg != "+connect");
   }
 
+  // A friend's invite's ticket follows the join (DESIGN.md 10.13).
+  options.join_ticket = "0123456789abcdef0123456789abcdef";
+  const launch_command with_ticket = build_launch_command(nullptr, options);
+  REQUIRE(with_ticket.ok());
+  CHECK_EQ(with_ticket.args.back(), *options.join_ticket);
+  CHECK_EQ(with_ticket.args[with_ticket.args.size() - 2],
+           std::string("xerces_join_ticket"));
+  options.join_ticket = "0123;quit";
+  CHECK(!build_launch_command(nullptr, options).ok());
+
   CHECK(valid_server_address("host.example:28960"));
   CHECK(valid_server_address("10.0.0.1"));
   CHECK(valid_server_address("[::1]:27017"));

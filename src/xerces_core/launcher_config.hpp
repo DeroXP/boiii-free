@@ -67,6 +67,12 @@ struct launcher_config {
   // 2026-11-05; docs/CRASH_REPORTS.md). On by default; off sends nothing.
   bool send_crash_reports = true;
 
+  // Friends (DESIGN.md 10.13). Only players invited from Xerces (with a
+  // ticket) can join this player's lobby while signed in; and an invite from
+  // a host this player joined or asked to join lately is taken at once.
+  bool friends_invite_only = true;
+  bool friends_follow = true;
+
   std::vector<favorite_server> favorites;
   std::vector<std::string> recent_servers; // host:port, newest first
 

@@ -74,6 +74,10 @@ TEST_CASE("logs: server addresses are replaced") {
            "+set XERCES_JOIN \"" + a + "\"");
   CHECK_EQ(redact_addresses_in_json(R"({"cmd":"+set xerces_join host:1"})"),
            R"({"cmd":"+set xerces_join )" + a + R"("})");
+  // An invite's ticket is a secret too.
+  CHECK_EQ(redact_addresses("+set xerces_join_ticket "
+                            "0123456789abcdef0123456789abcdef -x"),
+           "+set xerces_join_ticket " + a + " -x");
   CHECK_EQ(redact_addresses("my_xerces_join home"), "my_xerces_join home");
   CHECK_EQ(redact_addresses("xerces_joined home"), "xerces_joined home");
 

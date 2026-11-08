@@ -29,10 +29,29 @@ constexpr double ping_every = 25.0;
 // The lists again: nothing tells a player they were removed or blocked (the
 // backend keeps that quiet), and invites run out after 10 minutes.
 constexpr double lists_every = 60.0;
+// A ticket lets its player in for this long: time to get the host's mods,
+// start the game, and come back after a crash.
+constexpr int ticket_seconds = 3 * 60 * 60;
+// An invite from a host this player knocked on, within the hour the backend
+// allows it; or from one this player joined, within a play session.
+constexpr double knock_follow_seconds = 60.0 * 60;
+constexpr double join_follow_seconds = 6.0 * 60 * 60;
+// Players who joined a lobby are asked again when the host's game restarts
+// within this long.
+constexpr double party_seconds = 6.0 * 60 * 60;
+// A launch with a join waits this long for the game's main menu.
+constexpr double watch_seconds = 10.0 * 60;
 
 account::outcome failed(std::string message) {
   account::outcome out;
   out.message = std::move(message);
+  return out;
+}
+
+account::outcome succeeded() {
+  account::outcome out;
+  out.ok = true;
+  out.reached = true;
   return out;
 }
 
@@ -45,14 +64,17 @@ std::string with_port(const std::string &address, int port) {
   const bool v6 = address.find(':') != std::string::npos;
   return (v6 ? "[" + address + "]" : address) + ":" + std::to_string(port);
 }
+
+bool bool_member(const rapidjson::Value &doc, const char *name) {
+  const auto *value = json::member(doc, name);
+  return value && value->IsBool() && value->GetBool();
+}
 } // namespace
 
 friends_service::friends_service(std::optional<std::string> base_url,
                                  fs::path home, poster post)
     : base_url_(std::move(base_url)), home_(std::move(home)),
       post_(std::move(post)), ui_(std::make_shared<ui_side>()) {
-  ui_->on_invite = &on_invite;
-  ui_->on_news = &on_news;
   work_.available = base_url_.has_value();
   if (base_url_) {
     client_ = std::make_unique<account::client>(*base_url_,
@@ -110,6 +132,10 @@ friends_service::~friends_service() {
   if (worker_.joinable()) {
     worker_.join();
   }
+}
+
+std::string friends_service::link_url(const account::invite_link &link) const {
+  return base_url_ ? *base_url_ + link.path : link.path;
 }
 
 // ------------------------------------------------------------- threads
@@ -230,24 +256,74 @@ void friends_service::tick() {
   const double now = seconds_now();
   bool running = false;
   std::string mode;
+  bool invite_only = false;
   {
     std::scoped_lock lock(mutex_);
     running = game_running_;
     mode = game_mode_ui_;
+    invite_only = invite_only_;
   }
   if (running != work_.game_running || mode != game_mode_) {
     work_.game_running = running;
     game_mode_ = mode;
     if (!running) {
       work_.hosting = false;
+      game_pid_ = 0;
+      guests_told_ = false;
     }
     next_game_check_ = 0;
     publish();
   }
+  // A launch with a join: the hole punch once the game's menu is up.
+  if (watching_ && running) {
+    if (now >= watch_until_) {
+      watching_.reset();
+    } else {
+      const host_answer host = ask_game_host();
+      if (host.reached && host.main_menu && host.port > 0) {
+        punch_for(*watching_, host);
+        watching_.reset();
+      }
+    }
+  }
   if (running && now >= next_game_check_) {
     next_game_check_ = now + game_check_every;
     const host_answer host = ask_game_host();
+    if (host.reached && host.pid != game_pid_) {
+      // Another game process: it knows no setting yet.
+      game_pid_ = host.pid;
+      guests_told_ = false;
+    }
+    if (host.reached) {
+      const bool want = invite_only && client_->signed_in();
+      if (!guests_told_ || want != guests_invite_only_) {
+        guests_invite_only_ = want;
+        tell_game_guests(true);
+      }
+    }
     const bool hosting = host.reached && host.open;
+    if (hosting && !work_.hosting) {
+      // The lobby opened. Players who joined this player's lobby in a game
+      // that has since closed are asked again (follow the host).
+      std::vector<std::string> back;
+      for (auto it = party_.begin(); it != party_.end();) {
+        if (now - it->second.when > party_seconds) {
+          it = party_.erase(it);
+        } else if (it->second.pid != host.pid) {
+          back.push_back(it->first);
+          it = party_.erase(it);
+        } else {
+          ++it;
+        }
+      }
+      if (!back.empty()) {
+        post_ui([this, back] {
+          if (on_party_back) {
+            on_party_back(back);
+          }
+        });
+      }
+    }
     if (hosting != work_.hosting) {
       work_.hosting = hosting;
       publish();
@@ -285,16 +361,21 @@ void friends_service::publish() {
   });
 }
 
+void friends_service::post_ui(std::function<void()> run) {
+  std::weak_ptr<ui_side> weak = ui_;
+  post_([weak, run = std::move(run)] {
+    // The service (which owns ui_) is still there: run may use it.
+    if (weak.lock()) {
+      run();
+    }
+  });
+}
+
 void friends_service::answer(const done &finished, account::outcome result) {
   if (!finished) {
     return;
   }
-  std::weak_ptr<ui_side> weak = ui_;
-  post_([weak, finished, result = std::move(result)] {
-    if (weak.lock()) {
-      finished(result);
-    }
-  });
+  post_ui([finished, result = std::move(result)] { finished(result); });
 }
 
 // ------------------------------------------------------------- the data
@@ -346,8 +427,36 @@ void friends_service::refresh_all() {
   if (client_->privacy(privacy).ok) {
     work_.privacy = privacy;
   }
+  std::optional<account::invite_link> link;
+  if (client_->own_link(link).ok) {
+    work_.link = std::move(link);
+  }
+  account::knock_list knocks;
+  if (client_->knocks(knocks).ok) {
+    work_.knocks = std::move(knocks.incoming);
+    work_.knocked = std::move(knocks.outgoing);
+  }
   if (client_->signed_in()) {
     work_.username = client_->current()->username;
+  }
+}
+
+void friends_service::toast(const std::string &title, const std::string &text) {
+  if (!work_.game_running) {
+    return;
+  }
+  std::string response;
+  const bool reached = call_game("notify",
+                                 "{\"text\":" + json::quote(text) +
+                                     ",\"title\":" + json::quote(title) + "}",
+                                 &response);
+  const auto parsed = reached ? ipc::parse_response(response) : std::nullopt;
+  if (parsed && parsed->ok) {
+    log_info("launcher.friends.game_toast", "the game showed a friends toast");
+  } else {
+    log_warn("launcher.friends.game_toast",
+             "the game did not show a friends toast: " +
+                 (parsed ? parsed->message : response));
   }
 }
 
@@ -383,50 +492,84 @@ void friends_service::handle(const std::string &message) {
         push->type == "friend_added"
             ? push->username + " is now your friend."
             : std::string("You have a new friend request.");
-    std::weak_ptr<ui_side> weak = ui_;
-    post_([weak, news] {
-      if (auto ui = weak.lock(); ui && *ui->on_news) {
-        (*ui->on_news)(news);
+    post_ui([this, news] {
+      if (on_news) {
+        on_news(news);
       }
     });
   } else if (push->type == "invite") {
     const account::invite &received = push->received;
-    if (received.status == "pending" &&
-        std::ranges::find(work_.invites, received.id, &account::invite::id) ==
+    if (received.status != "pending" ||
+        std::ranges::find(work_.invites, received.id, &account::invite::id) !=
             work_.invites.end()) {
-      work_.invites.insert(work_.invites.begin(), received);
-      std::weak_ptr<ui_side> weak = ui_;
-      post_([weak, received] {
-        if (auto ui = weak.lock(); ui && *ui->on_invite) {
-          (*ui->on_invite)(received);
-        }
-      });
-      // The player is likely in the game: say it there too.
-      if (work_.game_running) {
-        const auto game = account::parse_session_text(received.session);
-        std::string response;
-        // The toast shows about 36 characters of title and 26 of text, one
-        // line each (seen in the game): "Invite from" and a 24-character
-        // name, then "Multiplayer, join in Xerces" at most.
-        const bool reached = call_game(
-            "notify",
-            "{\"text\":" +
-                json::quote(std::string(mode_name(game ? game->mode : "zm")) +
-                            ", join in Xerces") +
-                ",\"title\":" +
-                json::quote("Invite from " + received.from_username) + "}",
-            &response);
-        const auto parsed =
-            reached ? ipc::parse_response(response) : std::nullopt;
-        if (parsed && parsed->ok) {
-          log_info("launcher.friends.game_toast", "the game showed the invite");
-        } else {
-          log_warn("launcher.friends.game_toast",
-                   "the game did not show the invite: " +
-                       (parsed ? parsed->message : response));
-        }
-      }
+      return;
     }
+    work_.invites.insert(work_.invites.begin(), received);
+    // From a host this player asked to join, or joined lately: taken at
+    // once (follow the host).
+    bool follow = false;
+    {
+      std::scoped_lock lock(mutex_);
+      follow = follow_;
+    }
+    const auto host = follow_hosts_.find(received.from_user_id);
+    const bool auto_join = follow && host != follow_hosts_.end() &&
+                           seconds_now() - host->second < join_follow_seconds;
+    post_ui([this, received, auto_join] {
+      if (auto_join && on_auto_join) {
+        on_auto_join(received);
+      } else if (on_invite) {
+        on_invite(received);
+      }
+    });
+    if (!auto_join) {
+      // The player is likely in the game: say it there too. The toast shows
+      // about 36 characters of title and 26 of text, one line each (seen in
+      // the game): "Invite from" and a 24-character name, then "Multiplayer,
+      // join in Xerces" at most.
+      const auto game = account::parse_session_text(received.session);
+      toast("Invite from " + received.from_username,
+            std::string(mode_name(game ? game->mode : "zm")) +
+                ", join in Xerces");
+    }
+  } else if (push->type == "knock") {
+    const account::knock_info &knock = push->knocked;
+    if (knock.id.empty() ||
+        std::ranges::find(work_.knocks, knock.id, &account::knock_info::id) !=
+            work_.knocks.end()) {
+      return;
+    }
+    work_.knocks.insert(work_.knocks.begin(), knock);
+    post_ui([this, knock] {
+      if (on_knock) {
+        on_knock(knock);
+      }
+    });
+    toast(knock.from_username + " asks to join", "Let them in from Xerces");
+  } else if (push->type == "punch") {
+    // The player this launcher invited is about to connect: open the host's
+    // router to them. Only for invites sent from here.
+    if (!sent_invites_.contains(push->invite_id) ||
+        !xerces_core::valid_server_address(push->address)) {
+      return;
+    }
+    std::string response;
+    std::uint32_t pid = 0;
+    const bool reached =
+        call_game("punch", "{\"address\":" + json::quote(push->address) + "}",
+                  &response, &pid);
+    const auto parsed = reached ? ipc::parse_response(response) : std::nullopt;
+    if (parsed && parsed->ok) {
+      // The address stays out of the log (DESIGN.md 15.1).
+      log_info("launcher.friends.punch", "the game opens the router to a "
+                                         "joining player");
+    } else {
+      log_warn("launcher.friends.punch",
+               "the game did not take the hole punch: " +
+                   (parsed ? parsed->message : response));
+    }
+    party_[push->from_user_id] = party_member{seconds_now(), pid};
+    return;
   } else if (push->type == "error") {
     log_warn("launcher.friends.socket_error", push->code);
   } else {
@@ -451,9 +594,36 @@ void friends_service::send_presence(bool force) {
   }
 }
 
+void friends_service::tell_game_guests(bool force) {
+  if (!force && guests_told_) {
+    return;
+  }
+  std::string response;
+  const bool reached =
+      call_game("guests",
+                std::string("{\"invite_only\":") +
+                    (guests_invite_only_ ? "true" : "false") + "}",
+                &response);
+  const auto parsed = reached ? ipc::parse_response(response) : std::nullopt;
+  guests_told_ = parsed && parsed->ok;
+  if (reached && !guests_told_) {
+    // An older game build: it knows no invite tickets, so its lobby stays
+    // open to anyone with the address.
+    log_warn("launcher.friends.guests",
+             "the game did not take invite-only: " +
+                 (parsed ? parsed->message : response));
+    guests_told_ = true; // asked once per game
+  }
+}
+
 void friends_service::ended() {
   work_ = friends_snapshot{};
   work_.available = base_url_.has_value();
+  sent_invites_.clear();
+  follow_hosts_.clear();
+  party_.clear();
+  watching_.reset();
+  guests_told_ = false; // invite-only follows the sign-in
   {
     std::scoped_lock lock(mutex_);
     want_socket_ = false;
@@ -469,6 +639,7 @@ void friends_service::after_sign_in(const account::outcome &result) {
   work_.signed_in = true;
   work_.restoring = false;
   work_.username = client_->current()->username;
+  guests_told_ = false;
   log_info("launcher.friends.signed_in", "signed in to a Xerces account");
   refresh_all();
   {
@@ -483,7 +654,7 @@ void friends_service::after_sign_in(const account::outcome &result) {
 friends_service::host_answer friends_service::ask_game_host() {
   host_answer out;
   std::string response;
-  if (!call_game("host", "{}", &response)) {
+  if (!call_game("host", "{}", &response, &out.pid)) {
     out.error = response;
     return out;
   }
@@ -499,9 +670,9 @@ friends_service::host_answer friends_service::ask_game_host() {
   }
   const auto &doc = result.document;
   out.reached = true;
-  if (const auto *open = json::member(doc, "open"); open && open->IsBool()) {
-    out.open = open->GetBool();
-  }
+  out.open = bool_member(doc, "open");
+  out.main_menu = bool_member(doc, "main_menu");
+  out.in_match = bool_member(doc, "in_match");
   if (const auto *port = json::member(doc, "port"); port && port->IsInt()) {
     out.port = port->GetInt();
   }
@@ -512,10 +683,13 @@ friends_service::host_answer friends_service::ask_game_host() {
 // Calls the running game's pipe; response holds the whole answer, or why
 // there is none.
 bool friends_service::call_game(const char *method, const std::string &params,
-                                std::string *response) {
+                                std::string *response, std::uint32_t *pid) {
   for (const auto &entry : ipc::live_run_entries(home_ / "run")) {
     if (entry.role != "game") {
       continue;
+    }
+    if (pid) {
+      *pid = entry.pid;
     }
     const ipc::call_result result = ipc::call(entry, method, params, 3000);
     *response = result.ok ? result.response : result.error;
@@ -525,11 +699,129 @@ bool friends_service::call_game(const char *method, const std::string &params,
   return false;
 }
 
+account::outcome friends_service::punch_for(const join_plan &plan,
+                                            const host_answer &host) {
+  if (plan.invite_id.empty() || host.port <= 0 || host.port > 65535) {
+    return failed("no port to punch for");
+  }
+  bool delivered = false;
+  const account::outcome result = client_->punch(
+      plan.invite_id, static_cast<std::uint16_t>(host.port), &delivered);
+  if (result.ok) {
+    log_info("launcher.friends.punch_asked",
+             delivered ? "the host's launcher was asked to open its router"
+                       : "the host's launcher was not there to open its "
+                         "router");
+  } else {
+    // Not fatal: a forwarded port or UPnP lets the join in anyway.
+    log_warn("launcher.friends.punch_asked",
+             "the hole punch could not be asked for: " + result.code);
+  }
+  return result;
+}
+
+account::outcome
+friends_service::send_game_invite(const std::string &user_id,
+                                  const std::string &pack_json) {
+  if (!work_.game_running) {
+    return failed("Start the game and open your lobby to direct connect "
+                  "first.");
+  }
+  const host_answer host = ask_game_host();
+  if (!host.reached) {
+    return failed("The game did not answer: " + host.error);
+  }
+  if (!host.open) {
+    return failed("Open your lobby to direct connect first: DIRECT CONNECT "
+                  "in the lobby's menu.");
+  }
+  std::string address = host.mapped;
+  if (address.empty()) {
+    // No UPnP answer: the address the backend sees, and the game's port.
+    // The hole punch opens the router for the one joining (most routers
+    // keep the game's port); otherwise it is forwarded by hand, as for
+    // direct connect.
+    std::string seen;
+    const account::outcome where = client_->own_address(seen);
+    if (!where.ok) {
+      return failed("Xerces could not tell your internet address: " +
+                    where.message);
+    }
+    address = with_port(seen, host.port);
+  }
+  account::game_session game;
+  game.address = address;
+  game.mode = game_mode_.empty() ? "zm" : game_mode_;
+  game.modded = !pack_json.empty();
+
+  // The host's mods, shared as a pack (once per stack this session).
+  std::string pack_code;
+  if (!pack_json.empty()) {
+    if (const auto known = pack_codes_.find(pack_json);
+        known != pack_codes_.end()) {
+      pack_code = known->second;
+    } else {
+      const account::outcome shared =
+          client_->create_pack(pack_json, pack_code);
+      if (shared.ok) {
+        pack_codes_[pack_json] = pack_code;
+      } else {
+        // The invite goes without it: the friend joins with their own mods.
+        log_warn("launcher.friends.pack_failed",
+                 "the mods could not be shared with the invite: " +
+                     shared.code);
+        pack_code.clear();
+      }
+    }
+  }
+
+  // A ticket for this one invite, given to the game first: with invite-only
+  // on, only a player with one gets in.
+  game.ticket = account::new_ticket();
+  std::string response;
+  const bool reached =
+      call_game("guests",
+                "{\"seconds\":" + std::to_string(ticket_seconds) +
+                    ",\"ticket\":" + json::quote(game.ticket) + "}",
+                &response);
+  const auto parsed = reached ? ipc::parse_response(response) : std::nullopt;
+  if (!parsed || !parsed->ok) {
+    if (guests_invite_only_) {
+      return failed("The game did not take the invite's ticket: " +
+                    (parsed ? parsed->message : response));
+    }
+    game.ticket.clear(); // an older game build: no ticket needed either
+  }
+
+  account::invite sent;
+  const account::outcome result =
+      client_->send_invite(user_id, game, pack_code, &sent);
+  if (result.ok) {
+    if (!sent.id.empty()) {
+      sent_invites_.insert(sent.id);
+    }
+    log_info("launcher.friends.invited",
+             pack_code.empty() ? "sent a game invite"
+                               : "sent a game invite with the mods");
+  }
+  return result;
+}
+
 // ----------------------------------------------------------- actions
 void friends_service::set_game(bool running, std::string mode) {
   std::scoped_lock lock(mutex_);
   game_running_ = running;
   game_mode_ui_ = std::move(mode);
+}
+
+void friends_service::set_invite_only(bool on) {
+  std::scoped_lock lock(mutex_);
+  invite_only_ = on;
+}
+
+void friends_service::set_follow(bool on) {
+  std::scoped_lock lock(mutex_);
+  follow_ = on;
 }
 
 void friends_service::sign_in(std::string username, std::string password,
@@ -633,73 +925,33 @@ void friends_service::set_privacy(account::privacy_settings value,
       std::move(finished));
 }
 
-void friends_service::invite(std::string user_id, done finished) {
-  enqueue([this, user_id = std::move(user_id), finished] {
-    if (!client_ || !client_->signed_in()) {
-      answer(finished, failed("Sign in first."));
-      return;
-    }
-    if (!work_.game_running) {
-      answer(finished, failed("Start the game and open your lobby to direct "
-                              "connect first."));
-      return;
-    }
-    const host_answer host = ask_game_host();
-    if (!host.reached) {
-      answer(finished, failed("The game did not answer: " + host.error));
-      return;
-    }
-    if (!host.open) {
-      answer(finished, failed("Open your lobby to direct connect first: DIRECT "
-                              "CONNECT in the lobby's menu."));
-      return;
-    }
-    std::string address = host.mapped;
-    if (address.empty()) {
-      // No UPnP answer: the address the backend sees, and the game's port
-      // (forwarded on the router by hand, as for direct connect).
-      std::string seen;
-      const account::outcome where = client_->own_address(seen);
-      if (!where.ok) {
-        answer(finished, failed("Xerces could not tell your internet "
-                                "address: " +
-                                where.message));
-        return;
-      }
-      address = with_port(seen, host.port);
-    }
-    account::game_session game;
-    game.address = address;
-    game.mode = game_mode_.empty() ? "zm" : game_mode_;
-    game.modded = true;
-    const account::outcome result = client_->send_invite(user_id, game);
-    if (result.ok) {
-      log_info("launcher.friends.invited", "sent a game invite");
-    }
-    answer(finished, result);
-  });
+void friends_service::invite(std::string user_id, std::string pack_json,
+                             done finished) {
+  act(
+      [this, user_id = std::move(user_id), pack_json = std::move(pack_json)] {
+        return send_game_invite(user_id, pack_json);
+      },
+      std::move(finished));
 }
 
 void friends_service::accept_invite(std::string id, joined finished) {
   enqueue([this, id = std::move(id), finished] {
-    const auto it = std::ranges::find(work_.invites, id, &account::invite::id);
-    const auto game = it != work_.invites.end()
-                          ? account::parse_session_text(it->session)
-                          : std::nullopt;
     auto reply = [this, finished](account::outcome result,
                                   std::optional<join_plan> plan) {
-      std::weak_ptr<ui_side> weak = ui_;
-      post_(
-          [weak, finished, result = std::move(result), plan = std::move(plan)] {
-            if (weak.lock() && finished) {
-              finished(result, plan);
-            }
-          });
+      post_ui([finished, result = std::move(result), plan = std::move(plan)] {
+        if (finished) {
+          finished(result, plan);
+        }
+      });
     };
     if (!client_ || !client_->signed_in()) {
       reply(failed("Sign in first."), std::nullopt);
       return;
     }
+    const auto it = std::ranges::find(work_.invites, id, &account::invite::id);
+    const auto game = it != work_.invites.end()
+                          ? account::parse_session_text(it->session)
+                          : std::nullopt;
     if (!game) {
       reply(failed("This invite does not name a lobby Xerces can join."),
             std::nullopt);
@@ -707,37 +959,29 @@ void friends_service::accept_invite(std::string id, joined finished) {
     }
     join_plan plan;
     plan.game = *game;
-    if (work_.game_running) {
-      // The running game joins first, so an invite the game could not take
-      // yet (not at its main menu) stays to try again.
-      std::string response;
-      const bool reached =
-          call_game("join", "{\"address\":" + json::quote(game->address) + "}",
-                    &response);
-      const auto parsed =
-          reached ? ipc::parse_response(response) : std::nullopt;
-      if (!parsed || !parsed->ok) {
-        reply(failed(parsed && parsed->code == ipc::refused
-                         ? "Go to the game's main menu, then Join again."
-                         : "The game did not take the join: " +
-                               (parsed ? parsed->message : response)),
-              std::nullopt);
-        return;
-      }
-      plan.joined_running_game = true;
-    }
-    const account::outcome result = client_->accept_invite(id);
+    plan.invite_id = id;
+    plan.host_user_id = it->from_user_id;
+    plan.host_username = it->from_username;
+    const std::string pack_code = it->pack_code;
+
+    account::invite taken;
+    const account::outcome result = client_->accept_invite(id, &taken);
     std::erase_if(work_.invites,
                   [&](const account::invite &item) { return item.id == id; });
     publish();
-    if (!result.ok && !plan.joined_running_game) {
-      reply(result, std::nullopt); // gone (10 minutes) or no longer a friend
+    if (!result.ok) {
+      reply(result, std::nullopt); // gone (10 minutes) or no longer allowed
       return;
     }
+    if (!pack_code.empty() && game->modded) {
+      if (!client_->fetch_pack(pack_code, plan.pack_json).ok) {
+        plan.pack_json.clear();
+        plan.pack_missing = true;
+      }
+    }
+    follow_hosts_[plan.host_user_id] = seconds_now();
     log_info("launcher.friends.invite_accepted", "accepted a game invite");
-    account::outcome joined_ok = result;
-    joined_ok.ok = true;
-    reply(joined_ok, plan);
+    reply(result, plan);
   });
 }
 
@@ -753,5 +997,135 @@ void friends_service::decline_invite(std::string id, done finished) {
     publish();
     answer(finished, result);
   });
+}
+
+void friends_service::join_running(join_plan plan, done finished) {
+  enqueue([this, plan = std::move(plan), finished] {
+    const host_answer host = ask_game_host();
+    if (!host.reached) {
+      answer(finished, failed("The game did not answer: " + host.error));
+      return;
+    }
+    if (host.in_match || !host.main_menu) {
+      answer(finished, failed("Go to the game's main menu, then Join again."));
+      return;
+    }
+    if (client_ && client_->signed_in() && punch_for(plan, host).ok) {
+      // The host's game starts sending within a moment; give it one.
+      std::this_thread::sleep_for(750ms);
+    }
+    std::string params = "{\"address\":" + json::quote(plan.game.address);
+    if (!plan.game.ticket.empty()) {
+      params += ",\"ticket\":" + json::quote(plan.game.ticket);
+    }
+    params += "}";
+    std::string response;
+    const bool reached = call_game("join", params, &response);
+    const auto parsed = reached ? ipc::parse_response(response) : std::nullopt;
+    if (!parsed || !parsed->ok) {
+      answer(finished,
+             failed(parsed && parsed->code == ipc::refused
+                        ? "Go to the game's main menu, then Join again."
+                        : "The game did not take the join: " +
+                              (parsed ? parsed->message : response)));
+      return;
+    }
+    follow_hosts_[plan.host_user_id] = seconds_now();
+    answer(finished, succeeded());
+  });
+}
+
+void friends_service::watch_join(join_plan plan) {
+  enqueue([this, plan = std::move(plan)] {
+    follow_hosts_[plan.host_user_id] = seconds_now();
+    watching_ = plan;
+    watch_until_ = seconds_now() + watch_seconds;
+  });
+}
+
+void friends_service::quit_game(done finished) {
+  enqueue([this, finished] {
+    std::string response;
+    const bool reached = call_game("quit", "{}", &response);
+    const auto parsed = reached ? ipc::parse_response(response) : std::nullopt;
+    if (!parsed || !parsed->ok) {
+      answer(finished, failed("The game did not quit: " +
+                              (parsed ? parsed->message : response)));
+      return;
+    }
+    log_info("launcher.friends.quit_game", "asked the game to quit for a join");
+    answer(finished, succeeded());
+  });
+}
+
+// ------------------------------------------------------- links, knocks
+void friends_service::make_link(std::string mode, done finished) {
+  act(
+      [this, mode = std::move(mode)] {
+        account::invite_link link;
+        const account::outcome result = client_->create_link(mode, link);
+        if (result.ok) {
+          log_info("launcher.friends.link_made", "made an invite link");
+        }
+        return result;
+      },
+      std::move(finished));
+}
+
+void friends_service::stop_link(done finished) {
+  act([this] { return client_->delete_link(); }, std::move(finished));
+}
+
+void friends_service::look_up_link(std::string code, owner_found finished) {
+  enqueue([this, code = std::move(code), finished] {
+    account::link_owner owner;
+    const account::outcome result = client_ && client_->signed_in()
+                                        ? client_->link(code, owner)
+                                        : failed("Sign in first.");
+    post_ui([finished, result, owner, ok = result.ok] {
+      if (finished) {
+        finished(result, ok ? std::optional(owner) : std::nullopt);
+      }
+    });
+  });
+}
+
+void friends_service::knock(std::string code, std::string host_user_id,
+                            done finished) {
+  act(
+      [this, code = std::move(code), host_user_id = std::move(host_user_id)] {
+        const account::outcome result = client_->knock(code);
+        if (result.ok) {
+          // Their invite is taken at once, within the hour (follow).
+          follow_hosts_[host_user_id] =
+              seconds_now() - (join_follow_seconds - knock_follow_seconds);
+          log_info("launcher.friends.knocked", "asked to join through a link");
+        }
+        return result;
+      },
+      std::move(finished));
+}
+
+void friends_service::let_in(std::string knock_id, std::string user_id,
+                             std::string pack_json, done finished) {
+  act(
+      [this, knock_id = std::move(knock_id), user_id = std::move(user_id),
+       pack_json = std::move(pack_json)] {
+        const account::outcome accepted = client_->accept_knock(knock_id);
+        if (!accepted.ok) {
+          return accepted;
+        }
+        std::erase_if(work_.knocks, [&](const account::knock_info &item) {
+          return item.id == knock_id;
+        });
+        return send_game_invite(user_id, pack_json);
+      },
+      std::move(finished));
+}
+
+void friends_service::ignore_knock(std::string knock_id, done finished) {
+  act([this, knock_id = std::move(
+                 knock_id)] { return client_->decline_knock(knock_id); },
+      std::move(finished));
 }
 } // namespace xerces_launcher

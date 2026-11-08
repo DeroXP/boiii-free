@@ -135,11 +135,14 @@ to report these again, but tell us if you see them somewhere else or worse.
   again (README.txt, Playing with other testers).
 - **Friends and invites are new and tested on one PC only.** Accounts, friend
   requests, presence, privacy, block, sign-out, the open lobby showing as
-  joinable, the invite toast in the game and Join into a running game worked
-  with two launchers on one PC against a test server. An invite has not yet
-  reached a friend on another PC and brought them into a real lobby. An invite
-  still needs your port forwarded when the router has no UPnP, as direct connect
-  does. Friends only see you while Xerces is open.
+  joinable, the invite toast in the game, Join into a running game, invite links
+  and asking to join, getting a host's mods and following a host worked with two
+  launchers on one PC against a test server. An invite has not yet reached a
+  friend on another PC and brought them into a real lobby, so tickets and hole
+  punching are not proven between two routers. A router that changes the port
+  for each destination (some mobile and carrier networks) still needs the port
+  forwarded, as direct connect does. Friends only see you while Xerces is open.
+  Discord join is not built yet.
 - **Multiplayer with Zombies mods can close the game.** On a tester's PC with
   four Zombies mods loaded, switching the main menu to Multiplayer ended with
   "Could not allocate asset - increase XASSET_ENTRY_POOL_SIZE" and the game

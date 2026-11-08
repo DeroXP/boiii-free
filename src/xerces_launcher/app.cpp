@@ -18,6 +18,7 @@
 #include <sstream>
 #include <utility>
 
+#include <xerces_core/account.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/launcher_pacing.hpp>
 
@@ -341,6 +342,13 @@ options parse_options(int argc, wchar_t **argv) {
       out.dry_launch = true;
     } else if (arg == "--skip-boot") {
       out.skip_boot = true;
+    } else if (arg == "--join-link" || arg.starts_with("xerces://")) {
+      // An invite link (DESIGN.md 10.12): only its code is kept, and only a
+      // well-formed one. A browser hands over "xerces://join/<code>".
+      const std::string link = arg == "--join-link" ? next() : arg;
+      if (link.starts_with("xerces://join/") || arg == "--join-link") {
+        out.join_link = xerces_core::account::link_code_from(link).value_or("");
+      }
     }
   }
   // Shared with xerces_cli plan apply, so the variable means the same there.
@@ -968,6 +976,8 @@ bool app::open_text_file(const fs::path &file) {
   return result > 32;
 }
 
+std::string app::take_join_link() { return std::exchange(join_link_, {}); }
+
 void app::copy_text(const std::string &text) {
   if (system_) {
     system_->SetClipboardText(text);
@@ -1270,6 +1280,17 @@ int app::run() {
                       MB_OK | MB_ICONINFORMATION);
         }
         if (other) {
+          if (!opts_.join_link.empty()) {
+            // Hand the invite link to the open launcher, which shows it.
+            COPYDATASTRUCT data{};
+            data.dwData = copy_data_join_link;
+            data.cbData = static_cast<DWORD>(opts_.join_link.size());
+            data.lpData = opts_.join_link.data();
+            DWORD_PTR result = 0;
+            SendMessageTimeoutW(other, WM_COPYDATA, 0,
+                                reinterpret_cast<LPARAM>(&data),
+                                SMTO_ABORTIFHUNG, 3000, &result);
+          }
           if (IsIconic(other)) {
             ShowWindow(other, SW_RESTORE);
           }
@@ -1310,6 +1331,18 @@ int app::run() {
                               bool priority) {
     return on_key(key, modifiers, priority);
   };
+  callbacks.join_link = [this](const std::string &code) {
+    if (const auto canonical = xerces_core::account::link_code_from(code)) {
+      join_link_ = *canonical;
+      ++join_link_rev_;
+      changed_ = true;
+      log_info("launcher.join_link", "an invite link came from another start");
+    }
+  };
+  if (!opts_.join_link.empty()) {
+    join_link_ = opts_.join_link;
+    ++join_link_rev_;
+  }
   if (!window_.open("Xerces", opts_.width, opts_.height, callbacks)) {
     log_error("launcher.window.failed", "The window could not be created.");
     return 1;

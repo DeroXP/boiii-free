@@ -7,12 +7,27 @@
 namespace xerces_core {
 namespace {
 const std::set<std::string, std::less<>> known_keys = {
-    "schema",       "game_dir",        "first_run_done",  "mode",
-    "profiles",     "saved_positions", "player_name",     "nointro",
-    "close_on_launch", "extra_flags",  "dvars",           "theme",
-    "ui_scale_percent", "reduced_motion", "language",     "check_updates",
-    "favorites",    "recent_servers",
+    "schema",
+    "game_dir",
+    "first_run_done",
+    "mode",
+    "profiles",
+    "saved_positions",
+    "player_name",
+    "nointro",
+    "close_on_launch",
+    "extra_flags",
+    "dvars",
+    "theme",
+    "ui_scale_percent",
+    "reduced_motion",
+    "language",
+    "check_updates",
+    "favorites",
+    "recent_servers",
     "send_crash_reports",
+    "friends_invite_only",
+    "friends_follow",
 };
 
 bool valid_mode(std::string_view mode) {
@@ -172,6 +187,8 @@ launcher_config_result parse_launcher_config(std::string_view text) {
   }
   c.check_updates = bool_of(root, "check_updates", true);
   c.send_crash_reports = bool_of(root, "send_crash_reports", true);
+  c.friends_invite_only = bool_of(root, "friends_invite_only", true);
+  c.friends_follow = bool_of(root, "friends_follow", true);
   if (const auto *favorites = json::member(root, "favorites");
       favorites != nullptr && favorites->IsArray()) {
     for (const auto &item : favorites->GetArray()) {
@@ -274,6 +291,8 @@ std::string launcher_config_to_json(const launcher_config &c) {
   json::set(doc, "language", c.language, alloc);
   json::set(doc, "check_updates", c.check_updates, alloc);
   json::set(doc, "send_crash_reports", c.send_crash_reports, alloc);
+  json::set(doc, "friends_invite_only", c.friends_invite_only, alloc);
+  json::set(doc, "friends_follow", c.friends_follow, alloc);
 
   rapidjson::Value favorites(rapidjson::kArrayType);
   for (const auto &server : c.favorites) {

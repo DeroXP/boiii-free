@@ -33,7 +33,13 @@ struct window_callbacks {
   std::function<bool(Rml::Input::KeyIdentifier key, int modifiers,
                      bool priority)>
       key_down;
+  // An invite link's code a second start of Xerces handed over
+  // (WM_COPYDATA with copy_data_join_link): "XJN-XXXXXXXX", unchecked.
+  std::function<void(const std::string &code)> join_link;
 };
+
+// WM_COPYDATA's dwData for join_link ("XJN1").
+inline constexpr unsigned long copy_data_join_link = 0x584A4E31;
 
 class window {
 public:

@@ -85,8 +85,9 @@ struct invite {
   std::string from_username;
   std::string to_user_id;
   std::string to_username;
-  std::string session; // session_text()
-  std::string status;  // "pending", "accepted", "declined"
+  std::string session;   // session_text()
+  std::string pack_code; // XRC-XXXXXXXX: the host's mods, or ""
+  std::string status;    // "pending", "accepted", "declined"
 };
 struct invites {
   std::vector<invite> incoming;
@@ -94,14 +95,54 @@ struct invites {
 };
 
 // What a game invite carries in its session field: where the host's lobby
-// is and what it plays. "xerces/1 <address> <mode> <modded: 0|1>".
+// is and what it plays. "xerces/1 <address> <mode> <modded: 0|1>", or with
+// the host's ticket for this one invite (DESIGN.md 10.13)
+// "xerces/2 <address> <mode> <modded> <ticket>".
 struct game_session {
   std::string address; // host:port (valid_server_address)
   std::string mode = "zm";
   bool modded = true;
+  std::string ticket{}; // 32 lower-case hex digits, or "" (version 1)
 };
 std::string session_text(const game_session &value);
 std::optional<game_session> parse_session_text(std::string_view text);
+
+// A fresh ticket: 16 random bytes as 32 lower-case hex digits.
+std::string new_ticket();
+
+// Invite links (DESIGN.md 10.12). The code in its canonical form,
+// "XJN-XXXXXXXX", from what a player pastes or a link opens: the code in any
+// case, without its dash, Crockford look-alikes (O, I, L), or a link that
+// ends in one (https://.../join/<code>, xerces://join/<code>).
+std::optional<std::string> link_code_from(std::string_view text);
+// The same for a pack code, "XRC-XXXXXXXX".
+std::optional<std::string> pack_code_from(std::string_view text);
+
+struct invite_link {
+  std::string code;
+  std::string path; // "/join/<code>", on the backend
+  std::string mode;
+};
+struct link_owner {
+  std::string code;
+  std::string host_user_id;
+  std::string host_username;
+  std::string mode;
+};
+struct knock_info {
+  std::string id;
+  std::string from_user_id;
+  std::string from_username;
+  std::string to_user_id;
+  std::string to_username;
+  std::string mode;
+  std::string status; // "pending", "accepted" (a declined one reads pending
+                      // to whoever knocked)
+};
+struct knock_list {
+  std::vector<knock_info> incoming;
+  std::vector<knock_info> outgoing;
+};
 
 // ------------------------------------------------------------ the calls
 // ok: the backend did it. Otherwise reached says whether it answered; code
@@ -155,11 +196,33 @@ public:
   outcome privacy(privacy_settings &out);
   outcome set_privacy(const privacy_settings &value);
   outcome list_invites(invites &out);
-  outcome send_invite(std::string_view to_user_id, const game_session &game);
+  // out: the invite as the backend made it (its id, for the hole punch).
+  outcome send_invite(std::string_view to_user_id, const game_session &game,
+                      std::string_view pack_code = {}, invite *out = nullptr);
   outcome accept_invite(std::string_view invite_id, invite *out = nullptr);
   outcome decline_invite(std::string_view invite_id);
   // Your public address as the backend sees it (GET /v1/me/address).
   outcome own_address(std::string &out);
+
+  // Mod packs on the backend (POST /v1/packs, GET /v1/packs/<code>):
+  // pack_json is a pack's JSON (pack_to_json).
+  outcome create_pack(const std::string &pack_json, std::string &code);
+  outcome fetch_pack(std::string_view code, std::string &pack_json);
+
+  // Hole punching (DESIGN.md 10.13): this joiner's game listens on port;
+  // delivered says whether the host's launcher was there to take it.
+  outcome punch(std::string_view invite_id, std::uint16_t port,
+                bool *delivered = nullptr);
+
+  // Invite links and knocks (DESIGN.md 10.12).
+  outcome create_link(std::string_view mode, invite_link &out);
+  outcome own_link(std::optional<invite_link> &out);
+  outcome delete_link();
+  outcome link(std::string_view code, link_owner &out);
+  outcome knock(std::string_view code, knock_info *out = nullptr);
+  outcome knocks(knock_list &out);
+  outcome accept_knock(std::string_view knock_id);
+  outcome decline_knock(std::string_view knock_id);
 
 private:
   outcome call(std::string_view method, const std::string &path,
@@ -184,12 +247,16 @@ inline constexpr std::string_view ping_message = R"({"type":"ping"})";
 // A message from the backend's socket (backend/app/routers/ws.py).
 struct push {
   std::string type; // hello, presence, offline, friend_added, friend_request,
-                    // invite, auth_ok, pong, error
+                    // invite, knock, punch, auth_ok, pong, error
   std::string user_id;
   std::string username;
   presence now;                     // presence
   std::vector<friend_info> friends; // hello: friends' presence now
   invite received;                  // invite
+  knock_info knocked;               // knock
+  std::string invite_id;            // punch: the invite it is for
+  std::string from_user_id;         // punch: the joiner
+  std::string address;              // punch: the joiner's ip:port
   std::string code;                 // error
 };
 std::optional<push> parse_push(std::string_view text);

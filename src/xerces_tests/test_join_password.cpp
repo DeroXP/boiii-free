@@ -364,6 +364,39 @@ TEST_CASE("join password: the right answer admits the address, once") {
   CHECK_EQ(guard.challenge_count(), static_cast<std::size_t>(0));
 }
 
+TEST_CASE("join password: any of several keys passes (invite tickets)") {
+  // DESIGN.md 10.13: the password's key and each live ticket's key.
+  const std::string ticket = "0123456789abcdef0123456789abcdef";
+  const key ticket_key = derive_key(ticket, salt_a);
+  const std::vector<key> keys{hunter2(), ticket_key};
+  const auto now = clock_type::now();
+
+  host_guard guard;
+  REQUIRE(guard.challenge(joiner, session_a, nonce_a, now).code == result::ok);
+  CHECK(guard
+            .check(joiner, answer(ticket, nonce_a), std::span<const key>(keys),
+                   lan_host(), now)
+            .code == result::ok);
+  CHECK(guard.admitted(joiner));
+
+  const std::string other = "203.0.113.60:27017";
+  REQUIRE(guard.challenge(other, session_a, nonce_b, now).code == result::ok);
+  CHECK(guard
+            .check(other, answer("hunter2", nonce_b),
+                   std::span<const key>(keys), lan_host(), now)
+            .code == result::ok);
+
+  // No keys (invite only, no password, no tickets): nobody passes, and it
+  // counts as a wrong answer.
+  const std::string third = "203.0.113.70:27017";
+  REQUIRE(guard.challenge(third, session_a, nonce_a, now).code == result::ok);
+  CHECK(guard
+            .check(third, answer(ticket, nonce_a), std::span<const key>(),
+                   lan_host(), now)
+            .code == result::wrong);
+  CHECK(!guard.admitted(third));
+}
+
 TEST_CASE("join password: wrong, foreign and late answers are refused") {
   host_guard guard;
   const auto now = clock_type::now();

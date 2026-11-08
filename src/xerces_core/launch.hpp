@@ -24,6 +24,9 @@ struct launch_options {
   // "+set xerces_join <host:port>" last: join a self-hosted server once the
   // main menu is up (DESIGN.md 11.10).
   std::optional<std::string> connect;
+  // With connect: "+set xerces_join_ticket <ticket>", a friend's invite's
+  // ticket for that host (32 lower-case hex digits, DESIGN.md 10.13).
+  std::optional<std::string> join_ticket;
 };
 
 // A server address the command line can carry: host (letters, digits, '.',

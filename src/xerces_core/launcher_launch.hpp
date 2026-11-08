@@ -131,6 +131,8 @@ struct launch_inputs {
   // causes is never blamed on a mod.
   bool crash_followup = false;
   std::optional<std::string> connect; // "+set xerces_join host:port" (Servers)
+  // A friend's invite's ticket for that host (launch_options::join_ticket).
+  std::optional<std::string> join_ticket;
   // Instead of the profile's (a culprit-search test, with crash_followup).
   const std::vector<std::string> *mods = nullptr;
   bool dry_launch = false;

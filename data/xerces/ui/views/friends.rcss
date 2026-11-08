@@ -76,3 +76,10 @@ input.add-name { flex: 1 1 240dp; width: 240dp; min-height: 40dp; }
 .aside-note { padding: 12dp 0dp; font-size: 14dp; line-height: 20dp; color: var(--text2); }
 .aside-note.quiet { font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 18dp; }
 #friends-refresh { margin-top: 4dp; }
+
+/* ------------------------------------------------------ joining, links */
+.join-status { margin-top: 8dp; font-size: 14dp; line-height: 20dp; color: var(--text2); }
+.join-actions { margin-top: 16dp; }
+.link-url { padding: 8dp 0dp; font-family: "IBM Plex Mono"; font-size: 12dp; line-height: 16dp; word-break: break-all; }
+.link-actions { margin-bottom: 4dp; }
+#link-make { margin-bottom: 4dp; }

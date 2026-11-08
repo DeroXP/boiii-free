@@ -45,6 +45,10 @@ struct options {
   std::string theme;        // overrides the config
   bool dry_launch = false;  // never start the game, log the command
   bool skip_boot = false;
+  // An invite link to open in Friends (DESIGN.md 10.12): the code from
+  // "--join-link <link>" or a bare "xerces://join/<code>" (how Windows
+  // starts Xerces for one), "XJN-XXXXXXXX", or "".
+  std::string join_link;
 };
 
 options parse_options(int argc, wchar_t **argv);
@@ -115,6 +119,10 @@ public:
                                          const std::wstring &filter,
                                          const std::wstring &default_name);
   void copy_text(const std::string &text);
+  // An invite link handed to this launcher (its command line, or a second
+  // start's), once: "" when there is none. Friends takes it.
+  std::string take_join_link();
+  std::uint64_t join_link_rev() const { return join_link_rev_; }
   // Calls fn for event (e.g. "click") on element; the app owns the listener.
   void listen(Rml::Element *element, const std::string &event,
               std::function<void(Rml::Event &)> fn);
@@ -184,6 +192,8 @@ private:
   std::vector<entry> views_;
   std::string current_;
   std::uint64_t mode_rev_ = 1;
+  std::string join_link_;
+  std::uint64_t join_link_rev_ = 0;
 
   std::mutex posted_mutex_;
   std::deque<std::function<void()>> posted_;

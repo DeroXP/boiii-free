@@ -198,13 +198,24 @@ If you try it, tell us how it went.
   their lobby is open. To invite: host as above with the lobby open, then press
   Invite next to a friend. The invite gives them your lobby's address (the
   router's, from UPnP, or the internet address Xerces' server sees with your
-  game's port, which you then forward by hand as above). They get a toast in the
-  game and an entry on Friends; Join there has their game join yours from its
-  main menu, or starts it with the join. Invites last 10 minutes. Keep Xerces
-  open while you play, or friends see you offline and invites wait (Settings,
-  "Close Xerces when the game starts" off). Remove and Block are next to each
-  friend; the privacy buttons on Friends say who may send you requests, see you
-  online and invite you.
+  game's port), your mods, and a ticket only they can use: with "Who can join"
+  on Invited players (the default) nobody else gets into your lobby. They get a
+  toast in the game and an entry on Friends. Join there checks they have your
+  mods: any they lack open on the Workshop in Steam, they subscribe, and the
+  join starts by itself once Steam has downloaded them. Then their game joins
+  yours from its main menu, restarts with your mods first (it asks), or starts
+  with the join. Xerces asks your router to let them in (hole punching); most
+  routers do, and if yours does not, forward the game's port as above. Invites
+  last 10 minutes. **Invite links**: Make an invite link on Friends and share it
+  anywhere; whoever opens it asks to join, and you Let them in (with your lobby
+  open) or Ignore them. "Open invite links in Xerces" lets a click on a link
+  open Xerces. **Follow hosts you join** (on by default): when a friend you
+  played with invites you again, Xerces joins at once. After a crash in a
+  friend's lobby, Friends offers Rejoin. Keep Xerces open while you play, or
+  friends see you offline and invites wait (Settings, "Close Xerces when the
+  game starts" off). Remove and Block are next to each friend; the privacy
+  buttons on Friends say who may send you requests, see you online and invite
+  you.
 - The first time you host or join, Windows asks whether "BOIII" may use your
   networks. That is Xerces' game client (boiii.exe, it keeps that name for now).
   Allow it, on private networks at least; offline play does not need it.
@@ -234,11 +245,16 @@ If you try it, tell us how it went.
   Xerces is open it keeps a connection to that server and tells your friends
   whether you are online or in a game, its mode, and whether its lobby is open
   (or nothing, with "Who sees you online" set to Nobody). An invite you send
-  gives that friend your lobby's address and port; to find it without UPnP,
+  gives that friend your lobby's address and port, the list of your mods (as a
+  pack code), and a ticket for your lobby; to find the address without UPnP,
   Xerces asks the server which internet address it sees (the server neither
-  stores nor logs it). On your PC, Xerces keeps your sign-in in
-  `%LOCALAPPDATA%\Xerces\config\account.dat`, encrypted for your Windows
-  account; Sign out deletes it.
+  stores nor logs it). When a friend is about to join, the server passes their
+  internet address and port to your Xerces so your game can open your router to
+  them, as the join would show it anyway. An invite link names nobody; whoever
+  asks to join through it shows you their username. The game's own traffic is
+  not encrypted (it never was); tickets keep others out of your lobby. On your
+  PC, Xerces keeps your sign-in in `%LOCALAPPDATA%\Xerces\config\account.dat`,
+  encrypted for your Windows account; Sign out deletes it.
 - Links you click (GitHub issues, Black Ops III's store page, the licence) open
   in your browser or in Steam.
 

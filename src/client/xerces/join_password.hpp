@@ -27,7 +27,26 @@ namespace xerces_join_password {
 // on it, is checked like anyone. Call on the thread that handles packets.
 bool admits(const game::net::netadr_t &sender);
 
+// Invite tickets (DESIGN.md 10.13). The launcher gives the host a fresh
+// ticket (a random_token) with every game invite, and the invite carries it
+// to the one player invited. With invite_only on, a host without a password
+// checks every joiner as if it had one, and only a ticket's answer (or the
+// password's) passes, so only invited players get into its lobby and match.
+// Off by default; the launcher turns it on. Tickets last `lifetime` (at most
+// a day), up to 64 at a time, oldest dropped first.
+void set_invite_only(bool on);
+bool invite_only();
+bool add_ticket(const std::string &ticket, std::chrono::seconds lifetime);
+// Whether a joiner must answer the check: net_password is set, or
+// invite_only is on.
+bool locked();
+
 // ----------------------------------------------------------- the joiner
+// The ticket to answer `host`'s check with ("a.b.c.d:port"), from the
+// invite; it is used instead of net_password for that host for a day.
+void set_join_ticket(const std::string &host, const std::string &ticket);
+bool has_ticket_for(const game::net::netadr_t &host);
+
 enum class outcome {
   passed,  // the host accepted the password: join
   open,    // the host has no password after all: join

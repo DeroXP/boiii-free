@@ -78,6 +78,16 @@ void log_check(const std::string_view event, const std::string_view message,
 std::mutex host_mutex;
 core::host_guard guard;
 
+// Invite tickets and invite_only (join_password.hpp). Each ticket's key is
+// derived once, with this host's salt, when it is added.
+struct ticket_entry {
+  core::key key{};
+  steady::time_point expires{};
+};
+constexpr std::size_t max_tickets = 64;
+std::atomic_bool invite_only_on{false};
+std::vector<ticket_entry> tickets; // host_mutex
+
 // This host's salt, drawn once per start of the game (join_password.hpp,
 // derive_key).
 const std::string &host_salt() {
@@ -171,7 +181,7 @@ void receive_challenge(const game::net::netadr_t &sender,
     return;
   }
   const std::string peer = network::address_to_string(sender);
-  if (!network_password::is_password_set()) {
+  if (!locked()) {
     send(sender, core::result_command,
          core::format(core::result_message{message->session, result::open}));
     return;
@@ -201,23 +211,33 @@ void receive_proof(const game::net::netadr_t &sender,
     return;
   }
   const std::string password = network_password::get_password();
-  if (password.empty()) {
+  if (password.empty() && !invite_only()) {
     send(sender, core::result_command,
          core::format(core::result_message{message->session, result::open}));
     return;
   }
-  const core::key password_key_now = password_key(password, host_salt());
+  std::vector<core::key> keys;
+  if (!password.empty()) {
+    keys.push_back(password_key(password, host_salt()));
+  }
   core::result_message reply;
   {
     std::lock_guard lock(host_mutex);
+    const auto now = steady::now();
+    std::erase_if(tickets, [now](const ticket_entry &entry) {
+      return entry.expires <= now;
+    });
+    for (const ticket_entry &entry : tickets) {
+      keys.push_back(entry.key);
+    }
     reply = guard.check(network::address_to_string(sender), *message,
-                        password_key_now, own_addresses(), steady::now());
+                        std::span<const core::key>(keys), own_addresses(), now);
   }
   send(sender, core::result_command, core::format(reply));
   switch (reply.code) {
   case result::ok:
-    printf("[Join] A joiner gave the right password\n");
-    log_check("join.password.host", "a joiner gave the right password", "ok");
+    printf("[Join] A joiner passed the check\n");
+    log_check("join.password.host", "a joiner passed the check", "ok");
     break;
   case result::wrong:
     printf("[Join] A joiner gave a wrong password\n");
@@ -293,6 +313,28 @@ constexpr std::chrono::seconds attempt_time = 6s;
 std::mutex joiner_mutex;
 attempt joining;
 
+// The invite's ticket for one host (set_join_ticket). joiner_mutex.
+struct join_ticket {
+  game::net::netadr_t host{};
+  std::string ticket;
+  steady::time_point expires{};
+};
+join_ticket ticket_for_join;
+
+// Whether ticket_for_join is for host. Call with joiner_mutex held.
+bool ticket_matches(const game::net::netadr_t &host) {
+  return !ticket_for_join.ticket.empty() &&
+         ticket_for_join.expires > steady::now() &&
+         network::are_addresses_equal(host, ticket_for_join.host);
+}
+
+// What this joiner answers host's check with: the invite's ticket for it,
+// else net_password. Call with joiner_mutex held.
+std::string secret_for(const game::net::netadr_t &host) {
+  return ticket_matches(host) ? ticket_for_join.ticket
+                              : network_password::get_password();
+}
+
 // Call with joiner_mutex held.
 void send_challenge(const steady::time_point now) {
   ++joining.challenges_sent;
@@ -344,7 +386,7 @@ void receive_nonce(const game::net::netadr_t &sender,
       joining.answered) {
     return;
   }
-  const std::string password = network_password::get_password();
+  const std::string password = secret_for(joining.host);
   if (password.empty()) {
     finish(outcome::needed, 0);
     return;
@@ -429,9 +471,60 @@ void update_joiner() {
 }
 } // namespace
 
+void set_invite_only(const bool on) {
+  if (invite_only_on.exchange(on) != on) {
+    xerces_runtime::log_info("join.invite_only",
+                             on ? "only invited players can join"
+                                : "anyone with the address can join");
+  }
+}
+
+bool invite_only() { return invite_only_on.load(); }
+
+bool locked() { return network_password::is_password_set() || invite_only(); }
+
+bool add_ticket(const std::string &ticket,
+                const std::chrono::seconds lifetime) {
+  if (!core::valid_token(ticket) || lifetime <= 0s || lifetime > 24h) {
+    return false;
+  }
+  const core::key key = core::derive_key(ticket, host_salt());
+  std::lock_guard lock(host_mutex);
+  const auto now = steady::now();
+  std::erase_if(tickets, [now](const ticket_entry &entry) {
+    return entry.expires <= now;
+  });
+  if (tickets.size() >= max_tickets) {
+    tickets.erase(tickets.begin());
+  }
+  tickets.push_back(ticket_entry{key, now + lifetime});
+  return true;
+}
+
+void set_join_ticket(const std::string &host, const std::string &ticket) {
+  // A numeric IPv4 address and port only: a name would be looked up here.
+  const std::size_t colon = host.rfind(':');
+  in_addr numeric{};
+  if (!core::valid_token(ticket) || colon == std::string::npos ||
+      inet_pton(AF_INET, host.substr(0, colon).c_str(), &numeric) != 1) {
+    return;
+  }
+  const game::net::netadr_t address = network::address_from_string(host);
+  if (!network::is_ip_address(address)) {
+    return;
+  }
+  std::lock_guard lock(joiner_mutex);
+  ticket_for_join = join_ticket{address, ticket, steady::now() + 24h};
+}
+
+bool has_ticket_for(const game::net::netadr_t &host) {
+  std::lock_guard lock(joiner_mutex);
+  return ticket_matches(host);
+}
+
 bool admits(const game::net::netadr_t &sender) {
   using game::net::netadrtype_t;
-  const bool locked = network_password::is_password_set();
+  const bool locked = xerces_join_password::locked();
   // Without the check: the engine's own local players and bots, and this
   // game's own socket (DESIGN.md 11.10). A second game on this PC, or a
   // relay or tunnel agent that hands players from elsewhere to this game,
