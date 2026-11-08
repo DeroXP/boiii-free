@@ -1744,6 +1744,39 @@ Not tested yet: a stack that needs more than 4 GiB (nothing on this PC does),
 the culprit search's handling of a 6 or 8 GB choice beyond the unit tests, and
 the diagnostics screen's wording (it still says "On (-xerces-db-pool)").
 
+### The 12-mod stack on 19 Workshop maps (2026-11-08)
+
+Bench: `C:\Users\Ginld\XercesDev\bench\20261108-upscale` (`maps-check.ps1`,
+`run-maps\`), the test home of 20261106-modlabels, 4 GB zone memory. Per map:
+the level loads, 30 s of walking with the frame probe, screenshots, console.
+
+- [x] The 12 mods (PEGASUS, DS4C, Ascendance, Solo EE, Girls' Frontline, Girls'
+      Frontline 2.0, Neptunia, Bodycam, Classic FOV, Avali, QOL, SOE Unlocked)
+      hang on every level (main thread in `DB_FindXAssetHeader`, even on the 770
+      MB Buried Challenge). Removing Girls' Frontline 2.0 loads it; removing
+      Bodycam or SOE Unlocked does not. Girls' Frontline and its 2.0 are two
+      versions of one mod (same folder name `gfl`): use one.
+- [x] The 11 mods on all 19 maps: 17 load and run 30 s with no crash, freeze or
+      memory error (zone pool peak 1.5 to 3.3 GiB of 4); frame times 168 to 257
+      FPS, p99 5 to 10.6 ms, no hitch over 33 ms on 15 of them.
+- [x] Big Bang Tower ended the game with no message at about 40 s with DS4C +
+      Ascendance (not with either alone, nor with other mod groups): the map's
+      own UI Lua replacing the mods' (`xerces_map_ui_first`). With it off the
+      full stack loads, as do RUST, Town Reimagined, Super Mario 64, Digital
+      Circus, Wizard Castle and Shoot House. Default is now off.
+- [x] DIE RISE does not load with DS4C (alone too) or with another mod in the
+      stack: "Server Disconnected - Clientfield Mismatch"; PEGASUS alone loads.
+      Not fixed (script-level).
+- [x] Der Riese: 2,384 to 2,953 script errors a frame-rate's worth
+      (`_zm_perk_razor.csc`, "type undefined is not an int") with the mods and
+      without them; 10 frames over 100 ms. The map's own bug.
+- [x] Script errors on every map (about 110 to 390): DS4C's `live_xp.gsc` ("LUI
+      event name is not precached") and `fr_commands.gsc`.
+
+Not tested: mod features beyond loading (menus, characters, perks), longer play,
+two PCs. Character mods replace the default models (same asset names); new
+operator slots are not built.
+
 ### Record frame times (2026-11-08)
 
 Settings > Launch > "Record frame times" adds `-xerces-record-frames`; the

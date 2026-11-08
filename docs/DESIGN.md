@@ -1288,8 +1288,8 @@ own rule. The map's HUD and other UI Lua (`ui/` rawfiles, `.lua`) follow the
 same rule (the user's decision, 2026-11-05: DS4C's `t7hud_zm_custom.lua`
 replaced RUST V5's and errored; with the rule RUST keeps its own HUD and
 `datasources.lua`, logged as `loader.ui.map_first`, and the errors are gone).
-`xerces_map_ui_first` (on) turns that part off; UI runs on each client alone, so
-it needs no agreement with the host.
+`xerces_map_ui_first` (off by default since 2026-11-08) turns that part on; UI
+runs on each client alone, so it needs no agreement with the host.
 
 A script's server and client halves (.gsc, .csc) must come from the same source,
 so map-first never splits them (`xerces_core::decide_map_half`): the map takes a

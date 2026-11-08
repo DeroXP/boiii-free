@@ -84,7 +84,7 @@ std::atomic_bool reload_pending;
 // xerces_map_scripts_first: a custom map keeps its own scripts against mods
 // (DESIGN.md 6.3 rule 6). On unless turned off.
 game::EngineDependentDvarMut map_scripts_first_dvar;
-// xerces_map_ui_first: the same for its HUD and other UI Lua. On unless off.
+// xerces_map_ui_first: the same for its HUD and other UI Lua. Off unless on.
 game::EngineDependentDvarMut map_ui_first_dvar;
 // The host's choice while this process is a client of another host: the
 // server's .gsc and every client's .csc must come from the same copies, or
@@ -1349,10 +1349,12 @@ public:
               "ships another version of them (applies at the next map "
               "load).");
           map_ui_first_dvar = game::register_dvar_bool(
-              "xerces_map_ui_first", true, game::dvarFlags_e::NONE,
+              "xerces_map_ui_first", false, game::dvarFlags_e::NONE,
               "On a custom map, the map keeps its own HUD and other UI "
               "Lua when a mod ships another version of them (applies at "
-              "the next map load).");
+              "the next map load). Off by default since 2026-11-08: it "
+              "ended Big Bang Tower with DS4C and Ascendance, and RUST "
+              "loads without it.");
         },
         scheduler::main);
 
