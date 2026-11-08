@@ -21,6 +21,7 @@
 #using scripts\zm\_zm_magicbox;
 #using scripts\zm\_zm_perks;
 #using scripts\zm\_zm_score;
+#using scripts\zm\_zm_spawner;
 #using scripts\zm\_zm_utility;
 #using scripts\zm\_zm_weapons;
 
@@ -42,6 +43,7 @@
 #define MASK_RANDOM_LOADOUT 1024
 #define MASK_SELF_REVIVES 2048
 #define MASK_ROUND_999 4096
+#define MASK_SMART_ZOMBIES 8192
 
 #define NO_PERK_LIMIT 99
 #define WHEEL_COST 2500
@@ -63,6 +65,37 @@
 // Self-revives: back to one every this many rounds, and how long the use button is held
 #define SELF_REVIVE_EVERY 10
 #define SELF_REVIVE_HOLD_MS 1500
+
+// Smart zombies: none before SMART_FIRST_ROUND, then a share (per 1,000) rising evenly from SMART_FIRST_SHARE to
+// SMART_LAST_SHARE at round SMART_LAST_ROUND, and every zombie from the round after it on
+#define SMART_FIRST_ROUND 20
+#define SMART_FIRST_SHARE 100
+#define SMART_LAST_ROUND 998
+#define SMART_LAST_SHARE 990
+#define SMART_NONE 0
+#define SMART_PACK 1
+#define SMART_BURST 2
+#define SMART_AMBUSH 3
+// How often a smart zombie looks again, in seconds
+#define SMART_TICK 0.25
+// Pack hunters hold this far from their player until this many are waiting, or for at most PACK_WAIT_MS; then the pack
+// sprints at one player, and each hunter leaves the last stretch to the game's own attack
+#define PACK_SIZE 3
+#define PACK_HOLD_DIST 600
+#define PACK_WAIT_MS 10000
+#define PACK_CLOSE_DIST 160
+// Burst sprinters walk, and within BURST_RANGE of their player sprint for a moment every few seconds
+#define BURST_RANGE 900
+// Ambushers go to a spot their player cannot see, AMBUSH_MIN_DIST to AMBUSH_MAX_DIST from them, and wait there until
+// the player comes within AMBUSH_STRIKE_DIST or turns their back within AMBUSH_BACK_DIST, or for at most AMBUSH_WAIT_MS
+#define AMBUSH_MIN_DIST 350
+#define AMBUSH_MAX_DIST 700
+#define AMBUSH_TRAVEL_MS 12000
+#define AMBUSH_WAIT_MS 10000
+#define AMBUSH_STRIKE_DIST 320
+#define AMBUSH_BACK_DIST 1000
+// How many of the spots near the player an ambusher checks for one out of sight
+#define AMBUSH_SPOTS_CHECKED 12
 
 // HudElementText's alignment in its box, from x to x + width (seen in the game on 2026-11-07)
 #define ALIGN_LEFT 1
@@ -91,6 +124,7 @@ function __init__()
 	s.random_loadout = GetDvarInt("xerces_zm_randomLoadout") != 0;
 	s.self_revives = GetDvarInt("xerces_zm_selfRevives") != 0;
 	s.round_999 = GetDvarInt("xerces_zm_round999") != 0;
+	s.smart_zombies = GetDvarInt("xerces_zm_smartZombies") != 0;
 	if (s.start_points < 0)
 		s.start_points = 0;
 	// The round as of its start_of_round (the game raises level.round_number as the last one ends), counted on by
@@ -103,6 +137,10 @@ function __init__()
 	s.exfil = 0;
 	s.endless = 0;
 	s.notice_id = 0;
+	// Smart zombies: whether players were told they have started, the pack hunters' current pack and its player
+	s.smart_announced = 0;
+	s.pack_wave = 0;
+	s.pack_target = undefined;
 
 	s.mask = 0;
 	if (s.max_ammo)
@@ -131,6 +169,8 @@ function __init__()
 		s.mask += MASK_SELF_REVIVES;
 	if (s.round_999)
 		s.mask += MASK_ROUND_999;
+	if (s.smart_zombies)
+		s.mask += MASK_SMART_ZOMBIES;
 	level.xerces_rounds = s;
 
 	callback::on_connect(&on_player_connect);
@@ -163,6 +203,9 @@ function main()
 		install_self_revive_checks();
 	if (s.round_999)
 		install_end_screen();
+	// Rounds to 999 needs them too: keeping going past round 999 brings only smart zombies
+	if (s.smart_zombies || s.round_999)
+		install_smart_zombies();
 	level thread close_on_end_game();
 
 	if (s.power_on)
@@ -260,6 +303,8 @@ function show_settings()
 		text = add_setting(text, "Self-revives");
 	if (s.round_999)
 		text = add_setting(text, "Rounds to 999");
+	if (s.smart_zombies)
+		text = add_setting(text, "Smart zombies");
 	if (text != "")
 		self IPrintLn("Xerces settings: " + text);
 }
@@ -585,6 +630,12 @@ function round_started()
 		}
 		if (s.round == FINAL_ROUND)
 			open_final_vote();
+	}
+	// Once, on the first round with smart zombies that has no other notice
+	if (!s.smart_announced && s.skip == SKIP_NONE && !s.vote && smart_share() > 0)
+	{
+		s.smart_announced = 1;
+		notice_all(smart_notice(), 12);
 	}
 }
 
@@ -1539,7 +1590,8 @@ function exfil()
 	level notify("end_game");
 }
 
-// Every player gets every perk, infinite ammo and infinite points from here on (stage 4's smart zombies come then)
+// Every player gets every perk, infinite ammo and infinite points from here on, and every new zombie is a smart one
+// (smart_share)
 function keep_going()
 {
 	s = level.xerces_rounds;
@@ -1547,9 +1599,10 @@ function keep_going()
 		return;
 	s.vote = 0;
 	s.endless = 1;
+	s.smart_announced = 1;
 	clear_votes();
 	update_data_text();
-	notice_all("KEEP GOING: EVERY PERK, INFINITE AMMO AND INFINITE POINTS", 8);
+	notice_all("KEEP GOING: EVERY PERK, INFINITE AMMO AND POINTS, AND ONLY SMART ZOMBIES", 8);
 	level thread endless();
 }
 
@@ -1623,4 +1676,373 @@ function end_screen()
 			player lui_text(title, ALIGN_CENTER, 240, 170, 800, 44, (1, 1, 1), 1);
 		player lui_text("YOU SURVIVED " + with_commas(s.round) + " ROUNDS", ALIGN_CENTER, 240, 224, 800, 26, (1, 1, 1), 1);
 	}
+}
+
+// Smart zombies (stage 4): pack hunters, burst sprinters and ambushers, each with its own glow on the head from the
+// power-up effects every map loads (zm_powerups: yellow, green and blue; its red one is not on every map). A zombie
+// becomes one as it comes into the play area, by the round's share (smart_share). They steer through what the game's
+// own chase reads (zm_behavior::zombiefindflesh): v_zombie_custom_goal_pos and n_zombie_custom_goal_radius send a
+// zombie to a spot, and the run-cycle override (zombie_utility) sets its speed. Anything else that draws a zombie goes
+// first: a Monkey Bomb or other point of interest, something it attacks, a goal or speed override a map or effect set,
+// being turned.
+function install_smart_zombies()
+{
+	// zm_spawner::zombie_spawn_init runs these on each new zombie; a map may have set one function rather than a list
+	if (isdefined(level._zombie_custom_spawn_logic) && !IsArray(level._zombie_custom_spawn_logic))
+	{
+		single = level._zombie_custom_spawn_logic;
+		level._zombie_custom_spawn_logic = [];
+		level._zombie_custom_spawn_logic[0] = single;
+	}
+	zm_spawner::add_custom_zombie_spawn_logic(&smart_spawn);
+}
+
+// "SMART ZOMBIES: YELLOW HUNT IN PACKS, GREEN SPRINT IN BURSTS, BLUE LIE IN WAIT". The colours are split: shared.gsh
+// defines YELLOW, GREEN and BLUE as vectors, and the compiler expands them inside strings too (seen in the game on
+// 2026-11-07 as "(1, 1, 0) HUNT IN PACKS").
+function smart_notice()
+{
+	return "SMART ZOMBIES: YEL" + "LOW HUNT IN PACKS, GRE" + "EN SPRINT IN BURSTS, BL" + "UE LIE IN WAIT";
+}
+
+// How many of each 1,000 new zombies are smart this round: none before round 20, 100 there rising evenly to 990 at
+// round 998, and all of them after it or once round 999 has kept going
+function smart_share()
+{
+	s = level.xerces_rounds;
+	if (s.endless)
+		return 1000;
+	if (!s.smart_zombies || s.round < SMART_FIRST_ROUND)
+		return 0;
+	if (s.round > SMART_LAST_ROUND)
+		return 1000;
+	// In whole numbers: GSC divides in single-precision floats
+	rise = (s.round - SMART_FIRST_ROUND) * (SMART_LAST_SHARE - SMART_FIRST_SHARE);
+	return SMART_FIRST_SHARE + int(rise / (SMART_LAST_ROUND - SMART_FIRST_ROUND));
+}
+
+// On each new zombie (zm_spawner::zombie_spawn_init); only the plain zombies, not dogs, bosses or other kinds
+function smart_spawn()
+{
+	self endon("death");
+	if (!isdefined(self.archetype) || self.archetype != "zombie")
+		return;
+	if (!IS_TRUE(self.completed_emerging_into_playable_area))
+		self waittill("completed_emerging_into_playable_area");
+	if (RandomInt(1000) >= smart_share())
+		return;
+	type = 1 + RandomInt(3);
+	self.xerces_smart = type;
+	self smart_glow(type);
+	if (type == SMART_PACK)
+		self pack_hunter();
+	else if (type == SMART_BURST)
+		self burst_sprinter();
+	else
+		self ambusher();
+}
+
+// A tag_origin model on the zombie's head with its kind's glow, which also lights the zombie: yellow for pack hunters
+// (the caution glow), green for burst sprinters, blue for ambushers
+function smart_glow(type)
+{
+	fx = level._effect["powerup_on_caution"];
+	if (type == SMART_BURST)
+		fx = level._effect["powerup_on"];
+	else if (type == SMART_AMBUSH)
+		fx = level._effect["powerup_on_solo"];
+	if (!isdefined(fx))
+		return;
+	glow = Spawn("script_model", self GetTagOrigin("j_head"));
+	glow SetModel("tag_origin");
+	glow LinkTo(self, "j_head");
+	glow thread glow_follow(self, fx);
+}
+
+// On the glow model: the effect once the model has reached the players, and gone with the zombie (dead, removed or
+// turned)
+function glow_follow(zombie, fx)
+{
+	util::wait_network_frame();
+	if (isdefined(zombie) && IsAlive(zombie))
+		PlayFXOnTag(fx, self, "tag_origin");
+	while (isdefined(zombie) && IsAlive(zombie) && zombie.team == level.zombie_team)
+		wait 0.5;
+	self Delete();
+}
+
+// Whether a smart zombie may steer now: in the play area, still the zombies', and nothing else drawing it
+function smart_can_steer()
+{
+	if (!IsAlive(self) || self.team != level.zombie_team || IS_TRUE(level.intermission))
+		return false;
+	if (!IS_TRUE(self.completed_emerging_into_playable_area) || IS_TRUE(self.ignore_find_flesh))
+		return false;
+	if (isdefined(self.zombie_poi) || isdefined(self.attackable))
+		return false;
+	// A goal the map set
+	if (isdefined(self.v_zombie_custom_goal_pos) && !self own_goal())
+		return false;
+	return true;
+}
+
+function own_goal()
+{
+	return isdefined(self.xerces_goal) && isdefined(self.v_zombie_custom_goal_pos) && self.v_zombie_custom_goal_pos == self.xerces_goal;
+}
+
+function smart_goal(position, radius)
+{
+	self.v_zombie_custom_goal_pos = position;
+	self.n_zombie_custom_goal_radius = radius;
+	self.xerces_goal = position;
+}
+
+// Back to the game's own chase; a goal the map set stays
+function smart_goal_clear()
+{
+	if (self own_goal())
+	{
+		self.v_zombie_custom_goal_pos = undefined;
+		self.n_zombie_custom_goal_radius = undefined;
+	}
+	self.xerces_goal = undefined;
+}
+
+// Its speed through the game's run-cycle override. An override something else set (a slowing effect) goes first, and
+// a zombie without legs crawls as it does.
+function smart_speed(speed)
+{
+	if (IS_TRUE(self.missinglegs))
+		return;
+	if (isdefined(self.zombie_move_speed_override))
+	{
+		if (!isdefined(self.xerces_speed) || self.zombie_move_speed_override != self.xerces_speed)
+			return;
+		if (self.xerces_speed == speed)
+			return;
+		// zombie_utility::set_zombie_run_cycle keeps the current speed while an override is set
+		self.zombie_move_speed_override = undefined;
+	}
+	self zombie_utility::set_zombie_run_cycle_override_value(speed);
+	self.xerces_speed = speed;
+}
+
+// Where a player stands, as the game's own chase uses it
+function ground_position(player)
+{
+	if (isdefined(player.last_valid_position))
+		return player.last_valid_position;
+	return player.origin;
+}
+
+// Pack hunters come to within PACK_HOLD_DIST of the pack's player and hold there until PACK_SIZE of them are waiting
+// (or PACK_WAIT_MS passes). Then that pack sprints at the player together; each hunter leaves the last stretch to the
+// game's own attack. One the player walks up to stops waiting.
+function pack_hunter()
+{
+	self endon("death");
+	s = level.xerces_rounds;
+	wave = s.pack_wave;
+	self.xerces_pack_waiting = 1;
+	since = GetTime();
+	hold = undefined;
+	while (s.pack_wave == wave)
+	{
+		if (pack_waiting() >= PACK_SIZE || GetTime() - since > PACK_WAIT_MS)
+		{
+			// The next pack picks its own player
+			s.pack_wave++;
+			s.pack_target = undefined;
+			break;
+		}
+		target = pack_target();
+		if (isdefined(target) && DistanceSquared(self.origin, target.origin) < PACK_CLOSE_DIST * PACK_CLOSE_DIST)
+			break;
+		if (isdefined(target) && self smart_can_steer() && DistanceSquared(self.origin, target.origin) < PACK_HOLD_DIST * PACK_HOLD_DIST)
+		{
+			if (!isdefined(hold))
+				hold = self.origin;
+			self smart_goal(hold, 64);
+		}
+		else
+		{
+			hold = undefined;
+			self smart_goal_clear();
+		}
+		wait SMART_TICK;
+	}
+	self.xerces_pack_waiting = 0;
+	self smart_goal_clear();
+	self smart_speed("sprint");
+	target = pack_target();
+	for (;;)
+	{
+		if (!isdefined(target) || !zm_utility::is_player_valid(target))
+			target = pack_target();
+		if (!isdefined(target) || !self smart_can_steer() || DistanceSquared(self.origin, target.origin) < PACK_CLOSE_DIST * PACK_CLOSE_DIST)
+			self smart_goal_clear();
+		else
+			self smart_goal(ground_position(target), 30);
+		wait SMART_TICK;
+	}
+}
+
+function pack_waiting()
+{
+	count = 0;
+	foreach (zombie in GetAITeamArray(level.zombie_team))
+	{
+		if (IsAlive(zombie) && IS_TRUE(zombie.xerces_pack_waiting))
+			count++;
+	}
+	return count;
+}
+
+// The pack's player: kept while it can be attacked, else the one furthest from the other players (in co-op the pack
+// picks off whoever is alone)
+function pack_target()
+{
+	s = level.xerces_rounds;
+	if (isdefined(s.pack_target) && zm_utility::is_player_valid(s.pack_target))
+		return s.pack_target;
+	players = [];
+	foreach (player in GetPlayers())
+	{
+		if (zm_utility::is_player_valid(player))
+			players[players.size] = player;
+	}
+	best = undefined;
+	best_gap = -1;
+	foreach (player in players)
+	{
+		// The squared distance to the nearest other player; 0 alone
+		gap = 0;
+		first = 1;
+		foreach (other in players)
+		{
+			if (other == player)
+				continue;
+			distance = DistanceSquared(player.origin, other.origin);
+			if (first || distance < gap)
+				gap = distance;
+			first = 0;
+		}
+		if (gap > best_gap)
+		{
+			best = player;
+			best_gap = gap;
+		}
+	}
+	s.pack_target = best;
+	return best;
+}
+
+// Burst sprinters walk, and within BURST_RANGE of their player sprint for a moment every few seconds
+function burst_sprinter()
+{
+	self endon("death");
+	self smart_speed("walk");
+	for (;;)
+	{
+		wait RandomFloatRange(2.5, 4.5);
+		target = self.favoriteenemy;
+		if (!isdefined(target) || !IsPlayer(target) || DistanceSquared(self.origin, target.origin) > BURST_RANGE * BURST_RANGE)
+			continue;
+		self smart_speed("sprint");
+		wait RandomFloatRange(1.5, 2.5);
+		self smart_speed("walk");
+	}
+}
+
+// Ambushers run to a spot near their player that the player cannot see and wait there; they strike, sprinting, when
+// the player comes close or turns their back, or when the wait runs out
+function ambusher()
+{
+	self endon("death");
+	target = self.favoriteenemy;
+	if (!isdefined(target) || !IsPlayer(target))
+		target = zm_utility::get_closest_valid_player(self.origin);
+	spot = undefined;
+	if (isdefined(target))
+		spot = self ambush_spot(target);
+	if (isdefined(spot))
+	{
+		self smart_speed("run");
+		since = GetTime();
+		while (GetTime() - since < AMBUSH_TRAVEL_MS && zm_utility::is_player_valid(target))
+		{
+			if (DistanceSquared(self.origin, spot) < 48 * 48 || self ambush_strikes(target, 0))
+				break;
+			if (self smart_can_steer())
+				self smart_goal(spot, 32);
+			else
+				self smart_goal_clear();
+			wait SMART_TICK;
+		}
+		since = GetTime();
+		hold = self.origin;
+		while (GetTime() - since < AMBUSH_WAIT_MS && zm_utility::is_player_valid(target))
+		{
+			if (self ambush_strikes(target, 1))
+				break;
+			if (self smart_can_steer())
+				self smart_goal(hold, 32);
+			else
+				self smart_goal_clear();
+			wait SMART_TICK;
+		}
+	}
+	self smart_goal_clear();
+	self smart_speed("sprint");
+}
+
+// Whether an ambusher strikes now: its player is close, or (when it is waiting) has turned their back within
+// AMBUSH_BACK_DIST
+function ambush_strikes(target, waiting)
+{
+	distance = DistanceSquared(self.origin, target.origin);
+	if (distance < AMBUSH_STRIKE_DIST * AMBUSH_STRIKE_DIST)
+		return true;
+	if (!waiting || distance > AMBUSH_BACK_DIST * AMBUSH_BACK_DIST)
+		return false;
+	angles = target GetPlayerAngles();
+	facing = AnglesToForward((0, angles[1], 0));
+	toward = VectorNormalize((self.origin[0] - target.origin[0], self.origin[1] - target.origin[1], 0));
+	return VectorDot(facing, toward) < 0;
+}
+
+// A spot on the navigation mesh AMBUSH_MIN_DIST to AMBUSH_MAX_DIST from the player that the player cannot see: of the
+// nearest AMBUSH_SPOTS_CHECKED to the zombie, the first hidden one
+function ambush_spot(target)
+{
+	query = PositionQuery_Source_Navigation(target.origin, AMBUSH_MIN_DIST, AMBUSH_MAX_DIST, 128, 96);
+	if (!isdefined(query) || !isdefined(query.data) || query.data.size == 0)
+		return undefined;
+	eye = target GetEye();
+	checked = [];
+	for (i = 0; i < AMBUSH_SPOTS_CHECKED && i < query.data.size; i++)
+	{
+		// The nearest spot to the zombie not checked yet
+		best = undefined;
+		best_distance = 0;
+		for (j = 0; j < query.data.size; j++)
+		{
+			if (IS_TRUE(checked[j]))
+				continue;
+			distance = DistanceSquared(self.origin, query.data[j].origin);
+			if (!isdefined(best) || distance < best_distance)
+			{
+				best = j;
+				best_distance = distance;
+			}
+		}
+		if (!isdefined(best))
+			break;
+		checked[best] = 1;
+		spot = query.data[best].origin;
+		if (!SightTracePassed(eye, spot + (0, 0, 50), 0, target))
+			return spot;
+	}
+	return undefined;
 }

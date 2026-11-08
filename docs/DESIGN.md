@@ -1621,7 +1621,7 @@ logs, asks about config and backups, and says account deletion is separate.
 Unsigned installers trigger SmartScreen; `TRUST.md` says so. A portable zip is
 published as well.
 
-### 7.9 Zombies round settings (stages 1 to 3 built 2026-11-07)
+### 7.9 Zombies round settings (stages 1 to 4 built 2026-11-07)
 
 Settings that change how a Zombies match plays, asked for and decided by the
 user on 2026-11-07. They are all off by default, the host's settings apply to
@@ -1646,19 +1646,20 @@ only when the user says so:
 4. Smart zombies (pack hunters, burst sprinters and ambushers): none before
    round 20, 10% at round 20 rising evenly to 99% at round 998, all of them at
    round 999, each type with its own eye glow or aura from effects every map
-   already loads.
+   already loads. Built, below.
 
 **Stage 1.** Saved dvars, registered by `src/client/xerces/round_settings.cpp`
 with the archive flag: `xerces_zm_maxAmmo`, `xerces_zm_autoPap`,
 `xerces_zm_startPoints` (0 keeps the map's own), `xerces_zm_noPerkLimit`,
 `xerces_zm_boxStays`, `xerces_zm_powerOn`, `xerces_zm_doorsOpen` and
 `xerces_zm_roundHud`, for stage 2 `xerces_zm_wheel` and `xerces_zm_coinFlip`,
-and for stage 3 `xerces_zm_roundSkips`, `xerces_zm_randomLoadout`,
-`xerces_zm_selfRevives` and `xerces_zm_round999`.
-`data/ui_scripts/xerces_settings` is the menu: in the front end a settings
-screen like BOIII SETTINGS, with ZOMBIES, GAMBLING and ROUNDS tabs, whose button
-`data/ui_scripts/frontend_menus` adds after BOIII SETTINGS in the Zombies
-lobbies (`UI_ZMLOBBYONLINE`, `UI_ZMLOBBYLANGAME`), with or without mods.
+for stage 3 `xerces_zm_roundSkips`, `xerces_zm_randomLoadout`,
+`xerces_zm_selfRevives` and `xerces_zm_round999`, and for stage 4
+`xerces_zm_smartZombies`. `data/ui_scripts/xerces_settings` is the menu: in the
+front end a settings screen like BOIII SETTINGS, with ZOMBIES, GAMBLING and
+ROUNDS tabs, whose button `data/ui_scripts/frontend_menus` adds after BOIII
+SETTINGS in the Zombies lobbies (`UI_ZMLOBBYONLINE`, `UI_ZMLOBBYLANGAME`), with
+or without mods.
 
 `data/custom_scripts/zm/xerces_rounds.gsc` reads the dvars once, as the match
 loads, and uses only scripts the core Zombies script uses itself, so it links on
@@ -1846,10 +1847,55 @@ hooks the game's own scripts read; none replaces a game script.
   the rounds survived. Keep going gives every player every perk (each of
   `level._custom_perks` through `zm_perks::give_perk`, again whenever one is
   missing), infinite ammo (the clip and stock topped up four times a second) and
-  infinite points (the score held at 4,194,303, the game's cap). Stage 4's smart
-  zombies take over from there.
+  infinite points (the score held at 4,194,303, the game's cap), and from then
+  on every new zombie is a smart one (stage 4), with Smart Zombies on or off.
 - The notices are one more `HudElementText` per player, centred under the HUD;
   the self-revive prompt is another, shown while it applies.
+
+**Stage 4.** Smart Zombies, a host setting on the ROUNDS tab
+(`xerces_zm_smartZombies`). Each plain zombie (archetype `zombie`; dogs, bosses
+and other kinds never) is rolled once, when it comes into the play area
+(`zm_spawner::add_custom_zombie_spawn_logic`, then its
+`completed_emerging_into_playable_area`): out of 1,000, none before Xerces'
+round 20, 100 at round 20 rising evenly to 990 at round 998 (in whole numbers),
+and all of them from round 999, or once round 999 has kept going. A smart zombie
+is one of three kinds, drawn evenly.
+
+- How they steer. Only through what the game's own chase reads
+  (`zm_behavior::zombiefindflesh`): `v_zombie_custom_goal_pos` and
+  `n_zombie_custom_goal_radius` send one zombie to a spot instead of its player,
+  and the run-cycle override
+  (`zombie_utility::set_zombie_run_cycle_override_value`) sets its speed. Only
+  walk, run and sprint are used: those are the speeds the game itself picks, so
+  every map has their animations (`super_sprint` is mapped but a map may lack
+  it). Anything else goes first, checked four times a second: a point of
+  interest such as a Monkey Bomb (`zombie_poi`), something the zombie attacks
+  (`attackable`), a goal a map set, `ignore_find_flesh`, a speed override
+  something else set (a slowing effect), a zombie without legs, and a turned
+  zombie.
+- The glows. A `tag_origin` model linked to the zombie's `j_head` plays one of
+  the power-up glows `zm_powerups` loads on every map: `powerup_on_caution`
+  (yellow) for pack hunters, `powerup_on` (green) for burst sprinters,
+  `powerup_on_solo` (blue) for ambushers. Its red one (`powerup_on_red`) is only
+  loaded on some maps. The glow lights the zombie too. The model goes with the
+  zombie (dead, removed or turned).
+- Pack hunters come to within 600 units of the pack's player and hold there
+  until three hunters are waiting, or for 10 s; then that pack sprints at the
+  player together and leaves the last 160 units to the game's own attack. The
+  pack's player is kept while it can be attacked; otherwise it is the player
+  furthest from the other players (solo: the player).
+- Burst sprinters walk, and within 900 units of their player sprint for 1.5 to
+  2.5 s every 2.5 to 4.5 s.
+- Ambushers run to a spot on the navigation mesh 350 to 700 units from their
+  player that the player cannot see (of the 12 spots nearest the zombie, the
+  first a sight trace from the player's eye does not reach), for at most 12 s,
+  and wait there for at most 10 s. They strike, sprinting, when the player comes
+  within 320 units or, within 1,000 units, faces away from them.
+- On the first round with smart zombies that has no other notice, every player
+  sees "SMART ZOMBIES: YELLOW HUNT IN PACKS, GREEN SPRINT IN BURSTS, BLUE LIE IN
+  WAIT". The script splits the colour words: `shared.gsh` defines `YELLOW`,
+  `GREEN`, `BLUE` and others as vectors, and the GSC compiler expands a macro
+  inside a string too (the first test showed "(1, 1, 0) HUNT IN PACKS").
 
 ---
 

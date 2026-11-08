@@ -25,6 +25,7 @@ local WHEEL_BIT = 128
 local COIN_FLIP_BIT = 256
 local ROUND_SKIPS_BIT = 512
 local ROUND_999_BIT = 4096
+local SMART_ZOMBIES_BIT = 8192
 local SETTINGS = {
   {
     dvar = "xerces_zm_maxAmmo",
@@ -108,7 +109,14 @@ local SETTINGS = {
     name = "Rounds to 999",
     bit = ROUND_999_BIT,
     tab = "rounds",
-    description = "The round count goes past the game's 255. At round 999 everyone votes: exfil and win, or keep going with every perk, infinite ammo and infinite points.",
+    description = "The round count goes past the game's 255. At round 999 everyone votes: exfil and win, or keep going with every perk, infinite ammo, infinite points and only smart zombies.",
+  },
+  {
+    dvar = "xerces_zm_smartZombies",
+    name = "Smart Zombies",
+    bit = SMART_ZOMBIES_BIT,
+    tab = "rounds",
+    description = "From round 20 some zombies hunt smarter. Yellow ones gather and rush one player as a pack, green ones walk and then sprint in bursts, blue ones wait out of sight and strike when you turn away. 10% of them at round 20, rising to 99% at round 998, all of them from round 999.",
   },
   {
     dvar = "xerces_zm_wheel",

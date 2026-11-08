@@ -1482,6 +1482,51 @@ Not tested yet: everything that needs a second player (votes, joining, a
 self-revive while others are up), a map other than Kino der Toten, and rounds
 reached by playing past 255.
 
+### Zombies round settings, stage 4 (2026-11-07)
+
+DESIGN.md 7.9 stage 4 (smart zombies), on `launcher/round-system`. Run by Claude
+with your go-ahead ("Yes I'm not playing") on Kino der Toten, through
+`C:\Users\Ginld\XercesDev\bench\20261107-rounds\stage4-run.ps1`: twice without
+mods and once with your seven-mod stack (PEGASUS on top). Settings on as
+launcher dvars: Round HUD and Smart Zombies. A test-only game script (`probe7\`,
+copied into the worktree's `data\` for each run and removed after it) kept the
+test player standing (it could not be hurt and did not move or shoot), moved the
+game to round 30, counted for 60 s the zombies that came into the play area and
+how many were smart (killing each once counted, so more came), then made every
+new zombie smart as after round 999's Keep Going, and every 3 s reported what
+the smart zombies were doing. No keys were pressed in the match. Captures are of
+the whole screen (`capture-dpi.ps1`).
+
+- [x] Lobby, without mods: the ROUNDS tab has Smart Zombies after Round Skips
+      and Rounds to 999.
+- [x] The share, rounds 30 and 31 (109 and 110 in 1,000): 0 of 24 in the first
+      run (it killed nothing, so no more came), 22 of 152 with your stack and 14
+      of 105 in the second run without mods: 36 of 281, 12.8%.
+- [x] Every new zombie smart: 41 of 41 and 46 of 46 without mods, 63 of 63 with
+      your stack, of all three kinds (19/5/17, 15/12/19 and 16/25/22 pack
+      hunters, burst sprinters and ambushers).
+- [x] What they did, from the reports: pack hunters held back (up to two at a
+      time waiting) and then charged and reached the player; burst sprinters
+      switched between walking and sprinting every few seconds; ambushers went
+      to their spot and held there, then all struck (sprinting) and reached the
+      player. One glow per smart zombie alive (24 of 24, 32 of 32), gone within
+      a few seconds of the zombie.
+- [x] The glows on screen: yellow, green and blue power-up glows on the zombies'
+      heads. They light the whole zombie, and 24 smart zombies crowding a player
+      who stands still tint the screen (KNOWN_ISSUES).
+- [x] The notice at round 30: first it read "SMART ZOMBIES: (1, 1, 0) HUNT IN
+      PACKS, (0, 1, 0) SPRINT IN BURSTS, (0, 0, 1) LIE IN WAIT": the compiler
+      expands shared.gsh's colour macros inside strings. The colour words are
+      now split in the script, and the second run without mods showed "SMART
+      ZOMBIES: YELLOW HUNT IN PACKS, GREEN SPRINT IN BURSTS, BLUE LIE IN WAIT".
+      No other string in the script holds a macro name (checked with a script).
+- [x] No script error from Xerces' scripts or the probe in any run; none at all
+      without mods. With your stack the console has DS4C's usual ones.
+
+Not tested yet: a player who moves and shoots, co-op (the pack's choice of
+player), a Monkey Bomb or other point of interest drawing smart zombies, a
+turned zombie, maps other than Kino der Toten, and rounds reached by playing.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The
