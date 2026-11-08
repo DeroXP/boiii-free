@@ -58,6 +58,33 @@ to report these again, but tell us if you see them somewhere else or worse.
   blocked), but any other DLL a mod loads runs on your PC with your rights.
   Xerces does not ask first yet. Only turn on mods you trust.
 
+## Zombies round settings (XERCES SETTINGS)
+
+- **Other players need Xerces for the pause menu entries.** The counter, the
+  timer, the notices, the wheel and the coin flip show on every player's screen,
+  but the pause menu's XERCES SETTINGS, PACK-A-PUNCH WHEEL, COIN FLIP, SKIP
+  ROUND, EXFIL and KEEP GOING come from Xerces on each player's PC. A player
+  without Xerces cannot spin, bet or vote, and a vote needs more than half of
+  all the players in the match.
+- **Not tested with two PCs yet.** Everything here ran on one PC, as the host.
+  Not seen yet: a player who joins during a match, one who bleeds out and comes
+  back the next round (whether their counter and timer are still there), votes
+  from more than one player, and a self-revive while others are still up.
+- **A map's own reasons not to end a round early are not checked.** A skip ends
+  the round the way the Round Robbin gum does, but a map can tell Round Robbin
+  not to run (during a boss fight, for example) through a check whose name only
+  the map's compiled script has, and Xerces cannot ask it. On such a map a prime
+  or special round may be skippable when Round Robbin would refuse.
+- **Rounds to 999 keeps the game's zombie health.** Zombie health stops growing
+  at round 163 (about 2 billion), so past there a zombie needs an insta-kill, a
+  trap or a very strong weapon.
+- **Power On at Start flips the standard power switch.** A map that turns its
+  power on another way (a quest, several switches of its own) is left as it is,
+  and so are doors that only a quest or a map's own check opens.
+- **Tested on Kino der Toten only, so far.** Without mods and with a seven-mod
+  stack (PEGASUS on top, DS4C below it). Other maps and mods with their own box,
+  perk or Pack-a-Punch rules may do things differently.
+
 ## The game and Xerces
 
 - **Tested on one PC only.** This zip ran in the game on 2026-11-06 on one PC

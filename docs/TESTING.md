@@ -1223,6 +1223,265 @@ In the matches, MW4 Shipment's own menu script asked for unsafe Lua; Claude
 answered No each time. Windows Firewall asked whether the worktree's boiii.exe
 may use the network; that prompt was left for you.
 
+### Zombies round settings, stage 1 (2026-11-07)
+
+DESIGN.md 7.9, built on `launcher/round-system`. Run by Claude with your
+go-ahead ("Yes, I'm not playing") on Kino der Toten (`zm_theater`, it has a
+power switch, doors, debris, wall buys and a moving box), from the worktree
+build through the test home `C:\Users\Ginld\XercesDev\bench\20261106-modlabels`.
+The runner is `C:\Users\Ginld\XercesDev\bench\20261107-rounds\rounds-run.ps1`.
+It passes all eight settings on (5,000 starting points) as launcher dvars, so
+they were `+set` for that session only and the game's `config.cfg` kept its own
+lines (`xerces_launch_dvars`). A test-only game script and Lua file, copied into
+the worktree's `data\` for each run and removed after it, reported what the
+settings did as game messages. The test script gave a gun from the map's list
+through `zm_weapons::weapon_give` (as a wall buy does), emptied the gun in hand
+and ended round 1 by killing the zombies.
+
+- [x] No mods: the score is 5,000 and the perk limit 99 when the black screen
+      ends; the power is on (the switch was used and removed); all 12 door
+      triggers and every debris pile are open; `zombie_unlock_all` is back to 0;
+      the box's move chance is overridden; the gun came Pack-a-Punched (the base
+      gun gone, two primaries); the emptied gun had 208 rounds in stock 1 s into
+      round 2.
+- [x] No mods: "Xerces settings: Max Ammo every round, Auto Pack-a-Punch, 5,000
+      starting points, No perk limit, Box stays, Power on, Doors open, Round
+      HUD" in the game messages.
+- [x] No mods: `xerces_zm_match` was "127 5000" and `xerces_zm_hud` went from "8
+      0 1" to "8 5 1" in round 2, the same in the host's Lua, where the round
+      HUD element exists.
+- [x] No mods: the pause menu reads Resume, Direct Connect, Change Map, Kick
+      Players, Restart, Game Tweaks, XERCES SETTINGS, Main Menu, Quit to
+      Desktop, and its read-only XERCES SETTINGS opens.
+- [x] Front end, with and without mods: XERCES SETTINGS follows BOIII SETTINGS
+      in both Zombies lobbies (with your stack: after DS4C's Barracks, Join
+      Discord and BOIII SETTINGS), and the menu opens.
+- [x] Your stack with PEGASUS on top (PEGASUS, DS4C, Classic Viewmodel FOV,
+      Hyperdimension Neptunia, im_oxo QOL, Avali, Ascendance): every result
+      above is the same, and DS4C's pause menu reads Resume, DS4C Camos, DS4C
+      Mod Options, XERCES SETTINGS, PEGASUS MENU, Restart Level, End Game.
+- [x] No script error from Xerces' script in any run. With the stack, DS4C
+      prints its own errors while the map loads (also `_fixed_box.gsc`, before
+      any setting acts) and when the test script kills zombies without an
+      attacker.
+- [x] How it looks, seen once your PC was unlocked (the first runs were made
+      while it was locked, and every screenshot came out black), from
+      full-screen captures (`capture-dpi.ps1`: the screen is 3840x2160 at 150%,
+      and the session's `capture.ps1 -Screen` only saw its top-left 2560x1440).
+      The lobby screen shows all eight settings and the description panel. In
+      the match the round HUD sits top left (grey ZOMBIES LEFT and ROUND TIME or
+      LAST ROUND, white values), no timer line before round 1. The game's own
+      "Max Ammo!" shows at each round's start with the stock refilled. The
+      settings message is one line in the game messages. The pause menu's
+      read-only XERCES SETTINGS lists all eight with each description in full.
+      With your stack the HUD stays clear of PEGASUS's and DS4C's panels (level,
+      tokens, the Blue Door tracker).
+- [x] Found and fixed there: the added pause entries pushed the last row out of
+      view: Quit to Desktop in the stock pause menu, End Game in DS4C's. Both
+      entries (XERCES SETTINGS and the mod menu entry) now grow the list. The
+      stock list grows through BOIII's own row count; DS4C's list, whose rows
+      are as high as the stock ones (33.6), grows a row per added item. Seen
+      after the fix: all nine rows without mods, all seven in DS4C's pause menu.
+
+Tried and taken out: registering the settings event (`xerces_settings`) and the
+HUD labels with the engine as the map loads (DESIGN.md 7.9). The server's and
+client's lists then differed ("BG Cache Diff for LocalizedStrings - Mismatched")
+and the game left the map at once.
+
+### Zombies round settings, stage 2 (2026-11-07)
+
+DESIGN.md 7.9 stage 2 (the Pack-a-Punch wheel and the coin flip), on
+`launcher/round-system`. Run by Claude with your go-ahead ("Yes, I'm not
+playing") on Kino der Toten, the same way as stage 1, through
+`C:\Users\Ginld\XercesDev\bench\20261107-rounds\stage2-run.ps1`: all ten
+settings on as launcher dvars, and a test-only game script (`probe3\`, copied
+into the worktree's `data\` for each run and removed after it) that gave a gun
+from the map's list (Auto Pack-a-Punch upgraded it), kept the test player from
+going down (it stands among the zombies), ended rounds by killing the zombies,
+and reported as game messages. The first runs used the pause menu entries and
+the bet menu through Lua, calling each row's action the way selecting it does;
+the later ones pressed the arrow keys and Enter. All took full-screen captures.
+
+- [x] Lobby, with and without mods: XERCES SETTINGS has a ZOMBIES tab (stage 1's
+      eight) and a GAMBLING tab (Pack-a-Punch Wheel and Coin Flip, each with its
+      description). The runner changed tabs the way the controller's shoulder
+      buttons do (the tab grid's `navigateItemRight`; the game's tab list has no
+      keyboard key, and a mouse click goes to the same grid), and the list and
+      its heading changed to GAMBLING.
+- [x] No mods, with real keys: the pause menu reads Resume, Direct Connect,
+      Change Map, Kick Players, Restart, Game Tweaks, XERCES SETTINGS,
+      PACK-A-PUNCH WHEEL, COIN FLIP, Main Menu, Quit to Desktop, all in view.
+      The arrow keys and Enter on PACK-A-PUNCH WHEEL closed the pause menu and
+      spun the wheel. On COIN FLIP they opened the bet menu (BET 100 to BET
+      50,000 and ALL IN, "Heads wins 200 (x2.0)" at round 1), where Enter on BET
+      1,000 flipped. On XERCES SETTINGS they opened the read-only list of all
+      ten settings, where Enter on a row did nothing. The runner pressed Enter
+      only once a Lua readout said that row had focus.
+- [x] The wheel, no mods: 2,500 points a spin. A second spin in the same round
+      was refused ("One spin a round: spin again next round") with nothing
+      taken. During a Fire Sale (the game's own flag, set by the test script) a
+      spin cost 10 and the wheel's middle said FIRE SALE: 10. On nothing the
+      box's teddy bear rose and turned in front of the player. It refused the
+      starting M1911 and a score of 1,000, taking nothing. Across the runs it
+      gave each of the five ammo mods and nothing (Turned only came up after 25
+      spins, with your stack). One run had five nothings in a row (a 0.7%
+      chance), so the stack run counted the game's `RandomInt(8)` 4,000 times:
+      532, 501, 487, 483, 465, 505, 530, 497, as even as chance allows
+      (chi-square 7.3, 7 degrees of freedom).
+- [x] The coin flip, no mods: BET 1,000 at round 1 lost once ("COIN FLIP:
+      1,000", TAILS, "YOU LOSE 1,000" in red) and won twice ("YOU WIN 2,000
+      (x2.0)" in green). In round 2 (x2.1), after a win: 100 from 5,000 ends at
+      5,110 ("YOU WIN 210 (x2.1)", with the game's own +210 by the score), 1,234
+      from 5,000 at 6,357, 987,654 from 3,000,000 at 4,086,419, and 100,000 from
+      4,100,000 at 4,194,303 ("YOU WIN 194,303 (MAX POINTS)"). Refused, with
+      nothing taken: 50, 6,000 with 5,000 points, "abc", and any bet at
+      4,194,303 points.
+- [x] The game's points cap, found by these tests: a score a script sets to
+      1,500,000,000 reads back as 4,194,303. The coin flip now stops there
+      (DESIGN.md 7.9).
+- [x] No mods: after the pause menu's restart (`fast_restart`, which RESTART
+      runs in a solo game) the round HUD shows once, not doubled, and the pause
+      menu has the three entries again.
+- [x] Your stack (PEGASUS on top, DS4C's pause menu), with real keys: the pause
+      menu reads Resume, DS4C Camos, DS4C Mod Options, XERCES SETTINGS,
+      PACK-A-PUNCH WHEEL, COIN FLIP, PEGASUS MENU, Restart Level, End Game, all
+      in view. Two soak runs of 8 rounds each pressed only keys, with no Lua
+      sent from the console. Every round Down and Enter spun the wheel, then
+      picked COIN FLIP and a bet; the second soak also opened XERCES SETTINGS
+      every round (Enter on a row did nothing) and PEGASUS MENU every other
+      round (its Camo and Character menu). No crash, no Lua error and no script
+      error from Xerces in either. The payouts on screen were right (5,000 at
+      x2.1 paid 10,500; ALL IN with 10,290 at x2.8 paid 28,812; 7,500 at x2.4
+      and at x2.6 paid 18,000 and 19,500), the wheel took nothing for a Death
+      Machine from a power-up, and the bet menu reopens on the row last picked.
+- [x] Your stack, earlier runs driven by test Lua: the lobby's GAMBLING tab; the
+      wheel landed on Turned, Dead Wire, Thunder Wall and Blast Furnace; a bet
+      of 1,000 won ("YOU WIN 2,000 (x2.0)"); the Fire Sale spin cost 10; and the
+      HUD stays clear of PEGASUS's and DS4C's panels.
+- [x] How it looks, from full-screen captures. The wheel is a dark square in the
+      middle of the screen under an orange PACK-A-PUNCH WHEEL, with the ammo
+      mods' HUD icons and three NOTHING round the price; an orange highlight
+      goes round three times, slows onto the result, and the result's name shows
+      in the middle in its colour. The coin flip is a smaller panel: COIN FLIP
+      and the bet in orange, the coin's side turning in gold, then YOU WIN in
+      green or YOU LOSE in red. Both close by themselves. The round HUD is top
+      left for every player, as in stage 1. With PEGASUS the lobby screen has no
+      title (its restyle of the settings screen), in stage 1 too.
+- [x] No script error from Xerces' scripts in any run, and no Lua error from
+      Xerces' menus. With your stack, DS4C's progression script
+      (`scripts/ds4c/progression/live_xp.gsc`) prints "LUI event name (string)
+      is not precached" as zombies die, as it did in stage 1.
+
+Found and fixed during these runs:
+
+- A menu response ends at its first space, so in the first run the bet went to
+  the game as `xerces_flip` alone and no flip ran. Responses now join their
+  parts with ":".
+- GSC multiplies in single-precision floats, so a payout came out a point short
+  for about 1 bet in 100 (100 at x2.1 paid 209). The payout is now worked out in
+  whole numbers, checked offline against exact arithmetic for about a million
+  bets, and in the game above.
+- A win past the points cap was cut by the game without a word; it now says MAX
+  POINTS, ALL IN's description names the cap, and a bet at the cap is refused.
+- From a review of the code: under the Shopping Free gum a spin whose gun was
+  gone gave back 2,500 points it never took (it now gives back what it took);
+  the once-a-round lock would have stuck at round 255 (it counts rounds started
+  now); between rounds the flip paid 0.1 more than the menu showed (both use the
+  round as of its start now); a refused request said nothing once the pause menu
+  had closed; the teddy bear stayed in the world if its player left mid-rise;
+  and an ammo mod without a HUD icon would have broken the wheel (it shows the
+  name now).
+
+Crashes in the test runs: four of the seven runs with your stack that sent Lua
+through the console (to read the menus and pick rows) crashed in the game's Lua
+VM, twice at BlackOps3.exe+0x141D3DAA3 writing near address 0, once in its
+garbage collector on another thread, and once with no crash dump. None did
+without mods (four runs), and none did in the two soaks above, which only press
+keys, so they are put down to the test's own Lua. The address is noted in case
+it turns up in a player's crash report.
+
+Not tested yet: the refund under Shopping Free, rounds past 255, an ammo mod
+without an icon, and everything that needs a second player (KNOWN_ISSUES.md).
+
+### Zombies round settings, stage 3 (2026-11-07)
+
+DESIGN.md 7.9 stage 3 (round skips, random loadouts, self-revives, rounds to
+999), on `launcher/round-system`. Run by Claude with your go-ahead ("you can
+start now") on Kino der Toten, through
+`C:\Users\Ginld\XercesDev\bench\20261107-rounds\stage3-run.ps1` (no mods) and
+`soak3-run.ps1` (your stack). Settings on as launcher dvars: Round HUD, Round
+Skips, Random Loadout, Self-Revives and Rounds to 999. A test-only game script
+(`probe5\` without mods, `probe6\` with your stack, copied into the worktree's
+`data\` for each run and removed after it) kept the test player standing,
+reported as game messages, forced a dog round (`level.next_dog_round`), downed
+the player, and moved the game's round to its 255 cap and Xerces' count to 998
+for the last vote. In the match only keys were used: Down and Enter on the pause
+menu by row count, and the use key held 2.3 s for the self-revive. Lua ran from
+the console only in the lobby. Captures are of the game window alone
+(`capture-game-dpi.ps1`), so they cannot show anything else on your screen.
+
+- [x] Lobby, without mods: XERCES SETTINGS has ZOMBIES (now with Random Loadout
+      and Self-Revives), GAMBLING and a ROUNDS tab with Round Skips and Rounds
+      to 999, each with its description.
+- [x] Round skips, without mods. Round 2 (prime): "PRIME ROUND 2: SKIP IT FROM
+      THE PAUSE MENU FOR 400 POINTS" under the HUD, SKIP ROUND after XERCES
+      SETTINGS in the pause menu; Enter on it ended the round with exactly 400
+      points and no Max Ammo dropped. Round 3 (prime) through the menu response:
+      the same. Round 4, a dog round: "SPECIAL ROUND: ... AND A MAX AMMO"; Enter
+      on SKIP ROUND once its dogs were out ended the round with 400 points and
+      the round's own Max Ammo dropped ("ROUND SKIPPED: 400 POINTS, AND THE
+      ROUND'S MAX AMMO"). Round 6 (neither): the request was refused with
+      nothing given.
+- [x] Random loadout, without mods: from round 1 every round swapped both guns
+      for two box guns (among them a Ray Gun, the Thundergun, rifles, SMGs,
+      shotguns, a launcher), different each round.
+- [x] Self-revives, without mods: the HUD's SELF-REVIVES 1; downed (solo, no
+      Quick Revive) the game went on, HOLD USE TO REVIVE YOURSELF showed, and
+      holding use got the player up with 0 left; round 10 put it back to 1.
+- [x] Rounds to 999, without mods: with the game's round at 255 and Xerces'
+      count at 999 the HUD shows ROUND 999 (the game's own chalk stays at 255),
+      "ROUND 999: EXFIL OR KEEP GOING? VOTE IN THE PAUSE MENU", and EXFIL and
+      KEEP GOING in the pause menu. KEEP GOING: 8 of 8 perks, a full clip, the
+      score at 4,194,303 and back there after spending. A game over then shows
+      GAME OVER and YOU SURVIVED 999 ROUNDS above the game's scoreboard (the
+      game's own would say 255). EXFIL (a second run): the game ended with
+      EXFIL, YOU WIN and YOU SURVIVED 999 ROUNDS.
+- [x] Your stack (PEGASUS on top), keys only, 8 rounds: DS4C's pause menu reads
+      Resume, DS4C Camos, DS4C Mod Options, XERCES SETTINGS, then SKIP ROUND on
+      a round that can be skipped (EXFIL and KEEP GOING at round 999), PEGASUS
+      MENU, Restart Level, End Game, all in view. Down and Enter on SKIP ROUND
+      skipped rounds 2, 3 and 5 (prime) and a dog round at 7 (special), 400
+      points each. The self-revive got the player up (a round that started while
+      they were down swapped their guns once they were up). Every round gave two
+      box guns, with DS4C's attachments on them. At round 999 KEEP GOING held
+      the score at 4,194,303. No crash, no Lua error. DS4C's copy of
+      `_zm_weapons` printed a script error ("pair 'undefined' and 'bo6'") when
+      the random loadout handed over a gun; the gun came as usual.
+- [x] No script error from Xerces' scripts and no crash in the runs without mods
+      that pressed keys only.
+
+Found and fixed during these runs:
+
+- A dog in its spawn effect is shielded, so a skip right after the dogs came
+  could find nothing to kill, leave out `last_ai_down`, and the dog round never
+  ended. The skip now waits for an enemy it can kill, sends `last_ai_down` with
+  it and kills the rest as their shields drop.
+- The end screen's ROUNDS line sat on the game's scoreboard; it is above it now.
+- With your stack the random loadout gave one gun a round, Ray Gun Mark II and
+  the Thundergun in turn: DS4C orders the box's own pick so that its first gun
+  is always the same, and the second pick matched the first. The two guns are
+  now drawn evenly from the guns the box would give the player.
+- A skip that had to wait more than 30 s for enemies left the votes counted with
+  no skip; the votes are cleared then, with a notice to vote again.
+
+One run without mods that read the pause menu through Lua from the console
+closed silently in the match (no crash dump), as the crashed stack runs of stage
+2 did; the runs after it press keys only.
+
+Not tested yet: everything that needs a second player (votes, joining, a
+self-revive while others are up), a map other than Kino der Toten, and rounds
+reached by playing past 255.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The

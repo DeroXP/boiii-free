@@ -1582,6 +1582,14 @@ up to the first ":" or " - " ("^3[^5PZM^3] ^9PEGASUS^7 v0.2.3.9" gives PEGASUS,
 "Avali: Solspace - Character Pack" gives AVALI); "MOD MENU" when more than 16
 characters are left. Zombies matches only.
 
+Pause lists keep the height they were made with, so an added row would push the
+last one (Quit to Desktop, End Game) out of view (seen 2026-11-07). Both added
+entries (this one and XERCES SETTINGS, 7.9) grow the list: the stock list
+through `BoiiiStartMenuOptionCount`, which `data/ui_scripts/party` sizes it from
+right after it is filled, and a mod's list whose height is a whole number of
+stock-height rows (33.6, as DS4C's) by a row per item. Another mod's list is
+left as it is.
+
 ### 7.7 Rename
 
 - **Brand (renamed):** executable and workspace names, window titles and
@@ -1612,6 +1620,236 @@ for invites and share codes, and an uninstaller that removes app, cache and
 logs, asks about config and backups, and says account deletion is separate.
 Unsigned installers trigger SmartScreen; `TRUST.md` says so. A portable zip is
 published as well.
+
+### 7.9 Zombies round settings (stages 1 to 3 built 2026-11-07)
+
+Settings that change how a Zombies match plays, asked for and decided by the
+user on 2026-11-07. They are all off by default, the host's settings apply to
+everyone in the match, and they apply to solo and private matches only (the game
+script returns at once on a dedicated server). They come in four stages, each
+built on its own branch, tested in the game with the user's stack and pushed
+only when the user says so:
+
+1. The XERCES SETTINGS menu and the simple toggles (built, below).
+2. A double Pack-a-Punch wheel (2,500 points, once per round, on a gun already
+   Pack-a-Punched; 8 slices: the five ammo mods and 3 "nothing" slices that show
+   the mystery box's teddy bear and play its laugh; during a Fire Sale it costs
+   what the box does then, asked for on 2026-11-07) and a coin flip (the
+   player's bet, at least 100 points; 50/50; a win pays the bet times 2 at round
+   1, plus 0.1 per round, at most 5). Built, below.
+3. Round skips (special and prime rounds, +400 points each, a majority vote in
+   co-op, a Max Ammo with a special-round skip), a random loadout each round
+   (two guns from the map's box), self-revives (one per player, refilled every
+   10 rounds) and round 999 (a majority vote between exfil, which ends the game
+   with a win, and going on with only smart zombies, every perk, infinite ammo
+   and infinite points). Built, below.
+4. Smart zombies (pack hunters, burst sprinters and ambushers): none before
+   round 20, 10% at round 20 rising evenly to 99% at round 998, all of them at
+   round 999, each type with its own eye glow or aura from effects every map
+   already loads.
+
+**Stage 1.** Saved dvars, registered by `src/client/xerces/round_settings.cpp`
+with the archive flag: `xerces_zm_maxAmmo`, `xerces_zm_autoPap`,
+`xerces_zm_startPoints` (0 keeps the map's own), `xerces_zm_noPerkLimit`,
+`xerces_zm_boxStays`, `xerces_zm_powerOn`, `xerces_zm_doorsOpen` and
+`xerces_zm_roundHud`, for stage 2 `xerces_zm_wheel` and `xerces_zm_coinFlip`,
+and for stage 3 `xerces_zm_roundSkips`, `xerces_zm_randomLoadout`,
+`xerces_zm_selfRevives` and `xerces_zm_round999`.
+`data/ui_scripts/xerces_settings` is the menu: in the front end a settings
+screen like BOIII SETTINGS, with ZOMBIES, GAMBLING and ROUNDS tabs, whose button
+`data/ui_scripts/frontend_menus` adds after BOIII SETTINGS in the Zombies
+lobbies (`UI_ZMLOBBYONLINE`, `UI_ZMLOBBYLANGAME`), with or without mods.
+
+`data/custom_scripts/zm/xerces_rounds.gsc` reads the dvars once, as the match
+loads, and uses only scripts the core Zombies script uses itself, so it links on
+every Zombies map. Each toggle goes through a hook the game's own scripts read,
+not a replaced script:
+
+- Max Ammo every round: at `start_of_round` it does what the Max Ammo power-up
+  does for every player (`givemaxammo` on each weapon but hero weapons, the same
+  exclusions, `zmb_max_ammo` notifies) with the game's own "Max Ammo" HUD text.
+- Auto Pack-a-Punch: wall buys and the box give guns through
+  `zm_weapons::weapon_give`, which notifies `weapon_give`. At the end of that
+  frame a gun that can be upgraded and is not yet is swapped for its upgrade the
+  way the Pack-a-Punch machine hands one over (`give_build_kit_weapon`, so it
+  gets the map's camo, then start ammo; no ammo mod, as on a first upgrade).
+  Hero weapons, offhand and melee weapons, ballistic knives, shields and guns
+  with their own give callback are left alone.
+- Starting points: `level.player_starting_points` for players who join later,
+  and each player's score when the black screen ends.
+- No perk limit: `level.perk_purchase_limit` and
+  `level.get_player_perk_purchase_limit` both give 99.
+- Box stays: `level._zombiemode_chest_joker_chance_override_func` returns -1, so
+  `treasure_chest_should_move` never moves it (the `magic_chest_movable` dvar is
+  left alone, as a dvar would outlive the match).
+- Power on: a `trigger` notify from a player to every `use_elec_switch`, which
+  runs the map's own power-on (`zm_power::electric_switch` or the map's
+  `level.temporary_power_switch_logic`). Maps that power up another way are left
+  as they are.
+- Doors open: a forced `trigger` notify to every `zombie_door` and
+  `zombie_debris`. A forced door opens for free (`door_buy`), but debris charges
+  its cost unless `zombie_unlock_all` is set, so it is set for the few seconds
+  this takes and put back. A map's own door check still applies; electric doors
+  open with the power.
+- Round HUD: zombies left (`get_current_zombie_count` plus `level.zombie_total`)
+  and the round's time, between `start_of_round` and `end_of_round` (the last
+  round's time shows between rounds), top left on every player's screen (below).
+
+**What reaches the other players.** The game only sends a LUI event or shows a
+HUD label whose name it loaded from the map's zones
+(`#precache("eventstring", ...)` and `#precache("string", ...)` lines, which the
+game's linker turns into zone data; Xerces' compiler parses them and drops
+them). `LUINotifyEvent` with another name stops the thread with "LUI event name
+(string) is not precached", and a label is set to nothing unless a hidden engine
+dvar (hash `0xefd7ca2e`, off) lets the engine register it on the fly.
+Registering the names through the engine's own functions (`0x1400A3FF0` for LUI
+events, `0x1400A4690` for localized strings, build 0x6531394) was tried on
+2026-11-07: the game then compares the server's and the client's lists ("BG
+Cache Diff ... Mismatched") and ends the map at once, and a player joining later
+would hit the same check. So nothing is registered. What every map does register
+are the game's generic script menus (`HudElementText`, `HudElementImage`,
+`HudElementTimer`, `ScriptMessageDialog_Compact`) with their data keys (`text`,
+`x`, `y`, `width`, `height`, `alignment`, `red`, `green`, `blue`, `alpha`,
+`material`, `zRot`), and the script menu `StartMenu_Main`. A script opens one
+for a player (`OpenLUIMenu`) and fills it (`SetLUIMenuData`), and the game sends
+a text as it is. Measured on 2026-11-07: the screen is 1280x720, an image's `x`
+and `y` are its top left corner, and a text sits in the box from `x` to
+`x + width`, by `alignment` 1 left, 2 centre or 4 right. An image needs a
+registered material: the five ammo mods' HUD icons (`t7_hud_zm_aat_*`), `white`
+and `black` are on every Zombies map.
+
+- Every player gets the host's settings as a game message when they first spawn
+  (`IPrintLn`, plain text), such as "Xerces settings: Max Ammo every round, Auto
+  Pack-a-Punch, 5,000 starting points".
+- The round HUD is four `HudElementText` per player (two more each for stage 3's
+  SELF-REVIVES and ROUND lines), updated four times a second, sending only what
+  changed.
+- Each player also gets a hidden `HudElementText` (alpha 0) whose text is
+  "XERCES <mask> <starting points> <round> <skip> <vote>" (skip: 1 on a prime
+  round and 2 on a special round that can be skipped; vote: 1 while the round
+  999 vote is open). Xerces' Lua on the player's PC finds it (a menu named
+  `HudElementText` whose `text` model starts that way; a host on an older Xerces
+  sends the first three numbers only) to show, in the pause menu, XERCES
+  SETTINGS (a read-only list of what the match uses), PACK-A-PUNCH WHEEL and
+  COIN FLIP (when they are on), SKIP ROUND (on a round that can be skipped) and
+  EXFIL and KEEP GOING (while the round 999 vote is open). The entries go above
+  Restart and End Game in whichever game options list the pause menu uses, as
+  the mod menu entry does, and grow that list the same way (7.6).
+- Back to the game script the Lua sends
+  `Engine.SendMenuResponse(controller, "StartMenu_Main", response)`, which
+  arrives as the player's `menuresponse` notify. The game's own handler
+  (`zm_gametype::menu_onmenuresponse`) acts only on its own responses. A
+  response ends at its first space, so its parts are joined by ":"
+  (`xerces_wheel`, `xerces_flip:1000`, `xerces_flip:all`, `xerces_skip`,
+  `xerces_exfil`, `xerces_keep`). The pause menu is closed first
+  (`StartMenuGoBack`, which also unpauses a solo game), so the request runs at
+  once.
+
+**Stage 2.** Both are the host's settings (`xerces_zm_wheel`,
+`xerces_zm_coinFlip`); with one off its entry is not shown, and a request for it
+gets "The host has not turned ... on". A player has one wheel or flip at a time.
+As the pause menu has closed by the time a request arrives, every refusal says
+why on the player's screen (down or out, the last spin or flip still going, and
+the reasons below).
+
+- The wheel costs 2,500 points, or during a Fire Sale
+  (`level.zombie_vars["zombie_powerup_fire_sale_on"]`) 10, which is what the
+  mystery box costs then (`zm_magicbox::fire_sale_fix`). It is a purchase
+  (`zm_score::minus_to_player_score`, so the Shopping Free gum covers it). It
+  works once a round per player, counted by rounds started (the round number
+  stops at 255, below), on the gun in hand when it is Pack-a-Punched and can
+  take an ammo mod (`level.aat_in_use`, `aat::is_exempt_weapon`). Its eight
+  slices, clockwise from the top, are Blast Furnace, nothing, Dead Wire,
+  Fireworks, nothing, Thunder Wall, Turned, nothing. An ammo mod the map does
+  not register counts as nothing. The wheel is drawn on the player's screen (a
+  dark panel, each mod's HUD icon or "NOTHING", a highlight that goes round
+  three times and slows onto the result); then `aat::acquire(weapon, name)`
+  gives the mod, with its own sound, or, for nothing, the box's teddy
+  (`level.chest_joker_model`) rises and turns in front of the player with its
+  laugh (`level.zmb_laugh_alias`). If the gun is gone by then, what the spin
+  took comes back (nothing, under Shopping Free) and so does the round's spin.
+  An ammo mod a mod registers without a HUD icon shows its name.
+- The coin flip's bet menu offers 100, 500, 1,000, 2,500, 5,000, 10,000, 25,000,
+  50,000 and ALL IN, each with what heads pays at this round. The game script
+  takes a bet of at least 100 and at most the player's points straight from the
+  score (a bet is not a purchase, so no gum makes it free), flips a coin on the
+  player's screen, and on heads pays the bet times 2 at round 1 and 0.1 more for
+  each later round, at most 5, which includes the bet, rounded down to a whole
+  point. The round is the one the menus show, set at each round's start: the
+  game raises `level.round_number` as a round ends, and between rounds the flip
+  pays what the menu said. It works the payout out in whole numbers: GSC
+  multiplies and divides in single-precision floats, where 2.1 is 2.0999999 and
+  100 x 2.1 came to 209. A win never takes a score past 4,194,303, the game's
+  own points cap (measured on 2026-11-07: a score a script sets higher reads
+  back as 4,194,303). A win the cap cuts says MAX POINTS instead of the
+  multiplier, ALL IN's description names the cap, and a player at the cap cannot
+  bet, as a win could not pay.
+
+**Stage 3.** Four more host settings: Random Loadout and Self-Revives on the
+ZOMBIES tab, Round Skips and Rounds to 999 on the ROUNDS tab. Each goes through
+hooks the game's own scripts read; none replaces a game script.
+
+- Xerces counts the rounds. `zm::set_round_number` keeps the round in
+  `world.roundnumber` (XORed with 115) and clamps it at 255, and once the round
+  logic starts a game thread copies it into `level.round_number` every 0.05 s,
+  so the game's round stops at 255. At each `start_of_round` Xerces takes the
+  game's round below 255 and adds one a round from there. Prime rounds,
+  self-revive refills and round 999 go by that count. With Rounds to 999 on,
+  past round 255 the HUD gets a ROUND line with it (the game's own HUD stays at
+  255), and a game over shows Xerces' end screen in place of the game's (which
+  would say 255 rounds): `zm::end_game` leaves its own out when
+  `level._supress_survived_screen` is set and runs `level.custom_end_screen`.
+  Zombie health is the game's: it stops growing at round 163, at 2,035,642,980
+  (`zombie_utility::ai_calculate_health`: 150 at round 1, +100 a round to 950 at
+  round 9, then +10% a round, kept at its last value once it would pass 2^31).
+- Round skips. A round that sets the game's `special_round` flag (every map's
+  dog, parasite, spider and similar rounds do) or whose number is prime can be
+  skipped. As it starts, every player sees "PRIME ROUND 7: SKIP IT FROM THE
+  PAUSE MENU FOR 400 POINTS" (or "SPECIAL ROUND: ... AND A MAX AMMO"), and the
+  pause menu gets SKIP ROUND. Each player's SKIP ROUND is a vote, and more than
+  half the players skips; solo, one press. Round 999 cannot be skipped. A skip
+  ends the round the way the Round Robbin gum does (`zm_bgb_round_robbin`): no
+  more spawns this round (`level.zombie_total` 0, `kill_round`), `last_ai_down`
+  with the last zombie, then every zombie dies except Round Robbin's own
+  exceptions. On a special round `last_ai_down` is what drops the round's own
+  Max Ammo where its last enemy was, as when that enemy dies; nothing listens
+  for it on other rounds, so a prime skip drops none. A special round's first
+  enemies come a few seconds in, so a skip waits for them. Each player who is up
+  gets exactly 400 points (`zm_score::add_to_player_score`, which Double Points
+  does not multiply).
+- Random loadout. At each round's start, once a player is up and not drinking a
+  perk or holding a power-up's gun, two guns are drawn evenly from those the
+  mystery box would give that player
+  (`zm_magicbox::treasure_chest_canplayerreceiveweapon`: in the box, under its
+  wonder-weapon limits and any mod's own box rules, never a gun the player has).
+  The box's own pick (`treasure_chest_chooseweightedrandomweapon`) is not used:
+  it lets a mod order the guns, and with DS4C its first gun was always the same,
+  which left one gun a round. The two replace the player's guns and come the way
+  the box hands one over (`zm_weapons::weapon_give(weapon, 0, 1)`), so Auto
+  Pack-a-Punch upgrades them. Hero weapons, equipment and knives stay.
+- Self-revives. Each player starts with one and is back to one at rounds 10, 20,
+  30 and so on. Down with one, the player sees HOLD USE TO REVIVE YOURSELF and
+  holds the use button 1.5 s to get up through the game's own revive
+  (`zm_laststand::auto_revive`, as solo Quick Revive does). The HUD's
+  SELF-REVIVES line shows how many are left. Solo Quick Revive goes first. When
+  the last player up goes down, `zm::player_damage_override` asks
+  `level.check_end_solo_game_override` (solo) and
+  `level._game_module_game_end_check` (co-op) whether the game ends: Xerces'
+  answers keep it going while a player who is not out has a self-revive, after
+  asking any check the map or mode set. If that player bleeds out instead and
+  nobody is up, Xerces ends the game (`pre_end_game`, `end_game`), as the game
+  would have.
+- Round 999. When it starts, every player sees "ROUND 999: EXFIL OR KEEP GOING?
+  VOTE IN THE PAUSE MENU", and the pause menu gets EXFIL and KEEP GOING. More
+  than half the players decides; with no decision by the round's end it keeps
+  going. Exfil ends the game as a win, with an end screen of EXFIL, YOU WIN and
+  the rounds survived. Keep going gives every player every perk (each of
+  `level._custom_perks` through `zm_perks::give_perk`, again whenever one is
+  missing), infinite ammo (the clip and stock topped up four times a second) and
+  infinite points (the score held at 4,194,303, the game's cap). Stage 4's smart
+  zombies take over from there.
+- The notices are one more `HudElementText` per player, centred under the HUD;
+  the self-revive prompt is another, shown while it applies.
 
 ---
 

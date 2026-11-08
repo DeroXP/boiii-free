@@ -42,6 +42,17 @@ local quickSettingsButton = {
   customId = "btnQuickSettings",
 }
 
+-- Xerces' Zombies round settings (data/ui_scripts/xerces_settings), in the
+-- Zombies lobbies next to BOIII SETTINGS.
+local xercesSettingsButton = {
+  stringRef = "^3XERCES SETTINGS",
+  action = function(self, element, controller, param, menu)
+    SetPerControllerTableProperty(controller, "disableGameSettingsOptions", true)
+    OpenPopup(menu, "XercesSettingsMenu", controller)
+  end,
+  customId = "btnXercesSettings",
+}
+
 local function friendsPartyLabel()
   if Engine.DvarBool(nil, "friends_open") then
     return "^2DIRECT CONNECT: OPEN"
@@ -81,6 +92,12 @@ local function isMainLobby(menuId)
     or (targets.UI_CPLOBBYLANGAME and menuId == targets.UI_CPLOBBYLANGAME.id)
 end
 
+local function showsXercesSettings(menuId)
+  local targets = LobbyData.UITargets
+  return LUI.createMenu.XercesSettingsMenu ~= nil
+    and (menuId == targets.UI_ZMLOBBYONLINE.id or menuId == targets.UI_ZMLOBBYLANGAME.id)
+end
+
 local function hasButton(buttonTable, button)
   for _, item in ipairs(buttonTable) do
     if item.customId == button.customId or item.optionDisplay == button.stringRef then
@@ -99,6 +116,9 @@ end
 local function addModButtons(controller, menuId, buttonTable)
   if isMainLobby(menuId) then
     appendButton(controller, buttonTable, quickSettingsButton)
+  end
+  if showsXercesSettings(menuId) then
+    appendButton(controller, buttonTable, xercesSettingsButton)
   end
 
   local isLeader = isLobbyLeader(controller)
@@ -145,6 +165,7 @@ require("datasources_change_map_categories")
 
 CoD.LobbyButtons.STATS = statsButton
 CoD.LobbyButtons.QUICK_SETTINGS = quickSettingsButton
+CoD.LobbyButtons.XERCES_SETTINGS = xercesSettingsButton
 CoD.LobbyButtons.FRIENDS_PARTY = friendsPartyButton
 require("datasources_gamesettingsflyout_buttons")
 
@@ -269,6 +290,9 @@ local addCustomButtons = function(controller, menuId, buttonTable, isLeader)
   then
     utils.AddSmallButton(controller, buttonTable, CoD.LobbyButtons.STATS)
     utils.AddSmallButton(controller, buttonTable, CoD.LobbyButtons.QUICK_SETTINGS)
+    if showsXercesSettings(menuId) then
+      utils.AddSmallButton(controller, buttonTable, CoD.LobbyButtons.XERCES_SETTINGS)
+    end
   end
 
   addFriendsPartyButton(controller, menuId, buttonTable, isLeader)
