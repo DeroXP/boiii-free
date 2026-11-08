@@ -89,8 +89,9 @@ hash, sent with the link, shows that the zip is the one we made.
   and detail sharper. Upscaler Sharpness (0% to 100%, 80% by default) sets how
   much it sharpens, at 100% too. The HUD is not touched. Both are in Graphics >
   Video and in XERCES SETTINGS' GRAPHICS tab (a loaded mod may replace the
-  Graphics menu); Upscaler is off until you turn it on. DLSS and DLAA are not in
-  this beta.
+  Graphics menu); Upscaler is off until you turn it on. NVIDIA DLSS and DLAA are
+  not in this package: they need a separate module and NVIDIA's own file, which
+  NVIDIA's licence keeps out of the zip, so the option does not show for you.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.
@@ -146,7 +147,7 @@ Open an issue at <https://github.com/DeroXP/boiii-free/issues>, or tell us in
 the tester channel. Please include:
 
 - the Xerces version (About, or the top of the game's main menu), for example
-  `Xerces 0.1.0-beta.12 (3f09512d)`;
+  `Xerces 0.1.0-beta.13 (3f09512d)`;
 - what you did, what you expected and what happened;
 - the mods you had on, in their order, the mode and the map;
 - Diagnostics > Copy report, pasted in;
