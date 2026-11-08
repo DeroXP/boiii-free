@@ -191,6 +191,7 @@ launch_outcome preview_launch(const launch_inputs &in) {
   out.command_line = command.command_line;
   out.db_pool = db_pool::requested(command.args);
   out.precise_limiter = frame_pacing::requested(command.args);
+  out.record_frames = has_launch_flag(command.args, "-xerces-record-frames");
   out.flip_model = flip_model::requested(command.args);
   if (!command.ok()) {
     out.message = command.diags.items().empty()
@@ -417,6 +418,15 @@ launch_outcome launch_game(const launch_inputs &in,
       {L"XERCES_LAUNCH_ID", utf16(journal.launch_id)}};
   if (paths.client_data) {
     changes.emplace_back(L"XERCES_DATA_PATH", paths.client_data->wstring());
+  }
+  if (out.record_frames) {
+    // The frame probe (docs/DESIGN.md 12.2): a run of ten minutes that starts
+    // 20 s into the first level. Its files may not go under AppData or the
+    // game's folder, so they go next to the client.
+    changes.emplace_back(L"XERCES_BENCH", L"1");
+    changes.emplace_back(L"XERCES_BENCH_AUTO", L"ingame:20:600");
+    changes.emplace_back(L"XERCES_BENCH_OUT",
+                         (paths.client.parent_path() / "bench").wstring());
   }
   std::wstring environment;
   if (wchar_t *current = GetEnvironmentStringsW()) {

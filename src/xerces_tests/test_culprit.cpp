@@ -417,3 +417,20 @@ TEST_CASE("culprit: with experimental settings on, the settings are tested "
   // The settings themselves stay on for an ordinary launch.
   CHECK(preview_launch(in).flip_model);
 }
+
+TEST_CASE("launch: -xerces-record-frames is seen in the preview") {
+  launcher_config config = profile({}, "");
+  const game_state game;
+  const std::vector<installed_content> catalog;
+  launch_inputs in;
+  in.config = &config;
+  in.game = &game;
+  in.catalog = &catalog;
+  in.mode = "zm";
+  in.modded = false;
+  CHECK(!preview_launch(in).record_frames);
+  config.extra_flags = {"-xerces-record-frames"};
+  const launch_outcome with = preview_launch(in);
+  CHECK(with.record_frames);
+  CHECK(with.command_line.find("-xerces-record-frames") != std::string::npos);
+}

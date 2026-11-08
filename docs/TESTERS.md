@@ -96,6 +96,10 @@ hash, sent with the link, shows that the zip is the one we made.
   load with heavy mods: the game's 2 GB zone memory becomes 4, 6 or 8 GB. It
   uses only what a map needs, so a bigger size matters only for the heaviest
   stacks; try 4 GB first. Turn it off if the game crashes.
+- **Record frame times** (Settings > Launch, experimental): the next game writes
+  ten minutes of frame times, from 20 seconds into its first level, to a `bench`
+  folder next to Xerces.exe (three small files). Play as usual, then send those
+  files to show where a map stutters. Turn it off afterwards.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.
@@ -151,7 +155,7 @@ Open an issue at <https://github.com/DeroXP/boiii-free/issues>, or tell us in
 the tester channel. Please include:
 
 - the Xerces version (About, or the top of the game's main menu), for example
-  `Xerces 0.1.0-beta.13 (3f09512d)`;
+  `Xerces 0.1.0-beta.14 (3f09512d)`;
 - what you did, what you expected and what happened;
 - the mods you had on, in their order, the mode and the map;
 - Diagnostics > Copy report, pasted in;

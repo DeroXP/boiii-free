@@ -154,6 +154,7 @@ public:
     model.Bind("cinematics_note", &cinematics_note_);
     model.Bind("db_pool_gb", &db_pool_gb_);
     model.Bind("precise_limiter", &precise_limiter_);
+    model.Bind("record_frames", &record_frames_);
     model.Bind("close_on_launch", &close_on_launch_);
     model.Bind("flags", &flags_);
     model.Bind("flags_hint", &flags_hint_);
@@ -317,6 +318,7 @@ private:
         {"flip-model"},
         {"fps-field", "fps-slider"},
         {"precise-limiter"},
+        {"record-frames"},
         {"fov-field", "fov-slider"},
         {"vsync-game", "vsync-on", "vsync-off"},
         {"drawfps-game", "drawfps-on", "drawfps-off"},
@@ -656,6 +658,7 @@ private:
     precise_limiter_ =
         core::has_flag(c.extra_flags, core::frame_pacing::flag_name);
     flip_model_ = core::has_flag(c.extra_flags, core::flip_model::flag_name);
+    record_frames_ = core::has_flag(c.extra_flags, "xerces-record-frames");
     close_on_launch_ = c.close_on_launch;
     if (keep(text_field::flags)) {
       flags_ = core::join_flags(c.extra_flags);
@@ -1067,6 +1070,14 @@ private:
           on ? owner_->tr("Precise FPS limit is on (-xerces-precise-limiter). "
                           "Turn it off if the game stutters.")
              : owner_->tr("Xerces no longer passes -xerces-precise-limiter."));
+    } else if (key == "record_frames") {
+      const bool on = !core::has_flag(c.extra_flags, "xerces-record-frames");
+      set_flags(
+          core::with_flag(c.extra_flags, "xerces-record-frames", on),
+          std::string("record_frames ") + (on ? "on" : "off"),
+          on ? owner_->tr("The next game records ten minutes of frame times "
+                          "(-xerces-record-frames).")
+             : owner_->tr("Xerces no longer passes -xerces-record-frames."));
     } else if (key == "flip_model") {
       const bool on =
           !core::has_flag(c.extra_flags, core::flip_model::flag_name);
@@ -1492,7 +1503,7 @@ private:
 
   bool nointro_ = true, nocinematics_ = false, close_on_launch_ = false;
   int db_pool_gb_ = 0; // 0 off, else 4, 6 or 8
-  bool precise_limiter_ = false, flip_model_ = false;
+  bool precise_limiter_ = false, flip_model_ = false, record_frames_ = false;
   // The game's own config.cfg has boiii_skipIntro / boiii_skipCinematics on.
   bool game_skips_intro_ = false, game_skips_cinematics_ = false;
   Rml::String intro_note_, cinematics_note_;

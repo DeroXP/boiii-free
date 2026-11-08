@@ -1744,6 +1744,22 @@ Not tested yet: a stack that needs more than 4 GiB (nothing on this PC does),
 the culprit search's handling of a 6 or 8 GB choice beyond the unit tests, and
 the diagnostics screen's wording (it still says "On (-xerces-db-pool)").
 
+### Record frame times (2026-11-08)
+
+Settings > Launch > "Record frame times" adds `-xerces-record-frames`; the
+launch then gives the game `XERCES_BENCH=1`, `XERCES_BENCH_AUTO=ingame:20:600`
+and `XERCES_BENCH_OUT=<client folder>ench` (the probe refuses AppData and the
+game's folder).
+
+- [x] A launch from the launcher (test home, vanilla): the game log has
+      `perf.bench.armed`, "Frame probe on; runs go to <client folder>ench". The
+      setting is saved as `-xerces-record-frames` in the flags.
+- [x] Unit test: the preview sees the flag (585 pass).
+
+Not tested yet: a full ten-minute capture from the launcher (the probe itself
+was used for the runs below), and what the files look like when the player
+changes maps during the run.
+
 ### Town Reimagined stutter, first look (2026-11-08)
 
 The player reported stutter on Town Reimagined with their stack, and DLSS "maybe

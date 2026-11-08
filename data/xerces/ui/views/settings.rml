@@ -115,6 +115,14 @@
 
 			<div class="field">
 				<div class="field-text">
+					<div class="field-name">Record frame times (experimental)</div>
+					<div class="field-help">-xerces-record-frames: the next game writes ten minutes of frame times, from 20 seconds into its first level, to a bench folder next to Xerces.exe (three small files). Use it to show where a map stutters: play as usual and send the files. Costs almost nothing. Turn it off when you are done.</div>
+				</div>
+				<button id="record-frames" class="toggle" data-class-on="record_frames" data-event-click="toggle('record_frames')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="record_frames">On</span><span class="toggle-state" data-if="!record_frames">Off</span></button>
+			</div>
+
+			<div class="field">
+				<div class="field-text">
 					<div class="field-name">Field of view</div>
 					<div class="field-help">cg_fov_default, 65 to 120. The slider's left end is the game's setting.</div>
 					<div class="field-note">{{fov_note}}</div>

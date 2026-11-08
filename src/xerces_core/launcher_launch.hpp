@@ -107,6 +107,9 @@ struct launch_outcome {
   // -xerces-flip-model (flip-model presentation); the journal records them.
   bool db_pool = false;
   bool precise_limiter = false;
+  // -xerces-record-frames: the launch records ten minutes of frame times from
+  // the first level (the frame probe, XERCES_BENCH, into <client folder>ench).
+  bool record_frames = false;
   bool flip_model = false;
 };
 
