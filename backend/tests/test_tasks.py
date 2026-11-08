@@ -15,6 +15,8 @@ from app.models import (
     DeletedUsername,
     FriendRequest,
     Invite,
+    InviteLink,
+    Knock,
     Pack,
     RefreshToken,
     Report,
@@ -52,6 +54,8 @@ async def test_cleanup_deletes_only_expired_rows(app: FastAPI) -> None:
             db.add(Invite(from_user_id=a.id, to_user_id=b.id, session=tag, created_at=now, expires_at=when, status="pending"))
             db.add(RefreshToken(user_id=a.id, token_hash=tag * 16, family_id=uuid.uuid4(), created_at=now, expires_at=when))
             db.add(Pack(code=f"XRC-{'0' if tag == 'old' else '1'}0000000", owner_id=a.id, data={}, created_at=now, expires_at=when))
+            db.add(InviteLink(code=f"XJN-{'0' if tag == 'old' else '1'}0000000", owner_id=a.id, mode="zm", created_at=now, expires_at=when))
+            db.add(Knock(from_user_id=b.id, to_user_id=a.id, mode="zm" if tag == "old" else "mp", created_at=now, expires_at=when, status="pending"))
         db.add(FriendRequest(from_user_id=a.id, to_user_id=b.id, created_at=now, expires_at=past))
         db.add(FriendRequest(from_user_id=b.id, to_user_id=a.id, created_at=now, expires_at=future))
         db.add(Report(reporter_id=a.id, reported_id=b.id, reason="spam", created_at=now - timedelta(days=91), status="open"))
@@ -63,6 +67,8 @@ async def test_cleanup_deletes_only_expired_rows(app: FastAPI) -> None:
     counts = await run_cleanup(sessionmaker)
     assert counts == {
         "invites": 1,
+        "invite_links": 1,
+        "knocks": 1,
         "friend_requests": 1,
         "refresh_tokens": 1,
         "packs": 1,
@@ -75,6 +81,8 @@ async def test_cleanup_deletes_only_expired_rows(app: FastAPI) -> None:
         assert await db.scalar(select(Invite.session)) == "new"
         assert await db.scalar(select(func.count()).select_from(RefreshToken)) == 1
         assert await db.scalar(select(Pack.code)) == "XRC-10000000"
+        assert await db.scalar(select(InviteLink.code)) == "XJN-10000000"
+        assert await db.scalar(select(Knock.mode)) == "mp"
         assert await db.scalar(select(FriendRequest.from_user_id)) == b.id
         assert await db.scalar(select(Report.reason)) == "other"
         assert await db.scalar(select(DeletedUsername.username_lower)) == "held"

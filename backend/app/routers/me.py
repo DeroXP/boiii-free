@@ -19,6 +19,8 @@ from app.models import (
     FriendRequest,
     Friendship,
     Invite,
+    InviteLink,
+    Knock,
     Pack,
     RefreshToken,
     Report,
@@ -230,12 +232,27 @@ async def export_me(user: UserDep, db: DbDep) -> dict[str, Any]:
             select(Pack).where(Pack.owner_id == me).order_by(Pack.created_at, Pack.id)
         )
     ).all()
+    links = (
+        await db.scalars(
+            select(InviteLink)
+            .where(InviteLink.owner_id == me)
+            .order_by(InviteLink.created_at, InviteLink.id)
+        )
+    ).all()
+    knocks = (
+        await db.scalars(
+            select(Knock)
+            .where(or_(Knock.from_user_id == me, Knock.to_user_id == me))
+            .order_by(Knock.created_at, Knock.id)
+        )
+    ).all()
 
     other_ids = {f.user_high if f.user_low == me else f.user_low for f in friendships}
     other_ids |= {r.to_user_id if r.from_user_id == me else r.from_user_id for r in requests}
     other_ids |= {b.blocked_id for b in blocks}
     other_ids |= {r.reported_id for r in reports if r.reported_id is not None}
     other_ids |= {i.to_user_id if i.from_user_id == me else i.from_user_id for i in invites}
+    other_ids |= {k.to_user_id if k.from_user_id == me else k.from_user_id for k in knocks}
     names = await usernames(db, other_ids)
 
     def invite_row(invite: Invite, other_key: str, other_id: Any) -> dict[str, Any]:
@@ -345,6 +362,43 @@ async def export_me(user: UserDep, db: DbDep) -> dict[str, Any]:
             }
             for p in packs
         ],
+        "invite_links": [
+            {
+                "code": link.code,
+                "mode": link.mode,
+                "created_at": iso(link.created_at),
+                "expires_at": iso(link.expires_at),
+            }
+            for link in links
+        ],
+        "knocks": {
+            "received": [
+                {
+                    "id": str(k.id),
+                    "from_user_id": str(k.from_user_id),
+                    "from_username": names.get(k.from_user_id),
+                    "mode": k.mode,
+                    "status": k.status,
+                    "created_at": iso(k.created_at),
+                    "expires_at": iso(k.expires_at),
+                }
+                for k in knocks
+                if k.to_user_id == me
+            ],
+            # No status: a declined knock must not tell the one who knocked (links.py).
+            "sent": [
+                {
+                    "id": str(k.id),
+                    "to_user_id": str(k.to_user_id),
+                    "to_username": names.get(k.to_user_id),
+                    "mode": k.mode,
+                    "created_at": iso(k.created_at),
+                    "expires_at": iso(k.expires_at),
+                }
+                for k in knocks
+                if k.from_user_id == me
+            ],
+        },
     }
 
 

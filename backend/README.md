@@ -63,10 +63,20 @@ Outside production the interactive docs are served at `/docs`.
 | POST   | `/v1/blocks`                        | yes         | 204, body `{"username"}`                                     |
 | DELETE | `/v1/blocks/{user_id}`              | yes         | unblock, 204                                                 |
 | POST   | `/v1/reports`                       | yes         | always 202                                                   |
-| POST   | `/v1/invites`                       | yes         | 201 between friends, otherwise 403                           |
+| POST   | `/v1/invites`                       | yes         | 201 to a friend or an accepted knock, otherwise 403          |
 | GET    | `/v1/invites`                       | yes         | pending incoming, and your outgoing                          |
 | POST   | `/v1/invites/{id}/accept`           | yes         | recipient only                                               |
 | POST   | `/v1/invites/{id}/decline`          | yes         | recipient only, 204                                          |
+| POST   | `/v1/invites/{id}/punch`            | yes         | recipient of an accepted invite, `{"port"}`; `{"delivered"}` |
+| POST   | `/v1/links`                         | yes         | 201, a new invite link (`{"mode"}`); old ones stop working   |
+| GET    | `/v1/links`                         | yes         | `{"link"}`: your live link, or null                          |
+| DELETE | `/v1/links`                         | yes         | 204, your links stop working                                 |
+| GET    | `/v1/links/{code}`                  | yes         | whose link it is, or 404                                     |
+| POST   | `/v1/links/{code}/knock`            | yes         | 201, asks the link's owner to let you join                   |
+| GET    | `/v1/knocks`                        | yes         | pending knocks on your links, and your own knocks            |
+| POST   | `/v1/knocks/{id}/accept`            | yes         | host only; they may invite you for an hour                   |
+| POST   | `/v1/knocks/{id}/decline`           | yes         | host only, 204                                               |
+| GET    | `/join/{code}`                      | no          | HTML share page with an `xerces://join/<code>` button        |
 | POST   | `/v1/packs`                         | yes         | 201, `{"code", "expires_at"}`                                |
 | GET    | `/v1/packs/{code}`                  | no          | the pack, or 404                                             |
 | DELETE | `/v1/packs/{code}`                  | yes         | owner only, 204                                              |
@@ -85,6 +95,20 @@ you or accepts no requests is kept for you alone: it sits in your outgoing list
 like an unanswered request until it expires, and they never see it. Sending it
 again after they start accepting requests from you delivers it, and if they ask
 you themselves, you become friends, as with any request you sent.
+
+Invite links (`XJN-` plus 8 characters) last a day; a new one replaces the old.
+Following one, a signed-in player knocks: the owner's launcher shows who asks,
+and accepting lets the owner invite them for an hour although they are not
+friends, whatever their invite setting. Knocks last 10 minutes. A declined knock
+reads "pending" to whoever knocked until it expires, knocking again changes
+nothing, and a knock across a block is answered like any other but goes nowhere.
+The share page names nobody. A link carries no server address: that still goes
+only in the invite.
+
+Hole punching: after accepting an invite, the joiner sends its game's port to
+`/v1/invites/{id}/punch`. The host's launcher is pushed the joiner's public
+address and that port, and has its game send a few packets there so the host's
+router lets the joiner in. The address is passed on, never stored or logged.
 
 ## WebSocket
 
@@ -119,6 +143,9 @@ The server pushes:
   it
 - `offline` with `user_id` when a friend disconnects, or stops being visible
 - `invite` with the invite's fields when a friend invites you
+- `knock` with the knock's fields when someone knocks on your invite link
+- `punch` with `invite_id`, `from_user_id` and `address` (`ip:port`, IPv6 in
+  brackets) when the player you invited is about to connect
 - `friend_request` when someone sends you a friend request
 - `friend_added` with `user_id` and `username` when a request is accepted
 - `error` with `code` and `message` for a malformed message (the connection
@@ -296,6 +323,10 @@ logged.
 | Friend requests            | 20 per day per account                                         |
 | Invites                    | 30 per hour per account, and 1 per recipient per 30 seconds    |
 | Own address                | 30 per hour per account                                        |
+| Hole punching              | 30 per hour per account                                        |
+| Invite links               | 20 per day per account; 60 lookups per minute per account      |
+| Knocks                     | 30 per hour per account, 1 per host per 30 seconds             |
+| Share page                 | 60 per minute per address                                      |
 | Reports                    | 10 per day per account                                         |
 | Pack creation              | 20 per day per account                                         |
 | Pack lookup                | 120 per minute per address                                     |

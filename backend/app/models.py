@@ -40,6 +40,8 @@ PRIVACY_INVITES = ("friends", "nobody")
 REPORT_REASONS = ("spam", "harassment", "cheating", "impersonation", "other")
 REPORT_STATUSES = ("open", "closed")
 INVITE_STATUSES = ("pending", "accepted", "declined")
+KNOCK_STATUSES = ("pending", "accepted", "declined")
+GAME_MODES = ("zm", "mp", "cp")
 CRASH_KINDS = ("exception", "fail_fast", "out_of_memory", "unknown_exit")
 
 
@@ -208,6 +210,42 @@ class Invite(Base):
     to_user_id: Mapped[uuid.UUID] = mapped_column(_user_fk(), index=True)
     session: Mapped[str] = mapped_column(String(256))
     pack_code: Mapped[str | None] = mapped_column(String(12))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(index=True)
+    status: Mapped[str] = mapped_column(String(10), default="pending", server_default="pending")
+
+
+class InviteLink(Base):
+    """A host's link that asks to join their game (DESIGN.md 10.12): XJN- plus 8 Crockford base32
+    characters, kept a day. A new one replaces the host's old ones."""
+
+    __tablename__ = "invite_links"
+    __table_args__ = (CheckConstraint(_in("mode", GAME_MODES), name="mode"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(12), unique=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(_user_fk(), index=True)
+    mode: Mapped[str] = mapped_column(String(2))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(index=True)
+
+
+class Knock(Base):
+    """A player who followed a host's link and asks to join. Pending for 10 minutes; once the
+    host accepts, the host may invite them for an hour although they are not friends."""
+
+    __tablename__ = "knocks"
+    __table_args__ = (
+        CheckConstraint(_in("status", KNOCK_STATUSES), name="status"),
+        CheckConstraint(_in("mode", GAME_MODES), name="mode"),
+        CheckConstraint("from_user_id <> to_user_id", name="not_self"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    from_user_id: Mapped[uuid.UUID] = mapped_column(_user_fk(), index=True)
+    to_user_id: Mapped[uuid.UUID] = mapped_column(_user_fk(), index=True)
+    # The link's mode when they knocked, so the host sees what they asked to join.
+    mode: Mapped[str] = mapped_column(String(2))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(index=True)
     status: Mapped[str] = mapped_column(String(10), default="pending", server_default="pending")

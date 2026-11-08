@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Block, FriendRequest, Friendship, Invite, User
+from app.models import Block, FriendRequest, Friendship, Invite, Knock, User
 from app.schemas import username_lookup_key
 
 
@@ -115,13 +115,15 @@ async def delete_requests_between(
 async def cut_ties(
     db: AsyncSession, a: uuid.UUID, b: uuid.UUID, *, keep_hidden: bool = False
 ) -> bool:
-    """Remove the friendship, friend requests and invites between two users (a block does this).
+    """Remove the friendship, friend requests, invites and knocks between two users (a block does
+    this).
 
     With `keep_hidden`, requests the recipient never sees stay. Returns whether they were friends.
     """
     were_friends = await remove_friendship(db, a, b)
     await delete_requests_between(db, a, b, keep_hidden=keep_hidden)
     await delete_invites_between(db, a, b)
+    await delete_knocks_between(db, a, b)
     return were_friends
 
 
@@ -132,6 +134,19 @@ async def delete_invites_between(db: AsyncSession, a: uuid.UUID, b: uuid.UUID) -
             or_(
                 and_(Invite.from_user_id == a, Invite.to_user_id == b),
                 and_(Invite.from_user_id == b, Invite.to_user_id == a),
+            )
+        )
+        .execution_options(synchronize_session=False)
+    )
+
+
+async def delete_knocks_between(db: AsyncSession, a: uuid.UUID, b: uuid.UUID) -> None:
+    await db.execute(
+        delete(Knock)
+        .where(
+            or_(
+                and_(Knock.from_user_id == a, Knock.to_user_id == b),
+                and_(Knock.from_user_id == b, Knock.to_user_id == a),
             )
         )
         .execution_options(synchronize_session=False)

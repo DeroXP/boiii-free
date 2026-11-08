@@ -159,7 +159,7 @@ def test_path_detector_takes_linear_time() -> None:
         ({"schema": "1"}, "pack.schema must be 1"),
         ({"schema": True}, "pack.schema must be 1"),
         ({"name": ""}, "pack.name"),
-        ({"name": "n" * 65}, "pack.name"),
+        ({"name": "n" * 81}, "pack.name"),
         ({"name": 5}, "pack.name"),
         ({"mods": "ws.1"}, "pack.mods"),
         ({"mods": [{"id": "ws.1"}] * 129}, "pack.mods"),

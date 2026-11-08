@@ -115,6 +115,22 @@ def normalize_pack_code(value: str) -> str | None:
     return code if _PACK_CODE.fullmatch(code) else None
 
 
+_LINK_CODE = re.compile(r"XJN-[0-9A-HJKMNP-TV-Z]{8}")
+
+
+def normalize_link_code(value: str) -> str | None:
+    """Canonical XJN-XXXXXXXX invite link code, forgiving case and look-alikes, as pack codes."""
+    text = value.strip().upper()
+    if text.startswith("XJN-"):
+        body = text[4:]
+    elif text.startswith("XJN"):
+        body = text[3:]
+    else:
+        return None
+    code = "XJN-" + body.replace("-", "").translate(_CROCKFORD_LOOKALIKES)
+    return code if _LINK_CODE.fullmatch(code) else None
+
+
 class _Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -364,6 +380,65 @@ class InvitesOut(BaseModel):
 
 class PackIn(_Input):
     pack: dict[str, Any]
+
+
+class PunchIn(_Input):
+    """The joiner's game port, for the host's game to send to (hole punching)."""
+
+    port: int = Field(ge=1, le=65535)
+
+
+# ----------------------------------------------------------------------------- invite links
+
+
+class LinkIn(_Input):
+    mode: Literal["zm", "mp", "cp"] = "zm"
+
+
+class LinkOut(BaseModel):
+    code: str
+    # The share page, relative to the server: the launcher puts its own base URL in front.
+    path: str
+    mode: Literal["zm", "mp", "cp"]
+    expires_at: datetime
+
+
+class LinksOut(BaseModel):
+    """The caller's live invite link, if they have one (one at a time)."""
+
+    link: LinkOut | None
+
+
+class LinkInfoOut(BaseModel):
+    code: str
+    host_user_id: uuid.UUID
+    host_username: str
+    mode: Literal["zm", "mp", "cp"]
+    expires_at: datetime
+
+
+class KnockOut(BaseModel):
+    id: uuid.UUID
+    from_user_id: uuid.UUID
+    from_username: str
+    to_user_id: uuid.UUID
+    to_username: str
+    mode: Literal["zm", "mp", "cp"]
+    # Outgoing knocks never show "declined": the host's answer stays theirs (it reads "pending"
+    # until it expires).
+    status: Literal["pending", "accepted", "declined"]
+    created_at: datetime
+    expires_at: datetime
+
+
+class KnocksOut(BaseModel):
+    incoming: list[KnockOut]
+    outgoing: list[KnockOut]
+
+
+class PunchOut(BaseModel):
+    # Whether the host's launcher was connected to take it; the game is not asked to confirm.
+    delivered: bool
 
 
 class PackCreatedOut(BaseModel):

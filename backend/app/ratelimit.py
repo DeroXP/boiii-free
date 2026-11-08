@@ -41,6 +41,12 @@ DEFAULT_RULES: Mapping[str, Rule] = {
     "invite": Rule(30, HOUR),  # per user
     "invite_recipient": Rule(1, 30),  # per sender and recipient
     "own_address": Rule(30, HOUR),  # GET /v1/me/address, per user
+    "punch": Rule(30, HOUR),  # POST /v1/invites/{id}/punch, per user
+    "link_create": Rule(20, DAY),  # per user
+    "link_fetch": Rule(60, 60),  # GET /v1/links/{code}, per user
+    "join_page": Rule(60, 60),  # GET /join/{code}, per hashed address
+    "knock": Rule(30, HOUR),  # per user
+    "knock_host": Rule(1, 30),  # per knocker and host
     "report": Rule(10, DAY),  # per user
     "pack_create": Rule(20, DAY),  # per user
     "pack_fetch": Rule(120, 60),  # per hashed address (codes are public, this stops scraping)

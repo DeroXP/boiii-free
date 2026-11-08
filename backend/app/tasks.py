@@ -14,6 +14,8 @@ from app.models import (
     DeletedUsername,
     FriendRequest,
     Invite,
+    InviteLink,
+    Knock,
     Pack,
     RefreshToken,
     Report,
@@ -31,11 +33,13 @@ CRASH_RETENTION = timedelta(days=90)
 async def run_cleanup(
     sessionmaker: async_sessionmaker[AsyncSession], now: datetime | None = None
 ) -> dict[str, int]:
-    """Delete expired invites, friend requests, refresh tokens, packs and held names of deleted
-    accounts, old reports and old crash reports (their minidumps go with them)."""
+    """Delete expired invites, invite links, knocks, friend requests, refresh tokens, packs and held
+    names of deleted accounts, old reports and old crash reports (their minidumps go with them)."""
     now = now or utcnow()
     statements = {
         "invites": delete(Invite).where(Invite.expires_at < now),
+        "invite_links": delete(InviteLink).where(InviteLink.expires_at < now),
+        "knocks": delete(Knock).where(Knock.expires_at < now),
         "friend_requests": delete(FriendRequest).where(FriendRequest.expires_at < now),
         "refresh_tokens": delete(RefreshToken).where(RefreshToken.expires_at < now),
         "packs": delete(Pack).where(Pack.expires_at < now),

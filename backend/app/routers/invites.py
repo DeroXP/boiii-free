@@ -1,9 +1,10 @@
-"""Game invites between friends. They live 10 minutes."""
+"""Game invites between friends, or to a player whose knock the host accepted (links.py). They
+live 10 minutes."""
 
 import uuid
 from datetime import timedelta
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,12 +13,22 @@ from app.errors import ApiError, not_found
 from app.log import log_event
 from app.models import Invite, User, utcnow
 from app.presence import blocked_now
-from app.schemas import InviteIn, InviteOut, InvitesOut
+from app.routers.links import accepted_knock
+from app.schemas import InviteIn, InviteOut, InvitesOut, PunchIn, PunchOut
+from app.security import public_address
 from app.social import are_friends, is_blocked_either_way, usernames
 
 router = APIRouter(prefix="/v1/invites", tags=["invites"])
 
 INVITE_TTL = timedelta(minutes=10)
+
+
+async def _may_invite(db: AsyncSession, host: uuid.UUID, target: User) -> bool:
+    """Friends who take invites; or anyone who knocked on the host's link and was let in, whatever
+    their invite setting (they asked)."""
+    if target.privacy_invites == "friends" and await are_friends(db, host, target.id):
+        return True
+    return await accepted_knock(db, target.id, host)
 
 
 def invite_out(invite: Invite, names: dict[uuid.UUID, str]) -> InviteOut:
@@ -44,8 +55,7 @@ async def create_invite(
     allowed = (
         target is not None
         and target.id != user.id
-        and target.privacy_invites == "friends"
-        and await are_friends(db, user.id, target.id)
+        and await _may_invite(db, user.id, target)
         and not await is_blocked_either_way(db, user.id, target.id)
     )
     if not allowed or target is None:
@@ -118,7 +128,10 @@ async def _pending_invite_for(db: AsyncSession, invite_id: uuid.UUID, user: User
 @router.post("/{invite_id}/accept", response_model=InviteOut)
 async def accept_invite(invite_id: uuid.UUID, user: UserDep, db: DbDep) -> InviteOut:
     invite = await _pending_invite_for(db, invite_id, user)
-    if not await are_friends(db, user.id, invite.from_user_id):
+    if not (
+        await are_friends(db, user.id, invite.from_user_id)
+        or await accepted_knock(db, user.id, invite.from_user_id)
+    ):
         raise not_found("Invite not found.")
     invite.status = "accepted"
     await db.commit()
@@ -132,3 +145,46 @@ async def decline_invite(invite_id: uuid.UUID, user: UserDep, db: DbDep) -> Resp
     invite.status = "declined"
     await db.commit()
     return Response(status_code=204)
+
+
+@router.post("/{invite_id}/punch", response_model=PunchOut)
+async def punch(
+    invite_id: uuid.UUID,
+    body: PunchIn,
+    request: Request,
+    user: UserDep,
+    db: DbDep,
+    services: ServicesDep,
+) -> PunchOut:
+    """Hole punching (DESIGN.md 10.13): the joiner of an accepted invite gives its game's port; the
+    host's launcher is sent the joiner's public address and port, and has its game send a few
+    packets there, so the host's router lets the joiner's connection in.
+
+    The host learns the joiner's address here, as it would the moment they connected. Neither
+    side's address is stored or logged.
+    """
+    services.limiter.enforce("punch", str(user.id))
+    invite = await db.get(Invite, invite_id)
+    if (
+        invite is None
+        or invite.to_user_id != user.id
+        or invite.status != "accepted"
+        or invite.expires_at <= utcnow()
+        or await is_blocked_either_way(db, user.id, invite.from_user_id)
+    ):
+        raise not_found("Invite not found.")
+    config = services.config
+    address = public_address(request.scope, config.trust_proxy, config.proxy_hops)
+    if address is None:
+        raise ApiError(503, "address_unknown", "The server cannot tell your public address.")
+    endpoint = f"[{address}]:{body.port}" if ":" in address else f"{address}:{body.port}"
+    delivered = services.hub.send(
+        invite.from_user_id,
+        {
+            "type": "punch",
+            "invite_id": str(invite.id),
+            "from_user_id": str(user.id),
+            "address": endpoint,
+        },
+    )
+    return PunchOut(delivered=delivered)

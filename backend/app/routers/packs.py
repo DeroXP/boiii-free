@@ -27,7 +27,7 @@ router = APIRouter(prefix="/v1/packs", tags=["packs"])
 
 PACK_TTL = timedelta(days=90)
 MAX_PACK_BYTES = 64 * 1024
-MAX_PACK_NAME = 64
+MAX_PACK_NAME = 80  # as the launcher allows (pack.cpp)
 MAX_PACK_MODS = 128
 MAX_PACK_DEPTH = 32
 CODE_ATTEMPTS = 5

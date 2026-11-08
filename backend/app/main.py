@@ -30,6 +30,7 @@ from app.routers import (
     friends,
     health,
     invites,
+    links,
     me,
     packs,
     reports,
@@ -142,7 +143,9 @@ def create_app(settings: Settings | None = None, *, tuning: Tuning | None = None
     )
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestLogMiddleware)
-    for module in (health, auth, me, friends, blocks, reports, invites, packs, ws, crashes, admin):
+    for module in (
+        health, auth, me, friends, blocks, reports, invites, links, packs, ws, crashes, admin
+    ):
         app.include_router(module.router)
     return app
 
