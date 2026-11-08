@@ -165,6 +165,7 @@ struct auto_state {
   bool done = false;
   std::int64_t start_at = 0;
   std::int64_t end_at = 0;
+  std::int64_t left_level_at = 0; // first frame outside the level, 0 = inside
 };
 
 run_state run;    // main thread only
@@ -383,6 +384,18 @@ void step_auto(std::int64_t now) {
   } else if (now >= autos.end_at) {
     end_run(); // the automatic run: one ended by hand set autos.done already
     autos.done = true;
+  } else if (run.active && run.kind == "auto-ingame") {
+    // Leaving the level ends the in-game run there and writes it: otherwise
+    // a game that hangs or is closed on the way back to the menu loses the
+    // whole recording (the files are written only when a run ends).
+    if (in_level_active()) {
+      autos.left_level_at = 0;
+    } else if (autos.left_level_at == 0) {
+      autos.left_level_at = now;
+    } else if (now - autos.left_level_at >= seconds_to_ticks(2.0)) {
+      end_run();
+      autos.done = true;
+    }
   }
 }
 

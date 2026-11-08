@@ -1779,7 +1779,7 @@ operator slots are not built.
 
 ### Record frame times (2026-11-08)
 
-Settings > Launch > "Record frame times" adds `-xerces-record-frames`; the
+Settings > Display > "Record frame times" adds `-xerces-record-frames`; the
 launch then gives the game `XERCES_BENCH=1`, `XERCES_BENCH_AUTO=ingame:20:600`
 and `XERCES_BENCH_OUT=<client folder>ench` (the probe refuses AppData and the
 game's folder).
