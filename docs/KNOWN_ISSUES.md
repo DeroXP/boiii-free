@@ -79,6 +79,14 @@ to report these again, but tell us if you see them somewhere else or worse.
 - **Power On at Start flips the standard power switch.** A map that turns its
   power on another way (a quest, several switches of its own) is left as it is,
   and so are doors that only a quest or a map's own check opens.
+- **Smart zombies glow brightly up close.** Each smart zombie carries a power-up
+  glow (yellow, green or blue) that also lights it, so a crowd of them next to
+  you tints the screen. Tell us if it gets in the way.
+- **Smart zombies were tested against a player who stood still.** In our tests
+  the player could not be hurt and did not move or shoot. How the packs,
+  sprinters and ambushers play against someone moving and shooting, and in co-op
+  (a pack goes for the player furthest from the others), is not seen yet. An
+  ambusher comes out after about 22 s at most.
 - **Tested on Kino der Toten only, so far.** Without mods and with a seven-mod
   stack (PEGASUS on top, DS4C below it). Other maps and mods with their own box,
   perk or Pack-a-Punch rules may do things differently.

@@ -67,7 +67,12 @@ public:
     on_off("xerces_zm_round999",
            "Zombies, when you host: the round count goes past 255; at round "
            "999 everyone votes to exfil and win, or keep going with every "
-           "perk, infinite ammo and infinite points.");
+           "perk, infinite ammo, infinite points and only smart zombies.");
+    on_off("xerces_zm_smartZombies",
+           "Zombies, when you host: from round 20 some zombies are smart "
+           "(pack hunters, burst sprinters and ambushers, each with its own "
+           "glow): 10% at round 20, rising to 99% at round 998, all of them "
+           "from round 999.");
   }
 };
 } // namespace xerces_round_settings

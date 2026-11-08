@@ -70,16 +70,17 @@ hash, sent with the link, shows that the zip is the one we made.
   a round timer, a random loadout (two box guns each round) and a self-revive
   (back every 10 rounds; down, hold Use). Its GAMBLING tab has the Pack-a-Punch
   wheel and the coin flip; its ROUNDS tab has round skips (special and prime
-  rounds, 400 points, a vote in co-op) and rounds to 999 (the count goes past
-  255, and at 999 everyone votes to exfil or keep going). All are off until you
-  turn them on. When you host, everyone in the match gets your settings, and
-  each player sees them listed in a message when they spawn. In the match, the
-  pause menu has XERCES SETTINGS (what this match uses) and, when they are on,
-  PACK-A-PUNCH WHEEL (2,500 points, 10 in a Fire Sale, once a round, with a
-  Pack-a-Punched gun in hand: an ammo mod or the box's teddy) and COIN FLIP
-  (pick a bet; heads wins, and the payout grows each round), SKIP ROUND on a
-  round that can be skipped, and EXFIL and KEEP GOING at round 999. Not on
-  dedicated servers.
+  rounds, 400 points, a vote in co-op), rounds to 999 (the count goes past 255,
+  and at 999 everyone votes to exfil or keep going) and smart zombies (from
+  round 20 some zombies hunt in packs, sprint in bursts or wait out of sight,
+  each kind with its own glow). All are off until you turn them on. When you
+  host, everyone in the match gets your settings, and each player sees them
+  listed in a message when they spawn. In the match, the pause menu has XERCES
+  SETTINGS (what this match uses) and, when they are on, PACK-A-PUNCH WHEEL
+  (2,500 points, 10 in a Fire Sale, once a round, with a Pack-a-Punched gun in
+  hand: an ammo mod or the box's teddy) and COIN FLIP (pick a bet; heads wins,
+  and the payout grows each round), SKIP ROUND on a round that can be skipped,
+  and EXFIL and KEEP GOING at round 999. Not on dedicated servers.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.
