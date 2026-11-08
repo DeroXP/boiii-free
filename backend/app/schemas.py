@@ -208,6 +208,10 @@ class MeOut(BaseModel):
         )
 
 
+class AddressOut(BaseModel):
+    address: str
+
+
 class TokenOut(BaseModel):
     access_token: str
     refresh_token: str

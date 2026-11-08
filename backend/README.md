@@ -47,6 +47,7 @@ Outside production the interactive docs are served at `/docs`.
 | POST   | `/v1/auth/refresh`                  | no          | new token pair; the old refresh token is spent               |
 | POST   | `/v1/auth/logout`                   | no          | 204, revokes the refresh token's family, closes the socket   |
 | GET    | `/v1/me`                            | yes         | your account                                                 |
+| GET    | `/v1/me/address`                    | yes         | your public IP address, for a game invite (503 when unknown) |
 | PATCH  | `/v1/me/privacy`                    | yes         | set `friend_requests`, `presence`, `invites`                 |
 | POST   | `/v1/me/password`                   | yes         | 204, signs out every session and access token                |
 | GET    | `/v1/me/export`                     | yes         | everything stored about you                                  |
@@ -294,6 +295,7 @@ logged.
 | Token refresh              | 30 per minute per account, and per address for unusable tokens |
 | Friend requests            | 20 per day per account                                         |
 | Invites                    | 30 per hour per account, and 1 per recipient per 30 seconds    |
+| Own address                | 30 per hour per account                                        |
 | Reports                    | 10 per day per account                                         |
 | Pack creation              | 20 per day per account                                         |
 | Pack lookup                | 120 per minute per address                                     |

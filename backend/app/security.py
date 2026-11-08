@@ -22,8 +22,8 @@ from app.log import log_event
 from app.ratelimit import RateLimiter, rate_limited
 
 
-def client_address(scope: Scope, trust_proxy: bool, proxy_hops: int = 0) -> str:
-    """The caller's address, for rate limiting only (it is hashed, never stored or logged).
+def _raw_client_address(scope: Scope, trust_proxy: bool, proxy_hops: int) -> str | None:
+    """The caller's address as given, before any normalizing.
 
     Behind Railway's edge (XERCES_TRUST_PROXY=1) it comes from X-Forwarded-For: the first entry
     when the edge replaces the header (proxy_hops 0), else the entry `proxy_hops` places from the
@@ -40,12 +40,31 @@ def client_address(scope: Scope, trust_proxy: bool, proxy_hops: int = 0) -> str:
         entries = [entry for entry in entries if entry]
         if entries:
             if proxy_hops <= 0:
-                return _normalize_address(entries[0])
-            return _normalize_address(entries[-min(proxy_hops, len(entries))])
+                return entries[0]
+            return entries[-min(proxy_hops, len(entries))]
     client = scope.get("client")
     if client and client[0]:
-        return _normalize_address(str(client[0]))
-    return "unknown"
+        return str(client[0])
+    return None
+
+
+def client_address(scope: Scope, trust_proxy: bool, proxy_hops: int = 0) -> str:
+    """The caller's address, for rate limiting only (it is hashed, never stored or logged)."""
+    raw = _raw_client_address(scope, trust_proxy, proxy_hops)
+    return "unknown" if raw is None else _normalize_address(raw)
+
+
+def public_address(scope: Scope, trust_proxy: bool, proxy_hops: int = 0) -> str | None:
+    """The caller's own public IP address, exactly (an IPv4-mapped IPv6 address as IPv4), or None
+    when it is not a global address: a private or local one means the proxy settings do not match
+    the edge, and handing that to a friend's game would send it nowhere useful."""
+    raw = _raw_client_address(scope, trust_proxy, proxy_hops)
+    ip = _parse_ip(raw.strip()) if raw is not None else None
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    if ip is None or not ip.is_global:
+        return None
+    return str(ip)
 
 
 def _normalize_address(value: str) -> str:

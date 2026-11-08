@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,12 +34,14 @@ from app.presence import (
     presence_audience,
 )
 from app.schemas import (
+    AddressOut,
     MeOut,
     PasswordChangeIn,
     PasswordConfirmIn,
     PrivacyPatch,
     password_matches_username,
 )
+from app.security import public_address
 from app.social import usernames
 from app.tokens import lock_account, revoke_all_for_user
 
@@ -94,6 +96,19 @@ async def _lock_unchanged(db: AsyncSession, user_id: uuid.UUID, checked_hash: st
 @router.get("", response_model=MeOut)
 async def get_me(user: UserDep) -> MeOut:
     return MeOut.of(user)
+
+
+@router.get("/address", response_model=AddressOut)
+async def get_address(request: Request, user: UserDep, services: ServicesDep) -> AddressOut:
+    """The caller's own public IP address, which a host's launcher puts in a game invite when the
+    router has no UPnP to tell it (DESIGN.md 10.3). Signed in only, so this is no open address
+    echo; the address is neither stored nor logged."""
+    services.limiter.enforce("own_address", str(user.id))
+    config = services.config
+    address = public_address(request.scope, config.trust_proxy, config.proxy_hops)
+    if address is None:
+        raise ApiError(503, "address_unknown", "The server cannot tell your public address.")
+    return AddressOut(address=address)
 
 
 @router.patch("/privacy", response_model=MeOut)
