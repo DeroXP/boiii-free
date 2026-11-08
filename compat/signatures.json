@@ -163,6 +163,21 @@
       },
       "features": ["db_pool"],
       "note": "Sets up the shared PMem page budget: rcx the budget in bytes (0x140000000), rdx passed on unused; clears the 0x40000-page table (so never above 16 GiB) and adds rcx >> 16 pages. db_pool raises 5 GiB to 8 GiB. Made with sigmaker.py --detoured --through 0x1420C40B4 (through the page adder call)."
+    },
+    {
+      "id": "r.final_composite",
+      "symbol": "final composite (post-fx scene to the back buffer)",
+      "kind": "function",
+      "section": ".text",
+      "patterns": [
+        "?? ?? ?? ?? ?? 58 20 55 56 57 48 81 EC 40 01 00 00 0F 29 70 D8 0F 29 78 C8 44 0F 29 40 B8 44 0F 29 48 A8 44 0F 29 50 98 44 0F 29 58 88 44 0F 29 A0 78 FF FF FF 44 0F 29 A8 68 FF FF FF 44 0F 29 B0 58 FF FF FF 44 0F 29 B8 48 FF FF FF 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 90 00 00 00 83 3D ?? ?? ?? ?? 02 49 8B D8 48 8B FA 0F B7 E9 75 14 83 3D ?? ?? ?? ?? 01 7E 0B 0F B7 D1 48 8B CF E8 ?? ?? ?? ?? 0F B7 D5 48 8B CF E8 ?? ?? ?? ??"
+      ],
+      "offset": 0,
+      "known": {
+        "0x6531394": "0x1C617E0"
+      },
+      "features": ["upscale_spatial"],
+      "note": "The last post-fx pass: cx a view index, rdx the command state, r8 the view; reached by a tail jump from the post-fx function. It sets the render target to the back buffer (the call at +0x8B is the render-target setter), its display-encoding constants, and draws one full-screen quad that samples the whole scene texture (UV 0 to 1, bilinear clamp) into the whole back buffer; the HUD is drawn after it. Found with the frame tracer (src/client/xerces/gfx_trace.cpp). Made with sigmaker.py --detoured --through 0x141C6186B."
     }
   ]
 }

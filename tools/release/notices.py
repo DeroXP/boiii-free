@@ -691,6 +691,12 @@ def entries(links: dict[str, set[str]], tp: dict[str, pathlib.Path], subs: dict,
          "deps/Microsoft.Web.WebView2 (vendored, prebuilt WebView2LoaderStatic.lib)",
          [(None, read(deps / "Microsoft.Web.WebView2/LICENSE.txt")),
           ("NOTICE.txt", read(deps / "Microsoft.Web.WebView2/NOTICE.txt"))], "", {"WebView2LoaderStatic"}),
+        ("AMD FidelityFX Super Resolution 1.0 (FSR 1)", "MIT", includes(r"upscale_shaders/fsr1_"),
+         f"deps/FidelityFX-FSR ({version('deps/FidelityFX-FSR')})",
+         [(None, read(deps / "FidelityFX-FSR/license.txt"))],
+         "Its EASU and RCAS shaders (ffx_a.h, ffx_fsr1.h) are compiled into "
+         "src/client/xerces/upscale_shaders/fsr1_*.h by tools/shaders/build_shaders.py, and the constant "
+         "setup in src/xerces_core/upscale.cpp is ported from ffx_fsr1.h.", set()),
         ("RapidJSON", "MIT", includes(r"rapidjson/"), f"deps/rapidjson ({version('deps/rapidjson')})",
          [(None, read(deps / "rapidjson/license.txt"))],
          "Only RapidJSON's include/ folder is compiled; the JSON License the text names covers "

@@ -11,7 +11,9 @@
 #include <utils/hook.hpp>
 
 #include <xerces/flip_model.hpp>
+#include <xerces/gfx_trace.hpp>
 #include <xerces/perf_probe.hpp>
+#include <xerces/upscale.hpp>
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -423,6 +425,15 @@ HRESULT __stdcall present_stub(IDXGISwapChain *swap_chain, UINT sync_interval,
 
   if (!first_present_done) {
     first_present(swap_chain, sync_interval, flags);
+  }
+
+  // Xerces: the upscaler keeps the game's context from the first Present
+  // (xerces/upscale.hpp); the frame tracer (XERCES_GFX_TRACE=1 only;
+  // xerces/gfx_trace.hpp) ends a captured frame here, before the overlay
+  // draws.
+  xerces_upscale::on_present(swap_chain);
+  if (xerces_gfx_trace::enabled()) {
+    xerces_gfx_trace::on_present(swap_chain);
   }
 
   // Xerces: ImGui and its DX11 state save and restore run only while a

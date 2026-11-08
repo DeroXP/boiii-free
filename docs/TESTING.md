@@ -1707,6 +1707,50 @@ account), the join panel and the in-game Workshop menu downloading for real, a
 freeze in a launcher-started game sending its report, two PCs (whether the later
 menus keep SHOOT HAUS joins in sync), and the controller's jump.
 
+### AMD FSR 1 upscaler (2026-11-08)
+
+DESIGN.md 13.3 (Phase A). Bench:
+`C:\Users\Ginld\XercesDev\bench\20261108-upscale` (`trace-run.ps1`,
+`fsr-run.ps1`, `ui-run.ps1`, `ui-video-run.ps1`, `func_of.py`), the test home of
+20261106-modlabels, mods off, Shadows of Evil (`zm_zod`), 4K, the player's own
+Scene Resolution Ratio 80% and Filmic SMAA T2x. The game's `players\config.ini`
+was copied before each run and put back after.
+
+- [x] The frame tracer (`XERCES_GFX_TRACE=1`): device methods shared with the
+      WARP device, no deferred contexts; a frame of 2,512 events. The scene ends
+      in a 3072x1728 R11G11B10 texture (the T2x resolve's output) and one
+      full-screen draw (`r.final_composite`, 0x1C617E0, reached by a tail jump
+      from the post-fx function) stretches it into the 4K back buffer with a
+      bilinear clamp sampler; its pixel shader scales by 2^-15, applies the
+      display curve from `PostFxCBuffer` and the brightness offset. The quad's
+      UVs are 0 to 1 (a 1.0 constant in the code). The HUD is drawn after it.
+- [x] `sigmaker.py` made the signature (one match in the first `.text`); the
+      address is not in `integrity.hpp`'s list.
+- [x] In the game: the log has `xerces.upscale.installed`, then with
+      `xerces_upscaler 1` `xerces.upscale.active` "AMD FSR 1 upscales 3072x1728
+      to 3840x2160, sharpness 8/10". A traced frame shows, after the game's
+      composite, the composite's own shader 1:1 into a 3072x1728 texture, EASU
+      to 4K and RCAS into the back buffer, then the HUD as before.
+- [x] Full-size captures of the same view: FSR 1 is visibly sharper than the
+      game's stretch at 80% (bricks, window frames, the HOTEL sign, a riveted
+      panel), same colours and brightness; sharpness 0 (EASU alone) lies
+      between; the HUD text is the same in all of them. 100% with sharpening
+      alone shows no artefacts. The FPS counter (CPU-bound here) read 242 to 253
+      either way. The player was downed before the 50% FSR capture, so 50% was
+      only seen with the game's stretch.
+- [x] Menus (front end): XERCES SETTINGS' GRAPHICS tab shows Upscaler (Off) and
+      Upscaler Sharpness (80%) with their descriptions; Graphics > Video's list
+      builds 15 rows with the two after Scene Resolution Ratio; no Lua errors.
+- [x] Unit tests: the passes chosen per size and sharpness, the stops, the EASU
+      constants against `FsrEasuCon`, the registry entry and its entry bytes
+      (575 pass). `tools/shaders/build_shaders.py --check`: the headers match.
+
+Not tested yet: a 50% capture with FSR 1 (the player went down first), other
+anti-aliasing modes (FXAA, SMAA 1x, no anti-aliasing) and HDR or other Display
+Gamma choices, a measured GPU cost, mods, Multiplayer and Campaign maps,
+changing the options through the menus and Apply, and a window resize while it
+runs.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The

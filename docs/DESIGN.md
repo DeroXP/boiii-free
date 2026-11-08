@@ -3555,6 +3555,45 @@ signs it. When that signature misses, the Present path you asked for is the
 fallback: RCAS sharpening at Present, plus an opt-in whole-frame EASU from a
 reduced back buffer with the UI included.
 
+**Built 2026-11-08 (FSR 1; NIS and the Present fallback are not built).** The
+spike used a frame tracer, `src/client/xerces/gfx_trace.cpp`: a developer tool,
+on only with `XERCES_GFX_TRACE=1`, that detours d3d11.dll's device and context
+methods through their vtables (no game addresses) and writes one frame's draws,
+dispatches, copies and clears with their callers, shaders, targets, textures,
+samplers and, on request, constant buffers to `<home>\bench\gfx-trace` (a file
+`arm` holding "<frames> [cb]" asks for a capture; `exec.cfg` runs console
+commands). What it found on build 0x6531394 (TESTING.md, "AMD FSR 1 upscaler"):
+
+- There is no separate upsample pass. The engine's final composite
+  (`r.final_composite`, reached by a tail jump from the post-fx function) draws
+  one full-screen quad that samples the whole scene texture (UV 0 to 1, a
+  bilinear clamp sampler) into the whole back buffer, and its pixel shader
+  applies the display encoding: the value times 2^-15, the curve from
+  `PostFxCBuffer` (cb8) and the brightness offset. The scene texture is the SMAA
+  T2x resolve's output (R11G11B10 float). The HUD is drawn after it, at full
+  size.
+- `r_sceneResolutionMultiplier` is an integer percentage (50 to 200).
+
+`src/client/xerces/upscale.cpp` detours the composite (feature
+`upscale_spatial`; the client checks the five entry bytes, then the pattern).
+After the game's composite has run, with `xerces_upscaler` 1 it draws the frame
+again from what the composite left bound: the composite's own pixel shader,
+constants, texture and sampler on Xerces' full-screen triangle into a texture
+the scene's size (the encoded scene 1:1, whichever composite variant the game
+picked, so Xerces never copies its encoding), EASU from there to the back
+buffer's size, and RCAS into the back buffer (EASU straight into it at sharpness
+0; RCAS alone at 100%; nothing above 100%). Everything the passes change on the
+context is put back. The rules and the FSR constants (ported from `ffx_fsr1.h`)
+are in `xerces_core/upscale.*`; the shaders are in
+`src/client/xerces/upscale_shaders/*.hlsl`, compiled by
+`tools/shaders/build_shaders.py` (the Windows SDK's fxc) into committed headers,
+and `--check` compares them. FSR 1 is `deps/FidelityFX-FSR` v1.0.2 (MIT). The
+settings: `xerces_upscaler` (0 off, 1 AMD FSR 1; off by default) and
+`xerces_upscalerSharpness` (0 to 10, 8 by default), saved with the player's
+settings, in Graphics > Video and in XERCES SETTINGS' GRAPHICS tab (a loaded mod
+can replace the Graphics menu). Not built yet: the Quality, Balanced and
+Performance presets, a mip bias, and a measured GPU cost.
+
 ### 13.4 Phase B: temporal upscalers
 
 First the temporal input contract: Halton(2,3) jitter with enough phases for the
@@ -3563,11 +3602,14 @@ bias, with the non-Filmic T2x path forced while active. Then:
 
 1. FSR 2.2.1 on native DX11, through AMD's own MIT-licensed DX11 backend patch.
    Any GPU.
-2. DLSS Super Resolution through NGX D3D11, after the licence decision (D10).
-   Not through Streamline: Streamline must be initialised before any DXGI or
-   D3D11 call through its interposer or manual hooks, which does not fit a
-   client that maps the game into its own process, and its DLSS plugin needs NGX
-   anyway (cited in `research/upscalers.md`).
+2. DLSS Super Resolution through NGX D3D11, after the licence decision (D10). On
+   2026-11-08 you chose the D10 route for DLSS and DLAA (DLAA is DLSS at 100%):
+   a separately built module outside the GPL release that uses an
+   `nvngx_dlss.dll` the player points it at, kept out of the beta zips until a
+   licence check says it can ship. Not through Streamline: Streamline must be
+   initialised before any DXGI or D3D11 call through its interposer or manual
+   hooks, which does not fit a client that maps the game into its own process,
+   and its DLSS plugin needs NGX anyway (cited in `research/upscalers.md`).
 3. FSR 3.1 upscaling per D19.
 
 **Feasibility gate** at the end of the Phase B spike, judged on your GPU: jitter

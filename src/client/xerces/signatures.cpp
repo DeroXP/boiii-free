@@ -250,6 +250,10 @@ state resolve() {
   xerces_core::require_signatures(
       s.report, "db_pool", xerces_core::db_pool_signatures::all,
       s.problem.empty() ? "not in compat/signatures.json" : s.problem);
+  // The same for the upscaler (upscale.cpp).
+  xerces_core::require_signatures(
+      s.report, "upscale_spatial", xerces_core::upscale_signatures::all,
+      s.problem.empty() ? "not in compat/signatures.json" : s.problem);
 
   std::size_t matched = 0;
   for (const auto &result : s.report.results) {

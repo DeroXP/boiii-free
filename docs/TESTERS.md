@@ -83,6 +83,14 @@ hash, sent with the link, shows that the zip is the one we made.
   (pick a bet; heads wins, and the payout grows each round), SKIP ROUND on a
   round that can be skipped, and EXFIL and KEEP GOING at round 999. Not on
   dedicated servers.
+- **AMD FSR 1 (upscaler).** With Scene Resolution Ratio (Graphics > Video) below
+  100%, the game renders the 3D scene smaller and stretches it to your screen;
+  set Upscaler to AMD FSR 1 to enlarge it with FSR 1 instead, which keeps edges
+  and detail sharper. Upscaler Sharpness (0% to 100%, 80% by default) sets how
+  much it sharpens, at 100% too. The HUD is not touched. Both are in Graphics >
+  Video and in XERCES SETTINGS' GRAPHICS tab (a loaded mod may replace the
+  Graphics menu); Upscaler is off until you turn it on. DLSS and DLAA are not in
+  this beta.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.

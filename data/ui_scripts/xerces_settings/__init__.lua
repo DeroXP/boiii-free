@@ -141,6 +141,32 @@ local SETTINGS = {
   },
 }
 
+-- The GRAPHICS tab: this PC's own settings (src/client/xerces/upscale.cpp),
+-- not the host's, so they are kept out of SETTINGS and the pause menu's list.
+-- The same two are in Graphics > Video, which a loaded mod may replace.
+local GRAPHICS = {
+  {
+    dvar = "xerces_upscaler",
+    name = "Upscaler",
+    values = { 0, 1 },
+    default = 0,
+    text = function(value)
+      return value == 1 and "AMD FSR 1" or "Off"
+    end,
+    description = "How the 3D scene is enlarged when Scene Resolution Ratio (Graphics > Video) is below 100%. AMD FSR 1 keeps edges and detail sharper than the game's own stretch. The HUD is not touched.",
+  },
+  {
+    dvar = "xerces_upscalerSharpness",
+    name = "Upscaler Sharpness",
+    values = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 },
+    default = 8,
+    text = function(value)
+      return (value * 10) .. "%"
+    end,
+    description = "How much AMD FSR 1 sharpens the scene, 0% for none. It also sharpens at a Scene Resolution Ratio of 100%.",
+  },
+}
+
 -- 50000 -> "50,000"; 0 is the map's own
 local function withCommas(number)
   local text = tostring(math.floor(number))
@@ -254,6 +280,30 @@ if Engine.GetCurrentMap() == "core_frontend" then
   settingsSource("XercesSettingsGambling", "gambling")
   settingsSource("XercesSettingsRounds", "rounds")
 
+  DataSources.XercesSettingsGraphics = DataSourceHelpers.ListSetup("XercesSettingsGraphics", function(controller)
+    local items = {}
+    for _, setting in ipairs(GRAPHICS) do
+      local options = {}
+      for _, value in ipairs(setting.values) do
+        table.insert(options, { option = setting.text(value), value = value, default = value == setting.default })
+      end
+      table.insert(
+        items,
+        CoD.OptionsUtility.CreateDvarSettings(
+          controller,
+          setting.name,
+          setting.description,
+          "XercesSettings_" .. setting.dvar,
+          setting.dvar,
+          options,
+          nil,
+          updateDvar
+        )
+      )
+    end
+    return items
+  end)
+
   DataSources.XercesSettingsTabs = DataSourceHelpers.ListSetup("XercesSettingsTabs", function(controller)
     local function tab(name, dataSourceName, title)
       return {
@@ -266,6 +316,7 @@ if Engine.GetCurrentMap() == "core_frontend" then
       tab("ZOMBIES", "XercesSettingsZombies", "Zombies, when you host"),
       tab("GAMBLING", "XercesSettingsGambling", "Gambling, when you host"),
       tab("ROUNDS", "XercesSettingsRounds", "Rounds, when you host"),
+      tab("GRAPHICS", "XercesSettingsGraphics", "Graphics, on this PC"),
       { models = { tabIcon = CoD.buttonStrings.shoulderr }, properties = { m_mouseDisabled = true } },
     }
   end, true)

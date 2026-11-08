@@ -78,3 +78,6 @@
 [submodule "deps/stb_image_resize"]
 	path = deps/stb_image_resize
 	url = https://github.com/nothings/stb_image_resize
+[submodule "deps/FidelityFX-FSR"]
+	path = deps/FidelityFX-FSR
+	url = https://github.com/GPUOpen-Effects/FidelityFX-FSR

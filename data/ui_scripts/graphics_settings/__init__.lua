@@ -10,8 +10,44 @@ DataSources.OptionPCGraphicsCard = DataSourceHelpers.ListSetup("PC.OptionPCGraph
   }
 end, true)
 
+-- The upscaler (src/client/xerces/upscale.cpp): xerces_upscaler and
+-- xerces_upscalerSharpness, set when the menu's changes are applied.
+DataSources.XercesUpscaler = DataSourceHelpers.ListSetup("PC.XercesUpscaler", function()
+  return {
+    { models = { value = 0, valueDisplay = "Off" } },
+    { models = { value = 1, valueDisplay = "AMD FSR 1" } },
+  }
+end, true)
+DataSources.XercesUpscalerSharpness = DataSourceHelpers.ListSetup("PC.XercesUpscalerSharpness", function()
+  local values = {}
+  for tenth = 0, 10 do
+    table.insert(values, { models = { value = tenth, valueDisplay = (tenth * 10) .. "%" } })
+  end
+  return values
+end, true)
+
 local pendingGpuPreference = nil
-local pendingLod = {}
+local pendingDvars = {}
+
+local function pendingDvarSetting(dvar, label, description, datasource)
+  return {
+    models = {
+      label = label,
+      description = description,
+      profileVarName = dvar,
+      profileType = "function",
+      getFunction = function()
+        return pendingDvars[dvar] or Engine.DvarInt(nil, dvar)
+      end,
+      setFunction = function(_, value)
+        pendingDvars[dvar] = value
+      end,
+      datasource = datasource,
+      widgetType = "dropdown",
+    },
+    properties = CoD.PCUtil.OptionsGenericDropdownProperties,
+  }
+end
 
 local applyGraphicsOptions = ApplyPCGraphicsOptions
 ApplyPCGraphicsOptions = function(...)
@@ -21,16 +57,16 @@ ApplyPCGraphicsOptions = function(...)
     pendingGpuPreference = nil
     game.setgpupreference(preference)
   end
-  for dvar, value in pairs(pendingLod) do
+  for dvar, value in pairs(pendingDvars) do
     Engine.SetDvar(dvar, value)
   end
-  pendingLod = {}
+  pendingDvars = {}
 end
 
 local revertGraphicsOptions = CoD.PCUtil.RevertUnsavedGraphicsOptions
 CoD.PCUtil.RevertUnsavedGraphicsOptions = function(...)
   pendingGpuPreference = nil
-  pendingLod = {}
+  pendingDvars = {}
   return revertGraphicsOptions(...)
 end
 
@@ -112,6 +148,24 @@ DataSources.OptionGraphicsVideo = DataSourceHelpers.ListSetup("PC.OptionGraphics
     },
     properties = CoD.PCUtil.DependantDropdownProperties,
   })
+  table.insert(
+    videoSettings,
+    pendingDvarSetting(
+      "xerces_upscaler",
+      "Upscaler",
+      "How the 3D scene is enlarged when Scene Resolution Ratio is below 100%. AMD FSR 1 keeps edges and detail sharper than the game's own stretch. The HUD is not touched.",
+      "XercesUpscaler"
+    )
+  )
+  table.insert(
+    videoSettings,
+    pendingDvarSetting(
+      "xerces_upscalerSharpness",
+      "Upscaler Sharpness",
+      "How much AMD FSR 1 sharpens the scene, 0% for none. It also sharpens at a Scene Resolution Ratio of 100%.",
+      "XercesUpscalerSharpness"
+    )
+  )
   table.insert(videoSettings, {
     models = {
       label = "PLATFORM_DISPLAY_GAMMA",
@@ -220,10 +274,10 @@ DataSources.OptionGraphicsDetail = DataSourceHelpers.ListSetup("PC.OptionGraphic
         profileVarName = setting.dvar,
         profileType = "function",
         getFunction = function()
-          return pendingLod[setting.dvar] or Engine.DvarInt(nil, setting.dvar)
+          return pendingDvars[setting.dvar] or Engine.DvarInt(nil, setting.dvar)
         end,
         setFunction = function(_, value)
-          pendingLod[setting.dvar] = value
+          pendingDvars[setting.dvar] = value
         end,
         datasource = datasource,
         widgetType = "dropdown",

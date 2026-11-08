@@ -68,6 +68,15 @@ inline constexpr std::string_view init_page_budget = "pmem.init_page_budget";
 inline constexpr std::array all = {create_pool, init_page_budget};
 } // namespace db_pool_signatures
 
+// The registry entry the upscaler detours (src/client/xerces/upscale.cpp,
+// docs/DESIGN.md 13.3): the engine's final composite. Required like the
+// others; a miss turns only the upscaler off.
+namespace upscale_signatures {
+inline constexpr std::string_view final_composite = "r.final_composite";
+
+inline constexpr std::array all = {final_composite};
+} // namespace upscale_signatures
+
 // Whether code about to be detoured is exactly what the detour was written
 // for (DESIGN.md 4.3: no code bytes are written before the whole expected
 // instruction sequence is checked). `entry` is the bytes the detour's jmp
