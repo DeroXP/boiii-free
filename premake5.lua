@@ -481,6 +481,12 @@ newoption({
 })
 
 newoption({
+  trigger = "with-nvidia-dlss-sdk",
+  value = "PATH",
+  description = "Xerces: build the optional NVIDIA DLSS module (src/xerces_dlss, MIT, never part of the GPL release; docs/DESIGN.md 13.4 and D10) against NVIDIA's DLSS SDK in PATH.",
+})
+
+newoption({
   trigger = "with-upstream-plugins",
   description = "Xerces: build in upstream's plugin loader, which loads every DLL in two user-writable folders (off by default, docs/DESIGN.md 5.9).",
 })
@@ -937,6 +943,8 @@ resincludedirs({ path.join(tlsdll_proj.location, "src") })
 
 -- Xerces projects (docs/DESIGN.md 3.2)
 include("premake/xerces_projects.lua")
+-- The optional DLSS module, only with --with-nvidia-dlss-sdk (premake/xerces_dlss.lua)
+include("premake/xerces_dlss.lua")
 
 group("Dependencies")
 dependencies.projects()

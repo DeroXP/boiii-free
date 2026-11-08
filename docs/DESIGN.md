@@ -3618,6 +3618,50 @@ visualising reprojection error; ghosting no worse than T2x in standard scenes;
 overhead measured. If any fails, I will say so plainly, M9 ships Phase A only,
 and Phase C's temporal techniques wait.
 
+**Built 2026-11-08 (DLSS and DLAA; FSR 2.2 not yet).** What the frame tracer and
+the dump showed on build 0x6531394 (TESTING.md, "NVIDIA DLSS and DLAA"):
+
+- T2x's jitter comes from two functions that pick (-0.25, 0.25) or (0.25, -0.25)
+  render pixels by frame parity: `r.t2x_jitter_offset` (the offset the passes
+  undo; its one caller passes the frame number) and `r.t2x_jitter_projection`
+  (the same pair times 2 / width and 2 / height into the projection's +30h and
+  +34h, for the frame number in the backend data). Both read the same frame
+  number, on the render thread and the main thread.
+- The resolve (`r.t2x_resolve.draw_call`, a call site) reads t0 the jittered
+  colour (linear times 32768, R11G11B10), t11 this frame's velocity and t15
+  depth (reversed). The geometry pass writes the velocity per draw as current
+  minus previous position in render pixels, encoded |d| / 20 up to 10 pixels and
+  linearly to 1.0 at 40, so motion past 40 render pixels a frame (a fast turn at
+  4K) is clamped.
+
+`src/client/xerces/temporal.cpp` (feature `upscale_temporal`) detours both
+jitter functions to give Halton(2, 3) for that frame number (8 times the area
+ratio of positions, 8 to 64) while DLSS runs, and patches the resolve's draw
+call: after the game's resolve, a pass turns the bound inputs into DLSS's
+(colour divided by 32768, the velocity decoded and turned to last minus current
+position, depth to R32F), the module runs DLSS, and its output goes back times
+32768 into the resolve's colour output (DLAA) or into a texture at the back
+buffer's size that the final composite's detour draws with the composite's own
+shader (DLSS). The jitter DLSS gets is (x, -y): measured with the jitter held at
+(0.4, 0.3), only that lines DLSS's output up with the game's own picture. NGX's
+compute state is put back after it runs.
+
+The module, `src/xerces_dlss` (MIT; its interface `xerces_dlss.h` is shared with
+the client), is built only with premake's
+`--with-nvidia-dlss-sdk=<the SDK folder>`, against NVIDIA's DLSS SDK 310.9.16
+(`include\`, `nvsdk_ngx_s.lib`), and loads NVIDIA's signed `nvngx_dlss.dll` from
+its own folder; `xerces_dlss_check.exe` runs one DLAA and one upscaled frame on
+blank textures. The SDK stays outside the repository, and neither the module nor
+NVIDIA's DLL is in the beta zips. The client offers NVIDIA DLSS / DLAA
+(`xerces_upscaler` 2) only when both DLLs are next to it and the GPU is NVIDIA's
+(`xerces_dlssAvailable`); it picks DLAA at 100% and otherwise the DLSS mode
+whose render range holds the scene size. `xerces_dlssJitterSign` is a developer
+setting (flips, a held jitter, a motion log). Not built yet: camera motion
+rebuilt from depth and the last frame's matrices past the 40-pixel clamp, a mip
+bias, resets on killcams and camera cuts, a reactive mask, the NVIDIA logo and
+attribution the licence asks for before anything ships, and FSR 2.2 on the same
+inputs.
+
 ### 13.5 Phase C: FSR 4 and XeSS
 
 FSR 4 (RX 6000, 7000 and 9000) and cross-vendor XeSS are DX12 or Vulkan only, so

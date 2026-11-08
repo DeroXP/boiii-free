@@ -26,9 +26,21 @@ inline constexpr std::string_view feature = "upscale_spatial";
 inline constexpr std::array<std::uint8_t, 5> composite_entry = {
     0x48, 0x8B, 0xC4, 0x48, 0x89};
 
-// xerces_upscaler's values.
-enum class mode : int { off = 0, fsr1 = 1 };
-inline constexpr int mode_max = 1;
+// xerces_upscaler's values. NVIDIA DLSS (DLAA at 100%) needs the optional
+// module (src/xerces_dlss, docs/DESIGN.md D10) and SMAA T2x.
+enum class mode : int { off = 0, fsr1 = 1, dlss = 2 };
+inline constexpr int mode_max = 2;
+
+// The signature feature of the temporal inputs (the two jitter functions and
+// the T2x resolve's draw call, src/client/xerces/temporal.cpp).
+inline constexpr std::string_view temporal_feature = "upscale_temporal";
+
+// The bytes the jitter detours' jmps overwrite: push rbx; sub rsp, 40h
+// (first three bytes), and mov [rsp+18h], rbx.
+inline constexpr std::array<std::uint8_t, 5> jitter_offset_entry = {
+    0x40, 0x53, 0x48, 0x83, 0xEC};
+inline constexpr std::array<std::uint8_t, 5> jitter_projection_entry = {
+    0x48, 0x89, 0x5C, 0x24, 0x18};
 
 // xerces_upscalerSharpness: 0 to 10 (tenths); 0 leaves RCAS out.
 inline constexpr int sharpness_max = 10;
@@ -60,6 +72,36 @@ std::array<std::uint32_t, 16> easu_constants(float input_width,
                                              float input_height,
                                              float output_width,
                                              float output_height);
+
+// What the temporal upscaler does for one frame: nothing unless DLSS is
+// chosen and the render size is no larger than the output; DLAA when they are
+// the same.
+struct temporal_plan {
+  bool active = false;
+  bool dlaa = false;
+};
+temporal_plan plan_temporal(mode chosen, std::uint32_t render_width,
+                            std::uint32_t render_height,
+                            std::uint32_t output_width,
+                            std::uint32_t output_height);
+
+// The radical inverse of index in base (Halton): in [0, 1).
+float halton(std::uint32_t index, std::uint32_t base);
+
+// How many jitter positions to cycle through: 8 times the area ratio of
+// output to render (DLSS's guide), 8 to 64.
+std::uint32_t jitter_phases(std::uint32_t render_width,
+                            std::uint32_t render_height,
+                            std::uint32_t output_width,
+                            std::uint32_t output_height);
+
+// The sample's offset from the pixel centre for a frame, in render pixels,
+// each in [-0.5, 0.5): Halton(2, 3) at 1 + frame % phases.
+struct jitter {
+  float x = 0.0f;
+  float y = 0.0f;
+};
+jitter temporal_jitter(std::uint32_t frame, std::uint32_t phases);
 
 // FsrRcasCon from ffx_fsr1.h: con.x is the linear sharpness; con.y (the packed
 // half-precision pair) only the FP16 shader reads, so it stays 0 here.

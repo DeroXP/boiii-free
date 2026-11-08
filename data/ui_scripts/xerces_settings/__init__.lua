@@ -148,12 +148,21 @@ local GRAPHICS = {
   {
     dvar = "xerces_upscaler",
     name = "Upscaler",
-    values = { 0, 1 },
+    values = { 0, 1, 2 },
     default = 0,
-    text = function(value)
-      return value == 1 and "AMD FSR 1" or "Off"
+    -- NVIDIA DLSS only with the DLSS module (xerces_dlssAvailable)
+    shown = function(value)
+      return value ~= 2 or Engine.DvarInt(nil, "xerces_dlssAvailable") == 1
     end,
-    description = "How the 3D scene is enlarged when Scene Resolution Ratio (Graphics > Video) is below 100%. AMD FSR 1 keeps edges and detail sharper than the game's own stretch. The HUD is not touched.",
+    text = function(value)
+      if value == 1 then
+        return "AMD FSR 1"
+      elseif value == 2 then
+        return "NVIDIA DLSS / DLAA"
+      end
+      return "Off"
+    end,
+    description = "How the 3D scene is enlarged when Scene Resolution Ratio (Graphics > Video) is below 100%. AMD FSR 1 keeps edges and detail sharper than the game's own stretch. NVIDIA DLSS (with the DLSS module and an RTX GPU) replaces SMAA T2x's anti-aliasing and upscales; at 100% it is DLAA. The HUD is not touched.",
   },
   {
     dvar = "xerces_upscalerSharpness",
@@ -163,7 +172,7 @@ local GRAPHICS = {
     text = function(value)
       return (value * 10) .. "%"
     end,
-    description = "How much AMD FSR 1 sharpens the scene, 0% for none. It also sharpens at a Scene Resolution Ratio of 100%.",
+    description = "How much the scene is sharpened after AMD FSR 1 or NVIDIA DLSS, 0% for none. It also sharpens at a Scene Resolution Ratio of 100%.",
   },
 }
 
@@ -285,7 +294,9 @@ if Engine.GetCurrentMap() == "core_frontend" then
     for _, setting in ipairs(GRAPHICS) do
       local options = {}
       for _, value in ipairs(setting.values) do
-        table.insert(options, { option = setting.text(value), value = value, default = value == setting.default })
+        if not setting.shown or setting.shown(value) then
+          table.insert(options, { option = setting.text(value), value = value, default = value == setting.default })
+        end
       end
       table.insert(
         items,

@@ -77,6 +77,18 @@ inline constexpr std::string_view final_composite = "r.final_composite";
 inline constexpr std::array all = {final_composite};
 } // namespace upscale_signatures
 
+// The registry entries the temporal upscaler hooks (src/client/xerces/
+// temporal.cpp, docs/DESIGN.md 13.4): the two SMAA T2x jitter functions and
+// the resolve's draw call. A miss turns only DLSS off.
+namespace upscale_temporal_signatures {
+inline constexpr std::string_view jitter_offset = "r.t2x_jitter_offset";
+inline constexpr std::string_view jitter_projection = "r.t2x_jitter_projection";
+inline constexpr std::string_view resolve_draw_call = "r.t2x_resolve.draw_call";
+
+inline constexpr std::array all = {jitter_offset, jitter_projection,
+                                   resolve_draw_call};
+} // namespace upscale_temporal_signatures
+
 // Whether code about to be detoured is exactly what the detour was written
 // for (DESIGN.md 4.3: no code bytes are written before the whole expected
 // instruction sequence is checked). `entry` is the bytes the detour's jmp

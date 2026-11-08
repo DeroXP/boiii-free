@@ -146,3 +146,134 @@ TEST_CASE("signature registry: the shipped file has the final composite") {
   code[0] = 0xE9; // a jmp someone else wrote
   CHECK(!entry_code_matches(code, up::composite_entry, *pattern));
 }
+
+TEST_CASE("upscale: DLSS runs only when chosen and not above the screen") {
+  CHECK(!up::plan_temporal(up::mode::off, 3072, 1728, 3840, 2160).active);
+  CHECK(!up::plan_temporal(up::mode::fsr1, 3072, 1728, 3840, 2160).active);
+  const auto upscale =
+      up::plan_temporal(up::mode::dlss, 3072, 1728, 3840, 2160);
+  CHECK(upscale.active);
+  CHECK(!upscale.dlaa);
+  const auto dlaa = up::plan_temporal(up::mode::dlss, 3840, 2160, 3840, 2160);
+  CHECK(dlaa.active);
+  CHECK(dlaa.dlaa);
+  CHECK(!up::plan_temporal(up::mode::dlss, 4608, 2592, 3840, 2160).active);
+  CHECK(!up::plan_temporal(up::mode::dlss, 0, 0, 3840, 2160).active);
+}
+
+TEST_CASE("upscale: Halton jitter and its phases") {
+  CHECK_EQ(up::halton(1, 2), 0.5f);
+  CHECK_EQ(up::halton(2, 2), 0.25f);
+  CHECK_EQ(up::halton(3, 2), 0.75f);
+  CHECK(std::fabs(up::halton(1, 3) - 1.0f / 3.0f) < 1e-6f);
+  CHECK(std::fabs(up::halton(2, 3) - 2.0f / 3.0f) < 1e-6f);
+  CHECK(std::fabs(up::halton(4, 3) - 4.0f / 9.0f) < 1e-6f);
+  // 8 times the area ratio, 8 to 64.
+  CHECK_EQ(up::jitter_phases(3840, 2160, 3840, 2160), 8u);
+  CHECK_EQ(up::jitter_phases(3072, 1728, 3840, 2160), 13u);
+  CHECK_EQ(up::jitter_phases(1920, 1080, 3840, 2160), 32u);
+  CHECK_EQ(up::jitter_phases(960, 540, 3840, 2160), 64u);
+  CHECK_EQ(up::jitter_phases(0, 0, 3840, 2160), 8u);
+  // Frame 0 is Halton index 1; the sequence repeats after `phases` frames.
+  const auto first = up::temporal_jitter(0, 8);
+  CHECK_EQ(first.x, 0.0f);
+  CHECK(std::fabs(first.y - (1.0f / 3.0f - 0.5f)) < 1e-6f);
+  const auto again = up::temporal_jitter(8, 8);
+  CHECK_EQ(again.x, first.x);
+  CHECK_EQ(again.y, first.y);
+  for (std::uint32_t frame = 0; frame < 64; ++frame) {
+    const auto j = up::temporal_jitter(frame, 13);
+    CHECK(j.x >= -0.5f);
+    CHECK(j.x < 0.5f);
+    CHECK(j.y >= -0.5f);
+    CHECK(j.y < 0.5f);
+  }
+}
+
+TEST_CASE(
+    "signature registry: the shipped file has the T2x jitter and resolve") {
+  const auto file = xerces_tests::fixtures_dir().parent_path().parent_path() /
+                    "compat" / "signatures.json";
+  REQUIRE(std::filesystem::exists(file));
+  const signature_registry registry =
+      parse_signature_registry(xerces_tests::read_file(file));
+  REQUIRE(registry.ok());
+  const auto entry_of = [&](std::string_view id) -> const signature * {
+    const auto it = std::ranges::find_if(
+        registry.signatures, [&](const signature &s) { return s.id == id; });
+    return it == registry.signatures.end() ? nullptr : &*it;
+  };
+  struct expected {
+    std::string_view id;
+    std::uint64_t rva;
+    const std::uint8_t *entry; // the detour's five bytes, or null for a site
+  };
+  const expected all[] = {
+      {upscale_temporal_signatures::jitter_offset, 0x1CDE210,
+       up::jitter_offset_entry.data()},
+      {upscale_temporal_signatures::jitter_projection, 0x1CDE2A0,
+       up::jitter_projection_entry.data()},
+      {upscale_temporal_signatures::resolve_draw_call, 0x1C63F79, nullptr},
+  };
+  for (const auto &e : all) {
+    const signature *sig = entry_of(e.id);
+    REQUIRE(sig != nullptr);
+    CHECK(std::ranges::find(sig->features, up::temporal_feature) !=
+          sig->features.end());
+    CHECK_EQ(sig->known.at(0x6531394), e.rva);
+    CHECK(sig->kind == (e.entry ? symbol_kind::function : symbol_kind::site));
+    const auto pattern = parse_pattern(sig->patterns.front());
+    REQUIRE(pattern.has_value());
+    if (e.entry) {
+      for (std::size_t i = 0; i < 5; ++i) {
+        CHECK(!pattern->fixed[i]);
+      }
+      // The detour checks its five bytes itself; the pattern goes on from
+      // there.
+      std::vector<std::uint8_t> code(pattern->bytes.size(), 0);
+      std::copy(e.entry, e.entry + 5, code.begin());
+      for (std::size_t i = 0; i < code.size(); ++i) {
+        if (pattern->fixed[i]) {
+          code[i] = pattern->bytes[i];
+        }
+      }
+      CHECK(entry_code_matches(code, std::span<const std::uint8_t>(e.entry, 5),
+                               *pattern));
+    } else {
+      // A call site: the call itself, with its target left out.
+      CHECK(pattern->fixed[0]);
+      CHECK_EQ(pattern->bytes[0], std::uint8_t{0xE8});
+      CHECK(!pattern->fixed[1]);
+    }
+  }
+  // What temporal.cpp reads from the projection function's own code is fixed
+  // by its pattern: mov rax, [rip+X] at +0x40, mov edx, [rax+0x8A364] at
+  // +0x56, and the two size calls after mov ecx, [rdi+24h] at +0xA0 and +0xBA.
+  const auto pattern =
+      parse_pattern(entry_of(upscale_temporal_signatures::jitter_projection)
+                        ->patterns.front());
+  REQUIRE(pattern.has_value());
+  const auto fixed_at = [&](std::size_t at,
+                            std::initializer_list<std::uint8_t> bytes) {
+    std::size_t i = at;
+    for (const std::uint8_t b : bytes) {
+      if (!pattern->fixed[i] || pattern->bytes[i] != b) {
+        return false;
+      }
+      ++i;
+    }
+    return true;
+  };
+  CHECK(fixed_at(0x40, {0x48, 0x8B, 0x05}));
+  CHECK(fixed_at(0x56, {0x8B, 0x90, 0x64, 0xA3, 0x08, 0x00}));
+  CHECK(fixed_at(0xA0, {0x8B, 0x4F, 0x24, 0xE8}));
+  CHECK(fixed_at(0xBA, {0x8B, 0x4F, 0x24, 0x0F, 0x5B, 0xC0, 0xF3, 0x0F, 0x5E,
+                        0xF0, 0xE8}));
+  for (const auto &sig : registry.signatures) {
+    if (std::ranges::find(sig.features, up::temporal_feature) !=
+        sig.features.end()) {
+      CHECK(std::ranges::find(upscale_temporal_signatures::all, sig.id) !=
+            upscale_temporal_signatures::all.end());
+    }
+  }
+}

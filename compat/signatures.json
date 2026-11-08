@@ -178,6 +178,49 @@
       },
       "features": ["upscale_spatial"],
       "note": "The last post-fx pass: cx a view index, rdx the command state, r8 the view; reached by a tail jump from the post-fx function. It sets the render target to the back buffer (the call at +0x8B is the render-target setter), its display-encoding constants, and draws one full-screen quad that samples the whole scene texture (UV 0 to 1, bilinear clamp) into the whole back buffer; the HUD is drawn after it. Found with the frame tracer (src/client/xerces/gfx_trace.cpp). Made with sigmaker.py --detoured --through 0x141C6186B."
+    },
+    {
+      "id": "r.t2x_jitter_offset",
+      "symbol": "SMAA T2x jitter offset (pixels) for a frame",
+      "kind": "function",
+      "section": ".text",
+      "patterns": [
+        "?? ?? ?? ?? ?? 40 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 44 24 30 83 E2 01 C7 44 24 20 00 00 80 BE C7 44 24 24 00 00 80 3E C7 44 24 28 00 00 80 3E C7 44 24 2C 00 00 80 BE 8B 44 D4 20 89 01 8B 44 D4 24 48 8B D9 89 41 04"
+      ],
+      "offset": 0,
+      "known": {
+        "0x6531394": "0x1CDE210"
+      },
+      "features": ["upscale_temporal"],
+      "note": "rcx a float pair it fills, edx the frame number: (-0.25, 0.25) on even frames, (0.25, -0.25) on odd ones, in render pixels (moved by 0.25 when a dvar check passes). Its one caller passes the frame number from the backend data (+0x8A364). The temporal upscaler replaces the pair with a Halton sequence. Made with sigmaker.py --detoured --through 0x141CDE255."
+    },
+    {
+      "id": "r.t2x_jitter_projection",
+      "symbol": "SMAA T2x jitter into the projection",
+      "kind": "function",
+      "section": ".text",
+      "patterns": [
+        "?? ?? ?? ?? ?? 57 48 81 EC 80 00 00 00 0F 29 74 24 70 0F 29 7C 24 60 44 0F 29 44 24 50 44 0F 29 4C 24 40 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 44 24 30 48 8B F9 48 8B CA 48 8B DA E8 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? F3 0F 10 35 ?? ?? ?? ?? 8B 90 64 A3 08 00 C7 44 24 20 00 00 80 BE C7 44 24 24 00 00 80 3E 83 E2 01 C7 44 24 28 00 00 80 3E C7 44 24 2C 00 00 80 BE F3 44 0F 10 44 D4 20 F3 44 0F 10 4C D4 24 E8 ?? ?? ?? ?? 84 C0 74 0A F3 44 0F 58 C6 F3 44 0F 5C CE 8B 4F 24 E8 ?? ?? ?? ?? 0F B7 C8 F3 0F 10 3D ?? ?? ?? ?? 0F 28 F7 66 0F 6E C1 8B 4F 24 0F 5B C0 F3 0F 5E F0 E8 ?? ?? ?? ?? F3 44 0F 59 C6 0F B7 C0 F3 44 0F 11 43 30 66 0F 6E C0 0F 5B C0 F3 0F 5E F8 F3 44 0F 59 CF F3 44 0F 11 4B 34"
+      ],
+      "offset": 0,
+      "known": {
+        "0x6531394": "0x1CDE2A0"
+      },
+      "features": ["upscale_temporal"],
+      "note": "rcx the view, rdx the projection being built: the same pair as r.t2x_jitter_offset, for the frame number read from the backend data the global at +0x40 (mov rax, [rip+X]) points to (+0x8A364, the immediate at +0x58), times 2 / width and 2 / height (the two calls after mov ecx, [rdi+24h]) into [rdx+30h] and [rdx+34h]. The temporal upscaler reads the frame number and the two sizes the same way. Made with sigmaker.py --detoured --through 0x141CDE387."
+    },
+    {
+      "id": "r.t2x_resolve.draw_call",
+      "symbol": "SMAA T2x resolve (call to the full-screen draw)",
+      "kind": "site",
+      "section": ".text",
+      "patterns": ["E8 ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 33 D2 48 8B CF"],
+      "offset": 0,
+      "known": {
+        "0x6531394": "0x1C63F79"
+      },
+      "features": ["upscale_temporal"],
+      "note": "In the T2x resolve (0x141C63AB0, the fragment from 0x141C63C4B): the call that draws the resolve (rcx the command state), the same full-screen draw helper the final composite calls. When it returns, the resolve's inputs are still bound (t0 the jittered colour, t11 this frame's velocity, t15 depth) and its outputs (colour, luma, filmic history). Made with sigmaker.py --site-in 0x141C63C4B."
     }
   ]
 }

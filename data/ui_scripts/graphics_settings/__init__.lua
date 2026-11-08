@@ -12,11 +12,17 @@ end, true)
 
 -- The upscaler (src/client/xerces/upscale.cpp): xerces_upscaler and
 -- xerces_upscalerSharpness, set when the menu's changes are applied.
+-- NVIDIA DLSS is listed only when the optional DLSS module is there
+-- (xerces_dlssAvailable, src/client/xerces/temporal.cpp).
 DataSources.XercesUpscaler = DataSourceHelpers.ListSetup("PC.XercesUpscaler", function()
-  return {
+  local values = {
     { models = { value = 0, valueDisplay = "Off" } },
     { models = { value = 1, valueDisplay = "AMD FSR 1" } },
   }
+  if Engine.DvarInt(nil, "xerces_dlssAvailable") == 1 then
+    table.insert(values, { models = { value = 2, valueDisplay = "NVIDIA DLSS / DLAA" } })
+  end
+  return values
 end, true)
 DataSources.XercesUpscalerSharpness = DataSourceHelpers.ListSetup("PC.XercesUpscalerSharpness", function()
   local values = {}
@@ -153,7 +159,7 @@ DataSources.OptionGraphicsVideo = DataSourceHelpers.ListSetup("PC.OptionGraphics
     pendingDvarSetting(
       "xerces_upscaler",
       "Upscaler",
-      "How the 3D scene is enlarged when Scene Resolution Ratio is below 100%. AMD FSR 1 keeps edges and detail sharper than the game's own stretch. The HUD is not touched.",
+      "How the 3D scene is enlarged when Scene Resolution Ratio is below 100%. AMD FSR 1 keeps edges and detail sharper than the game's own stretch. NVIDIA DLSS (with the DLSS module and an RTX GPU) replaces SMAA T2x's anti-aliasing and upscales; at 100% it is DLAA. The HUD is not touched.",
       "XercesUpscaler"
     )
   )
@@ -162,7 +168,7 @@ DataSources.OptionGraphicsVideo = DataSourceHelpers.ListSetup("PC.OptionGraphics
     pendingDvarSetting(
       "xerces_upscalerSharpness",
       "Upscaler Sharpness",
-      "How much AMD FSR 1 sharpens the scene, 0% for none. It also sharpens at a Scene Resolution Ratio of 100%.",
+      "How much the scene is sharpened after AMD FSR 1 or NVIDIA DLSS, 0% for none. It also sharpens at a Scene Resolution Ratio of 100%.",
       "XercesUpscalerSharpness"
     )
   )

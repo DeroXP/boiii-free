@@ -62,6 +62,50 @@ std::array<std::uint32_t, 16> easu_constants(const float input_width,
   return con;
 }
 
+temporal_plan plan_temporal(const mode chosen, const std::uint32_t render_width,
+                            const std::uint32_t render_height,
+                            const std::uint32_t output_width,
+                            const std::uint32_t output_height) {
+  temporal_plan out;
+  if (chosen != mode::dlss || render_width == 0 || render_height == 0 ||
+      output_width == 0 || output_height == 0 || render_width > output_width ||
+      render_height > output_height) {
+    return out;
+  }
+  out.active = true;
+  out.dlaa = render_width == output_width && render_height == output_height;
+  return out;
+}
+
+float halton(std::uint32_t index, const std::uint32_t base) {
+  float fraction = 1.0f;
+  float result = 0.0f;
+  while (index > 0) {
+    fraction /= static_cast<float>(base);
+    result += fraction * static_cast<float>(index % base);
+    index /= base;
+  }
+  return result;
+}
+
+std::uint32_t jitter_phases(const std::uint32_t render_width,
+                            const std::uint32_t render_height,
+                            const std::uint32_t output_width,
+                            const std::uint32_t output_height) {
+  if (render_width == 0 || render_height == 0) {
+    return 8;
+  }
+  const double ratio = (static_cast<double>(output_width) * output_height) /
+                       (static_cast<double>(render_width) * render_height);
+  const auto phases = static_cast<std::uint32_t>(std::ceil(8.0 * ratio));
+  return std::clamp<std::uint32_t>(phases, 8, 64);
+}
+
+jitter temporal_jitter(const std::uint32_t frame, const std::uint32_t phases) {
+  const std::uint32_t index = 1 + frame % std::max<std::uint32_t>(phases, 1);
+  return {halton(index, 2) - 0.5f, halton(index, 3) - 0.5f};
+}
+
 // Ported from FsrRcasCon in ffx_fsr1.h (as above).
 std::array<std::uint32_t, 4> rcas_constants(const float stops) {
   return {bits(std::exp2(-stops)), 0, 0, 0};

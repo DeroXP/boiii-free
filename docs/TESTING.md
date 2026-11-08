@@ -1751,6 +1751,51 @@ Gamma choices, a measured GPU cost, mods, Multiplayer and Campaign maps,
 changing the options through the menus and Apply, and a window resize while it
 runs.
 
+### NVIDIA DLSS and DLAA (2026-11-08)
+
+DESIGN.md 13.4 (Phase B). Bench:
+`C:\Users\Ginld\XercesDev\bench\20261108-upscale` (`build-dlss.ps1`,
+`dlss-run.ps1`, `dlss-sign-run.ps1`, `dlss-motion*-run.ps1`,
+`dlss-final-run.ps1`, `shift.py`, `temporal-notes.md`), the same test home and
+map, the RTX 5070 Ti, NVIDIA's DLSS SDK 310.9.16 (the release's git hashes
+checked, `nvngx_dlss.dll` signed by NVIDIA). The player's `boiii_players` files
+(`config.ini`, `user\config.cfg`, the bindings) are copied before the later runs
+and put back after; three test values an earlier run left in `user\config.cfg`
+(`cl_yawspeed 50`, `xerces_upscaler 2`, `xerces_upscalerSharpness 0`) were taken
+out by hand.
+
+- [x] `xerces_dlss_check.exe`: "DLSS available", one DLAA frame (1920x1080) and
+      one Quality frame (2560x1440 to 3840x2160) ran.
+- [x] In the game at 80% (3072x1728 to 4K): "DLSS: Quality, 3072x1728 to
+      3840x2160, 13 jitter positions"; at 100%: "DLSS: DLAA, 3840x2160 (DLAA), 8
+      jitter positions". The two jitter detours report the same frame number,
+      and the offset runs on the resolve's thread.
+- [x] The jitter's signs: with the jitter held at (0.4, 0.3), phase correlation
+      against the game's own picture gives about +1 pixel in x when x is flipped
+      and -0.6 to -0.9 in y when y is not; only (x, -y) gives about 0 in both,
+      which is now the default.
+- [x] Motion vectors: the geometry pass's shader encodes current minus previous
+      position the way the decode undoes it; a logged mean at the screen's
+      centre is 0 standing still, -40 turning left and +40 turning right (the
+      arrow-key turn is fast enough to hit the 40-pixel clamp, so the unclamped
+      range was not seen).
+- [x] Captures: DLSS at 80% and DLAA at 100% look right (colours, HUD, no
+      artefacts); DLAA lines up with Filmic SMAA T2x within 0.03 pixels and its
+      edges are a little cleaner. Turning, the edges stay clean. The FPS
+      counter, CPU-bound here, read about 178 with DLSS at 80% against 258 with
+      the game's own anti-aliasing.
+- [x] Menus: with the module there, Graphics > Video's Upscaler lists "Off",
+      "AMD FSR 1" and "NVIDIA DLSS / DLAA"; XERCES SETTINGS opens.
+- [x] Unit tests: the DLSS plan, Halton values, the jitter positions and their
+      range, the three registry entries and what the client reads from the
+      projection function's code (578 pass).
+
+Not tested yet: motion between 1 and 40 pixels a frame (ghosting), fast turns
+past the clamp at length, killcams and map changes (resets), other maps and
+mods, Multiplayer and Campaign, DLSS below 80% (Balanced, Performance), a GPU
+time measured on its own, changing the option through the menus, and a game
+without the module (the option must not show).
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The
