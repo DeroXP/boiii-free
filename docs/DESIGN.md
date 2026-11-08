@@ -831,27 +831,31 @@ together.
 - What changes: with `-xerces-db-pool` on the command line (Settings > Launch,
   "Larger zone memory (experimental)"), `src/client/xerces/db_pool.cpp` detours
   both. The first pool created, if it is exactly `main`, flags 0x1E, 2 GiB, gets
-  4 GiB; the first `gpu_prt` pool, if it is exactly flags 0x7E, 18 GiB, gets 30
-  GiB (2026-11-07, for MW4 Shipment: it reserves address space only, and a
-  pool's 19-bit page index caps any pool below 32 GiB); the page budget, if it
-  is exactly 5 GiB, becomes 8 GiB (the budget is bookkeeping, and the page table
-  holds at most 16 GiB). Every other call passes through, including the five
-  later 2 GiB `main` pools and the three later `gpu_prt` pools of other stacks.
-  Apart from the allocator's bounds check, the only plain-code reader of a
-  `gpu_prt` pool's size is a test of whether an address lies in it (0x1420C3AC0,
-  base and size), which a raised size keeps consistent. Before writing, the
-  client checks the bytes each jmp overwrites (wildcards in the registry) and
-  the whole registry pattern, and installs both detours or neither. The detours
-  only record what they see. The first frame logs `xerces.db_pool` (every pool
-  call, the budget, the size read back), and `xerces.db_pool.usage` gives the
-  pool's committed size the first time it passes 2 GiB and the first time the
-  player is in a level. The journal records whether a launch had the flag. Safe
-  mode and every "find the culprit" test leave it out, and a crash with it makes
-  the setting a suspect of its own (5.6). Since 2026-11-07
-  `xerces.db_pool.usage` is also logged each time the journal enters the front
-  end, a level's load or a level, and `xerces.db_pool.pools` then lists every
-  pool in use (index, name, flags, MiB committed, size): the descriptor of each
-  pool the detour recorded has the same size and page fields as the main pool's.
+  4 GiB (6 or 8 GiB with `-xerces-db-pool-6gb` or `-xerces-db-pool-8gb` beside
+  it, the Settings choice of 2026-11-08: Off, 4, 6 or 8 GB; the planner's memory
+  checks use the chosen size); the first `gpu_prt` pool, if it is exactly flags
+  0x7E, 18 GiB, gets 30 GiB (2026-11-07, for MW4 Shipment: it reserves address
+  space only, and a pool's 19-bit page index caps any pool below 32 GiB); the
+  page budget, if it is exactly 5 GiB, becomes the pool plus 4 GiB, which is 8
+  GiB for the 4 GiB pool, 10 and 12 for the others (the budget is bookkeeping,
+  and the page table holds at most 16 GiB). Every other call passes through,
+  including the five later 2 GiB `main` pools and the three later `gpu_prt`
+  pools of other stacks. Apart from the allocator's bounds check, the only
+  plain-code reader of a `gpu_prt` pool's size is a test of whether an address
+  lies in it (0x1420C3AC0, base and size), which a raised size keeps consistent.
+  Before writing, the client checks the bytes each jmp overwrites (wildcards in
+  the registry) and the whole registry pattern, and installs both detours or
+  neither. The detours only record what they see. The first frame logs
+  `xerces.db_pool` (every pool call, the budget, the size read back), and
+  `xerces.db_pool.usage` gives the pool's committed size the first time it
+  passes 2 GiB and the first time the player is in a level. The journal records
+  whether a launch had the flag. Safe mode and every "find the culprit" test
+  leave it out, and a crash with it makes the setting a suspect of its own
+  (5.6). Since 2026-11-07 `xerces.db_pool.usage` is also logged each time the
+  journal enters the front end, a level's load or a level, and
+  `xerces.db_pool.pools` then lists every pool in use (index, name, flags, MiB
+  committed, size): the descriptor of each pool the detour recorded has the same
+  size and page fields as the main pool's.
 - Why opt-in: it has run in the game five times only (2026-11-05: BACKROOMZ and
   Super Mario 64 with DS4C, alone and stacked, and Cheese Cube; all loaded and
   went back to the menu, docs/TESTING.md). Risks (reverse-engineering verdict,

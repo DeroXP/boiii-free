@@ -50,8 +50,11 @@ profile_request(const launcher_config &config, const std::string &mode,
   if (zone_memory) {
     // Checked against the pool the launch will have: the larger zone memory
     // when the settings pass its flag (DESIGN.md 5.4).
+    const int pool_gib = db_pool::requested_gib(config.extra_flags);
     request.zone_budget = zone_budget_for(
-        *zone_memory, mode, has_flag(config.extra_flags, db_pool::flag_name));
+        *zone_memory, mode, pool_gib != 0,
+        db_pool::pool_bytes_for(pool_gib != 0 ? pool_gib
+                                              : db_pool::default_size_gib));
   }
   request.xerces_version =
       version::parse(xerces_version_text).value_or(version{});

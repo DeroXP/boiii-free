@@ -1,6 +1,7 @@
 #include "db_pool.hpp"
 
 #include <cstdio>
+#include <optional>
 
 #include "json.hpp"
 #include "launch.hpp"
@@ -41,12 +42,75 @@ bool requested(const std::vector<std::string> &args) {
          has_launch_flag(args, "-" + std::string(flag));
 }
 
+namespace {
+// The flag's name without its dashes (one or two), or empty for an argument
+// that does not start with a dash.
+std::string_view undashed(std::string_view arg) {
+  if (arg.starts_with("--")) {
+    return arg.substr(2);
+  }
+  if (arg.starts_with("-")) {
+    return arg.substr(1);
+  }
+  return {};
+}
+
+// 4, 6 or 8 for "xerces-db-pool-<n>gb" (either spelling), else nothing.
+std::optional<int> size_of_flag(std::string_view arg) {
+  constexpr std::string_view prefix = "xerces-db-pool-";
+  constexpr std::string_view suffix = "gb";
+  const std::string_view name = undashed(arg);
+  if (name.size() != prefix.size() + 1 + suffix.size() ||
+      !name.starts_with(prefix) || !name.ends_with(suffix)) {
+    return std::nullopt;
+  }
+  const char digit = name[prefix.size()];
+  for (const int option : size_options_gib) {
+    if (digit == static_cast<char>('0' + option)) {
+      return option;
+    }
+  }
+  return std::nullopt;
+}
+} // namespace
+
+int requested_gib(const std::vector<std::string> &args) {
+  bool on = false;
+  int size = default_size_gib;
+  for (const std::string &arg : args) {
+    if (!arg.empty() && arg[0] == '+') {
+      break; // flags only come before the first command
+    }
+    if (undashed(arg) == flag_name) {
+      on = true;
+    } else if (const auto chosen = size_of_flag(arg)) {
+      size = *chosen;
+    }
+  }
+  return on ? size : 0;
+}
+
+std::vector<std::string> with_size(std::vector<std::string> flags,
+                                   const int size_gib) {
+  std::erase_if(flags, [](const std::string &flag) {
+    return undashed(flag) == flag_name || size_of_flag(flag).has_value();
+  });
+  if (size_gib != 0) {
+    flags.push_back("-" + std::string(flag_name));
+    if (size_gib != default_size_gib) {
+      flags.push_back("-" + std::string(flag_name) + "-" +
+                      std::to_string(size_gib) + "gb");
+    }
+  }
+  return flags;
+}
+
 std::uint64_t pool_size(bool first_call, bool first_prt_call,
                         std::string_view name, std::uint32_t flags,
-                        std::uint64_t size) {
+                        std::uint64_t size, std::uint64_t main_target) {
   if (first_call && name == main_pool_name && flags == main_pool_flags &&
       size == stock_pool_size) {
-    return raised_pool_size;
+    return main_target;
   }
   if (first_prt_call && name == prt_pool_name && flags == prt_pool_flags &&
       size == stock_prt_size) {
@@ -55,8 +119,8 @@ std::uint64_t pool_size(bool first_call, bool first_prt_call,
   return size;
 }
 
-std::uint64_t page_budget(std::uint64_t bytes) {
-  return bytes == stock_page_budget ? raised_page_budget : bytes;
+std::uint64_t page_budget(std::uint64_t bytes, std::uint64_t target) {
+  return bytes == stock_page_budget ? target : bytes;
 }
 
 pool_name copy_pool_name(const char *name) {
@@ -71,7 +135,7 @@ pool_name copy_pool_name(const char *name) {
 }
 
 bool pool_raised(const report &r) {
-  return !r.calls.empty() && r.calls.front().size_out == raised_pool_size &&
+  return !r.calls.empty() && r.calls.front().size_out == r.target_pool &&
          r.calls.front().size_in == stock_pool_size;
 }
 
@@ -93,23 +157,23 @@ bool prt_raised(const report &r) {
 }
 
 bool budget_raised(const report &r) {
-  return r.budget && r.budget->bytes_out == raised_page_budget &&
+  return r.budget && r.budget->bytes_out == r.target_budget &&
          r.budget->bytes_in == stock_page_budget;
 }
 
 bool applied(const report &r) {
   return pool_raised(r) && prt_raised(r) && budget_raised(r) &&
          r.calls.front().result != 0 &&
-         (!r.main_size || *r.main_size == raised_pool_size);
+         (!r.main_size || *r.main_size == r.target_pool);
 }
 
 std::string message(const report &r) {
   if (applied(r)) {
     std::string out = "Larger zone memory is on: the DB main pool is " +
-                      mib(raised_pool_size) + " (stock " +
-                      mib(stock_pool_size) + "), its streamed-texture pool " +
-                      mib(raised_prt_size) + " (stock " + mib(stock_prt_size) +
-                      ") and the page budget " + mib(raised_page_budget) +
+                      mib(r.target_pool) + " (stock " + mib(stock_pool_size) +
+                      "), its streamed-texture pool " + mib(raised_prt_size) +
+                      " (stock " + mib(stock_prt_size) +
+                      ") and the page budget " + mib(r.target_budget) +
                       " (stock " + mib(stock_page_budget) + ")";
     if (r.main_size) {
       out += "; the pool reads back " + mib(*r.main_size);
@@ -133,7 +197,7 @@ std::string message(const report &r) {
     }
   } else if (r.calls.front().result == 0) {
     out += " the engine could not reserve the raised pool;";
-  } else if (r.main_size && *r.main_size != raised_pool_size) {
+  } else if (r.main_size && *r.main_size != r.target_pool) {
     out += " the DB main pool reads back " + hex(*r.main_size) + ";";
   }
   if (!prt_raised(r)) {
@@ -168,6 +232,8 @@ std::string data_json(const report &r) {
   rapidjson::Document doc(rapidjson::kObjectType);
   auto &alloc = doc.GetAllocator();
   json::set(doc, "applied", applied(r), alloc);
+  json::set(doc, "pool_gib", static_cast<std::int64_t>(r.target_pool / gib),
+            alloc);
   json::set(doc, "pool_raised", pool_raised(r), alloc);
   json::set(doc, "prt_raised", prt_raised(r), alloc);
   json::set(doc, "budget_raised", budget_raised(r), alloc);

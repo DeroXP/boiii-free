@@ -598,6 +598,31 @@ TEST_CASE("zone memory: the larger zone memory's budget") {
   CHECK_EQ(other->larger_pool_mib, 0.0);
 }
 
+TEST_CASE("zone memory: the budget follows the pool size the launch chose") {
+  zone_memory_build build;
+  build.name = "test";
+  build.db_main_pool_mib = 2048;
+  build.baseline_mib = {{"zm", 849}};
+  // 6 and 8 GiB: the pool the planner checks against is the chosen one, and
+  // what turning the setting on would give is the chosen size too.
+  for (const int gib : {6, 8}) {
+    const auto larger =
+        zone_budget_for(build, "zm", true, db_pool::pool_bytes_for(gib));
+    REQUIRE(larger.has_value());
+    CHECK(larger->larger_pool);
+    CHECK_EQ(larger->pool_mib, gib * 1024.0);
+    CHECK_EQ(larger->larger_pool_mib, gib * 1024.0);
+    CHECK_EQ(larger->baseline_mib, 849.0);
+  }
+  // Off: the stock pool, and the 4 GiB the plain switch would give.
+  const auto off =
+      zone_budget_for(build, "zm", false, db_pool::pool_bytes_for(4));
+  REQUIRE(off.has_value());
+  CHECK(!off->larger_pool);
+  CHECK_EQ(off->pool_mib, 2048.0);
+  CHECK_EQ(off->larger_pool_mib, 4096.0);
+}
+
 TEST_CASE("zone memory: the streamed-texture pool's figures and budget") {
   const zone_memory_table table = parse_zone_memory(R"({
     "schema": "xerces.zone_memory/1",

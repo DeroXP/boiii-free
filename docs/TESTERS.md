@@ -92,6 +92,10 @@ hash, sent with the link, shows that the zip is the one we made.
   Graphics menu); Upscaler is off until you turn it on. NVIDIA DLSS and DLAA are
   not in this package: they need a separate module and NVIDIA's own file, which
   NVIDIA's licence keeps out of the zip, so the option does not show for you.
+- **Larger zone memory** (Settings > Launch, experimental) lets big custom maps
+  load with heavy mods: the game's 2 GB zone memory becomes 4, 6 or 8 GB. It
+  uses only what a map needs, so a bigger size matters only for the heaviest
+  stacks; try 4 GB first. Turn it off if the game crashes.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.

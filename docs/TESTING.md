@@ -1707,6 +1707,74 @@ account), the join panel and the in-game Workshop menu downloading for real, a
 freeze in a launcher-started game sending its report, two PCs (whether the later
 menus keep SHOOT HAUS joins in sync), and the controller's jump.
 
+### Larger zone memory: 4, 6 and 8 GB (2026-11-08)
+
+DESIGN.md 5.4 (zone memory). Settings > Launch has Off, 4, 6 and 8 GB, written
+as `-xerces-db-pool` and, for 6 and 8, `-xerces-db-pool-6gb` or `-8gb` (the
+launcher's flag field takes no `=`). The page budget follows the pool (pool plus
+4 GiB: 8, 10 and 12 GiB, under the 16 GiB its page table holds), and the
+planner's memory checks use the chosen size. Bench:
+`C:\Users\Ginld\XercesDev\bench\20261108-upscale` (`town-run.ps1`,
+`probe-run-flags.ps1`, `launcher-row.txt`), the test home of 20261106-modlabels,
+the player's mod stack (DS4C, Ascendance, Girls' Frontline, im_oxo QOL, Classic
+Viewmodel FOV) on Town Reimagined (`zm_town`, 3.4 GB).
+
+- [x] The game: with 4 GB the DB main pool is 4096 MiB and the page budget 8192
+      MiB (as before); with `-xerces-db-pool-6gb` 6144 and 10240 MiB; with
+      `-xerces-db-pool-8gb` 8192 and 12288 MiB; each reads back the size it was
+      given, the streamed-texture pool is 30720 MiB in all three, and Town
+      Reimagined loaded in about 40 s each time and held 2282 MiB of the pool
+      (`xerces.db_pool`, `xerces.db_pool.usage`).
+- [x] The player's own log of the same stack: the pool peaked at 2726 MiB over
+      four maps in a session (Digital Circus, Town Reimagined, Cheese Cube,
+      Shadows of Evil), so 4 GB was not full; 6 and 8 GB matter only for heavier
+      stacks (the BACKROOMZ, Super Mario 64 and MW4 Shipment class).
+- [x] The launcher (a copy of the test home, `--view settings`, scripted
+      clicks): the Launch section shows Off, 4 GB, 6 GB and 8 GB; each click
+      writes the flags the choice means (8 GB:
+      `-borderless -xerces-db-pool     -xerces-db-pool-8gb`) and the "The game
+      starts with" line shows them.
+- [x] Unit tests: the sizes, the budget for each (never past 16 GiB or a pool's
+      page index), the detours' target sizes, the flag parsing (the last size
+      wins, a size alone turns nothing on, other spellings are 4 GiB), the
+      settings' flags round trip, the report against the chosen size, and the
+      planner's pool size (584 pass).
+
+Not tested yet: a stack that needs more than 4 GiB (nothing on this PC does),
+the culprit search's handling of a 6 or 8 GB choice beyond the unit tests, and
+the diagnostics screen's wording (it still says "On (-xerces-db-pool)").
+
+### Town Reimagined stutter, first look (2026-11-08)
+
+The player reported stutter on Town Reimagined with their stack, and DLSS "maybe
+a little more stuttery than SMAA". Two runs of `town-run.ps1 -Segments` (the
+frame probe, XERCES_BENCH=1; `nvidia-smi` and the process's RAM sampled
+alongside; 4K, Scene Resolution 70%, Filmic SMAA T2x or DLSS Quality, 4 GB zone
+memory), each with 40 s of walking at the spawn; then the player went down at
+about 1:40 and the game left the level (cheats cannot be switched on here, so
+`god` is refused).
+
+- [x] Filmic SMAA T2x, both runs: median 4.0 ms (about 250 FPS), p99 6.0 to 6.5
+      ms, longest frame 9.6 and 11.0 ms, no frame over 12 ms in 43 s each.
+- [x] DLSS Quality, the in-level part of both runs (about 18 s each): median 5.5
+      to 6.0 ms (about 165 FPS), p99 8.0 ms in the first run; two frames of 126
+      ms at 13.7 s and 14.3 s (first run), then the player went down and the
+      level ended (149 and 717 ms; 675 ms in the second run). The frames after
+      the exit are the front end's, not the level's.
+- [x] The GPU was at 98 to 99% in both (the game is GPU-bound at 4K, 70%), VRAM
+      10.8 GiB of 16 in both, the game's working set 11 GB (32 GB PC). DLSS
+      costs about 2 ms a frame here (4.0 to 6.0 ms); the card sat at its
+      software power cap with DLSS.
+- [x] The console of the first run: 1,824 script errors in 3.5 minutes, nearly
+      all while the map and mods loaded; only 4 and 5 during the 40 s walks.
+      They name `scripts/zm/explosive_zomb.gsc` (in the mods' `zm_mod` zone and
+      also in `zm_town`: the engine says "Redundant scriptparsetree asset ...")
+      and DS4C's `fr_commands.gsc` and `hud_util_shared.gsc`.
+
+Not found yet: the player's stutter. Near the spawn the level was smooth in both
+modes. It may be elsewhere or later (streaming while moving through the map,
+many zombies, a round's script work), which a capture in real play would show.
+
 ### AMD FSR 1 upscaler (2026-11-08)
 
 DESIGN.md 13.3 (Phase A). Bench:

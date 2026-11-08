@@ -12,9 +12,10 @@
 // components' post_unpack; it passes each pool's size to a plain helper and
 // the shared page budget to another (xerces_core/db_pool.hpp). This detours
 // both helpers, found through the signature registry and checked byte for
-// byte first: the first pool (the DB main pool) gets 4 GiB instead of 2 GiB,
-// the first "gpu_prt" pool 30 GiB instead of 18 GiB, the page budget 8 GiB
-// instead of 5 GiB, and every other call passes through unchanged.
+// byte first: the first pool (the DB main pool) gets 4 GiB instead of 2 GiB
+// (6 or 8 GiB with -xerces-db-pool-6gb or -8gb), the first "gpu_prt" pool 30
+// GiB instead of 18 GiB, the page budget 8 GiB instead of 5 GiB (10 or 12 GiB
+// for the bigger pools), and every other call passes through unchanged.
 //
 // The detours run inside the engine's PMem set-up, before Com_Init. The game
 // log is open by then (post_unpack logs), but they still only copy what they
@@ -43,6 +44,11 @@ namespace ids = xerces_core::db_pool_signatures;
 
 utils::hook::detour create_pool_hook;
 utils::hook::detour init_page_budget_hook;
+
+// What the launch asked for (the size flag, set in post_unpack before the
+// engine creates its pools; read by the detours as plain values).
+std::uint64_t target_pool = core::raised_pool_size;
+std::uint64_t target_budget = core::raised_page_budget;
 
 // ------------------------------------------------- what the detours record
 // The engine creates 23 pools on build 0x6531394; room for more, and a count
@@ -79,8 +85,8 @@ std::uint64_t create_pool_stub(const char *name, const std::uint32_t flags,
   call.size_in = size;
   const bool first_prt = call.name.view() == core::prt_pool_name &&
                          !prt_seen.exchange(true, std::memory_order_relaxed);
-  call.size_out =
-      core::pool_size(index == 0, first_prt, call.name.view(), flags, size);
+  call.size_out = core::pool_size(index == 0, first_prt, call.name.view(),
+                                  flags, size, target_pool);
   const auto result = create_pool_hook.invoke<std::uint64_t>(
       name, flags, call.size_out, region);
   call.result = static_cast<std::uint8_t>(result);
@@ -97,7 +103,7 @@ std::uint64_t create_pool_stub(const char *name, const std::uint32_t flags,
 // to the page adder, which never reads it. It returns nothing: rax holds
 // whatever its last instructions left there.
 void init_page_budget_stub(const std::uint64_t bytes, const std::uint64_t rdx) {
-  const std::uint64_t given = core::page_budget(bytes);
+  const std::uint64_t given = core::page_budget(bytes, target_budget);
   if (budget_call_count.fetch_add(1, std::memory_order_relaxed) == 0) {
     first_budget.bytes_in = bytes;
     first_budget.bytes_out = given;
@@ -146,6 +152,8 @@ std::uint32_t main_pages() {
 
 core::report snapshot() {
   core::report r;
+  r.target_pool = target_pool;
+  r.target_budget = target_budget;
   r.pool_calls = pool_call_count.load(std::memory_order_relaxed);
   r.budget_calls = budget_call_count.load(std::memory_order_relaxed);
   for (std::uint32_t i = 0; i < std::min(r.pool_calls, max_recorded); ++i) {
@@ -369,7 +377,9 @@ bool install() {
   }
   xerces_runtime::log_info(
       "xerces.db_pool.installed",
-      "Larger zone memory: hooks installed; the engine sets up its pools next",
+      "Larger zone memory: hooks installed (" +
+          std::to_string(target_pool / core::gib) +
+          " GiB pool); the engine sets up its pools next",
       "{\"create_pool\":" + xerces_core::json::quote(rva(*pool_at)) +
           ",\"init_page_budget\":" + xerces_core::json::quote(rva(*budget_at)) +
           "}");
@@ -385,9 +395,14 @@ public:
     if (!game::is_client() || !game::is_new_client()) {
       return;
     }
-    if (!core::requested(xerces_runtime::command_line_args())) {
+    const std::vector<std::string> args = xerces_runtime::command_line_args();
+    if (!core::requested(args)) {
       return;
     }
+    // The pool's size: -xerces-db-pool-6gb or -8gb, else 4 GiB.
+    const int size_gib = core::requested_gib(args);
+    target_pool = core::pool_bytes_for(size_gib);
+    target_budget = core::page_budget_for(size_gib);
     if (!install()) {
       return;
     }

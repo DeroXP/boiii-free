@@ -15,8 +15,9 @@
 //   -nocinematics also turn the game's own saved skip switches on, which
 //   Xerces cannot turn off (xerces_core::dvar_skip_intro), so the screen
 //   says so instead of promising the videos play.
-// - Larger zone memory (experimental): the client's -xerces-db-pool
-//   (src/client/xerces/db_pool.cpp), also in config.extra_flags. Safe mode
+// - Larger zone memory (experimental): the client's -xerces-db-pool, with
+//   -xerces-db-pool-6gb or -8gb for a bigger pool (4 GB without them;
+//   src/client/xerces/db_pool.cpp), also in config.extra_flags. Safe mode
 //   leaves it out (xerces_core::preview_launch).
 // - Flip-model presentation (experimental): the client's -xerces-flip-model
 //   (src/client/xerces/flip_model.cpp), also in config.extra_flags. Safe
@@ -151,7 +152,7 @@ public:
     model.Bind("intro_note", &intro_note_);
     model.Bind("nocinematics", &nocinematics_);
     model.Bind("cinematics_note", &cinematics_note_);
-    model.Bind("db_pool", &db_pool_);
+    model.Bind("db_pool_gb", &db_pool_gb_);
     model.Bind("precise_limiter", &precise_limiter_);
     model.Bind("close_on_launch", &close_on_launch_);
     model.Bind("flags", &flags_);
@@ -326,7 +327,7 @@ private:
     const std::vector<std::vector<std::string>> rest = {
         {"nointro"},
         {"nocinematics"},
-        {"db-pool"},
+        {"db-pool-off", "db-pool-4", "db-pool-6", "db-pool-8"},
         {"close-on-launch"},
         {"flags-field"},
         {"theme-dark", "theme-light", "theme-contrast"},
@@ -651,7 +652,7 @@ private:
                          "1 in boiii_players\\user\\config.cfg). Turn it off "
                          "in the game's Quick Settings.")
             : std::string();
-    db_pool_ = core::has_flag(c.extra_flags, core::db_pool::flag_name);
+    db_pool_gb_ = core::db_pool::requested_gib(c.extra_flags);
     precise_limiter_ =
         core::has_flag(c.extra_flags, core::frame_pacing::flag_name);
     flip_model_ = core::has_flag(c.extra_flags, core::flip_model::flag_name);
@@ -964,6 +965,29 @@ private:
                 : value == "borderless"
                     ? owner_->tr("Display mode: borderless (-borderless).")
                     : owner_->tr("Display mode: the game's setting."));
+    } else if (key == "dbpool") {
+      const int gib = std::atoi(value.c_str());
+      if (gib != 0 && std::ranges::find(core::db_pool::size_options_gib, gib) ==
+                          core::db_pool::size_options_gib.end()) {
+        return;
+      }
+      if (core::db_pool::requested_gib(c.extra_flags) == gib) {
+        return;
+      }
+      set_flags(
+          core::db_pool::with_size(c.extra_flags, gib),
+          "db_pool " + std::to_string(gib),
+          gib == 0 ? owner_->tr("Xerces no longer passes -xerces-db-pool.")
+          : gib == core::db_pool::default_size_gib
+              ? owner_->tr("Larger zone memory is on: 4 GB "
+                           "(-xerces-db-pool). Turn it off if the game "
+                           "crashes.")
+          : gib == 6 ? owner_->tr("Larger zone memory is on: 6 GB "
+                                  "(-xerces-db-pool-6gb). Turn it off if the "
+                                  "game crashes.")
+                     : owner_->tr("Larger zone memory is on: 8 GB "
+                                  "(-xerces-db-pool-8gb). Turn it off if the "
+                                  "game crashes."));
     } else if (key == "vsync" || key == "drawfps") {
       const std::string_view dvar =
           key == "vsync" ? core::dvar_vsync : core::dvar_draw_fps;
@@ -1034,13 +1058,6 @@ private:
                     ? owner_->tr("Xerces no longer passes -nocinematics; the "
                                  "game's Quick Settings still skip cinematics.")
                     : owner_->tr("Xerces no longer passes -nocinematics."));
-    } else if (key == "db_pool") {
-      const bool on = !core::has_flag(c.extra_flags, core::db_pool::flag_name);
-      set_flags(core::with_flag(c.extra_flags, core::db_pool::flag_name, on),
-                std::string("db_pool ") + (on ? "on" : "off"),
-                on ? owner_->tr("Larger zone memory is on (-xerces-db-pool). "
-                                "Turn it off if the game crashes.")
-                   : owner_->tr("Xerces no longer passes -xerces-db-pool."));
     } else if (key == "precise_limiter") {
       const bool on =
           !core::has_flag(c.extra_flags, core::frame_pacing::flag_name);
@@ -1474,7 +1491,8 @@ private:
   Rml::Vector<dvar_row> others_;
 
   bool nointro_ = true, nocinematics_ = false, close_on_launch_ = false;
-  bool db_pool_ = false, precise_limiter_ = false, flip_model_ = false;
+  int db_pool_gb_ = 0; // 0 off, else 4, 6 or 8
+  bool precise_limiter_ = false, flip_model_ = false;
   // The game's own config.cfg has boiii_skipIntro / boiii_skipCinematics on.
   bool game_skips_intro_ = false, game_skips_cinematics_ = false;
   Rml::String intro_note_, cinematics_note_;

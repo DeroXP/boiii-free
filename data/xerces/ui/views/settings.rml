@@ -191,9 +191,14 @@
 			<div class="field">
 				<div class="field-text">
 					<div class="field-name">Larger zone memory (experimental)</div>
-					<div class="field-help">Lets big custom maps load with heavy mods. Turn it off if the game crashes. -xerces-db-pool: the game's 2 GiB zone memory for maps and mods becomes 4 GiB. Safe mode always leaves it off.</div>
+					<div class="field-help">Lets big custom maps load with heavy mods. Turn it off if the game crashes. -xerces-db-pool: the game's 2 GiB zone memory for maps and mods becomes 4, 6 or 8 GiB (-xerces-db-pool-6gb or -8gb). It only uses the memory a map needs, so a bigger size helps only the heaviest stacks. Safe mode always leaves it off.</div>
 				</div>
-				<button id="db-pool" class="toggle" data-class-on="db_pool" data-event-click="toggle('db_pool')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="db_pool">On</span><span class="toggle-state" data-if="!db_pool">Off</span></button>
+				<div class="choices">
+					<button id="db-pool-off" class="choice" data-class-on="db_pool_gb == 0" data-event-click="choose('dbpool', '0')"><span class="mark-dot"></span><span>Off</span></button>
+					<button id="db-pool-4" class="choice" data-class-on="db_pool_gb == 4" data-event-click="choose('dbpool', '4')"><span class="mark-dot"></span><span>4 GB</span></button>
+					<button id="db-pool-6" class="choice" data-class-on="db_pool_gb == 6" data-event-click="choose('dbpool', '6')"><span class="mark-dot"></span><span>6 GB</span></button>
+					<button id="db-pool-8" class="choice" data-class-on="db_pool_gb == 8" data-event-click="choose('dbpool', '8')"><span class="mark-dot"></span><span>8 GB</span></button>
+				</div>
 			</div>
 
 			<div class="field">

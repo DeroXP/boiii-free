@@ -261,7 +261,8 @@ find_zone_memory_build(const zone_memory_table &table,
 
 std::optional<zone_budget> zone_budget_for(const zone_memory_build &build,
                                            std::string_view mode,
-                                           bool larger_pool) {
+                                           bool larger_pool,
+                                           std::uint64_t larger_pool_bytes) {
   const auto it = build.baseline_mib.find(std::string(mode));
   if (it == build.baseline_mib.end() || !(build.db_main_pool_mib > 0)) {
     return std::nullopt;
@@ -270,7 +271,7 @@ std::optional<zone_budget> zone_budget_for(const zone_memory_build &build,
   // The client raises the DB main pool only when the engine creates it at
   // exactly the stock size (db_pool::pool_size).
   if (build.db_main_pool_mib == to_mib(db_pool::stock_pool_size)) {
-    budget.larger_pool_mib = to_mib(db_pool::raised_pool_size);
+    budget.larger_pool_mib = to_mib(larger_pool_bytes);
     if (larger_pool) {
       budget.pool_mib = budget.larger_pool_mib;
       budget.larger_pool = true;
@@ -296,7 +297,8 @@ std::optional<zone_budget> zone_budget_for(const zone_memory_build &build,
 std::optional<zone_budget> find_zone_budget(const zone_memory_table &table,
                                             std::string_view game_build,
                                             std::string_view mode,
-                                            bool larger_pool) {
+                                            bool larger_pool,
+                                            std::uint64_t larger_pool_bytes) {
   const zone_memory_build *build =
       game_build.starts_with("0x")
           ? find_zone_memory_build(table, std::nullopt, hex32(game_build))
@@ -304,7 +306,7 @@ std::optional<zone_budget> find_zone_budget(const zone_memory_table &table,
   if (build == nullptr) {
     return std::nullopt;
   }
-  return zone_budget_for(*build, mode, larger_pool);
+  return zone_budget_for(*build, mode, larger_pool, larger_pool_bytes);
 }
 
 bool is_zone_file(std::string_view relative) {

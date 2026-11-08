@@ -19,6 +19,7 @@
 #include <string_view>
 #include <vector>
 
+#include "db_pool.hpp"
 #include "diagnostics.hpp"
 
 namespace xerces_core {
@@ -86,19 +87,22 @@ find_zone_memory_build(const zone_memory_table &table,
 // The budget of a mode on a build; nullopt when the mode is not measured.
 // larger_pool: the launch has the larger zone memory, so the pool is the
 // raised one when the build's pool is the stock one it raises (the baseline
-// stays: the game's own zones take the same either way).
-std::optional<zone_budget> zone_budget_for(const zone_memory_build &build,
-                                           std::string_view mode,
-                                           bool larger_pool = false);
+// stays: the game's own zones take the same either way). larger_pool_bytes is
+// its size, the player's choice of 4, 6 or 8 GiB (db_pool::pool_bytes_for;
+// 4 GiB unless the launch says more).
+std::optional<zone_budget>
+zone_budget_for(const zone_memory_build &build, std::string_view mode,
+                bool larger_pool = false,
+                std::uint64_t larger_pool_bytes = db_pool::raised_pool_size);
 
 // The same from a plan request's game_build: Steam's build number as the
 // launcher writes it ("24784313"), or an exe checksum as `xerces_cli plan
 // resolve --game-build` takes it ("0x6531394"). nullopt for anything else,
 // an unknown build or an unmeasured mode.
-std::optional<zone_budget> find_zone_budget(const zone_memory_table &table,
-                                            std::string_view game_build,
-                                            std::string_view mode,
-                                            bool larger_pool = false);
+std::optional<zone_budget>
+find_zone_budget(const zone_memory_table &table, std::string_view game_build,
+                 std::string_view mode, bool larger_pool = false,
+                 std::uint64_t larger_pool_bytes = db_pool::raised_pool_size);
 
 // --------------------------------------------------- a mod's or map's zones
 // The zone files of a folder: *.ff at its root (Steam's Workshop layout) or

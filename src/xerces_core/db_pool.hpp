@@ -10,10 +10,11 @@
 // pmem.create_pool: rcx name, edx flags, r8 size, r9 the pool's region) and
 // the shared page budget to another (pmem.init_page_budget: rcx bytes). With
 // the launch flag -xerces-db-pool the client detours both: the first pool, the
-// DB (fastfile) stack's "main" pool, gets 4 GiB instead of 2 GiB, the DB
-// stack's streamed-texture pool (the first "gpu_prt") 30 GiB instead of 18 GiB,
-// and the page budget 8 GiB instead of 5 GiB. Every other call passes through
-// unchanged.
+// DB (fastfile) stack's "main" pool, gets 4 GiB instead of 2 GiB (6 or 8 GiB
+// with -xerces-db-pool-6gb or -8gb, below), the DB stack's streamed-texture
+// pool (the first "gpu_prt") 30 GiB instead of 18 GiB, and the page budget 8
+// GiB instead of 5 GiB (more for the bigger pools). Every other call passes
+// through unchanged.
 
 #include <array>
 #include <cstdint>
@@ -50,6 +51,28 @@ inline constexpr std::uint64_t page_budget_ceiling = 0x40000 * page_size;
 static_assert(raised_page_budget <= page_budget_ceiling);
 static_assert(raised_pool_size > stock_pool_size);
 
+// The larger pool's size is the player's choice (Settings > Launch): 4, 6 or 8
+// GiB. -xerces-db-pool alone is 4; -xerces-db-pool-6gb or -xerces-db-pool-8gb
+// beside it make it 6 or 8 (plain flags, since the launcher's flag field takes
+// only letters, digits and dashes). The pool only reserves address space;
+// memory is committed as zones use it. The page budget follows the pool: the
+// stock budget (5 GiB) less the stock pool (2 GiB) plus the pool, and 1 GiB
+// more, which is 8 GiB for 4 GiB (what the first build gave) and at most 12
+// GiB for 8, under the 16 GiB the budget's page table holds.
+inline constexpr std::uint64_t gib = 0x40000000;
+inline constexpr std::array<int, 3> size_options_gib = {4, 6, 8};
+inline constexpr int default_size_gib = 4;
+inline constexpr std::uint64_t pool_bytes_for(int size_gib) {
+  return static_cast<std::uint64_t>(size_gib) * gib;
+}
+inline constexpr std::uint64_t page_budget_for(int size_gib) {
+  return stock_page_budget - stock_pool_size + pool_bytes_for(size_gib) + gib;
+}
+static_assert(pool_bytes_for(default_size_gib) == raised_pool_size);
+static_assert(page_budget_for(default_size_gib) == raised_page_budget);
+static_assert(page_budget_for(8) <= page_budget_ceiling);
+static_assert(pool_bytes_for(8) < 0x7FFFF * page_size); // a pool's page index
+
 // The DB stack's streamed-texture pool, the first "gpu_prt" the engine
 // creates: every loaded zone's block 8 (its streamed images) takes address
 // space there. 18 GiB on build 0x6531394; MW4 Shipment (10.4 GiB of block 8)
@@ -82,12 +105,27 @@ inline constexpr std::array<std::uint8_t, 6> init_page_budget_entry = {
 // their size. The streamed-texture pool is raised only on the first "gpu_prt"
 // call (first_prt_call) and only when it is exactly the stock one; three more
 // "gpu_prt" pools keep their size.
+// main_target is the size the DB main pool becomes (the player's choice,
+// pool_bytes_for); the streamed-texture pool is 30 GiB whatever it is.
 std::uint64_t pool_size(bool first_call, bool first_prt_call,
                         std::string_view name, std::uint32_t flags,
-                        std::uint64_t size);
+                        std::uint64_t size,
+                        std::uint64_t main_target = raised_pool_size);
 // The page budget the budget helper is given: raised only from exactly the
-// stock budget.
-std::uint64_t page_budget(std::uint64_t bytes);
+// stock budget, to `target` (page_budget_for the chosen size).
+std::uint64_t page_budget(std::uint64_t bytes,
+                          std::uint64_t target = raised_page_budget);
+
+// The pool size the arguments ask for, in GiB: 0 when -xerces-db-pool is not
+// before the first "+" command, else 6 or 8 when -xerces-db-pool-6gb or
+// -xerces-db-pool-8gb is there too (the last one wins), else 4. Flags may be
+// spelled with one dash or two. The size flags alone turn nothing on.
+int requested_gib(const std::vector<std::string> &args);
+// The flags with the zone memory set to `size_gib`: 0 removes every zone memory
+// flag, 4 leaves -xerces-db-pool alone, 6 and 8 add the size flag. Other flags
+// and their order are kept.
+std::vector<std::string> with_size(std::vector<std::string> flags,
+                                   int size_gib);
 
 // A pool name as the detour keeps it: at most 15 characters, up to the first
 // NUL; empty for a null pointer. No allocation, so it is safe that early.
@@ -113,6 +151,10 @@ struct budget_call {
 };
 
 struct report {
+  // What the launch asked for: the main pool and the page budget the detours
+  // give (the first build's 4 GiB and 8 GiB unless the size flag says more).
+  std::uint64_t target_pool = raised_pool_size;
+  std::uint64_t target_budget = raised_page_budget;
   std::vector<pool_call> calls;      // the recorded ones, in call order
   std::uint32_t pool_calls = 0;      // every call, recorded or not
   std::optional<budget_call> budget; // the first call

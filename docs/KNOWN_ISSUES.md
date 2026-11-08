@@ -16,10 +16,11 @@ to report these again, but tell us if you see them somewhere else or worse.
   streamed textures) more of the second. The game shows "Black Ops III ran out
   of memory", names the map and the mods, and closes when you press OK. The Mods
   screen warns about maps that will not fit before you launch. Turning on
-  Settings > Launch > "Larger zone memory (experimental)" makes them load:
-  BACKROOMZ and Super Mario 64 played that way in our tests, twice each, plus
-  one smaller map, and MW4 Shipment with six mods twice, once right after
-  Shadows of Evil. Turn it off again if the game crashes with it on.
+  Settings > Launch > "Larger zone memory (experimental)" (Off, 4, 6 or 8 GB; 4
+  GB is what those tests used) makes them load: BACKROOMZ and Super Mario 64
+  played that way in our tests, twice each, plus one smaller map, and MW4
+  Shipment with six mods twice, once right after Shadows of Evil. Turn it off
+  again if the game crashes with it on.
 - **Two camo mods: a camo can look like another.** DS4C and Ascendance both
   replace the camo list and use the same camo numbers for different camos. The
   higher mod's list wins, but each gun's camo looks come from whichever mod has
