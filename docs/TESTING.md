@@ -1180,6 +1180,49 @@ passed through the home's `dvars` setting: the same argument Join now passes
       reaches the handshake where the tester's game crashed, so this is the
       check that shows the crash is gone.
 
+### MW4 Shipment out of memory (2026-11-07)
+
+You reported "ran out of memory" on MW4 Shipment (Workshop 3829169329) with your
+six mods even with Larger zone memory on. Your game logs had four such exits,
+all `loader.out_of_memory` with zone `zm_mw4_shipment` and caller 0x20C5A3D (the
+pool allocator's bounds check): DS4C alone, two and three mods with the stock
+pool (2026-11-06), and the six mods with the larger pool right after Shadows of
+Evil (2026-11-07). The zone headers: MW4 Shipment's main zone takes 736.3 MiB of
+blocks 5 and 6, so DS4C alone should have fit the stock main pool with 11 MiB to
+spare (849 + 451.3 + 736.3), and the six mods (1169.3 MiB) the 4 GiB one with
+1.3 GiB to spare.
+
+Run by Claude with your go-ahead ("Yes, I'm not playing"), on the
+`launcher/oom-diag` worktree build through the test home
+(`C:\Users\Ginld\XercesDev\bench\20261106-modlabels`, `mw4-run.ps1` there),
+Larger zone memory on unless said:
+
+- **Where it ran out.** The six mods straight into MW4 Shipment: the main pool
+  held 1334 MiB in the front end, 1907 as the level started and 2753 of 4096 at
+  the exit, so it was not full. With every pool listed and the allocator's own
+  shortfall and descriptor read at the exit, the full one was pool 2, the DB
+  stack's `gpu_prt` (18 GiB), short by 5950 MiB. DS4C alone with that pool at
+  its stock 18 GiB: short by 1322 MiB, the main pool at 2035 MiB (the main-pool
+  figures were right all along). Block 8 of the zones (streamed images: 10.4 GiB
+  for MW4 Shipment, 2.7 GiB for DS4C) fills that pool; both runs give a stock
+  baseline of 6338 MiB (the six-mod run predicts 5951.5 MiB short).
+- [x] The six mods with the first `gpu_prt` raised to 30 GiB: MW4 Shipment loads
+      (46 s), the level renders with its textures (screenshots), the map's own
+      mode menu opens, and the pool holds 778 MiB committed in the level.
+- [x] Your sequence: Shadows of Evil first (2410 MiB in the main pool), back to
+      the menu, then MW4 Shipment: it loads. The main pool goes back to 1906 MiB
+      in the front end between the maps.
+- [x] The finished build: `xerces.db_pool` says "its streamed-texture pool 30720
+      MiB (stock 18432 MiB)", and the six mods load MW4 Shipment again.
+- [x] The plan (`xerces_cli plan apply --dry-launch` on the test home, DS4C
+      alone): with the stock pools, "MW4 SHIPMENT ZOMBIE ... needs 19754.1 MiB
+      of streamed-texture memory, 1322.1 over" and the warning offers Larger
+      zone memory; with it, every installed map fits.
+
+In the matches, MW4 Shipment's own menu script asked for unsafe Lua; Claude
+answered No each time. Windows Firewall asked whether the worktree's boiii.exe
+may use the network; that prompt was left for you.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The

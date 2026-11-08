@@ -6,13 +6,15 @@
 //
 // The engine's DB (fastfile) stack has a fixed 2 GiB "main" pool. Two custom
 // maps with DS4C overflow it while their main zone loads, and the engine then
-// ends the game. The size comes from a start-up function Arxan keeps
-// encrypted, which runs right after the components' post_unpack; it passes
-// each pool's size to a plain helper and the shared page budget to another
-// (xerces_core/db_pool.hpp). This detours both helpers, found through the
-// signature registry and checked byte for byte first: the first pool (the DB
-// main pool) gets 4 GiB instead of 2 GiB, the page budget 8 GiB instead of
-// 5 GiB, and every other call passes through unchanged.
+// ends the game. Its streamed-texture pool ("gpu_prt", 18 GiB) is the other
+// limit: MW4 Shipment's streamed images overflow it with DS4C. The sizes come
+// from a start-up function Arxan keeps encrypted, which runs right after the
+// components' post_unpack; it passes each pool's size to a plain helper and
+// the shared page budget to another (xerces_core/db_pool.hpp). This detours
+// both helpers, found through the signature registry and checked byte for
+// byte first: the first pool (the DB main pool) gets 4 GiB instead of 2 GiB,
+// the first "gpu_prt" pool 30 GiB instead of 18 GiB, the page budget 8 GiB
+// instead of 5 GiB, and every other call passes through unchanged.
 //
 // The detours run inside the engine's PMem set-up, before Com_Init. The game
 // log is open by then (post_unpack logs), but they still only copy what they
@@ -30,6 +32,7 @@
 #include <xerces_core/json.hpp>
 #include <xerces_core/sigruntime.hpp>
 
+#include "db_pool.hpp"
 #include "runtime.hpp"
 #include "signatures.hpp"
 
@@ -54,6 +57,8 @@ struct recorded_call {
 
 recorded_call pool_calls[max_recorded];
 std::atomic<std::uint32_t> pool_call_count{0};
+// A "gpu_prt" pool was created: only the first (the DB stack's) may grow.
+std::atomic<bool> prt_seen{false};
 
 std::atomic<bool> budget_done{false};
 core::budget_call first_budget;
@@ -72,7 +77,10 @@ std::uint64_t create_pool_stub(const char *name, const std::uint32_t flags,
   call.name = core::copy_pool_name(name);
   call.flags = flags;
   call.size_in = size;
-  call.size_out = core::pool_size(index == 0, call.name.view(), flags, size);
+  const bool first_prt = call.name.view() == core::prt_pool_name &&
+                         !prt_seen.exchange(true, std::memory_order_relaxed);
+  call.size_out =
+      core::pool_size(index == 0, first_prt, call.name.view(), flags, size);
   const auto result = create_pool_hook.invoke<std::uint64_t>(
       name, flags, call.size_out, region);
   call.result = static_cast<std::uint8_t>(result);
@@ -122,6 +130,8 @@ bool readable(const void *start, const std::size_t size) {
 // the engine keeps there are readable: its size at +0x10 and its committed
 // 64 KiB pages at +0x20 (docs/DESIGN.md 5.4 step 4).
 std::atomic<std::uintptr_t> main_region{0};
+std::atomic<std::uint64_t> main_size{0};
+std::atomic<std::uint32_t> peak_pages{0};
 constexpr std::size_t size_offset = 0x10;
 constexpr std::size_t pages_offset = 0x20;
 
@@ -153,6 +163,7 @@ core::report snapshot() {
         readable(reinterpret_cast<const void *>(region), pages_offset + 4)) {
       r.main_size =
           *reinterpret_cast<const std::uint64_t *>(region + size_offset);
+      main_size.store(*r.main_size, std::memory_order_relaxed);
       main_region.store(region, std::memory_order_release);
       r.main_pages = main_pages();
     }
@@ -167,14 +178,18 @@ void log_report(const core::report &r) {
 }
 
 // Once a second on the main loop: the DB main pool's committed size, logged
-// (from the async pipeline) the first time it passes the stock 2 GiB and the
-// first time the journal says the player is in a level.
+// (from the async pipeline) the first time it passes the stock 2 GiB and each
+// time the journal enters the front end, a level's load or a level. Whether
+// the pool empties between maps: on 2026-11-07 MW4 Shipment ran out of zone
+// memory one second into its load, right after Shadows of Evil, with the
+// larger pool and a stack that should have left it more than 1 GiB.
 void watch_usage() {
-  static std::uint32_t peak = 0;
   static bool logged_above = false;
-  static bool logged_in_game = false;
+  static std::optional<xerces_core::launch_phase> last_phase;
   const std::uint32_t pages = main_pages();
-  peak = std::max(peak, pages);
+  const std::uint32_t peak =
+      std::max(peak_pages.load(std::memory_order_relaxed), pages);
+  peak_pages.store(peak, std::memory_order_relaxed);
   const auto log_usage = [&](const char *when) {
     const std::string data =
         xerces_core::db_pool::usage_json(pages, peak, when);
@@ -190,12 +205,105 @@ void watch_usage() {
     logged_above = true;
     log_usage("above_stock");
   }
-  if (!logged_in_game && xerces_runtime::journal_active() &&
-      xerces_runtime::journal_phase() == xerces_core::launch_phase::in_game) {
-    logged_in_game = true;
-    log_usage("in_game");
+  if (!xerces_runtime::journal_active()) {
+    return;
+  }
+  const xerces_core::launch_phase phase = xerces_runtime::journal_phase();
+  if (last_phase == phase) {
+    return;
+  }
+  last_phase = phase;
+  if (phase == xerces_core::launch_phase::frontend ||
+      phase == xerces_core::launch_phase::loading_map ||
+      phase == xerces_core::launch_phase::in_game) {
+    log_usage(xerces_core::to_string(phase));
+    // Every pool in use at that moment (the out-of-memory check is the same
+    // for all of them).
+    const std::string data =
+        "{\"when\":" + xerces_core::json::quote(xerces_core::to_string(phase)) +
+        ",\"pools\":" + pools_json() + "}";
+    scheduler::once(
+        [data] {
+          xerces_runtime::log_info("xerces.db_pool.pools",
+                                   "The engine's memory pools in use", data);
+        },
+        scheduler::async);
   }
 }
+} // namespace
+
+std::optional<main_pool_usage> main_usage() {
+  if (main_region.load(std::memory_order_acquire) == 0) {
+    return std::nullopt;
+  }
+  main_pool_usage usage;
+  usage.pages = main_pages();
+  usage.peak_pages =
+      std::max(peak_pages.load(std::memory_order_relaxed), usage.pages);
+  usage.size = main_size.load(std::memory_order_relaxed);
+  return usage;
+}
+
+std::vector<pool_state> pools() {
+  std::vector<pool_state> out;
+  const std::uint32_t count =
+      std::min(pool_call_count.load(std::memory_order_relaxed), max_recorded);
+  for (std::uint32_t i = 0; i < count; ++i) {
+    if (!pool_calls[i].done.load(std::memory_order_acquire)) {
+      break;
+    }
+    const std::uintptr_t region = pool_calls[i].region;
+    if (region == 0 ||
+        !readable(reinterpret_cast<const void *>(region), pages_offset + 4)) {
+      continue;
+    }
+    pool_state state;
+    state.index = i;
+    state.name = std::string(pool_calls[i].call.name.view());
+    state.flags = pool_calls[i].call.flags;
+    state.size =
+        *reinterpret_cast<const volatile std::uint64_t *>(region + size_offset);
+    state.pages = *reinterpret_cast<const volatile std::uint32_t *>(
+        region + pages_offset);
+    out.push_back(std::move(state));
+  }
+  return out;
+}
+
+std::optional<std::uint32_t> pool_of_descriptor(const std::uint64_t address) {
+  const std::uint32_t count =
+      std::min(pool_call_count.load(std::memory_order_relaxed), max_recorded);
+  for (std::uint32_t i = 0; i < count; ++i) {
+    if (pool_calls[i].done.load(std::memory_order_acquire) &&
+        pool_calls[i].region != 0 && pool_calls[i].region - 8 == address) {
+      return i;
+    }
+  }
+  return std::nullopt;
+}
+
+std::string pool_json(const pool_state &state) {
+  namespace json = xerces_core::json;
+  char flags[16];
+  std::snprintf(flags, sizeof(flags), "0x%X", state.flags);
+  return "{\"i\":" + std::to_string(state.index) +
+         ",\"name\":" + json::quote(json::valid_utf8(state.name, 32)) +
+         ",\"flags\":" + json::quote(flags) + ",\"mib\":" +
+         std::to_string(std::uint64_t{state.pages} * core::page_size >> 20) +
+         ",\"size_mib\":" + std::to_string(state.size >> 20) + "}";
+}
+
+std::string pools_json() {
+  std::string out = "[";
+  for (const pool_state &state : pools()) {
+    if (state.pages != 0) {
+      out += (out.size() > 1 ? "," : "") + pool_json(state);
+    }
+  }
+  return out + "]";
+}
+
+namespace {
 
 // ---------------------------------------------------------------- install
 std::string rva(const std::uintptr_t address) {

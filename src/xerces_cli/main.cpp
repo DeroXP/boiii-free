@@ -613,6 +613,18 @@ void print_zone_memory(const plan &p) {
                       ? ", map " + mib_text(to_mib(*memory.map_bytes))
                       : "")
               << ")";
+    if (budget.prt_checked) {
+      const double stack_prt = to_mib(memory.stack_prt_bytes);
+      const double map_prt =
+          memory.map_prt_bytes ? to_mib(*memory.map_prt_bytes) : 0.0;
+      std::cout << "; streamed textures "
+                << mib_text(budget.prt_baseline_mib + stack_prt + map_prt)
+                << " of " << mib_text(budget.prt_pool_mib) << " MiB (game "
+                << mib_text(budget.prt_baseline_mib) << ", mods "
+                << mib_text(stack_prt)
+                << (memory.map_prt_bytes ? ", map " + mib_text(map_prt) : "")
+                << ")";
+    }
     const std::size_t unread = memory.maps_unread.size();
     const std::string not_checked = std::to_string(unread) +
                                     (unread == 1 ? " was" : " were") +
@@ -630,7 +642,8 @@ void print_zone_memory(const plan &p) {
     }
     for (const auto &map : memory.maps_over) {
       std::cout << "    " << map.name << " (" << map.id << "): needs "
-                << mib_text(map.need_mib) << " MiB, "
+                << mib_text(map.need_mib) << " MiB"
+                << (map.texture ? " of streamed-texture memory" : "") << ", "
                 << mib_text(map.over_by_mib) << " over"
                 << (map.over_without_mods ? ", even with no mods" : "")
                 << (map.fits_larger_pool ? "; fits the larger zone memory ("

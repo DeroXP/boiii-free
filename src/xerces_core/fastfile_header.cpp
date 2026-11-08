@@ -25,6 +25,8 @@ std::uint64_t fastfile_header::db_main_pool_bytes() const {
              : a + b;
 }
 
+std::uint64_t fastfile_header::db_prt_pool_bytes() const { return blocks[8]; }
+
 std::optional<fastfile_header> parse_fastfile_header(std::string_view bytes) {
   if (bytes.size() < fastfile_header_bytes ||
       !bytes.starts_with(fastfile_magic)) {

@@ -9,16 +9,17 @@ to report these again, but tell us if you see them somewhere else or worse.
   intro plays to the end, DS4C's scripts error on every frame and the game drops
   you before you are in the level. Skip the intro and it plays. This is DS4C's
   own and has not been checked on plain BOIII.
-- **BACKROOMZ and Super Mario 64 with DS4C run out of memory.** DS4C's files
-  take about 450 MiB of the memory the game keeps for loaded content, and these
-  two maps need more than is left. With BACKROOMZ the game shows "Black Ops III
-  ran out of memory", names the map and the mods, and closes when you press OK.
-  Super Mario 64 should do the same, but we have not checked that yet. The Mods
+- **BACKROOMZ, Super Mario 64 and MW4 Shipment with DS4C run out of memory.**
+  DS4C's files take about 450 MiB of the memory the game keeps for loaded
+  content and 2.7 GiB of the room it keeps for streamed textures. BACKROOMZ and
+  Super Mario 64 need more of the first than is left, MW4 Shipment (10.4 GiB of
+  streamed textures) more of the second. The game shows "Black Ops III ran out
+  of memory", names the map and the mods, and closes when you press OK. The Mods
   screen warns about maps that will not fit before you launch. Turning on
-  Settings > Launch > "Larger zone memory (experimental)" makes them load: both
-  played that way in our tests, twice each, plus one smaller map. Those five
-  runs are all the testing that setting has had. Turn it off again if the game
-  crashes with it on.
+  Settings > Launch > "Larger zone memory (experimental)" makes them load:
+  BACKROOMZ and Super Mario 64 played that way in our tests, twice each, plus
+  one smaller map, and MW4 Shipment with six mods twice, once right after
+  Shadows of Evil. Turn it off again if the game crashes with it on.
 - **Two camo mods: a camo can look like another.** DS4C and Ascendance both
   replace the camo list and use the same camo numbers for different camos. The
   higher mod's list wins, but each gun's camo looks come from whichever mod has

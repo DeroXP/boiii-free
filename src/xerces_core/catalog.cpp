@@ -717,6 +717,8 @@ void read_zone_headers(installed_content &content,
         read_fastfile_header(base / std::filesystem::path(name));
     content.zone_headers[file] =
         header ? std::optional(header->db_main_pool_bytes()) : std::nullopt;
+    content.zone_prt[file] =
+        header ? std::optional(header->db_prt_pool_bytes()) : std::nullopt;
   }
 }
 } // namespace

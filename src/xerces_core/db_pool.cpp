@@ -41,11 +41,16 @@ bool requested(const std::vector<std::string> &args) {
          has_launch_flag(args, "-" + std::string(flag));
 }
 
-std::uint64_t pool_size(bool first_call, std::string_view name,
-                        std::uint32_t flags, std::uint64_t size) {
+std::uint64_t pool_size(bool first_call, bool first_prt_call,
+                        std::string_view name, std::uint32_t flags,
+                        std::uint64_t size) {
   if (first_call && name == main_pool_name && flags == main_pool_flags &&
       size == stock_pool_size) {
     return raised_pool_size;
+  }
+  if (first_prt_call && name == prt_pool_name && flags == prt_pool_flags &&
+      size == stock_prt_size) {
+    return raised_prt_size;
   }
   return size;
 }
@@ -70,13 +75,31 @@ bool pool_raised(const report &r) {
          r.calls.front().size_in == stock_pool_size;
 }
 
+namespace {
+const pool_call *first_prt_call(const report &r) {
+  for (const pool_call &call : r.calls) {
+    if (call.name.view() == prt_pool_name) {
+      return &call;
+    }
+  }
+  return nullptr;
+}
+} // namespace
+
+bool prt_raised(const report &r) {
+  const pool_call *prt = first_prt_call(r);
+  return prt != nullptr && prt->size_in == stock_prt_size &&
+         prt->size_out == raised_prt_size && prt->result != 0;
+}
+
 bool budget_raised(const report &r) {
   return r.budget && r.budget->bytes_out == raised_page_budget &&
          r.budget->bytes_in == stock_page_budget;
 }
 
 bool applied(const report &r) {
-  return pool_raised(r) && budget_raised(r) && r.calls.front().result != 0 &&
+  return pool_raised(r) && prt_raised(r) && budget_raised(r) &&
+         r.calls.front().result != 0 &&
          (!r.main_size || *r.main_size == raised_pool_size);
 }
 
@@ -84,9 +107,10 @@ std::string message(const report &r) {
   if (applied(r)) {
     std::string out = "Larger zone memory is on: the DB main pool is " +
                       mib(raised_pool_size) + " (stock " +
-                      mib(stock_pool_size) + ") and the page budget " +
-                      mib(raised_page_budget) + " (stock " +
-                      mib(stock_page_budget) + ")";
+                      mib(stock_pool_size) + "), its streamed-texture pool " +
+                      mib(raised_prt_size) + " (stock " + mib(stock_prt_size) +
+                      ") and the page budget " + mib(raised_page_budget) +
+                      " (stock " + mib(stock_page_budget) + ")";
     if (r.main_size) {
       out += "; the pool reads back " + mib(*r.main_size);
     }
@@ -112,6 +136,20 @@ std::string message(const report &r) {
   } else if (r.main_size && *r.main_size != raised_pool_size) {
     out += " the DB main pool reads back " + hex(*r.main_size) + ";";
   }
+  if (!prt_raised(r)) {
+    const pool_call *prt = first_prt_call(r);
+    if (prt == nullptr) {
+      out += " no \"gpu_prt\" pool was recorded, so the streamed-texture "
+             "pool keeps its size;";
+    } else if (prt->size_out == raised_prt_size && prt->result == 0) {
+      out += " the engine could not reserve the raised streamed-texture "
+             "pool;";
+    } else {
+      out += " the first \"gpu_prt\" pool was flags " + hex(prt->flags) +
+             " size " + hex(prt->size_in) +
+             ", not the stock streamed-texture pool, so it was left alone;";
+    }
+  }
   if (!budget_raised(r)) {
     out += r.budget ? " the page budget was " + hex(r.budget->bytes_in) +
                           ", not the stock 5 GiB, so it was left alone;"
@@ -131,6 +169,7 @@ std::string data_json(const report &r) {
   auto &alloc = doc.GetAllocator();
   json::set(doc, "applied", applied(r), alloc);
   json::set(doc, "pool_raised", pool_raised(r), alloc);
+  json::set(doc, "prt_raised", prt_raised(r), alloc);
   json::set(doc, "budget_raised", budget_raised(r), alloc);
   json::set(doc, "pool_calls", static_cast<std::int64_t>(r.pool_calls), alloc);
   json::set(doc, "budget_calls", static_cast<std::int64_t>(r.budget_calls),
@@ -171,9 +210,16 @@ std::string usage_message(std::uint32_t pages, std::uint32_t peak_pages,
                           std::string_view when) {
   const std::string now = mib(std::uint64_t{pages} * page_size);
   const std::string peak = mib(std::uint64_t{peak_pages} * page_size);
-  std::string out = when == "in_game"
-                        ? "In a level, the DB main pool holds " + now
-                        : "The DB main pool now holds " + now;
+  std::string out;
+  if (when == "in_game") {
+    out = "In a level, the DB main pool holds " + now;
+  } else if (when == "frontend") {
+    out = "In the front end, the DB main pool holds " + now;
+  } else if (when == "loading_map") {
+    out = "As a level starts loading, the DB main pool holds " + now;
+  } else {
+    out = "The DB main pool now holds " + now;
+  }
   out += above_stock(pages) ? ", more than the stock " + mib(stock_pool_size)
                             : ", within the stock " + mib(stock_pool_size);
   if (peak_pages > pages) {

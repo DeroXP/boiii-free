@@ -8,7 +8,8 @@
 // 2026-11-05) start with the 8 bytes "TAff0000", then the version, a u32,
 // 0x251, at +8; the ten block sizes are u64s at +0xA8 + 8 * i. When a custom
 // map loads, the engine takes blocks 5 and 6 of every loaded zone from one
-// fixed pool, the DB stack's main pool (zone_memory.hpp).
+// fixed pool, the DB stack's main pool, and block 8 from its streamed-texture
+// pool (zone_memory.hpp).
 
 #include <array>
 #include <cstddef>
@@ -31,6 +32,10 @@ struct fastfile_header {
   // Blocks 5 and 6: the zone's share of the DB stack's main pool. Saturates
   // instead of wrapping on a header that claims absurd sizes.
   std::uint64_t db_main_pool_bytes() const;
+  // Block 8: the zone's streamed images, which take address space in the DB
+  // stack's streamed-texture pool ("gpu_prt", db_pool.hpp) while it is loaded
+  // (2026-11-07: MW4 Shipment's 10.4 GiB overflowed its 18 GiB with DS4C).
+  std::uint64_t db_prt_pool_bytes() const;
 };
 
 // The header from a file's first bytes. nullopt for another magic or version,
