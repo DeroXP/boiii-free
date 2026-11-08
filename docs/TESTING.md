@@ -1522,6 +1522,11 @@ the whole screen (`capture-dpi.ps1`).
       No other string in the script holds a macro name (checked with a script).
 - [x] No script error from Xerces' scripts or the probe in any run; none at all
       without mods. With your stack the console has DS4C's usual ones.
+- [x] The same run with your stack on `launcher/integrate-beta7` (beta.6 with
+      the MW4 Shipment memory fix and stages 1 to 4 merged): 15 of 167 smart at
+      rounds 30 and 31, 62 of 62 after (24/20/18), no crash, no script error
+      from Xerces' scripts, and the game log's `xerces.db_pool` showed the
+      larger streamed-texture pool (30720 MiB) with Larger zone memory on.
 
 Not tested yet: a player who moves and shoots, co-op (the pack's choice of
 player), a Monkey Bomb or other point of interest drawing smart zombies, a
