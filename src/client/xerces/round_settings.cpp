@@ -51,9 +51,13 @@ public:
            "2,500 points (10 during a Fire Sale), once a round, on a "
            "Pack-a-Punched gun, for one of the five ammo mods or nothing.");
     on_off("xerces_zm_coinFlip",
-           "Zombies, when you host: a coin flip in the pause menu: bet points "
-           "on a 50/50; a win pays the bet times 2 at round 1, 0.1 more each "
-           "round, up to 5.");
+           "Zombies, when you host: a coin flip in the pause menu, three times "
+           "a round: bet points on a 50/50; a win pays the bet times 2 at "
+           "round 1, 0.1 more each round, up to 5.");
+    game::register_dvar_int(
+        "xerces_zm_startRound", 1, 1, 255, saved,
+        "Zombies, when you host: the round the match starts on, with that "
+        "round's zombies. 1 is the game's own start.");
     on_off("xerces_zm_roundSkips",
            "Zombies, when you host: special rounds and prime-numbered rounds "
            "can be skipped from the pause menu for 400 points (a special round "
@@ -62,8 +66,9 @@ public:
            "Zombies, when you host: at each round's start everyone's guns are "
            "swapped for two the mystery box picks.");
     on_off("xerces_zm_selfRevives",
-           "Zombies, when you host: everyone has one self-revive, back every "
-           "10 rounds; down with one, hold Use to get up.");
+           "Zombies, when you host: everyone has one self-revive, back 10 "
+           "rounds after it was used; down with one, hold Jump or Use to get "
+           "up.");
     on_off("xerces_zm_round999",
            "Zombies, when you host: the round count goes past 255; at round "
            "999 everyone votes to exfil and win, or keep going with every "

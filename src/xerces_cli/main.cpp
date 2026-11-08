@@ -39,6 +39,7 @@
 #include <xerces_core/sigregistry.hpp>
 #include <xerces_core/sigscan.hpp>
 #include <xerces_core/version.hpp>
+#include <xerces_core/workshop_get.hpp>
 #include <xerces_core/zone_memory.hpp>
 
 #include "cli.hpp"
@@ -190,6 +191,9 @@ Work without the game:
   game check [--game-dir <folder>] [--builds <file>] [--json]
                                                    the launcher's pre-flight check:
                                                    is this game build supported?
+  workshop get <id,id,...> [--game-dir <folder>]   subscribe and download through
+                                                   Steam (your account, as Black
+                                                   Ops III); a JSON line per change
   sig check --dump <file|folder> [--registry <file>] [--build <0x...>] [--json]
                                                    the signature registry against
                                                    a memory dump (newest .bin in
@@ -933,6 +937,44 @@ int cmd_game_detect(const arguments &args) {
 
 std::string hex(std::uint64_t value);
 
+// workshop get <id,id,...> [--game-dir <dir>] (DESIGN.md 9.2): subscribes to
+// and downloads Workshop items through Steam's own Workshop API, with the
+// game's steam_api64.dll, under the player's Steam account
+// (xerces_core/workshop_get.hpp). One JSON line per change on stdout, for the
+// launcher and the game, which start this. Exit 0: all installed; 1: some
+// failed; 2: Steam could not be started.
+int cmd_workshop_get(const arguments &args) {
+  if (!accept_only(args, 3, {"--game-dir", "--home"}, {})) {
+    return exit_error;
+  }
+  const auto ids = xerces_core::workshop_get::parse_ids(args.word(2));
+  if (!ids) {
+    std::cerr << "workshop get needs Workshop ids: workshop get "
+                 "<id,id,...>.\n";
+    return exit_error;
+  }
+  fs::path game_dir;
+  if (const auto given = args.get("--game-dir")) {
+    game_dir = fs::path(*given);
+  } else {
+    const detection found = detect_game(
+        std::nullopt, steam_roots_from_registry(), real_filesystem());
+    if (!found.game_dir) {
+      std::cerr << "Black Ops III was not found; give --game-dir.\n";
+      return exit_error;
+    }
+    game_dir = *found.game_dir;
+  }
+  xerces_core::workshop_get::options run;
+  run.game_dir = game_dir;
+  run.ids = *ids;
+  run.report = [](const xerces_core::workshop_get::progress &line) {
+    std::cout << xerces_core::workshop_get::to_json(line) << std::endl;
+  };
+  const int result = xerces_core::workshop_get::run(run);
+  return result == 0 ? exit_ok : exit_failed;
+}
+
 // The launcher's pre-flight check (DESIGN.md 4.2): compares BlackOps3.exe and
 // Steam's build number with compat/builds.json. Reads only.
 int cmd_game_check(const arguments &args) {
@@ -1449,6 +1491,9 @@ int main(int argc, char **argv) {
     }
     if (group == "game" && action == "check") {
       return cmd_game_check(args);
+    }
+    if (group == "workshop" && action == "get") {
+      return cmd_workshop_get(args);
     }
     if (group == "sig") {
       return cmd_sig(args, action);

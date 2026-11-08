@@ -1665,6 +1665,48 @@ on this PC):
 Not tested yet: the presence on a profile with the game running, and Ask to Join
 between two Discord accounts.
 
+### Rounds, freezes and Steam downloads (2026-11-08)
+
+After a session with a friend on beta.10 (DESIGN.md 7.9, 9.2; CRASH_REPORTS.md).
+Bench: `C:\Users\Ginld\XercesDev\bench\20261108-rounds` (`round8-run.ps1` with
+the probe `probe8`, `freeze-run.ps1`), the test home of 20261106-modlabels, the
+player's own Workshop mods and maps.
+
+- [x] The friend session's logs: invites, tickets and the mods check worked; the
+      two drops were joining SHOOT HAUS (`zm_shoothouse`), as it loaded; the
+      freeze was in BACKROOMZ while hosting, the main thread waiting on a lock
+      in the script VM (`ScrVar_ReleaseValue`, from `Scr_MakeArray`), the holder
+      unknown (only the main thread was recorded then).
+- [x] With all 12 of the player's mods on SHOOT HAUS (46 zones) the load hung:
+      the main thread waited in `DB_FindXAssetHeader` for an asset that never
+      came (likely past the engine's 63 zone slots, which Xerces cannot check
+      for this build). With 9 of them (PEGASUS, DS4C, Ascendance, Solo Easter
+      Eggs, Girls' Frontline, Neptunia, Classic FOV, Avali, im_oxo QOL), the
+      probe on SHOOT HAUS (start round 20), BACKROOMZ (5) and RUST V5 (1): the
+      round and speed (round x 4) as set; the hidden text and HUD 2 s after the
+      spawn, with the starting round as the sixth number; `GetLUIMenuData` on a
+      closed menu answers undefined; both random-loadout guns Pack-a-Punched;
+      four coin flips asked, three run, the fourth told "Three coin flips a
+      round"; down, jump held 2.5 s, up, the self-revive used at that round; the
+      hidden text closed by the probe was open again at the next round. Captures
+      show the HUD, round 20 and HOLD JUMP OR USE TO REVIVE YOURSELF. RUST's own
+      `_zm_weapons` raises a non-terminal script error ("'undefined' and 'bo6'")
+      from the upgrade; the guns were upgraded.
+- [x] A freeze on purpose (mods off, a console Lua loop at the main menu): at 30
+      s `freeze-<time>.txt` (the main thread's stack, then 27 other threads,
+      named where they have names) and a 618 KB `freeze-<time>.dmp`; the game
+      closed itself at 61 s (`exception.freeze.closed`).
+- [x] `xerces_cli workshop get 2804432292` (installed already): Steam's API
+      started as Black Ops III, "ready", then "installed". Steam's library
+      printed the Steam id on stderr, which the callers throw away.
+- [x] Unit tests: the helper's progress lines, Steam's item state flags and id
+      lists; the join check's "Get ... through Steam now?" (570 pass).
+
+Not tested yet: a download of an item not yet installed (it subscribes the
+account), the join panel and the in-game Workshop menu downloading for real, a
+freeze in a launcher-started game sending its report, two PCs (whether the later
+menus keep SHOOT HAUS joins in sync), and the controller's jump.
+
 ### Voice chat starts as push-to-talk (2026-11-05)
 
 Built and unit-tested (`test_voice_default.cpp`), not run in the game yet. The

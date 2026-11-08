@@ -121,6 +121,8 @@ struct join_notice {
   std::string title;
   std::string message;
   std::vector<std::string> workshop_pages;
+  // Every missing Workshop item, for Steam to get (DESIGN.md 9.2)
+  std::vector<std::string> workshop_ids;
 };
 
 // A dialog names at most max_listed_items items, then says how many more.

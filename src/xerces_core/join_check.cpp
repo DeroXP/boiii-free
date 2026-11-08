@@ -368,9 +368,12 @@ join_notice missing_notice(const join_check &check) {
                    ", then join again.";
     return out;
   }
-  out.message += "\nSubscribe on the Steam Workshop; Steam downloads " +
-                 std::string(pages.size() == 1 ? "it" : "them") +
-                 ". Then join again.";
+  out.workshop_ids = pages;
+  out.message +=
+      "\nSteam can subscribe you to " +
+      std::string(pages.size() == 1 ? "it" : "them") + " and download " +
+      std::string(pages.size() == 1 ? "it" : "them") + "; join again once " +
+      std::string(pages.size() == 1 ? "it is" : "they are") + " here.";
   if (without_page) {
     out.message += without_page == 1
                        ? " Ask the host where to get the one that is not a "
@@ -378,14 +381,10 @@ join_notice missing_notice(const join_check &check) {
                        : " Ask the host where to get the ones that are not "
                          "Workshop items.";
   }
-  const std::size_t opened = out.workshop_pages.size();
-  out.message += pages.size() == 1 ? "\n\nOpen its Workshop page in Steam now?"
-                 : opened == pages.size()
-                     ? "\n\nOpen their " + std::to_string(opened) +
-                           " Workshop pages in Steam now?"
-                     : "\n\nOpen the first " + std::to_string(opened) +
-                           " of their " + std::to_string(pages.size()) +
-                           " Workshop pages in Steam now?";
+  out.message += pages.size() == 1
+                     ? "\n\nGet it through Steam now?"
+                     : "\n\nGet the " + std::to_string(pages.size()) +
+                           " Workshop items through Steam now?";
   return out;
 }
 

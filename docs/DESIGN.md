@@ -1828,9 +1828,12 @@ hooks the game's own scripts read; none replaces a game script.
   which left one gun a round. The two replace the player's guns and come the way
   the box hands one over (`zm_weapons::weapon_give(weapon, 0, 1)`), so Auto
   Pack-a-Punch upgrades them. Hero weapons, equipment and knives stay.
-- Self-revives. Each player starts with one and is back to one at rounds 10, 20,
-  30 and so on. Down with one, the player sees HOLD USE TO REVIVE YOURSELF and
-  holds the use button 1.5 s to get up through the game's own revive
+- Self-revives. Each player starts with one; a used one comes back 10 rounds
+  after the round it was used in (the HUD says "0 (BACK AT ROUND n)"; until
+  2026-11-08 they came back at rounds 10, 20, 30 and so on). Down with one, the
+  player sees HOLD JUMP OR USE TO REVIVE YOURSELF and holds jump or use 1.5 s
+  (jump since 2026-11-08: on a controller use is also reload, and holding it
+  while down did not count) to get up through the game's own revive
   (`zm_laststand::auto_revive`, as solo Quick Revive does). The HUD's
   SELF-REVIVES line shows how many are left. Solo Quick Revive goes first. When
   the last player up goes down, `zm::player_damage_override` asks
@@ -1851,6 +1854,28 @@ hooks the game's own scripts read; none replaces a game script.
   on every new zombie is a smart one (stage 4), with Smart Zombies on or off.
 - The notices are one more `HudElementText` per player, centred under the HUD;
   the self-revive prompt is another, shown while it applies.
+
+**Changes of 2026-11-08** (asked for after a session with a friend):
+
+- The pause menu entries and the HUD come back after a player dies and respawns,
+  sits out as a spectator, or spawns late: they open on every spawn and are
+  checked at every round's start (`ensure_menus`), opened again only when the
+  game no longer has them (`GetLUIMenuData` on the hidden text answers nothing
+  once the game closed it). They open 2 s after the player's game is in, a row
+  at a time: each opens with ten messages the game must confirm, and a friend
+  joining SHOOT HAUS dropped out of sync twice (EXE_ERR_RELIABLE_CYCLED_OUT)
+  with the map's own messages arriving at the same moment.
+- The coin flip: three a round per player (by rounds started).
+- Random Loadout with Auto Pack-a-Punch upgrades both guns (the game's
+  `weapon_give` notify upgraded only the one it switched to).
+- Starting Round (`xerces_zm_startRound`, 1 to 255, on the ROUNDS tab: Default,
+  5, 10, 15, 20, 25, 30, 40, 50 to 100): the game keeps the round in
+  `world.roundnumber` xor 115 (`zm::set_round_number`) and copies it into
+  `level.round_number` every frame; Xerces sets both once
+  `start_zombie_round_logic` is set, with the speed and spawn delay a natural
+  round of that number has; each round's zombie count and health follow from it
+  (`zm::round_spawning`). The settings message and the in-match list say it, and
+  the hidden text carries it as a sixth number.
 
 **Stage 4.** Smart Zombies, a host setting on the ROUNDS tab
 (`xerces_zm_smartZombies`). Each plain zombie (archetype `zombie`; dogs, bosses
@@ -2005,6 +2030,35 @@ get hooked, conflicts and merges, downloads and their sizes, and safety flags
 (`steam://url/CommunityFilePage/<id>`); the player subscribes there and Steam
 downloads it. For several items, a guided queue opens each in turn and moves on
 by itself when the item's folder appears. Steam decides who may download what.
+
+**Through Steam's API (2026-11-08, the user's choice over the pages).**
+`xerces_cli workshop get <ids> [--game-dir]` (`xerces_core/workshop_get.hpp`)
+loads Black Ops III's own `steam_api64.dll` from the game folder (Steamworks SDK
+1.37, Workshop interface 008), starts the Steamworks API as Black Ops III (app
+311210, set in that process's environment), and for each item calls
+`SubscribeItem` (what Steam's Subscribe button does), `DownloadItem` (high
+priority) and reads `GetItemState` and `GetItemDownloadInfo` every half second,
+printing one JSON line per change. Steam starts the API only for an account that
+owns the game, and decides itself whether to subscribe and download; the items
+land in Steam's Workshop folder, where the game and Xerces already look. While
+the process runs (seconds to minutes) Steam may show the player in Black Ops
+III. An item Steam does not subscribe to within 90 s (taken down, private)
+fails; the rest fail when nothing has moved for 5 minutes. Steam's library
+prints the player's Steam id on stderr, so callers throw stderr away. Two
+callers:
+
+- Friends' join panel (10.12): Join starts it for the missing mods at once (an
+  automatic join waits for "Get them through Steam"), each mod showing
+  subscribing, queued, downloading with its percent, downloaded or failed; the
+  folders are scanned again and the join goes on. The Workshop page buttons stay
+  as the fallback.
+- The in-game Workshop menu's DOWNLOAD: its queue
+  (`no_upstream_downloaders.cpp`, still none of upstream's downloaders) runs one
+  item at a time through it, with the download overlay, and reloads the game's
+  content when Steam has the item.
+
+No fenced code is involved: the fenced Steam proxy's stand-in Workshop interface
+still answers nothing to the game's own `Mods_SubscribeUGC`.
 
 ### 9.3 Updates and pins
 
@@ -2386,13 +2440,14 @@ Discord's developer portal for Discord join (id 1568827390010859623).
   `pack_code`; the same stack gives the same code all session. The joiner's
   launcher fetches the pack and `xerces_core/invite_pack.hpp` matches it against
   the catalog, by id and then by Workshop id. Missing mods are got the way a
-  player gets any mod: Join opens the first missing mod's Workshop page in Steam
-  (`steam://url/CommunityFilePage/<id>`), the Friends tab lists the rest with a
-  Workshop page button each, the player subscribes and Steam downloads. Nothing
-  goes around Steam. The launcher scans the folders again every 8 s and joins by
-  itself once every mod is here. A mod that is not on the Workshop is named, for
-  the player to ask the host about. The game then starts with the pack's mods in
-  the pack's order (`launch_inputs::mods`), not the joiner's profile.
+  player gets any mod, from Steam: since 2026-11-08 Join has Steam subscribe to
+  and download them at once (9.2, `xerces_cli workshop get`), the Friends tab
+  showing each one's progress, with a Workshop page button each as the fallback
+  (`steam://url/CommunityFilePage/<id>`). Nothing goes around Steam. The
+  launcher scans the folders again every 8 s and joins by itself once every mod
+  is here. A mod that is not on the Workshop is named, for the player to ask the
+  host about. The game then starts with the pack's mods in the pack's order
+  (`launch_inputs::mods`), not the joiner's profile.
 - **Restart and rejoin.** When the joiner's game already runs, the launcher
   compares the plan it runs (the journal's plan id) with the pack's. The same:
   the running game joins from its main menu. Different (or mods loaded for a
@@ -3674,8 +3729,8 @@ release from v1.0.
 
 Beta packages for testers (2026-11-05) come first, as a zip by private link:
 
-- `VERSION` is the one place the version is set (`0.1.0-beta.10`). premake writes
-  it, the commit and whether the tree had changes into
+- `VERSION` is the one place the version is set (`0.1.0-beta.10`). premake
+  writes it, the commit and whether the tree had changes into
   `build\src\xerces_version.h`; all three programs show "Xerces <version>
   (<commit>)" (About, the menu watermark, the console title, the crash report)
   and carry it in their `VERSIONINFO`.

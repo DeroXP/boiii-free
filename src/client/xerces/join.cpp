@@ -130,14 +130,6 @@ std::string keys_json(const std::vector<xerces_core::join_item> &items) {
   return out + "]";
 }
 
-void open_pages(const std::vector<std::string> &pages) {
-  for (std::size_t i = 0; i < pages.size(); ++i) {
-    scheduler::once(
-        [id = pages[i]] { workshop::open_workshop_page(id); }, scheduler::async,
-        std::chrono::duration_cast<std::chrono::milliseconds>(page_gap * i));
-  }
-}
-
 void show_error(const std::string &message) {
   scheduler::once(
       [message] {
@@ -195,9 +187,27 @@ void check_host(const host_offer &offer, std::function<void()> proceed) {
     if (notice.workshop_pages.empty()) {
       show_error(notice.message);
     } else {
+      // Yes: Steam subscribes to and downloads every one of them, through
+      // the Workshop menu's queue (DESIGN.md 9.2); the player joins again
+      // once they are here.
+      std::vector<std::pair<std::string, game::ZoneType>> wanted;
+      for (const auto &entry : check.missing) {
+        if (!entry.item.workshop_id.empty()) {
+          wanted.emplace_back(entry.item.workshop_id,
+                              entry.item.kind ==
+                                      xerces_core::host_item_kind::map
+                                  ? game::ZoneType::USERMAP
+                                  : game::ZoneType::MOD);
+        }
+      }
       download_overlay::show_confirmation(
-          notice.title, notice.message,
-          [pages = notice.workshop_pages] { open_pages(pages); });
+          notice.title, notice.message, [wanted] {
+            for (const auto &[id, type] : wanted) {
+              workshop::queue::add(id, type);
+            }
+            xerces_runtime::log_info("join.missing.steam",
+                                     "Steam is asked for the host's content");
+          });
     }
     return;
   }

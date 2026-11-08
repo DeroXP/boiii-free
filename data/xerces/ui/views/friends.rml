@@ -45,13 +45,17 @@
 				<div class="panel-head"><span class="panel-title">{{join_title}}</span></div>
 				<div class="join-status">{{join_status}}</div>
 				<div class="friend-row" data-for="m, i : join_mods">
-					<div class="friend-text"><div class="friend-name">{{m.name}}</div></div>
+					<div class="friend-text">
+						<div class="friend-name">{{m.name}}</div>
+						<div class="friend-status" data-if="m.status != ''">{{m.status}}</div>
+					</div>
 					<div class="row-actions">
 						<button class="small-button" data-if="m.on_workshop" data-attr-id="'join-mod-' + i" data-event-click="row('mod page', i)"><span>Workshop page</span></button>
 					</div>
 				</div>
 				<div class="toolbar join-actions">
 					<button id="join-go" class="primary-button" data-if="join_ready" data-event-click="act('join go')"><span>Join</span></button>
+					<button id="join-download" class="primary-button" data-if="join_can_download" data-event-click="act('join download')"><span>Get them through Steam</span></button>
 					<button id="join-next" class="outline" data-if="join_pages" data-event-click="act('join next')"><span>Open the next Workshop page</span></button>
 					<button id="join-cancel" class="outline" data-event-click="act('join cancel')"><span>Cancel</span></button>
 				</div>

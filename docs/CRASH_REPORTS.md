@@ -80,7 +80,14 @@ memory for rate limits only).
    client as module and offset. Its dialog's "Restart game" ends the process
    with exit code 0, which alone would read as a clean exit. The dialog says the
    report is sent when the game closes (the launcher is open) or when Xerces
-   opens next; with the setting off it points to GitHub and the bundle.
+   opens next; with the setting off it points to GitHub and the bundle. A freeze
+   (no frame for 30 s, a watchdog thread in the client) is reported the same
+   way, kind `unknown_exit`: a dump of every thread as it stands and the main
+   thread's frames, with a last console line "[Freeze] ...". The same dump and a
+   text file of where every thread is go to the minidumps folder whatever the
+   setting. If frames come back, the pending report is removed; if not, the game
+   ends itself with exit code 0xC0000194 (STATUS_POSSIBLE_DEADLOCK) 60 s after
+   its last frame, 180 s while the journal says it is loading (2026-11-08).
 2. When the game the launcher started exits, the launcher counts it as a crash
    when the client wrote a dump, or the exit code is not 0 and the journal does
    not end in `clean_exit` (`xerces_core::exit_is_crash`). Each pending crash

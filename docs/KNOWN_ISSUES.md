@@ -144,6 +144,12 @@ to report these again, but tell us if you see them somewhere else or worse.
   forwarded, as direct connect does. Friends only see you while Xerces is open.
   Discord's Ask to Join has not been tried between two Discord accounts yet;
   connecting to the Discord app has.
+- **Joining a friend on SHOOT HAUS dropped out of sync twice**
+  (EXE_ERR_RELIABLE_CYCLED_OUT, "The server sent updates faster than your game
+  could confirm them") on 2026-11-08, while the map loaded; other maps joined.
+  Xerces' round settings now open their menus later and a row at a time, which
+  takes some of that load away; whether that is enough on this map is not seen
+  yet, as it needs two PCs.
 - **Multiplayer with Zombies mods can close the game.** On a tester's PC with
   four Zombies mods loaded, switching the main menu to Multiplayer ended with
   "Could not allocate asset - increase XASSET_ENTRY_POOL_SIZE" and the game

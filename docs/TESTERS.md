@@ -68,19 +68,21 @@ hash, sent with the link, shows that the zip is the one we made.
   starting points (500, 5,000 or 50,000), no perk limit, a box that never moves,
   the power on and every door open at the start, and a zombies-left counter with
   a round timer, a random loadout (two box guns each round) and a self-revive
-  (back every 10 rounds; down, hold Use). Its GAMBLING tab has the Pack-a-Punch
-  wheel and the coin flip; its ROUNDS tab has round skips (special and prime
-  rounds, 400 points, a vote in co-op), rounds to 999 (the count goes past 255,
-  and at 999 everyone votes to exfil or keep going) and smart zombies (from
-  round 20 some zombies hunt in packs, sprint in bursts or wait out of sight,
-  each kind with its own glow). All are off until you turn them on. When you
-  host, everyone in the match gets your settings, and each player sees them
-  listed in a message when they spawn. In the match, the pause menu has XERCES
-  SETTINGS (what this match uses) and, when they are on, PACK-A-PUNCH WHEEL
-  (2,500 points, 10 in a Fire Sale, once a round, with a Pack-a-Punched gun in
-  hand: an ammo mod or the box's teddy) and COIN FLIP (pick a bet; heads wins,
-  and the payout grows each round), SKIP ROUND on a round that can be skipped,
-  and EXFIL and KEEP GOING at round 999. Not on dedicated servers.
+  (back 10 rounds after you use it; down, hold Jump or Use). Its GAMBLING tab
+  has the Pack-a-Punch wheel and the coin flip (three flips a round); its ROUNDS
+  tab has the starting round (start the match on round 5 to 100), round skips
+  (special and prime rounds, 400 points, a vote in co-op), rounds to 999 (the
+  count goes past 255, and at 999 everyone votes to exfil or keep going) and
+  smart zombies (from round 20 some zombies hunt in packs, sprint in bursts or
+  wait out of sight, each kind with its own glow). All are off until you turn
+  them on. When you host, everyone in the match gets your settings, and each
+  player sees them listed in a message when they spawn. In the match, the pause
+  menu has XERCES SETTINGS (what this match uses) and, when they are on,
+  PACK-A-PUNCH WHEEL (2,500 points, 10 in a Fire Sale, once a round, with a
+  Pack-a-Punched gun in hand: an ammo mod or the box's teddy) and COIN FLIP
+  (pick a bet; heads wins, and the payout grows each round), SKIP ROUND on a
+  round that can be skipped, and EXFIL and KEEP GOING at round 999. Not on
+  dedicated servers.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.
@@ -91,6 +93,13 @@ hash, sent with the link, shows that the zip is the one we made.
   game**, then go back to Xerces (start it again if it is closed). "Restart
   game" starts the game again with the same mods, past Xerces, so Xerces cannot
   help with the next start.
+- **A freeze is handled like a crash.** When the game has shown no new frame for
+  30 seconds it writes `freeze-<time>.txt` (where every thread is) and
+  `freeze-<time>.dmp` in `%LOCALAPPDATA%\boiii\minidumps`, next to its crash
+  dumps, and Xerces sends a crash report for it. If it is still frozen 60
+  seconds after its last frame (3 minutes while a map loads), it closes itself;
+  you do not have to end it in Task Manager. If it comes back on its own, the
+  report is taken back.
 - After a crash with mods on, Home offers to launch with mods off (safe mode),
   and "Find the culprit" tries your mods in smaller groups, one test launch at a
   time, to find the one that crashes.
@@ -201,24 +210,24 @@ If you try it, tell us how it went.
   game's port), your mods, and a ticket only they can use: with "Who can join"
   on Invited players (the default) nobody else gets into your lobby. They get a
   toast in the game and an entry on Friends. Join there checks they have your
-  mods: any they lack open on the Workshop in Steam, they subscribe, and the
-  join starts by itself once Steam has downloaded them. Then their game joins
-  yours from its main menu, restarts with your mods first (it asks), or starts
-  with the join. Xerces asks your router to let them in (hole punching); most
-  routers do, and if yours does not, forward the game's port as above. Invites
-  last 10 minutes. **Invite links**: Make an invite link on Friends and share it
-  anywhere; whoever opens it asks to join, and you Let them in (with your lobby
-  open) or Ignore them. "Open invite links in Xerces" lets a click on a link
-  open Xerces. **Follow hosts you join** (on by default): when a friend you
-  played with invites you again, Xerces joins at once. After a crash in a
-  friend's lobby, Friends offers Rejoin. **Show on Discord** (off until you turn
-  it on, on both PCs): your Discord profile shows your game, and while your
-  lobby is open your Discord friends get Ask to Join; you answer "Let them
-  join?" in Xerces, and they join as with an invite. Keep Xerces open while you
-  play, or friends see you offline and invites wait (Settings, "Close Xerces
-  when the game starts" off). Remove and Block are next to each friend; the
-  privacy buttons on Friends say who may send you requests, see you online and
-  invite you.
+  mods: Steam subscribes them to any they lack and downloads them (Steam may
+  show them as playing Black Ops III meanwhile), and the join starts by itself
+  once they are here. Then their game joins yours from its main menu, restarts
+  with your mods first (it asks), or starts with the join. Xerces asks your
+  router to let them in (hole punching); most routers do, and if yours does not,
+  forward the game's port as above. Invites last 10 minutes. **Invite links**:
+  Make an invite link on Friends and share it anywhere; whoever opens it asks to
+  join, and you Let them in (with your lobby open) or Ignore them. "Open invite
+  links in Xerces" lets a click on a link open Xerces. **Follow hosts you join**
+  (on by default): when a friend you played with invites you again, Xerces joins
+  at once. After a crash in a friend's lobby, Friends offers Rejoin. **Show on
+  Discord** (off until you turn it on, on both PCs): your Discord profile shows
+  your game, and while your lobby is open your Discord friends get Ask to Join;
+  you answer "Let them join?" in Xerces, and they join as with an invite. Keep
+  Xerces open while you play, or friends see you offline and invites wait
+  (Settings, "Close Xerces when the game starts" off). Remove and Block are next
+  to each friend; the privacy buttons on Friends say who may send you requests,
+  see you online and invite you.
 - The first time you host or join, Windows asks whether "BOIII" may use your
   networks. That is Xerces' game client (boiii.exe, it keeps that name for now).
   Allow it, on private networks at least; offline play does not need it.
@@ -239,7 +248,10 @@ If you try it, tell us how it went.
   Discord status, so your friend code is not sent there.
 - **Steam.** Your mods come through your Steam client. The game client also asks
   Steam's web API (`api.steampowered.com`) for details and preview pictures of
-  Workshop items it shows that ship none (their ids only).
+  Workshop items it shows that ship none (their ids only). To get a friend's
+  mods when you join, or an item you DOWNLOAD in the game's Workshop menu,
+  Xerces asks your Steam client, as Black Ops III and under your account, to
+  subscribe to it and download it, as Subscribe on its Workshop page would.
 - **Playing together.** Servers you join, and players who join your lobby, see
   your IP address. While your lobby is open the game asks your router to forward
   its port (UPnP). Voice chat reaches the other players.

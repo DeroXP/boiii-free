@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <ctime>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -29,6 +30,7 @@
 #include "../friends_service.hpp"
 #include "../link_protocol.hpp"
 #include "../log.hpp"
+#include "../workshop_download.hpp"
 
 namespace xerces_launcher {
 namespace {
@@ -47,7 +49,13 @@ struct invite_row {
 struct mod_row {
   Rml::String name;
   bool on_workshop = false;
+  Rml::String status; // what Steam is doing with it
 };
+
+// "120 MB"
+std::string megabytes(std::uint64_t bytes) {
+  return std::to_string((bytes + 512 * 1024) / (1024 * 1024)) + " MB";
+}
 
 const char *mode_name(const std::string &mode) {
   return mode == "mp" ? "Multiplayer" : mode == "cp" ? "Campaign" : "Zombies";
@@ -101,6 +109,7 @@ public:
     if (auto row = model.RegisterStruct<mod_row>()) {
       row.RegisterMember("name", &mod_row::name);
       row.RegisterMember("on_workshop", &mod_row::on_workshop);
+      row.RegisterMember("status", &mod_row::status);
     }
     model.RegisterArray<Rml::Vector<friend_row>>();
     model.RegisterArray<Rml::Vector<person_row>>();
@@ -137,6 +146,7 @@ public:
     model.Bind("join_ready", &join_ready_);
     model.Bind("join_mods", &join_mods_);
     model.Bind("join_pages", &join_pages_);
+    model.Bind("join_can_download", &join_can_download_);
     model.Bind("rejoin", &rejoin_);
     model.Bind("rejoin_text", &rejoin_text_);
     // Links and knocks.
@@ -279,6 +289,11 @@ private:
     double next_scan = 0;
     double quit_deadline = 0;
     std::uint64_t seen_catalog = 0;
+    // Steam getting the missing mods (workshop_download): each item's last
+    // progress, and why Steam could not be asked, if it could not
+    std::map<std::uint64_t, core::workshop_get::progress> steam;
+    bool steam_running = false;
+    std::string steam_error;
   };
   // The last join, for Rejoin after a crash.
   struct last_join {
@@ -335,13 +350,113 @@ private:
     if (join_->stage == join_stage::mods) {
       owner_->show("friends");
       if (asked) {
-        open_next_page(); // the player pressed Join: the first page opens
+        // The player pressed Join: Steam gets the mods at once
+        steam_download();
       }
       show_join();
       return;
     }
     show_join();
     go();
+  }
+
+  // Steam subscribes to and downloads the missing mods that are on the
+  // Workshop, under the player's account (xerces_core/workshop_get.hpp); the
+  // folder rescans then see them and the join goes on.
+  void steam_download() {
+    if (!join_ || download_.running()) {
+      return;
+    }
+    std::vector<std::uint64_t> ids;
+    for (const auto &mod : join_->missing) {
+      if (mod.workshop_id) {
+        ids.push_back(*mod.workshop_id);
+      }
+    }
+    services &svc = owner_->svc();
+    if (ids.empty() || !svc.game().dir) {
+      return;
+    }
+    const auto cli = svc.paths().program.parent_path() / "xerces_cli.exe";
+    std::string error;
+    join_->steam_error.clear();
+    const bool started = download_.start(
+        cli, *svc.game().dir, ids,
+        [this](std::function<void()> task) { owner_->post(std::move(task)); },
+        [this](const core::workshop_get::progress &line) {
+          steam_progress(line);
+        },
+        [this](int code) { steam_done(code); }, &error);
+    if (!started) {
+      join_->steam_error = error;
+      owner_->notify(owner_->tr("Steam could not be asked for the mods:") +
+                         " " + error,
+                     true, "workshop download did not start");
+      show_join();
+      return;
+    }
+    join_->steam_running = true;
+    owner_->notify(owner_->tr("Steam is getting your friend's mods."));
+    show_join();
+  }
+
+  void steam_progress(const core::workshop_get::progress &line) {
+    if (!join_) {
+      return;
+    }
+    if (line.state == "error") {
+      join_->steam_error = line.message;
+      owner_->notify(line.message, true, "workshop download: steam error");
+    } else if (line.id != 0) {
+      join_->steam[line.id] = line;
+      if (line.state == "installed") {
+        owner_->svc().start_scan(); // the rescan finds it, and the join goes on
+      }
+    }
+    show_join();
+  }
+
+  void steam_done(int) {
+    if (!join_) {
+      return;
+    }
+    join_->steam_running = false;
+    owner_->svc().start_scan();
+    show_join();
+  }
+
+  // A mod's line on the join panel while Steam gets it
+  std::string
+  steam_status(const core::invite_pack_check::missing_mod &mod) const {
+    if (!mod.workshop_id) {
+      return owner_->tr("Not on the Workshop");
+    }
+    const auto it = join_->steam.find(*mod.workshop_id);
+    if (it == join_->steam.end()) {
+      return join_->steam_running ? owner_->tr("Waiting for Steam") : "";
+    }
+    const auto &line = it->second;
+    if (line.state == "downloading" && line.total > 0) {
+      const auto percent = line.done * 100 / line.total;
+      return owner_->tr("Downloading") + " " + std::to_string(percent) + "% (" +
+             megabytes(line.done) + " / " + megabytes(line.total) + ")";
+    }
+    if (line.state == "downloading") {
+      return owner_->tr("Downloading");
+    }
+    if (line.state == "queued") {
+      return owner_->tr("Queued in Steam");
+    }
+    if (line.state == "subscribing") {
+      return owner_->tr("Subscribing");
+    }
+    if (line.state == "installed") {
+      return owner_->tr("Downloaded");
+    }
+    if (line.state == "failed") {
+      return owner_->tr("Failed:") + " " + line.message;
+    }
+    return "";
   }
 
   void open_next_page() {
@@ -534,6 +649,7 @@ private:
   }
 
   void cancel_join() {
+    download_.cancel();
     join_.reset();
     show_join();
   }
@@ -576,13 +692,17 @@ private:
     join_active_ = join_.has_value();
     join_mods_.clear();
     join_pages_ = false;
+    join_can_download_ = false;
     if (join_) {
       join_title_ = owner_->tr("Joining") + " " + join_->plan.host_username +
                     owner_->tr("'s lobby");
       for (const auto &mod : join_->missing) {
-        join_mods_.push_back({mod.id, mod.workshop_id.has_value()});
+        join_mods_.push_back(
+            {mod.id, mod.workshop_id.has_value(), steam_status(mod)});
         join_pages_ = join_pages_ || mod.workshop_id.has_value();
       }
+      join_can_download_ = join_pages_ && !join_->steam_running &&
+                           join_->stage == join_stage::mods;
       switch (join_->stage) {
       case join_stage::mods: {
         const std::size_t count = join_->missing.size();
@@ -593,8 +713,19 @@ private:
                 ? owner_->tr("One of your friend's mods is not here yet.")
                 : std::to_string(count) + " " +
                       owner_->tr("of your friend's mods are not here yet.");
-        if (off < count) {
-          join_status_ += " " + owner_->tr("Subscribe on each Workshop page; "
+        if (off < count && join_->steam_running) {
+          join_status_ += " " + owner_->tr("Steam is subscribing to them and "
+                                           "downloading them; the join starts "
+                                           "by itself once they are here.");
+        } else if (off < count && !join_->steam_error.empty()) {
+          join_status_ += " " + owner_->tr("Steam could not get them:") + " " +
+                          join_->steam_error + " " +
+                          owner_->tr("Subscribe on each Workshop page "
+                                     "instead; the join starts by itself "
+                                     "once Steam has downloaded them.");
+        } else if (off < count) {
+          join_status_ += " " + owner_->tr("Get them through Steam, or "
+                                           "subscribe on each Workshop page; "
                                            "the join starts by itself once "
                                            "Steam has downloaded them.");
         }
@@ -858,6 +989,11 @@ private:
                                 : owner_->tr("Connecting...");
     connected_ = s.signed_in && s.connected;
     hosting_ = s.hosting;
+    // Hosting a lobby of their own, the player is no longer in a friend's:
+    // a crash now is not one to rejoin a friend after (seen 2026-11-08).
+    if (s.hosting) {
+      last_.reset();
+    }
     invite_note_ =
         !s.game_running
             ? owner_->tr("To invite a friend, start the game and open your "
@@ -1041,6 +1177,8 @@ private:
       }
     } else if (action == "join next") {
       open_next_page();
+    } else if (action == "join download") {
+      steam_download();
     } else if (action == "rejoin") {
       rejoin();
     } else if (action == "rejoin close") {
@@ -1228,6 +1366,7 @@ private:
   std::string game_mode_ = "zm";
   std::optional<pending_join> join_;
   std::optional<last_join> last_;
+  workshop_download download_;
   discord_presence discord_;
   std::int64_t game_started_at_ = 0;
   std::string party_id_;
@@ -1263,6 +1402,7 @@ private:
   bool join_ready_ = false;
   Rml::Vector<mod_row> join_mods_;
   bool join_pages_ = false;
+  bool join_can_download_ = false;
   bool rejoin_ = false;
   Rml::String rejoin_text_;
   Rml::Vector<person_row> knocks_;

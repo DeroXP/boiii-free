@@ -160,7 +160,9 @@ TEST_CASE("join: everything missing is reported at once") {
   CHECK(contains(notice.message, "Mod: my_local_mod, not a Workshop item"));
   CHECK(contains(notice.message, "Map: zm_rust (Workshop item 3010010010)"));
   CHECK(contains(notice.message, "the one that is not a Workshop item"));
-  CHECK(contains(notice.message, "Open their 3 Workshop pages in Steam now?"));
+  CHECK(
+      contains(notice.message, "Get the 3 Workshop items through Steam now?"));
+  CHECK(notice.workshop_ids == notice.workshop_pages);
   CHECK(notice.workshop_pages ==
         std::vector<std::string>({"3171632315", "3656779213", "3010010010"}));
 
@@ -173,7 +175,7 @@ TEST_CASE("join: everything missing is reported at once") {
   const join_notice single = missing_notice(one);
   CHECK_EQ(single.title, std::string("Mod not installed"));
   CHECK(contains(single.message, "This server uses a mod you don't have"));
-  CHECK(contains(single.message, "Open its Workshop page in Steam now?"));
+  CHECK(contains(single.message, "Get it through Steam now?"));
 
   // Nothing with a Workshop page: no question, nothing to open.
   const join_check local =
@@ -428,9 +430,10 @@ TEST_CASE("join: a host's long lists are cut short") {
   CHECK(contains(notice.message,
                  "- and " + std::to_string(items.size() - max_listed_items) +
                      " more\n"));
-  CHECK(contains(notice.message, "Open the first 10 of their " +
-                                     std::to_string(items.size()) +
-                                     " Workshop pages in Steam now?"));
+  // Steam gets every one of them; only the pages to open stop at 10
+  CHECK(contains(notice.message, "Get the " + std::to_string(items.size()) +
+                                     " Workshop items through Steam now?"));
+  CHECK_EQ(notice.workshop_ids.size(), items.size());
   // One line per listed item, plus the "and more" line.
   std::size_t lines = 0;
   for (std::size_t at = 0;
@@ -445,7 +448,7 @@ TEST_CASE("join: a host's long lists are cut short") {
   const join_notice all = missing_notice(few);
   CHECK_EQ(all.workshop_pages.size(), std::size_t(10));
   CHECK(!contains(all.message, "more\n"));
-  CHECK(contains(all.message, "Open their 10 Workshop pages in Steam now?"));
+  CHECK(contains(all.message, "Get the 10 Workshop items through Steam now?"));
 
   // The "Different versions" list is cut the same way.
   fake_pc has_all;

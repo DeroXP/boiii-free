@@ -95,7 +95,14 @@ local SETTINGS = {
     name = "Self-Revives",
     bit = 2048,
     tab = "zombies",
-    description = "Everyone has one self-revive, back every 10 rounds. Down with one, hold Use to get up.",
+    description = "Everyone has one self-revive, back 10 rounds after it was used. Down with one, hold Jump or Use to get up.",
+  },
+  {
+    dvar = "xerces_zm_startRound",
+    name = "Starting Round",
+    rounds = true,
+    tab = "rounds",
+    description = "The round the match starts on, with that round's zombies: their number, health and speed. Default is round 1.",
   },
   {
     dvar = "xerces_zm_roundSkips",
@@ -130,7 +137,7 @@ local SETTINGS = {
     name = "Coin Flip",
     bit = COIN_FLIP_BIT,
     tab = "gambling",
-    description = "From the pause menu: bet points on a coin, heads wins. A win pays the bet times 2 at round 1, 0.1 more each round, up to 5.",
+    description = "From the pause menu, three times a round: bet points on a coin, heads wins. A win pays the bet times 2 at round 1, 0.1 more each round, up to 5.",
   },
 }
 
@@ -152,6 +159,13 @@ local function pointsText(points)
   return withCommas(points)
 end
 
+local function roundText(round)
+  if round <= 1 then
+    return "Default"
+  end
+  return "Round " .. round
+end
+
 if Engine.GetCurrentMap() == "core_frontend" then
   require("ui.uieditor.widgets.Lobby.Common.FE_TabBar")
   require("ui.uieditor.widgets.Scrollbars.verticalScrollbar")
@@ -165,10 +179,12 @@ if Engine.GetCurrentMap() == "core_frontend" then
 
   -- A value set outside this menu is listed too, or the menu would show the
   -- first option and overwrite the dvar.
-  local function pointsOptions()
-    local current = Engine.DvarInt(nil, "xerces_zm_startPoints") or 0
-    local values = { 0, 500, 5000, 50000 }
-    local custom = current > 0
+  local function choiceOptions(dvarName, values, defaultValue, text)
+    local current = Engine.DvarInt(nil, dvarName) or defaultValue
+    if current < defaultValue then
+      current = defaultValue
+    end
+    local custom = true
     for _, value in ipairs(values) do
       if value == current then
         custom = false
@@ -180,13 +196,26 @@ if Engine.GetCurrentMap() == "core_frontend" then
     end
     local options = {}
     for _, value in ipairs(values) do
-      local label = pointsText(value)
+      local label = text(value)
       if custom and value == current then
         label = label .. " (Custom)"
       end
-      table.insert(options, { option = label, value = value, default = value == 0 })
+      table.insert(options, { option = label, value = value, default = value == defaultValue })
     end
     return options
+  end
+
+  local function pointsOptions()
+    return choiceOptions("xerces_zm_startPoints", { 0, 500, 5000, 50000 }, 0, pointsText)
+  end
+
+  local function roundOptions()
+    return choiceOptions(
+      "xerces_zm_startRound",
+      { 1, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100 },
+      1,
+      roundText
+    )
   end
 
   local function settingsSource(name, tab)
@@ -200,6 +229,8 @@ if Engine.GetCurrentMap() == "core_frontend" then
           }
           if setting.points then
             options = pointsOptions()
+          elseif setting.rounds then
+            options = roundOptions()
           end
           table.insert(
             items,
@@ -337,8 +368,8 @@ if Engine.GetCurrentMap() == "core_frontend" then
 end
 
 -- In a match. The host's game opens a hidden HudElementText for each player
--- whose text is "XERCES <mask> <starting points> <round> <skip> <vote>"
--- (xerces_rounds.gsc data_text): skip is 1 on a prime round and 2 on a special
+-- whose text is "XERCES <mask> <starting points> <round> <skip> <vote>
+-- <starting round>" (xerces_rounds.gsc data_text): skip is 1 on a prime round and 2 on a special
 -- round that can be skipped, vote is 1 while the round 999 vote is open. The
 -- game sends a script menu's text as it
 -- is, where a new LUI event name would be refused (docs/DESIGN.md 7.9). The
@@ -361,8 +392,12 @@ local function matchData()
       local text = ok and model and Engine.GetModel(model, "text")
       local value = text and Engine.GetModelValue(text)
       if type(value) == "string" then
-        -- A host on an older Xerces sends the first three only
-        local mask, points, round, skip, vote = string.match(value, "^XERCES (%d+) (%d+) (%d+) (%d+) (%d+)$")
+        -- A host on an older Xerces sends fewer
+        local mask, points, round, skip, vote, startRound =
+          string.match(value, "^XERCES (%d+) (%d+) (%d+) (%d+) (%d+) (%d+)$")
+        if not mask then
+          mask, points, round, skip, vote = string.match(value, "^XERCES (%d+) (%d+) (%d+) (%d+) (%d+)$")
+        end
         if not mask then
           mask, points, round = string.match(value, "^XERCES (%d+) (%d+) (%d+)$")
         end
@@ -373,6 +408,7 @@ local function matchData()
             round = tonumber(round),
             skip = tonumber(skip or "0"),
             vote = tonumber(vote or "0"),
+            startRound = tonumber(startRound or "1"),
           }
           return
         end
@@ -415,6 +451,8 @@ DataSources.XercesMatchSettings = ListHelper_SetupDataSource("XercesMatchSetting
     local value = "Off"
     if setting.points then
       value = pointsText(match.points)
+    elseif setting.rounds then
+      value = roundText(match.startRound)
     elseif hasBit(match.mask, setting.bit) then
       value = "On"
     end

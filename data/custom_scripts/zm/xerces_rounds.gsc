@@ -63,8 +63,14 @@
 #define GAME_ROUND_CAP 255
 #define FINAL_ROUND 999
 // Self-revives: back to one every this many rounds, and how long the use button is held
+// A used self-revive comes back this many rounds later
 #define SELF_REVIVE_EVERY 10
 #define SELF_REVIVE_HOLD_MS 1500
+#define COIN_FLIPS_PER_ROUND 3
+// The starting round: the game's own round count stops at 255
+#define MAX_START_ROUND 255
+// Xerces' menus open this long after a player's game is in (ensure_menus)
+#define MENUS_DELAY 2
 
 // Smart zombies: none before SMART_FIRST_ROUND, then a share (per 1,000) rising evenly from SMART_FIRST_SHARE to
 // SMART_LAST_SHARE at round SMART_LAST_ROUND, and every zombie from the round after it on
@@ -125,8 +131,13 @@ function __init__()
 	s.self_revives = GetDvarInt("xerces_zm_selfRevives") != 0;
 	s.round_999 = GetDvarInt("xerces_zm_round999") != 0;
 	s.smart_zombies = GetDvarInt("xerces_zm_smartZombies") != 0;
+	s.start_round = GetDvarInt("xerces_zm_startRound");
 	if (s.start_points < 0)
 		s.start_points = 0;
+	if (s.start_round < 1)
+		s.start_round = 1;
+	if (s.start_round > MAX_START_ROUND)
+		s.start_round = MAX_START_ROUND;
 	// The round as of its start_of_round (the game raises level.round_number as the last one ends), counted on by
 	// Xerces where the game's stops (255), and how many rounds have started
 	s.round = 1;
@@ -175,7 +186,27 @@ function __init__()
 
 	callback::on_connect(&on_player_connect);
 	callback::on_spawned(&on_player_spawned);
+	if (s.start_round > 1)
+		level thread apply_start_round(s.start_round);
 	level thread main();
+}
+
+// The starting round. The game keeps the round in world.roundnumber, xor 115 (zm::set_round_number), and copies it into
+// level.round_number every frame. Each round's zombie count and health come from it (zm::round_spawning); the speed and
+// the spawn delay are set as a round ends (zm::round_think), so they are set here for the first one. In time: round_start
+// waits at least 2 seconds after start_zombie_round_logic before the first round.
+function apply_start_round(round)
+{
+	wait_for_flag("start_zombie_round_logic");
+	world.roundnumber = round ^ 115;
+	level.round_number = round;
+	if (isdefined(level.gamedifficulty) && level.gamedifficulty == 0)
+		level.zombie_move_speed = round * level.zombie_vars["zombie_move_speed_multiplier_easy"];
+	else
+		level.zombie_move_speed = round * level.zombie_vars["zombie_move_speed_multiplier"];
+	if (isdefined(level.func_get_zombie_spawn_delay))
+		level.zombie_vars["zombie_spawn_delay"] = [[level.func_get_zombie_spawn_delay]](round);
+	SetRoundsPlayed(round);
 }
 
 function main()
@@ -230,34 +261,65 @@ function on_player_spawned()
 		self.xerces_spawned = 1;
 		self thread first_spawn();
 	}
+	// Every spawn: a player who died, sat out as a spectator and came back, or who joined late, may have lost them
+	self thread ensure_menus();
 	if (level.xerces_rounds.auto_pap)
 		self thread watch_auto_pap();
 }
 
-// Once per player, from the end of the black screen: the data for Xerces' menus, the HUD, the settings message and a
-// self-revive
+// Once per player, from the end of the black screen: a self-revive and the settings message
 function first_spawn()
 {
 	self endon("disconnect");
 	wait_for_flag("initial_blackscreen_passed");
 	s = level.xerces_rounds;
-	self.xerces_data = self lui_text(data_text(), ALIGN_LEFT, 0, 0, 10, 10, (1, 1, 1), 0);
 	if (s.self_revives)
 	{
 		self.xerces_self_revives = 1;
 		self thread self_revive_watch();
 	}
-	self create_hud();
-	wait 4;
+	wait 4 + MENUS_DELAY;
 	self show_settings();
 }
 
-// "XERCES <mask> <starting points> <round> <skip> <vote>", which data/ui_scripts/xerces_settings reads: the round's
-// skip (SKIP_*) and whether the round 999 vote is open
+// The hidden text Xerces' pause menu entries read (data_text) and the HUD, opened again whenever the player's game no
+// longer has them. They open MENUS_DELAY seconds after the player's game is in, a row at a time: each opens with ten
+// messages the game must confirm, and a joiner whose game was still loading got them together with the map's own and
+// dropped out of sync (EXE_ERR_RELIABLE_CYCLED_OUT, 2026-11-08). A menu the game closed is not closed again here: its
+// number may belong to another menu by now.
+function ensure_menus()
+{
+	self notify("xerces_ensure_menus");
+	self endon("xerces_ensure_menus");
+	self endon("disconnect");
+	level endon("end_game");
+	wait_for_flag("initial_blackscreen_passed");
+	while (self.sessionstate != "playing")
+		wait 0.5;
+	wait MENUS_DELAY;
+	if (self menus_open())
+		return;
+	self.xerces_hud = undefined;
+	self.xerces_data = self lui_text(data_text(), ALIGN_LEFT, 0, 0, 10, 10, (1, 1, 1), 0);
+	wait 0.1;
+	self create_hud();
+}
+
+// Whether the hidden text is still open: the game hands back what was set on an open menu
+function menus_open()
+{
+	if (!isdefined(self.xerces_data))
+		return false;
+	text = self GetLUIMenuData(self.xerces_data, "text");
+	return isdefined(text) && text == data_text();
+}
+
+// "XERCES <mask> <starting points> <round> <skip> <vote> <starting round>", which data/ui_scripts/xerces_settings
+// reads: the round's skip (SKIP_*) and whether the round 999 vote is open
 function data_text()
 {
 	s = level.xerces_rounds;
-	return "XERCES " + s.mask + " " + s.start_points + " " + s.round + " " + s.skip + " " + s.vote;
+	return "XERCES " + s.mask + " " + s.start_points + " " + s.round + " " + s.skip + " " + s.vote + " " + s.start_round;
 }
 
 function update_data_text()
@@ -281,6 +343,8 @@ function show_settings()
 		text = add_setting(text, "Auto Pack-a-Punch");
 	if (s.start_points > 0)
 		text = add_setting(text, with_commas(s.start_points) + " starting points");
+	if (s.start_round > 1)
+		text = add_setting(text, "start at round " + s.start_round);
 	if (s.no_perk_limit)
 		text = add_setting(text, "No perk limit");
 	if (s.box_stays)
@@ -462,14 +526,33 @@ function auto_pap(weapon)
 	waittillframeend;
 	if (!isdefined(weapon) || !self HasWeapon(weapon) || !can_auto_pap(weapon))
 		return;
+	self upgrade_gun(weapon, 1);
+}
+
+function upgrade_gun(weapon, switch_to)
+{
 	upgrade = zm_weapons::get_upgrade_weapon(weapon, 0);
 	if (!isdefined(upgrade) || upgrade == level.weaponnone)
 		return;
-
 	self TakeWeapon(weapon);
 	upgrade = self zm_weapons::give_build_kit_weapon(upgrade);
 	self GiveStartAmmo(upgrade);
-	self SwitchToWeapon(upgrade);
+	if (switch_to)
+		self SwitchToWeapon(upgrade);
+}
+
+// Random loadout's two guns: weapon_give's notify upgrades the one it switches to, and the other was missed (seen
+// 2026-11-08), so once both are given every gun the player holds is upgraded, the one in hand switched to
+function upgrade_primaries()
+{
+	self endon("disconnect");
+	wait 0.1;
+	current = self GetCurrentWeapon();
+	foreach (weapon in self GetWeaponsListPrimaries())
+	{
+		if (self HasWeapon(weapon) && can_auto_pap(weapon))
+			self upgrade_gun(weapon, weapon == current);
+	}
 }
 
 function can_auto_pap(weapon)
@@ -610,7 +693,9 @@ function round_watch()
 function round_started()
 {
 	s = level.xerces_rounds;
-	if (s.self_revives && s.round % SELF_REVIVE_EVERY == 0)
+	foreach (player in GetPlayers())
+		player thread ensure_menus();
+	if (s.self_revives)
 		refill_self_revives();
 	if (s.round_skips)
 		open_skip();
@@ -691,6 +776,7 @@ function create_hud()
 	}
 	hud.notice = self lui_text("", ALIGN_CENTER, 140, 130, 1000, 24, (1, 0.85, 0.3), 1);
 	hud.menus[hud.menus.size] = hud.notice;
+	hud.notice_id = 0;
 	self.xerces_hud = hud;
 	if (s.self_revives)
 		self update_revives_row();
@@ -698,10 +784,12 @@ function create_hud()
 		self update_round_row();
 }
 
+// One row's text, then a pause before the next (ensure_menus)
 function hud_text(hud, text, x, y, color)
 {
 	menu = self lui_text(text, ALIGN_LEFT, x, y, 150, 24, color, 1);
 	hud.menus[hud.menus.size] = menu;
+	wait 0.05;
 	return menu;
 }
 
@@ -712,7 +800,10 @@ function update_revives_row()
 	count = 0;
 	if (isdefined(self.xerces_self_revives))
 		count = self.xerces_self_revives;
-	self SetLUIMenuData(self.xerces_hud.revives, "text", "" + count);
+	text = "" + count;
+	if (count < 1 && isdefined(self.xerces_revive_used_round))
+		text = "0 (BACK AT ROUND " + (self.xerces_revive_used_round + SELF_REVIVE_EVERY) + ")";
+	self SetLUIMenuData(self.xerces_hud.revives, "text", text);
 }
 
 function update_round_row()
@@ -1026,6 +1117,18 @@ function coin_flip_request(amount)
 	}
 	if (self cannot_play())
 		return;
+	// COIN_FLIPS_PER_ROUND a round each, counted by rounds started (which go on past 255)
+	s = level.xerces_rounds;
+	if (!isdefined(self.xerces_flip_round) || self.xerces_flip_round != s.rounds_started)
+	{
+		self.xerces_flip_round = s.rounds_started;
+		self.xerces_flips = 0;
+	}
+	if (self.xerces_flips >= COIN_FLIPS_PER_ROUND)
+	{
+		self IPrintLnBold("Three coin flips a round: flip again next round");
+		return;
+	}
 	if (self.score >= MAX_SCORE)
 	{
 		self IPrintLnBold("You have the most points the game holds: a win could not pay");
@@ -1044,6 +1147,7 @@ function coin_flip_request(amount)
 		self IPrintLnBold("You don't have " + with_commas(bet) + " points");
 		return;
 	}
+	self.xerces_flips++;
 	self thread coin_flip(bet);
 }
 
@@ -1161,6 +1265,24 @@ function clear_notice(id, seconds)
 		if (isdefined(player.xerces_hud))
 			player SetLUIMenuData(player.xerces_hud.notice, "text", "");
 	}
+}
+
+// A line on one player's screen, cleared after the given seconds unless a newer one replaced it
+function notice_player(text, seconds)
+{
+	if (!isdefined(self.xerces_hud))
+		return;
+	self.xerces_hud.notice_id++;
+	self SetLUIMenuData(self.xerces_hud.notice, "text", text);
+	self thread clear_player_notice(self.xerces_hud, self.xerces_hud.notice_id, seconds);
+}
+
+function clear_player_notice(hud, id, seconds)
+{
+	self endon("disconnect");
+	wait seconds;
+	if (isdefined(self.xerces_hud) && self.xerces_hud == hud && hud.notice_id == id)
+		self SetLUIMenuData(hud.notice, "text", "");
 }
 
 // Each player's vote: "skip", or "exfil" or "keep" in the round 999 vote. More than half the players decides.
@@ -1402,6 +1524,8 @@ function random_loadout()
 	}
 	foreach (weapon in picks)
 		self zm_weapons::weapon_give(weapon, 0, 1);
+	if (level.xerces_rounds.auto_pap)
+		self thread upgrade_primaries();
 }
 
 function can_swap_guns()
@@ -1411,20 +1535,21 @@ function can_swap_guns()
 	return !isdefined(self.is_drinking) || self.is_drinking <= 0;
 }
 
-// Self-revives: one each, back to one every SELF_REVIVE_EVERY rounds
+// Self-revives: one each; a used one comes back SELF_REVIVE_EVERY rounds after the round it was used in
 function refill_self_revives()
 {
-	refilled = 0;
+	s = level.xerces_rounds;
 	foreach (player in GetPlayers())
 	{
 		if (!isdefined(player.xerces_self_revives) || player.xerces_self_revives >= 1)
 			continue;
+		if (isdefined(player.xerces_revive_used_round) && s.round < player.xerces_revive_used_round + SELF_REVIVE_EVERY)
+			continue;
 		player.xerces_self_revives = 1;
+		player.xerces_revive_used_round = undefined;
 		player update_revives_row();
-		refilled = 1;
+		player notice_player("SELF-REVIVE BACK", 6);
 	}
-	if (refilled)
-		notice_all("SELF-REVIVES REFILLED", 6);
 }
 
 function self_revive_watch()
@@ -1437,8 +1562,9 @@ function self_revive_watch()
 	}
 }
 
-// A player who goes down with a self-revive holds the use button to get up, through the game's own revive
-// (zm_laststand::auto_revive, as solo Quick Revive does). Solo Quick Revive goes first.
+// A player who goes down with a self-revive holds jump or use to get up, through the game's own revive
+// (zm_laststand::auto_revive, as solo Quick Revive does). Solo Quick Revive goes first. Jump, because on a controller
+// use is also reload, and holding it while down did not count (2026-11-08).
 function self_revive_offer()
 {
 	self endon("disconnect");
@@ -1447,13 +1573,13 @@ function self_revive_offer()
 		return;
 	if (level flag::get("solo_game") && isdefined(self.lives) && self.lives > 0 && self HasPerk("specialty_quickrevive"))
 		return;
-	self.xerces_prompt = self lui_text("HOLD USE TO REVIVE YOURSELF", ALIGN_CENTER, 340, 470, 600, 26, (1, 1, 1), 1);
+	self.xerces_prompt = self lui_text("HOLD JUMP OR USE TO REVIVE YOURSELF", ALIGN_CENTER, 340, 470, 600, 26, (1, 1, 1), 1);
 	self thread end_game_if_bled_out();
 	held = 0;
 	revived = 0;
 	while (self laststand::player_is_in_laststand())
 	{
-		if (self UseButtonPressed())
+		if (self JumpButtonPressed() || self UseButtonPressed())
 			held += 50;
 		else
 			held = 0;
@@ -1472,6 +1598,7 @@ function self_revive_offer()
 	if (!revived)
 		return;
 	self.xerces_self_revives--;
+	self.xerces_revive_used_round = level.xerces_rounds.round;
 	self update_revives_row();
 	self zm_laststand::auto_revive(self);
 }
