@@ -13,6 +13,7 @@
 #include <game/game.hpp>
 #include <game/utils.hpp>
 #include <loader/component_loader.hpp>
+#include <utils/thread.hpp>
 
 #include <xerces_core/frame_ring.hpp>
 #include <xerces_core/json.hpp>
@@ -177,6 +178,8 @@ std::int64_t seconds_to_ticks(double seconds) {
   return static_cast<std::int64_t>(seconds * double(frequency));
 }
 
+std::string stalls_csv(const run_state &r, std::int64_t t1); // below
+
 // ------------------------------------------------- writing (async thread)
 std::filesystem::path unique_base(const std::string &name) {
   std::error_code ec;
@@ -264,7 +267,9 @@ void write_run(const finished_run &done) {
           base.string() + ".main.csv",
           bench::main_csv(main_in_run, main_previous, clock, main_lost)) &&
       xerces_runtime::write_file(base.string() + ".meta.json",
-                                 bench::run_meta_json(meta));
+                                 bench::run_meta_json(meta)) &&
+      xerces_runtime::write_file(base.string() + ".stalls.csv",
+                                 stalls_csv(r, done.t1));
 
   const bench::frames_summary summary =
       bench::summarize(in_run, previous, clock, done.t1);
@@ -291,6 +296,154 @@ void write_run(const finished_run &done) {
   }
 }
 
+// ------------------------------------------ the stall sampler (own thread)
+// While the main thread is inside one long frame, this thread now and then
+// stops it for a moment and notes where it is (its call stack as raw
+// addresses). The run's <run>.stalls.csv then says which engine code the long
+// frames were in. Nothing here allocates while the main thread is stopped:
+// the samples go into a fixed array, and the addresses are turned into
+// module+offset only when a run is written.
+constexpr std::size_t stall_stack_depth = 14;
+constexpr std::size_t stall_sample_max = 6000;
+constexpr double stall_threshold_ms = 40.0; // a frame this long is sampled
+constexpr double stall_interval_ms = 8.0;   // between samples of one frame
+
+struct stall_sample {
+  std::int64_t qpc = 0;
+  std::int64_t stalled_ticks = 0; // the frame's age when sampled
+  std::uint32_t depth = 0;
+  std::uint64_t pc[stall_stack_depth]{};
+};
+
+std::atomic<std::int64_t> last_main_frame{0};
+std::atomic_bool sampling{false}; // a run is going (mirror of run.active)
+stall_sample *stall_samples = nullptr;         // stall_sample_max entries
+std::atomic<std::uint32_t> stall_count{0};     // written by the sampler only
+
+void sample_main_thread(HANDLE thread, std::int64_t now, std::int64_t age) {
+  const std::uint32_t slot = stall_count.load(std::memory_order_relaxed);
+  if (slot >= stall_sample_max) {
+    return;
+  }
+  stall_sample &out = stall_samples[slot];
+  out = {};
+  CONTEXT context{};
+  context.ContextFlags = CONTEXT_CONTROL;
+  if (SuspendThread(thread) == static_cast<DWORD>(-1)) {
+    return;
+  }
+  if (GetThreadContext(thread, &context)) {
+    while (out.depth < stall_stack_depth && context.Rip) {
+      out.pc[out.depth++] = context.Rip;
+      DWORD64 image_base = 0;
+      const PRUNTIME_FUNCTION function =
+          RtlLookupFunctionEntry(context.Rip, &image_base, nullptr);
+      if (!function) {
+        break;
+      }
+      PVOID handler_data = nullptr;
+      DWORD64 establisher_frame = 0;
+      RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, context.Rip, function,
+                       &context, &handler_data, &establisher_frame, nullptr);
+    }
+  }
+  ResumeThread(thread);
+  if (out.depth > 0) {
+    out.qpc = now;
+    out.stalled_ticks = age;
+    stall_count.store(slot + 1, std::memory_order_release);
+  }
+}
+
+void stall_sampler() {
+  HANDLE thread = nullptr;
+  std::uint32_t thread_id = 0;
+  std::int64_t last_sample = 0;
+  for (;;) {
+    Sleep(4);
+    const std::int64_t last = last_main_frame.load(std::memory_order_relaxed);
+    if (last == 0) {
+      continue; // no main frame yet (start-up, loading)
+    }
+    if (const std::uint32_t id = main_thread_id(); id != thread_id) {
+      if (thread) {
+        CloseHandle(thread);
+      }
+      thread_id = id;
+      thread = id ? OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT,
+                               FALSE, id)
+                  : nullptr;
+    }
+    if (!thread) {
+      continue;
+    }
+    const std::int64_t now = probe_clock();
+    const double age_ms = bench::ticks_to_ms(now - last, frequency);
+    // A map load or a lost window is one huge "frame": not sampled.
+    if (age_ms < stall_threshold_ms || age_ms > 5000.0 ||
+        !sampling.load(std::memory_order_relaxed)) {
+      continue;
+    }
+    if (bench::ticks_to_ms(now - last_sample, frequency) < stall_interval_ms) {
+      continue;
+    }
+    last_sample = now;
+    sample_main_thread(thread, now, now - last);
+  }
+}
+
+// "module+0xoffset" for an address; the module's file name only.
+std::string module_offset(std::uint64_t address) {
+  HMODULE module = nullptr;
+  if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                          reinterpret_cast<LPCWSTR>(address), &module) ||
+      !module) {
+    char text[32];
+    std::snprintf(text, sizeof(text), "?+0x%llx",
+                  static_cast<unsigned long long>(address));
+    return text;
+  }
+  wchar_t path[MAX_PATH];
+  const DWORD size = GetModuleFileNameW(module, path, MAX_PATH);
+  std::wstring name(path, size);
+  if (const auto slash = name.find_last_of(L"\\/"); slash != std::wstring::npos) {
+    name = name.substr(slash + 1);
+  }
+  char text[64];
+  std::snprintf(text, sizeof(text), "+0x%llx",
+                static_cast<unsigned long long>(
+                    address - reinterpret_cast<std::uint64_t>(module)));
+  std::string out;
+  for (const wchar_t c : name) {
+    out.push_back(c < 128 ? static_cast<char>(c) : '?');
+  }
+  return out + text;
+}
+
+// One row a sample: t_ms from the run start, how old the frame was, then the
+// stack, innermost first, ';'-separated.
+std::string stalls_csv(const run_state &r, std::int64_t t1) {
+  std::string csv = "t_ms,frame_age_ms,stack\n";
+  if (!stall_samples) {
+    return csv;
+  }
+  const std::uint32_t count = stall_count.load(std::memory_order_acquire);
+  for (std::uint32_t i = 0; i < count; ++i) {
+    const stall_sample &s = stall_samples[i];
+    if (s.qpc < r.t0 || s.qpc >= t1) {
+      continue;
+    }
+    csv += decimal(bench::ticks_to_ms(s.qpc - r.t0, frequency)) + "," +
+           decimal(bench::ticks_to_ms(s.stalled_ticks, frequency)) + ",";
+    for (std::uint32_t d = 0; d < s.depth; ++d) {
+      csv += (d ? ";" : "") + module_offset(s.pc[d]);
+    }
+    csv += "\n";
+  }
+  return csv;
+}
+
 // --------------------------------------------------- runs (main thread)
 bool begin_run(const std::string &requested, const std::string &kind) {
   auto *ring = frames.load(std::memory_order_acquire);
@@ -299,6 +452,7 @@ bool begin_run(const std::string &requested, const std::string &kind) {
   }
   run = {};
   run.active = true;
+  sampling.store(true, std::memory_order_relaxed);
   run.kind = kind;
   run.t0 = probe_clock();
   run.frame_begin = ring->count();
@@ -331,6 +485,7 @@ bool end_run() {
     // stops, so its end time cannot cut a manual run started after it.
     autos.done = true;
   }
+  sampling.store(false, std::memory_order_relaxed);
   auto done = std::make_shared<finished_run>();
   done->t1 = probe_clock();
   done->frame_end = ring->count();
@@ -403,6 +558,7 @@ void step_auto(std::int64_t now) {
 void main_frame() {
   const std::int64_t now = probe_clock();
   mains->push(now);
+  last_main_frame.store(now, std::memory_order_relaxed);
 
   const auto window =
       reinterpret_cast<HWND>(game_window.load(std::memory_order_relaxed));
@@ -535,6 +691,9 @@ void arm() {
                std::memory_order_release);
   probe_detail::armed.store(true, std::memory_order_release);
 
+  stall_samples = new stall_sample[stall_sample_max];
+  utils::thread::create_named_thread("Xerces Stall Sampler", stall_sampler)
+      .detach();
   scheduler::loop(main_frame, scheduler::main);
   add_commands();
   log_async(xerces_core::log_level::info, "perf.bench.armed",
