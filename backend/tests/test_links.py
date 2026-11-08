@@ -1,6 +1,7 @@
 """Invite links, knocks, knock-based invites and hole punching (DESIGN.md 10.12, 10.13)."""
 
 import asyncio
+import uuid
 from datetime import timedelta
 
 import httpx
@@ -8,7 +9,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import update
 
-from app.models import InviteLink, Knock, utcnow
+from app.models import Invite, InviteLink, Knock, utcnow
 from tests.helpers import (
     AppFactory,
     TestUser,
@@ -354,3 +355,19 @@ async def test_punch_is_rate_limited(app_factory: AppFactory) -> None:
         invite_id = await _accepted_invite(client, host, guest)
         codes = [(await _punch(client, guest, invite_id, "8.8.8.8")).status_code for _ in range(31)]
         assert codes[:30] == [200] * 30 and codes[30] == 429
+
+
+async def test_an_accepted_invite_lasts_an_hour_for_the_punch(
+    client: httpx.AsyncClient, app: FastAPI
+) -> None:
+    host = await register(client, "host")
+    guest = await register(client, "guest")
+    invite_id = await _accepted_invite(client, host, guest)
+    async with services_of(app).sessionmaker() as db:
+        row = await db.get(Invite, uuid.UUID(invite_id))
+        assert row is not None
+        left = row.expires_at - utcnow()
+        assert timedelta(minutes=59) < left <= timedelta(hours=1)
+        row.expires_at = utcnow() - timedelta(seconds=1)
+        await db.commit()
+    assert (await _punch(client, guest, invite_id, "8.8.8.8")).status_code == 404

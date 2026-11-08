@@ -21,6 +21,9 @@ from app.social import are_friends, is_blocked_either_way, usernames
 router = APIRouter(prefix="/v1/invites", tags=["invites"])
 
 INVITE_TTL = timedelta(minutes=10)
+# An accepted invite lasts this long from the answer: the joiner may first get
+# the host's mods, then start the game, and the hole punch needs the invite.
+INVITE_ACCEPTED_TTL = timedelta(hours=1)
 
 
 async def _may_invite(db: AsyncSession, host: uuid.UUID, target: User) -> bool:
@@ -134,6 +137,7 @@ async def accept_invite(invite_id: uuid.UUID, user: UserDep, db: DbDep) -> Invit
     ):
         raise not_found("Invite not found.")
     invite.status = "accepted"
+    invite.expires_at = max(invite.expires_at, utcnow() + INVITE_ACCEPTED_TTL)
     await db.commit()
     names = await usernames(db, [invite.from_user_id, invite.to_user_id])
     return invite_out(invite, names)
