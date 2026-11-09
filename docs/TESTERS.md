@@ -108,6 +108,7 @@ hash, sent with the link, shows that the zip is the one we made.
   looks) says which mod. When you host, your last pick is put on again in the next
   match; other players pick again. It is not yet a set of *new* slots next to the
   base characters: a character mod changes how the base characters look.
+  After a pick you see yourself in the third-person view for four seconds.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.

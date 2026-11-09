@@ -23,6 +23,8 @@ REGISTER_SYSTEM("xerces_characters", &__init__, undefined)
 
 // How long after a spawn the pick is put on again: after the game's and the mods' own spawn scripts
 #define APPLY_DELAY 1.5
+// How long the third-person view stays after a pick
+#define SHOW_OFF_TIME 4
 #define MAX_INDEX 63
 #define MAX_STYLE 15
 
@@ -114,6 +116,19 @@ function reset()
 	}
 }
 
+// A pick made in the pause menu: the third-person view for a few seconds, so the player sees the character on them (the
+// pause menu cannot show it: the game stands still under it and the menu darkens the scene)
+function show_off()
+{
+	self notify("xerces_char_show_off");
+	self endon("xerces_char_show_off");
+	self endon("disconnect");
+	wait 0.3;
+	self SetClientThirdPerson(1);
+	wait SHOW_OFF_TIME;
+	self SetClientThirdPerson(0);
+}
+
 function menu_responses()
 {
 	self endon("disconnect");
@@ -128,6 +143,7 @@ function menu_responses()
 		if (words[1] == "default")
 		{
 			self reset();
+			self thread show_off();
 			continue;
 		}
 		if (words.size < 3)
@@ -137,5 +153,6 @@ function menu_responses()
 		if (index < 0 || index > MAX_INDEX || style < 0 || style > MAX_STYLE)
 			continue;
 		self apply(index, style);
+		self thread show_off();
 	}
 }

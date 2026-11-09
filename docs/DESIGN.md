@@ -1928,7 +1928,7 @@ is one of three kinds, drawn evenly.
 
 ---
 
-### 7.10 Zombies character screen (built 2026-11-08, beta.18)
+### 7.10 Zombies character screen (built 2026-11-08, beta.18, third-person view beta.19)
 
 Asked for by the user on 2026-11-08: character mods such as Hyperdimension
 Neptunia should not just replace the default characters, and Xerces' own
@@ -1970,6 +1970,12 @@ What is built:
   `xerces_char_apply` is 1, which the script sets around them with no wait in
   between. The bit is cleared when a player connects and by DEFAULT. Tested in a match
   with DS4C, Neptunia and a script that made the same calls: they were skipped.
+- After a pick the match shows the character on the player: the third-person view
+  (`SetClientThirdPerson`) for 4 seconds, then the first-person view again. A live
+  3D preview inside the screen was tried and dropped: the game stands still under
+  the pause menu (a solo game's scripts do not run, so a focus change could not
+  change the player) and the menu darkens the scene, and the game has no UI model
+  widget a match can use (`Engine.SetupUI3DWindow` belongs to the lobby scenes).
 - The host's last pick is saved in the dvar `xerces_char_saved` (index * 16 + outfit + 1)
   and put on again when the host spawns in a later match; other players pick again.
 - `XERCES_CHAR_TRACE=1` in the environment writes every call that changes what a

@@ -2732,7 +2732,7 @@ text, `commands.txt`, and copies of the logs read (`inputs\`). It was taken at
   - every scan was warm (0.08 s). No cold scan is in these logs, so the 195 s
     first scan above is not re-measured.
 
-## Zombies character screen (beta.18)
+## Zombies character screen (beta.18, beta.19)
 
 Built on `launcher/upscale`; the test home is
 `C:\Users\Ginld\XercesDev\bench\20261106-modlabels` (DS4C Patched on top of Hyperdimension
@@ -2748,6 +2748,8 @@ screenshots, console, Lua snippets).
       player (third person and first-person arms); with a test script that called
       `SetCharacterBodyType` as DS4C does, the calls were skipped (`char.call` lines
       "(skipped: locked)") and the player kept the pick.
+- [x] After a pick the view goes third person (Neptunia's character seen from behind) and
+      back to first person; the screen itself cannot show the model (see DESIGN.md 7.10).
 - [x] The host's pick is put on again after `map zm_zod` (outfit 3 of Floyd came back as
       type 5, style 2).
 - [ ] Not tried: another player picking, DEFAULT after a pick, GFL or Avali stacked, a
