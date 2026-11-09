@@ -1928,6 +1928,59 @@ is one of three kinds, drawn evenly.
 
 ---
 
+### 7.10 Zombies character screen (built 2026-11-08, beta.18)
+
+Asked for by the user on 2026-11-08: character mods such as Hyperdimension
+Neptunia should not just replace the default characters, and Xerces' own
+character menu should be as good as DS4C's, win over DS4C's own, and list DS4C's
+characters. What was found first (research on the user's stack):
+
+- A character mod does not add characters. The game picks what a player wears
+  with `SetCharacterBodyType(index)`, `SetCharacterBodyStyle(style)` and
+  `SetCharacterHelmetStyle(style)` (first-person arms follow them), and a mod such
+  as Neptunia replaces the *models* of some indexes by their asset names
+  (`c_zom_dlc_waw_dempsey_*`, `c_zom_zod_*`, the multiplayer specialists'
+  `c_t7_mp_<specialist>_mpc_body<N>_skin<M>`). In a Zombies match with Neptunia, indexes
+  0 to 3 (Dempsey, Nikolai, Richtofen, Takeo) are its characters.
+- `SetModel` on a player works with Neptunia alone but not with DS4C Patched
+  (the character system draws the player), so slots are made with the three
+  character calls.
+- DS4C's character screen is a Lua list, `CoD.CharacterTable` (24 entries: `models.name`,
+  `models.characterIndex` as text, `models.image` and `models.styles`, one empty table
+  per outfit). Indexes 500 and up (Disciple, Misty, Shimo) are made by DS4C's own
+  scripts, not the game's table, and are left out.
+
+What is built:
+
+- `data/ui_scripts/xerces_characters`: a CHARACTERS entry in the Zombies pause
+  menu, in the game options list in use (the stock one or a mod's, as XERCES
+  SETTINGS), above the rows that leave the match. The screen lists DEFAULT and every
+  character of `CoD.CharacterTable` (the base game's eight when no mod lists them) with
+  its portrait, and an outfit screen for a character with more than one. The list is
+  made each time the screen opens. A character whose look comes from a mod other
+  than the one that lists it (found with `game.getassetowner` on a model of the
+  character) says so: "Looks from Hyperdimension Neptunia".
+- The pick goes to the match as the menu response `xerces_char:<index>:<style>`
+  (or `xerces_char:default`) under `StartMenu_Main`, which
+  `data/custom_scripts/zm/xerces_characters.gsc` applies. The script also puts a
+  player's pick on again 1.5 s after each spawn.
+- Priority: `src/client/xerces/character_slots.cpp` wraps the three character calls.
+  While a player's bit is set in the dvar `xerces_char_lock`, calls from other
+  scripts (DS4C's) are skipped; Xerces' own are let through while
+  `xerces_char_apply` is 1, which the script sets around them with no wait in
+  between. The bit is cleared when a player connects and by DEFAULT. Tested in a match
+  with DS4C, Neptunia and a script that made the same calls: they were skipped.
+- The host's last pick is saved in the dvar `xerces_char_saved` (index * 16 + outfit + 1)
+  and put on again when the host spawns in a later match; other players pick again.
+- `XERCES_CHAR_TRACE=1` in the environment writes every call that changes what a
+  player wears to the game log (event `char.call`, at most 600 lines, and the lock's
+  skips); off otherwise.
+
+Not built: a character mod's characters as slots *beside* the base ones. They
+share the base characters' asset names, so only one look of an index can be in the
+game at a time; separate slots would need the mod's models loaded under other names
+and the game's character table to point at them.
+
 ## 8. Packs, profiles and safety nets (goal 6 and extras)
 
 ### 8.1 Pack file
@@ -3819,7 +3872,7 @@ release from v1.0.
 
 Beta packages for testers (2026-11-05) come first, as a zip by private link:
 
-- `VERSION` is the one place the version is set (`0.1.0-beta.17`). premake
+- `VERSION` is the one place the version is set (`0.1.0-beta.18`). premake
   writes it, the commit and whether the tree had changes into
   `build\src\xerces_version.h`; all three programs show "Xerces <version>
   (<commit>)" (About, the menu watermark, the console title, the crash report)

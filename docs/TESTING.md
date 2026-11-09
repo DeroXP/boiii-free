@@ -2731,3 +2731,24 @@ text, `commands.txt`, and copies of the logs read (`inputs\`). It was taken at
   - catalog scanned at 410 ms;
   - every scan was warm (0.08 s). No cold scan is in these logs, so the 195 s
     first scan above is not re-measured.
+
+## Zombies character screen (beta.18)
+
+Built on `launcher/upscale`; the test home is
+`C:\Users\Ginld\XercesDev\bench\20261106-modlabels` (DS4C Patched on top of Hyperdimension
+Neptunia, `zm_zod`), driven with `bench\20261108-chars\run-lua.ps1` (keys,
+screenshots, console, Lua snippets).
+
+- [x] The pause menu has CHARACTERS (in DS4C's own pause list, above RESTART LEVEL).
+- [x] The screen lists DS4C's characters below index 64 with their portraits and a
+      scroll bar; "Looks from Hyperdimension Neptunia [Character Mod]" on Dempsey to
+      Takeo; no Lua error.
+- [x] A character with outfits (Floyd) opens an outfit screen (Floyd 1 to 5).
+- [x] Picking Richtofen closes both menus and puts Neptunia's Richtofen on the
+      player (third person and first-person arms); with a test script that called
+      `SetCharacterBodyType` as DS4C does, the calls were skipped (`char.call` lines
+      "(skipped: locked)") and the player kept the pick.
+- [x] The host's pick is put on again after `map zm_zod` (outfit 3 of Floyd came back as
+      type 5, style 2).
+- [ ] Not tried: another player picking, DEFAULT after a pick, GFL or Avali stacked, a
+      dedicated server.

@@ -59,6 +59,19 @@ to report these again, but tell us if you see them somewhere else or worse.
   blocked), but any other DLL a mod loads runs on your PC with your rights.
   Xerces does not ask first yet. Only turn on mods you trust.
 
+## Zombies characters (CHARACTERS)
+
+- **Character mods change the base characters, they are not new slots.** Hyperdimension
+  Neptunia (and similar mods) replace the models of existing characters by name,
+  so with it loaded Dempsey, Nikolai, Richtofen and Takeo look like its characters
+  and the original looks are not there to pick. CHARACTERS says which mod changed
+  a look.
+- **DS4C's own extra characters are not in the CHARACTERS list.** Disciple, Misty
+  and Shimo (indexes 500 and up) are made by DS4C's own scripts; use DS4C's
+  character screen for them (it cannot change a pick made in CHARACTERS until
+  you pick DEFAULT).
+- **Only the host's last pick is remembered.** Other players pick again each match.
+
 ## Zombies round settings (XERCES SETTINGS)
 
 - **Other players need Xerces for the pause menu entries.** The counter, the

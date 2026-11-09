@@ -100,6 +100,14 @@ hash, sent with the link, shows that the zip is the one we made.
   ten minutes of frame times, from 20 seconds into its first level, to a `bench`
   folder next to Xerces.exe (four small files, one listing what the game was doing during each long frame); leaving the level writes them early. Play as usual, then send those
   files to show where a map stutters. Turn it off afterwards.
+- **CHARACTERS (Zombies).** The pause menu of a Zombies match has a CHARACTERS
+  entry: every character the game or DS4C lists (DS4C's portraits and outfits),
+  and DEFAULT. Your pick stays on you: another mod's own character screen
+  (DS4C's) cannot change it until you pick DEFAULT. A character whose look a
+  character mod has replaced (Hyperdimension Neptunia gives the first four their
+  looks) says which mod. When you host, your last pick is put on again in the next
+  match; other players pick again. It is not yet a set of *new* slots next to the
+  base characters: a character mod changes how the base characters look.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.
