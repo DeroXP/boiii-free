@@ -72,6 +72,23 @@ to report these again, but tell us if you see them somewhere else or worse.
   you pick DEFAULT).
 - **Only the host's last pick is remembered.** Other players pick again each match.
 
+## Zombies aim assist and hip-fire spread
+
+- **The modern aim assist has not been played with a real controller yet.** Its
+  rules were checked in a match with a simulated stick (the view followed 60% of a
+  zombie's motion; slowdown and the fades read as designed), but how it feels is
+  untested. Say what feels off: strength and ranges are single numbers.
+- **It needs an XInput controller.** A controller in another mode (DualShock or
+  Switch mode without a wrapper) is not seen; `xerces_aim_debug` in a match says
+  "controller NOT found". It is tied to this build of the game: after a game update
+  it turns itself off and writes `xerces.aim_assist.off` to the log.
+- **The game's own aim assist still runs under it.** Game's Own leaves only that.
+- **Up close it is weak on purpose.** As in Modern Warfare III, rotation fades in
+  from nothing at point blank to full at 6 m, so a zombie at arm's length gets
+  little of it.
+- **No Hip-Fire Spread is the host's setting.** It does nothing in a match you
+  joined, and the crosshair of players who joined still shows their own spread.
+
 ## Zombies round settings (XERCES SETTINGS)
 
 - **Other players need Xerces for the pause menu entries.** The counter, the

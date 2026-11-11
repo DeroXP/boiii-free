@@ -73,6 +73,9 @@ public:
            "Zombies, when you host: the round count goes past 255; at round "
            "999 everyone votes to exfil and win, or keep going with every "
            "perk, infinite ammo, infinite points and only smart zombies.");
+    on_off("xerces_zm_noHipSpread",
+           "Zombies, when you host: no hip-fire spread; shots from the hip go "
+           "where the crosshair is, for everyone in the match.");
     on_off("xerces_zm_smartZombies",
            "Zombies, when you host: from round 20 some zombies are smart "
            "(pack hunters, burst sprinters and ambushers, each with its own "

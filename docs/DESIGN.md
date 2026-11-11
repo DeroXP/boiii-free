@@ -1987,6 +1987,74 @@ share the base characters' asset names, so only one look of an index can be in t
 game at a time; separate slots would need the mod's models loaded under other names
 and the game's character table to point at them.
 
+### 7.11 Zombies: modern controller aim assist and no hip-fire spread (built 2026-11-11, beta.20)
+
+Asked for by the user on 2026-11-09 ("a better aim assist for controller", "remove
+hip fire spread") and 2026-11-11 ("like the new call of duty's similarly to mw3",
+with the rules in their aim trainer AimTuner). Both are for Zombies only; neither
+exists in multiplayer or campaign.
+
+**Aim assist** (`src/client/xerces/zm_aim_assist.cpp`, dvar `xerces_zm_aimAssist`,
+saved on this PC: 0 the game's own only, 1 "Modern (MW3)", 2 "Modern, Stronger"; in
+XERCES SETTINGS' CONTROLLER tab). The game's own assist stays as it is; its tuning
+dvars (`aim_lockon_*`, `aim_slowdown_*`) are not in the released game, so Xerces'
+works on the client's own view angles, every frame. The rules and numbers are the
+ones AimTuner documents for Modern Warfare III / Black Ops 6 (its README "Aim
+assist" and `aimtuner/codkit.py`, style `classic`; community measurements):
+
+- Slowdown: while a zombie is inside a bubble around the crosshair (0.14 by 0.19 of
+  the screen's half width and height, all of the assist inside three quarters of it,
+  none at its edge), your own look speed is cut by 50%, 0.6 of that from the hip.
+  Full from 3 m to 50 m, none at 0 m and 100 m.
+- Rotational: the view follows 60% of the zombie's motion across the screen, whether
+  it moved or you strafed (0.7 of that up and down), only with stick input: the left
+  stick at least 25% sideways or the right stick at least 5%. It fades in to full at
+  6 m, is full to 35 m, 30% at 50 m, 5% at 70 m, none from 95 m.
+- A clear line of sight to the chest or the head (the game's own sight trace). No
+  pull toward a target and no snap on aiming down sights: those games have neither.
+- "Stronger" keeps the rules with 80% rotation and 60% slowdown.
+
+It reads the controller itself (XInput), so a mouse never gets it, and it is off in
+menus, in the console and while the window is not in front. Zombies are the game's
+actors (`ET_ACTOR`) in the client's entities; their place is their bounds.
+
+Where the game keeps what it needs was measured in the running game
+(`xerces_aim_debug`), because Xerces' layouts of this data are not exact:
+
+- The camera (the game's refdef) is 0x131D78 into cg: the tangents of half the
+  field of view 16 and 12 bytes before it, its forward axis 28 bytes after. The
+  camera gives the eye, the view's direction as drawn (recoil included) and the
+  field of view; the sights count as up when the view is 7% narrower than the
+  widest seen in the level.
+- The client's own view angles (what the sticks turn) are 0xB8C8 into the client's
+  data. The game hides that data's pointer, so the allocation is noted as the game
+  makes it (a detour on `Hunk_UserAlloc`, known by its size: the released game
+  passes no names).
+- Every frame both are checked (the camera over the player's own entity with a
+  unit forward axis and sane tangents; the angles readable numbers) before anything
+  is moved; if not, the assist stays off and says so once in the log
+  (`xerces.aim_assist.off`).
+- No game function is called from the frame except the sight trace:
+  `CG_IsFullyInitialized`, asked while a level loaded, waited on the loader and
+  froze the game (2026-11-11), and a log line from inside the allocation detour did
+  the same.
+
+`XERCES_AIM_TEST=1` in the environment acts as a controller with the left stick
+held sideways and logs each second what the assist did (`xerces.aim_assist.test`).
+
+**No hip-fire spread** (`src/client/xerces/zm_hip_spread.cpp`, host setting
+`xerces_zm_noHipSpread`, "No Hip-Fire Spread" in XERCES SETTINGS' ZOMBIES tab, bit
+16384 of the match's settings). The game's `SetSpreadOverride` only holds spread at
+a weapon's smallest hip spread, so while this PC hosts a Zombies match with the
+setting on, every loaded weapon's hip spread (smallest and largest when standing,
+crouched, prone and sliding, and what firing, turning, moving and sprinting add) is
+set to 0. The host's game runs the server, so it holds for everyone in the match.
+A weapon's zone can stay loaded into the next level (64 of 94 did in the test), so
+the weapons changed are remembered by name and, in any level that is not a hosted
+Zombies match with the setting on, each one still loaded and still at 0 gets its
+spread back within a second of the level starting. Weapons are only touched inside
+a level, in the game's own frame.
+
 ## 8. Packs, profiles and safety nets (goal 6 and extras)
 
 ### 8.1 Pack file
@@ -3878,7 +3946,7 @@ release from v1.0.
 
 Beta packages for testers (2026-11-05) come first, as a zip by private link:
 
-- `VERSION` is the one place the version is set (`0.1.0-beta.19`). premake
+- `VERSION` is the one place the version is set (`0.1.0-beta.20`). premake
   writes it, the commit and whether the tree had changes into
   `build\src\xerces_version.h`; all three programs show "Xerces <version>
   (<commit>)" (About, the menu watermark, the console title, the crash report)

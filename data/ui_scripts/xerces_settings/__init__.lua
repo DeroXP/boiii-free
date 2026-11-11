@@ -26,6 +26,7 @@ local COIN_FLIP_BIT = 256
 local ROUND_SKIPS_BIT = 512
 local ROUND_999_BIT = 4096
 local SMART_ZOMBIES_BIT = 8192
+local NO_HIP_SPREAD_BIT = 16384
 local SETTINGS = {
   {
     dvar = "xerces_zm_maxAmmo",
@@ -82,6 +83,13 @@ local SETTINGS = {
     bit = 64,
     tab = "zombies",
     description = "Shows how many zombies are left in the round and how long it has taken, top left.",
+  },
+  {
+    dvar = "xerces_zm_noHipSpread",
+    name = "No Hip-Fire Spread",
+    bit = NO_HIP_SPREAD_BIT,
+    tab = "zombies",
+    description = "Shots from the hip go where the crosshair is, for everyone in the match. Aiming down sights is unchanged.",
   },
   {
     dvar = "xerces_zm_randomLoadout",
@@ -173,6 +181,25 @@ local GRAPHICS = {
       return (value * 10) .. "%"
     end,
     description = "How much the scene is sharpened after AMD FSR 1 or NVIDIA DLSS, 0% for none. It also sharpens at a Scene Resolution Ratio of 100%.",
+  },
+}
+
+-- The CONTROLLER tab: this PC's own (src/client/xerces/zm_aim_assist.cpp)
+local CONTROLLER = {
+  {
+    dvar = "xerces_zm_aimAssist",
+    name = "Aim Assist (Zombies)",
+    values = { 0, 1, 2 },
+    default = 0,
+    text = function(value)
+      if value == 1 then
+        return "Modern (MW3)"
+      elseif value == 2 then
+        return "Modern, Stronger"
+      end
+      return "Game's Own"
+    end,
+    description = "Controller aim assist in Zombies that works like the newer Call of Duty games' (Modern Warfare III): your look speed is slowed while a zombie is near the crosshair, and the view turns with a zombie as it moves or you strafe. As in those games it needs stick input (the left stick sideways, or the right stick), has no snap to targets, and fades up close and far away. Stronger keeps the same rules with more of each. Zombies you can see only; never with a mouse, never in multiplayer.",
   },
 }
 
@@ -289,31 +316,35 @@ if Engine.GetCurrentMap() == "core_frontend" then
   settingsSource("XercesSettingsGambling", "gambling")
   settingsSource("XercesSettingsRounds", "rounds")
 
-  DataSources.XercesSettingsGraphics = DataSourceHelpers.ListSetup("XercesSettingsGraphics", function(controller)
-    local items = {}
-    for _, setting in ipairs(GRAPHICS) do
-      local options = {}
-      for _, value in ipairs(setting.values) do
-        if not setting.shown or setting.shown(value) then
-          table.insert(options, { option = setting.text(value), value = value, default = value == setting.default })
+  local function localSource(name, list)
+    DataSources[name] = DataSourceHelpers.ListSetup(name, function(controller)
+      local items = {}
+      for _, setting in ipairs(list) do
+        local options = {}
+        for _, value in ipairs(setting.values) do
+          if not setting.shown or setting.shown(value) then
+            table.insert(options, { option = setting.text(value), value = value, default = value == setting.default })
+          end
         end
-      end
-      table.insert(
-        items,
-        CoD.OptionsUtility.CreateDvarSettings(
-          controller,
-          setting.name,
-          setting.description,
-          "XercesSettings_" .. setting.dvar,
-          setting.dvar,
-          options,
-          nil,
-          updateDvar
+        table.insert(
+          items,
+          CoD.OptionsUtility.CreateDvarSettings(
+            controller,
+            setting.name,
+            setting.description,
+            "XercesSettings_" .. setting.dvar,
+            setting.dvar,
+            options,
+            nil,
+            updateDvar
+          )
         )
-      )
-    end
-    return items
-  end)
+      end
+      return items
+    end)
+  end
+  localSource("XercesSettingsGraphics", GRAPHICS)
+  localSource("XercesSettingsController", CONTROLLER)
 
   DataSources.XercesSettingsTabs = DataSourceHelpers.ListSetup("XercesSettingsTabs", function(controller)
     local function tab(name, dataSourceName, title)
@@ -328,6 +359,7 @@ if Engine.GetCurrentMap() == "core_frontend" then
       tab("GAMBLING", "XercesSettingsGambling", "Gambling, when you host"),
       tab("ROUNDS", "XercesSettingsRounds", "Rounds, when you host"),
       tab("GRAPHICS", "XercesSettingsGraphics", "Graphics, on this PC"),
+      tab("CONTROLLER", "XercesSettingsController", "Controller, on this PC"),
       { models = { tabIcon = CoD.buttonStrings.shoulderr }, properties = { m_mouseDisabled = true } },
     }
   end, true)

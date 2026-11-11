@@ -44,6 +44,7 @@
 #define MASK_SELF_REVIVES 2048
 #define MASK_ROUND_999 4096
 #define MASK_SMART_ZOMBIES 8192
+#define MASK_NO_HIP_SPREAD 16384
 
 #define NO_PERK_LIMIT 99
 #define WHEEL_COST 2500
@@ -131,6 +132,7 @@ function __init__()
 	s.self_revives = GetDvarInt("xerces_zm_selfRevives") != 0;
 	s.round_999 = GetDvarInt("xerces_zm_round999") != 0;
 	s.smart_zombies = GetDvarInt("xerces_zm_smartZombies") != 0;
+	s.no_hip_spread = GetDvarInt("xerces_zm_noHipSpread") != 0;
 	s.start_round = GetDvarInt("xerces_zm_startRound");
 	if (s.start_points < 0)
 		s.start_points = 0;
@@ -182,6 +184,8 @@ function __init__()
 		s.mask += MASK_ROUND_999;
 	if (s.smart_zombies)
 		s.mask += MASK_SMART_ZOMBIES;
+	if (s.no_hip_spread)
+		s.mask += MASK_NO_HIP_SPREAD;
 	level.xerces_rounds = s;
 
 	callback::on_connect(&on_player_connect);

@@ -2754,3 +2754,40 @@ screenshots, console, Lua snippets).
       type 5, style 2).
 - [ ] Not tried: another player picking, DEFAULT after a pick, GFL or Avali stacked, a
       dedicated server.
+
+## Zombies modern aim assist and no hip-fire spread (beta.20)
+
+Built on `launcher/upscale`; test home `C:\Users\Ginld\XercesDev\bench\20261106-modlabels`,
+`zm_zod` with no mods, driven with `bench\20261108-chars\run-lua.ps1`.
+
+Aim assist (`XERCES_AIM_TEST=1`: a simulated controller with the left stick held
+sideways; no real controller was used):
+
+- [x] `xerces_aim_debug`: camera ok (eye 60 units over the player's origin, tangents
+      1.167 / 0.656 at a field of view of 100), client angles ok.
+- [x] A zombie at 28 to 32 m walking through the bubble: rotation 0.09 at the bubble's
+      edge (e 0.96), 0.30 (e 0.88), 0.49 (e 0.80), 0.60 inside three quarters (e 0.74);
+      slowdown 0.30 from the hip; over a second the target moved 0.33 degrees and the view
+      followed 0.20 (60%); the client's yaw and the camera's both went from 0.00 to 1.04.
+- [x] "Modern, Stronger": rotation 0.29 at 49 m rising to 0.80 from 35 m in, slowdown
+      0.36 from the hip; the view followed 80% and kept a zombie in the middle of the
+      bubble (e about 0.1) as it walked from 48 m to 26 m.
+- [x] No crash or freeze over four runs (five matches, two with the assist on) with the
+      final build, leaving to the menu included. Two freezes on the way (a game call and
+      a log line during a level load) are fixed and noted in DESIGN.md 7.11.
+- [ ] Not tried: a real controller (how it feels, the 2-second idle rule, the right
+      stick's slowdown, the sights-up rule), a strafe past a still target at 10 m (19
+      degrees in Black Ops 6), co-op, a joined match.
+
+No hip-fire spread:
+
+- [x] Ten shots from the hip at a wall: a spread of holes about a third of the screen's
+      height wide with the setting off, one tight group at the crosshair with it on
+      (`bench\20261108-chars\spread-compare.png`).
+- [x] Log: "No hip-fire spread on 94 weapons" as the match starts; after `disconnect` and
+      a second match with the setting off, "Hip-fire spread back on 64 weapons (94 were
+      changed)" as that level starts; clean exit.
+- [x] XERCES SETTINGS' lists build with the new rows (ZOMBIES 11 rows, CONTROLLER 1, seven
+      tab entries) and no Lua or script error; the menu itself was not opened on screen.
+- [ ] Not tried: co-op (a second player's shots), turning the setting off in the middle
+      of a match, a custom map's own weapons loaded late.

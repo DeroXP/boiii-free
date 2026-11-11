@@ -109,6 +109,15 @@ hash, sent with the link, shows that the zip is the one we made.
   match; other players pick again. It is not yet a set of *new* slots next to the
   base characters: a character mod changes how the base characters look.
   After a pick you see yourself in the third-person view for four seconds.
+- **Aim assist like the newer Call of Duty games (Zombies, controller).** XERCES
+  SETTINGS > CONTROLLER > Aim Assist (Zombies): Game's Own, Modern (MW3) or Modern,
+  Stronger. Modern slows your look speed while a zombie is near the crosshair and
+  turns the view with a zombie as it moves or you strafe; like those games it needs
+  stick input, has no snap, and fades up close and far away. It needs an Xbox-style
+  (XInput) controller, works in Zombies only and never with a mouse. In a match the
+  console command `xerces_aim_debug` says whether it sees your controller.
+- **No Hip-Fire Spread (Zombies).** XERCES SETTINGS > ZOMBIES, when you host: shots
+  from the hip go where the crosshair is, for everyone in the match.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.
