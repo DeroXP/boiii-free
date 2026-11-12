@@ -963,6 +963,25 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
     }
     return pin->second;
   };
+  // The installed versions of an id whose pin names one that is not
+  // installed: "the installed version is 1.5.0". A legacy mod's version is
+  // its content hash, so every Steam update leaves a pack's pin behind.
+  const auto pin_not_installed =
+      [&](const std::string &id) -> std::optional<std::string> {
+    const auto pin = request.pins.find(id);
+    const auto found = index.find(id);
+    if (pin == request.pins.end() || found == index.end() ||
+        found->second.empty() || pin_left_out(id)) {
+      return std::nullopt;
+    }
+    std::string list;
+    for (const auto *candidate : found->second) {
+      list += (list.empty() ? "" : ", ") + candidate->info.ver.to_string();
+    }
+    return (found->second.size() == 1 ? "the installed version is "
+                                      : "the installed versions are ") +
+           list;
+  };
 
   const std::set<std::string> requested_ids(request.mods.begin(),
                                             request.mods.end());
@@ -984,15 +1003,19 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
                       (text.empty() ? "it does not fit the other mods" : text) +
                       ".");
       out.fixes.push_back({"unpin", id, *pinned});
+    } else if (const auto installed = pin_not_installed(id)) {
+      // The mod is installed, only not in the pinned version: there is
+      // nothing to install, the pin has to go.
+      diags.error("plan.mod.version", "/mods",
+                  "Version " + pin->second + " of \"" + id +
+                      "\" is pinned, but it is not installed; " + *installed +
+                      ".");
+      out.fixes.push_back({"unpin", id, pin->second});
     } else {
       diags.error("plan.mod.version", "/mods",
-                  pin != request.pins.end()
-                      ? "Version " + pin->second + " of \"" + id +
-                            "\" is not installed."
-                      : "No installed version of \"" + id +
-                            "\" fits what the other mods need.");
-      out.fixes.push_back(
-          {"install", id, pin != request.pins.end() ? pin->second : ""});
+                  "No installed version of \"" + id +
+                      "\" fits what the other mods need.");
+      out.fixes.push_back({"install", id, ""});
     }
   }
   std::set<std::string> asked;
@@ -1020,6 +1043,13 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
                   "Version " + *pinned + " of \"" + id + "\" is pinned, but " +
                       need.text + ".");
       out.fixes.push_back({"unpin", id, *pinned});
+    } else if (const auto installed = pin_not_installed(id)) {
+      const std::string &pinned = request.pins.at(id);
+      diags.error("plan.dependency.unsatisfiable", "",
+                  "Version " + pinned + " of \"" + id +
+                      "\" is pinned, but it is not installed; " + *installed +
+                      " (" + need.text + ").");
+      out.fixes.push_back({"unpin", id, pinned});
     } else {
       diags.error("plan.dependency.unsatisfiable", "",
                   "No installed version of \"" + id + "\" fits (" + need.text +
@@ -1087,7 +1117,12 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
     }
   }
 
-  // Mode support and the Xerces version each mod asks for.
+  // Mode support and the Xerces version each mod asks for. A beta build
+  // counts as the version it leads to: by npm's rule a prerelease only meets
+  // a range that names a prerelease of the same version, so 0.1.0-beta.21
+  // failed ">=0.1", and with it every mod that has requires.xerces.
+  version running = request.xerces_version;
+  running.prerelease.clear();
   for (const auto &[id, content] : selected) {
     if (!content->info.supports_mode(request.mode)) {
       diags.error("plan.mode.unsupported", "",
@@ -1096,7 +1131,7 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
       out.fixes.push_back({"remove", id, ""});
     }
     if (content->info.requires_xerces &&
-        !content->info.requires_xerces->satisfied_by(request.xerces_version)) {
+        !content->info.requires_xerces->satisfied_by(running)) {
       diags.error("plan.xerces.version", "",
                   content->info.name + " needs Xerces " +
                       content->info.requires_xerces_text + "; this is " +

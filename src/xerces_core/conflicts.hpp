@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <optional>
 #include <set>
@@ -115,4 +116,13 @@ std::string conflict_report_to_text(const conflict_report &report);
 asset_index index_loose_files(
     const std::string &owner,
     const std::vector<std::pair<std::string, std::string>> &files);
+// A file of a mod folder (relative path, either slash) that is no loose
+// asset: the manifest, Workshop metadata, previews and notes, everything
+// under zone/, and fastfiles and their packs (.ff, .xpak, .sabl, .sabs)
+// wherever they sit.
+bool loose_index_skips(std::string_view relative);
+// index_loose_files for a folder on disk. Only the files the index uses are
+// read: the others (loose_index_skips) can be gigabytes each.
+asset_index index_loose_folder(const std::string &owner,
+                               const std::filesystem::path &folder);
 } // namespace xerces_core

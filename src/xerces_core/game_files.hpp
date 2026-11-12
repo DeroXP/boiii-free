@@ -12,6 +12,7 @@
 // Same rules as upstream's launcher.cpp, so files either one writes read the
 // same in both.
 
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -61,7 +62,21 @@ std::optional<std::string> running_game_client(std::string_view client_name);
 // asset_limits.hpp, which also reads the pool sizes).
 bool asset_pools_enabled(std::string_view launcher_settings_json);
 // The file with asset_limits_enabled set and disable_asset_pools removed,
-// keeping every other key; a missing or broken file becomes an object.
-std::string set_asset_pools_enabled(std::string_view launcher_settings_json,
-                                    bool enabled);
+// keeping every other key. No text (no file yet, or a blank one) becomes an
+// object with that one key. Text that is not a JSON object gives nothing:
+// writing a fresh object over it would drop every other setting it holds.
+std::optional<std::string>
+set_asset_pools_enabled(std::string_view launcher_settings_json, bool enabled);
+
+// The switch made in the file itself (the Game files screen's button).
+enum class pool_switch {
+  written,       // the file now holds the switch, and its other keys
+  unreadable,    // the file is there but could not be read: left alone
+  not_an_object, // it holds something other than a JSON object: left alone
+  not_written,   // the new text could not be written
+};
+// A file that is not there is made. One that cannot be read is not taken
+// for a missing one, which would replace it with a file of one key.
+// Written through a temporary file, so the game never reads half a file.
+pool_switch switch_asset_pools(const std::filesystem::path &file, bool enabled);
 } // namespace xerces_core

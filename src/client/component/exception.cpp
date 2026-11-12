@@ -2,12 +2,15 @@
 
 #include <cstdint>
 
+#include <game/utils.hpp>
 #include <loader/component_loader.hpp>
 
 #include "console.hpp"
 #include "error_help.hpp"
 #include "exception.hpp"
+#include "mod_stack.hpp"
 #include "scheduler.hpp"
+#include "script.hpp"
 #include "script_error.hpp"
 
 #include <errhandlingapi.h>
@@ -19,11 +22,15 @@
 #include <utils/thread.hpp>
 
 #include <exception/minidump.hpp>
+#include <xerces/db_pool.hpp>
+#include <xerces/loader.hpp>
 #include <xerces/runtime.hpp>
 #include <xerces_core/crash_report.hpp>
 #include <xerces_core/journal.hpp>
+#include <xerces_core/json.hpp>
 #include <xerces_core/launcher_home.hpp>
 #include <xerces_core/log.hpp>
+#include <xerces_core/out_of_memory.hpp>
 
 // In case of clangd compilation
 #if __has_include("version.hpp")
@@ -42,8 +49,13 @@
 
 #include <CommCtrl.h>
 #include <dbghelp.h>
+#include <psapi.h>
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dbghelp.lib")
+#pragma comment(lib, "psapi.lib")
+
+// The image this code is part of (boiii.exe), as the linker names it.
+EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 
 namespace exception {
 
@@ -88,23 +100,8 @@ struct resolved_frame {
   uint32_t line_number = 0;
 };
 
-resolved_frame resolve_address(void *addr) {
-  resolved_frame frame{};
-  frame.address = reinterpret_cast<uint64_t>(addr);
-
-  const utils::nt::library mod = utils::nt::library::get_by_address(addr);
-  if (mod) {
-    frame.module_name = mod.get_name();
-    frame.module_base = reinterpret_cast<uint64_t>(mod.get_ptr());
-    frame.rva = frame.address - frame.module_base;
-
-    if (frame.module_name == "BlackOps3.exe")
-      frame.rva += 0x140000000;
-  } else {
-    frame.module_name = "unknown";
-    frame.rva = frame.address;
-  }
-
+// The function's name and its source line, where symbols know them.
+void add_symbols(resolved_frame &frame) {
   ensure_symbols_initialized();
 
   // Try to resolve function name from PDB symbols
@@ -129,7 +126,26 @@ resolved_frame resolve_address(void *addr) {
     frame.file_name = line_info.FileName;
     frame.line_number = line_info.LineNumber;
   }
+}
 
+resolved_frame resolve_address(void *addr) {
+  resolved_frame frame{};
+  frame.address = reinterpret_cast<uint64_t>(addr);
+
+  const utils::nt::library mod = utils::nt::library::get_by_address(addr);
+  if (mod) {
+    frame.module_name = mod.get_name();
+    frame.module_base = reinterpret_cast<uint64_t>(mod.get_ptr());
+    frame.rva = frame.address - frame.module_base;
+
+    if (frame.module_name == "BlackOps3.exe")
+      frame.rva += 0x140000000;
+  } else {
+    frame.module_name = "unknown";
+    frame.rva = frame.address;
+  }
+
+  add_symbols(frame);
   return frame;
 }
 
@@ -352,6 +368,10 @@ std::string describe_scripts() {
 
 bool is_game_thread() { return main_thread_id == GetCurrentThreadId(); }
 
+// Xerces: the name of the text report the crash handler wrote (crash-<time>
+// .txt in the minidumps folder), for the dialog.
+std::string crash_report_file;
+
 void show_mouse_cursor() {
   while (ShowCursor(TRUE) < 0)
     ;
@@ -447,12 +467,15 @@ std::string crash_report_note(bool dump = true) {
 void display_error_dialog() {
   const std::string minidumps_out =
       (game::get_appdata_path() / "minidumps").string();
-  const std::string error_str =
-      std::format("{}\n\nDetails: {} (0x{:08X}) at {:p} on the {} thread.\n\n"
-                  "Crash dump saved in:\n{}\n\n{}",
-                  crash_reason(), get_exception_string(exception_data.code),
-                  exception_data.code, game::derelocate(exception_data.address),
-                  thread_role(), minidumps_out, crash_report_note());
+  const std::string error_str = std::format(
+      "{}\n\nDetails: {} (0x{:08X}) at {:p} on the {} thread.\n\n"
+      "Crash report{} and dump saved in:\n{}\n\n{}",
+      crash_reason(), get_exception_string(exception_data.code),
+      exception_data.code, game::derelocate(exception_data.address),
+      thread_role(),
+      crash_report_file.empty() ? std::string{}
+                                : std::format(" ({})", crash_report_file),
+      minidumps_out, crash_report_note());
 
   utils::thread::suspend_other_threads();
   show_mouse_cursor();
@@ -606,53 +629,73 @@ std::string get_callstack_summary(const LPEXCEPTION_POINTERS exceptioninfo,
   return info;
 }
 
-std::string generate_crash_info(const LPEXCEPTION_POINTERS exceptioninfo) {
-  std::string info{};
-  const std::function<void(const std::string &text)> line =
-      [&info](const std::string &text) {
-        info.append(text);
-        info.append("\r\n");
-      };
+// ------------------------------------------------------------------------
+// Xerces: the text report (docs/CRASH_REPORTS.md, "The text report"). A
+// crash, a freeze and a fatal error each leave one in the minidumps folder,
+// next to the dump, and the same text without the console's lines goes into
+// the crash report the launcher sends. It opens with what happened and what
+// the game was doing (version, how long it ran, the map, the mods in load
+// order, the scripts running), so most reports can be read without opening
+// the dump.
 
-  const resolved_frame crash_frame =
-      resolve_address(exceptioninfo->ExceptionRecord->ExceptionAddress);
+std::atomic<uint32_t> frame_count{0};
+std::atomic<DWORD> frame_thread_id{0};
+// The threads that run the server's frames and the renderer's, noted by each
+// as it runs (post_unpack): a report names threads by what they do.
+std::atomic<DWORD> server_thread_id{0};
+std::atomic<DWORD> render_thread_id{0};
+const std::chrono::steady_clock::time_point process_start =
+    std::chrono::steady_clock::now();
 
-  line("Xerces Crash Dump");
-  line(std::string{});
-  // Xerces: "Xerces <version> (<commit>)", the build the report is about.
-  line("Version: "s + XERCES_VERSION_LABEL);
-  line("Timestamp: "s + get_timestamp());
-  line(utils::string::va(
-      "Exception: 0x%08X (%s)", exceptioninfo->ExceptionRecord->ExceptionCode,
-      get_exception_string(exceptioninfo->ExceptionRecord->ExceptionCode)));
-  line(utils::string::va("Address: 0x%llX", crash_frame.address));
-  line(utils::string::va("Module: %s + 0x%llX", crash_frame.module_name.c_str(),
-                         crash_frame.rva));
-  if (!crash_frame.function_name.empty())
-    line("Function: " + crash_frame.function_name);
-  if (!crash_frame.file_name.empty() && crash_frame.line_number > 0)
-    line(utils::string::va("Source: %s:%lu", crash_frame.file_name.c_str(),
-                           crash_frame.line_number));
-  if (!exception_data.culprit.empty())
-    line("Diagnosis: " + error_help::strip_colors(exception_data.culprit));
-  if (!exception_data.scripts.empty())
-    line("Scripts:" + exception_data.scripts);
-  line(utils::string::va("Base: 0x%llX", game::get_base()));
-  line(utils::string::va("Thread ID: %lu (%s)", GetCurrentThreadId(),
-                         thread_role()));
-
-  if (exceptioninfo->ExceptionRecord->ExceptionCode ==
-      EXCEPTION_ACCESS_VIOLATION) {
-    const char *op =
-        exceptioninfo->ExceptionRecord->ExceptionInformation[0] == 1
-            ? "write to"
-            : "read from";
-    uintptr_t target = exceptioninfo->ExceptionRecord->ExceptionInformation[1];
-    line(utils::string::va(
-        "Access Violation: Attempted to %s 0x%012llX%s", op, target,
-        target < 0x10000 ? " (NULL pointer dereference)" : ""));
+// Runs fn; false when it faulted. For reads of game state by a report: after
+// a crash, or from the freeze watchdog's side, that state may be half
+// written. What fn had built stays as it was (no destructors run), which is
+// a leak in a process that is about to end.
+bool run_guarded_raw(void (*fn)(void *), void *arg) {
+  __try {
+    fn(arg);
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
   }
+}
 
+template <typename F> bool run_guarded(F &&fn) {
+  return run_guarded_raw(
+      [](void *arg) { (*static_cast<std::remove_reference_t<F> *>(arg))(); },
+      &fn);
+}
+
+std::string duration_text(const std::chrono::steady_clock::duration time) {
+  const long long total =
+      std::chrono::duration_cast<std::chrono::seconds>(time).count();
+  if (total >= 3600) {
+    return std::format("{} h {:02} min", total / 3600, total % 3600 / 60);
+  }
+  if (total >= 60) {
+    return std::format("{} min {:02} s", total / 60, total % 60);
+  }
+  return std::format("{} s", total);
+}
+
+// When this client was built (its PE header's time stamp): it tells apart
+// two builds that carry the same version label, as a developer's do.
+std::string build_time() {
+  const auto *base = reinterpret_cast<const uint8_t *>(&__ImageBase);
+  const auto *nt =
+      reinterpret_cast<const IMAGE_NT_HEADERS *>(base + __ImageBase.e_lfanew);
+  const __time64_t stamp = nt->FileHeader.TimeDateStamp;
+  tm utc{};
+  char text[32]{};
+  if (_gmtime64_s(&utc, &stamp) != 0 || utc.tm_year < 120 ||
+      utc.tm_year > 200 ||
+      strftime(text, sizeof(text), "%Y-%m-%d %H:%M UTC", &utc) == 0) {
+    return {};
+  }
+  return text;
+}
+
+std::string os_version() {
   RTL_OSVERSIONINFOW version_info{};
   version_info.dwOSVersionInfoSize = sizeof(version_info);
 
@@ -682,32 +725,352 @@ std::string generate_crash_info(const LPEXCEPTION_POINTERS exceptioninfo) {
 #endif
 
   if (rtl_get_version && NT_SUCCESS(rtl_get_version(&version_info))) {
-    line(utils::string::va("OS Version: %u.%u.%u", version_info.dwMajorVersion,
-                           version_info.dwMinorVersion,
-                           version_info.dwBuildNumber));
-  } else {
-    line("OS Version: unavailable");
+    return utils::string::va("%u.%u.%u", version_info.dwMajorVersion,
+                             version_info.dwMinorVersion,
+                             version_info.dwBuildNumber);
   }
+  return "unavailable";
+}
+
+// How much memory is left: the PC's, and what the game itself holds. A game
+// that ran out, or nearly, shows here without a debugger.
+std::string memory_text() {
+  std::string text;
+  const auto gib = [](const uint64_t bytes) {
+    return std::format("{:.1f}",
+                       static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0));
+  };
+  MEMORYSTATUSEX status{};
+  status.dwLength = sizeof(status);
+  if (GlobalMemoryStatusEx(&status)) {
+    text += std::format("Memory: RAM {} of {} GB free ({} % in use), commit {} "
+                        "of {} GB free\r\n",
+                        gib(status.ullAvailPhys), gib(status.ullTotalPhys),
+                        status.dwMemoryLoad, gib(status.ullAvailPageFile),
+                        gib(status.ullTotalPageFile));
+  }
+  PROCESS_MEMORY_COUNTERS_EX counters{};
+  counters.cb = sizeof(counters);
+  if (GetProcessMemoryInfo(
+          GetCurrentProcess(),
+          reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&counters),
+          sizeof(counters))) {
+    text += std::format(
+        "Game memory: {} GB in RAM (most so far {}), {} GB "
+        "committed (most so far {})\r\n",
+        gib(counters.WorkingSetSize), gib(counters.PeakWorkingSetSize),
+        gib(counters.PrivateUsage), gib(counters.PeakPagefileUsage));
+  }
+  std::string pools;
+  run_guarded([&pools] { pools = xerces_db_pool::pools_json(); });
+  if (pools.size() > 2) {
+    text += "Zone pools: " + pools + "\r\n";
+  }
+  return text;
+}
+
+// The settings that change what the game does, as it had them. The game
+// answers for its dvars on its main thread only (a freeze report's thread got
+// nothing, 2026-11-12), so the main thread notes them every few seconds and a
+// report from another thread uses what was noted.
+std::mutex settings_mutex;
+std::string settings_seen;
+
+std::string read_settings() {
+  static constexpr std::array names{
+      "xerces_upscaler",
+      "xerces_upscalerSharpness",
+      "xerces_zm_aimAssist",
+      "xerces_zm_noHipSpread",
+      "xerces_zm_roundHud",
+      "xerces_zm_selfRevives",
+      "xerces_zm_roundSkips",
+      "xerces_zm_round999",
+      "xerces_zm_smartZombies",
+      "xerces_zm_randomLoadout",
+      "xerces_zm_startRound",
+      "xerces_zm_startPoints",
+      "xerces_zm_wheel",
+      "xerces_zm_coinFlip",
+      "xerces_char_saved",
+      "com_maxfps",
+      "r_vsync",
+      "r_fullscreen",
+      "r_mode",
+      "cg_fov_default",
+      "cg_fovScale",
+      "com_maxclients",
+      "sv_running",
+      "cl_paused",
+  };
+  std::string text;
+  run_guarded([&text] {
+    for (const char *name : names) {
+      if (const auto dvar = game::get_dvar(name); dvar.nonnull()) {
+        if (const char *value = game::Dvar_DisplayableValue(dvar)) {
+          text += std::format("{}{}={}", text.empty() ? "" : ", ", name,
+                              xerces_core::json::valid_utf8(value, 80));
+        }
+      }
+    }
+  });
+  return text.empty() ? std::string{} : "Settings: " + text + "\r\n";
+}
+
+void note_settings() {
+  std::string text = read_settings();
+  const std::lock_guard lock(settings_mutex);
+  settings_seen = std::move(text);
+}
+
+std::string settings_text() {
+  if (is_game_thread()) {
+    return read_settings();
+  }
+  const std::lock_guard lock(settings_mutex);
+  return settings_seen;
+}
+
+// The scripts one VM is running, innermost first, as "function (file line
+// 12)": not "file:12", which the scrubbing of a report that is sent reads as
+// a host and a port. Empty when it runs none or its state cannot be read.
+std::vector<std::string> script_stack(const game::scr::scriptInstance_t inst) {
+  std::vector<std::string> lines;
+  run_guarded([&lines, inst] {
+    if (game::scr::vm::gScrVmPub->instance[inst].function_count <= 0) {
+      return;
+    }
+    for (const script::script_frame &frame : script::get_script_frames(inst)) {
+      if (frame.file.empty() || lines.size() >= 24) {
+        continue;
+      }
+      const std::string where =
+          frame.line < 0 ? frame.file
+                         : std::format("{} line {}", frame.file, frame.line);
+      lines.push_back(xerces_core::json::valid_utf8(
+          frame.function.empty()
+              ? where
+              : std::format("{} ({})", frame.function, where),
+          300));
+    }
+  });
+  return lines;
+}
+
+const char *script_vm_name(const game::scr::scriptInstance_t inst) {
+  return inst == game::scr::SCRIPTINSTANCE_CLIENT ? "CSC" : "GSC";
+}
+
+// Both VMs' running scripts, for the report's body.
+std::string scripts_text() {
+  std::string text;
+  for (const game::scr::scriptInstance_t inst :
+       {game::scr::SCRIPTINSTANCE_SERVER, game::scr::SCRIPTINSTANCE_CLIENT}) {
+    const std::vector<std::string> lines = script_stack(inst);
+    if (lines.empty()) {
+      continue;
+    }
+    text += std::format("{} scripts running (innermost first):\r\n",
+                        script_vm_name(inst));
+    for (const std::string &line : lines) {
+      text += "\t" + line + "\r\n";
+    }
+    text += "\r\n";
+  }
+  return text;
+}
+
+// One line naming the script that runs: the server's when it runs one (a
+// freeze or a crash is far more often a GSC script's), else the client's.
+std::string running_script() {
+  for (const game::scr::scriptInstance_t inst :
+       {game::scr::SCRIPTINSTANCE_SERVER, game::scr::SCRIPTINSTANCE_CLIENT}) {
+    const std::vector<std::string> lines = script_stack(inst);
+    if (!lines.empty()) {
+      return std::format("{} {}", script_vm_name(inst), lines.front());
+    }
+  }
+  return {};
+}
+
+// What the game was doing: these lines open every report.
+std::string session_text() {
+  std::string text;
+  const auto line = [&text](const std::string_view key,
+                            const std::string &value) {
+    if (!value.empty()) {
+      text += std::format("{}: {}\r\n", key, value);
+    }
+  };
+  line("Version", XERCES_VERSION_LABEL);
+  line("Built", build_time());
+  line("Time", get_timestamp() + " (local)");
+  line("Windows", os_version());
+  line("Running for",
+       duration_text(std::chrono::steady_clock::now() - process_start));
+  line("Phase", xerces_runtime::journal_phase_for_crash());
+
+  std::string mode, map, mods;
+  run_guarded([&mode, &map] {
+    using game::eModes;
+    mode = game::com::Com_SessionMode_IsMode(eModes::ZOMBIES)       ? "zm"
+           : game::com::Com_SessionMode_IsMode(eModes::MULTIPLAYER) ? "mp"
+           : game::com::Com_SessionMode_IsMode(eModes::CAMPAIGN)    ? "cp"
+                                                                    : "";
+    map = xerces_core::out_of_memory_map(mod_stack::active_usermap(),
+                                         xerces_loader::current_map());
+  });
+  run_guarded([&mods] {
+    // The main mod first, then the others as they are stacked
+    std::vector<std::string> ids = mod_stack::get();
+    if (const std::string main_mod = mod_stack::main_id();
+        !main_mod.empty() && std::ranges::find(ids, main_mod) == ids.end()) {
+      ids.insert(ids.begin(), main_mod);
+    }
+    for (const std::string &id : ids) {
+      const std::string title =
+          error_help::strip_colors(mod_stack::workshop_title(id));
+      mods += std::format("{}{}{}", mods.empty() ? "" : "; ", id,
+                          title.empty() ? std::string{}
+                                        : std::format(" ({})", title));
+    }
+  });
+  line("Mode", mode);
+  line("Map", map.empty() ? std::string{"(none: the menus)"} : map);
+  line("Mods in load order", mods.empty() ? std::string{"(none)"} : mods);
+  std::string flags;
+  for (const std::string &flag :
+       xerces_core::launch_flag_names(xerces_runtime::command_line_args())) {
+    flags += (flags.empty() ? "" : " ") + flag;
+  }
+  line("Flags", flags);
+  // The renderer's work runs on the main thread in most of the game; it is
+  // named only when it has a thread of its own.
+  line("Threads",
+       std::format("main {}, server {}{} (0: not seen yet)",
+                   frame_thread_id.load(), server_thread_id.load(),
+                   render_thread_id.load() != frame_thread_id.load()
+                       ? std::format(", renderer {}", render_thread_id.load())
+                       : std::string{}));
+  return xerces_core::json::valid_utf8(text, 8000);
+}
+
+// The console's last lines, for the report on this PC. The report that is
+// sent has them already (its console tail), so they are kept apart.
+constexpr std::size_t LOCAL_CONSOLE_LINES = 80;
+std::string console_text() {
+  const std::vector<std::string> lines =
+      xerces_runtime::console_last_lines(LOCAL_CONSOLE_LINES);
+  if (lines.empty()) {
+    return {};
+  }
+  std::string text =
+      std::format("\r\nConsole (its last {} lines):\r\n", lines.size());
+  for (const std::string &line : lines) {
+    text += "\t" + error_help::strip_colors(line) + "\r\n";
+  }
+  return text;
+}
+
+// The bytes of the instruction that faulted and the ones after it: enough
+// to tell which instruction it was when the address is in no module (a
+// hook's stub, memory that was freed).
+std::string code_bytes(const void *address) {
+  uint8_t bytes[16]{};
+  if (!address || !run_guarded([&bytes, address] {
+        std::memcpy(bytes, address, sizeof(bytes));
+      })) {
+    return "(not readable)";
+  }
+  std::string text;
+  for (const uint8_t byte : bytes) {
+    text += std::format("{:02X} ", byte);
+  }
+  return text;
+}
+
+bool write_report_file(const std::filesystem::path &file,
+                       const std::string &text) {
+  return utils::io::write_file(file, text, false);
+}
+
+std::string generate_crash_info(const LPEXCEPTION_POINTERS exceptioninfo) {
+  std::string info{};
+  const std::function<void(const std::string &text)> line =
+      [&info](const std::string &text) {
+        info.append(text);
+        info.append("\r\n");
+      };
+
+  const resolved_frame crash_frame =
+      resolve_address(exceptioninfo->ExceptionRecord->ExceptionAddress);
+
+  line("Xerces Crash Report");
   line(std::string{});
+  line(std::format("What happened: {} on the {} thread.", describe_crash(),
+                   thread_role()));
+  if (!exception_data.culprit.empty())
+    line("Diagnosis: " + error_help::strip_colors(exception_data.culprit));
+  if (!exception_data.scripts.empty())
+    line("Scripts:" + exception_data.scripts);
+  line(std::string{});
+  info += session_text();
+  line(std::string{});
+  line(utils::string::va(
+      "Exception: 0x%08X (%s)", exceptioninfo->ExceptionRecord->ExceptionCode,
+      get_exception_string(exceptioninfo->ExceptionRecord->ExceptionCode)));
+  line(utils::string::va("Address: 0x%llX", crash_frame.address));
+  line(utils::string::va("Module: %s + 0x%llX", crash_frame.module_name.c_str(),
+                         crash_frame.rva));
+  if (!crash_frame.function_name.empty())
+    line("Function: " + crash_frame.function_name);
+  if (!crash_frame.file_name.empty() && crash_frame.line_number > 0)
+    line(utils::string::va("Source: %s:%lu", crash_frame.file_name.c_str(),
+                           crash_frame.line_number));
+  line(utils::string::va("Base: 0x%llX", game::get_base()));
+  line(utils::string::va("Thread ID: %lu (%s)", GetCurrentThreadId(),
+                         thread_role()));
+
+  if (exceptioninfo->ExceptionRecord->ExceptionCode ==
+      EXCEPTION_ACCESS_VIOLATION) {
+    const char *op =
+        exceptioninfo->ExceptionRecord->ExceptionInformation[0] == 1
+            ? "write to"
+            : "read from";
+    uintptr_t target = exceptioninfo->ExceptionRecord->ExceptionInformation[1];
+    line(utils::string::va(
+        "Access Violation: Attempted to %s 0x%012llX%s", op, target,
+        target < 0x10000 ? " (NULL pointer dereference)" : ""));
+  }
+  line("Code at the crash address: " +
+       code_bytes(exceptioninfo->ExceptionRecord->ExceptionAddress));
+  line(std::string{});
+  info += scripts_text();
   line(get_callstack_summary(exceptioninfo));
   const std::string registers = get_memory_registers(exceptioninfo);
   if (!registers.empty()) {
     line(std::string{});
     line(registers);
   }
+  line(std::string{});
+  info += memory_text();
+  info += settings_text();
 
   return info;
 }
 
-void write_minidump(const LPEXCEPTION_POINTERS exceptioninfo) {
+// stamp: the time in the early dump's name, so the dump, the text report
+// and the zip of one crash carry the same name.
+void write_minidump(const LPEXCEPTION_POINTERS exceptioninfo,
+                    const std::string &stamp, const std::string &info) {
   const std::string crash_name =
       (game::get_appdata_path() / "minidumps" /
-       utils::string::va("xerces-crash-%s.zip", get_timestamp().data()))
+       utils::string::va("xerces-crash-%s.zip", stamp.data()))
           .string();
 
   utils::compression::zip::archive zip_file{};
   zip_file.add("crash.dmp", create_minidump(exceptioninfo));
-  zip_file.add("info.txt", generate_crash_info(exceptioninfo));
+  zip_file.add("info.txt", info);
   if (!zip_file.write(crash_name, "Xerces Crash Dump")) {
     utils::io::remove_file(crash_name);
   }
@@ -997,14 +1360,33 @@ void write_pending_note(xerces_core::pending_crash note,
                              xerces_core::pending_crash_to_json(note));
 }
 
+// One line of at most `cap` bytes: line breaks become spaces.
+std::string one_line(std::string text, const std::size_t cap = 250) {
+  for (char &c : text) {
+    if (c == '\r' || c == '\n' || c == '\t') {
+      c = ' ';
+    }
+  }
+  return xerces_core::json::valid_utf8(text, cap);
+}
+
+// details: the text report (generate_crash_info), which the report carries
+// as it is; reason, summary and script say in a line each what the report is
+// about, so a list of reports can be read without opening one.
 void finish_pending_report(const std::string &id, const resolved_frame &crash,
-                           const std::vector<resolved_frame> &frames) {
+                           const std::vector<resolved_frame> &frames,
+                           const std::string &details) {
   if (id.empty()) {
     return;
   }
   xerces_core::pending_crash note;
   note.report_id = id;
   note.code = exception_data.code;
+  note.reason = "exception";
+  note.summary = one_line(
+      std::format("{} on the {} thread", describe_crash(), thread_role()));
+  note.script = one_line(running_script());
+  note.details = details;
   if (crash.module_name != "unknown") {
     note.module = crash.module_name;
     note.offset = crash.rva;
@@ -1023,13 +1405,18 @@ void finish_pending_report(const std::string &id, const resolved_frame &crash,
 // module and offset are the first frame outside the client, the code that
 // raised the error. Without it "Restart game", which ends this process with
 // code 0, would read as a clean exit and nothing would be reported.
-void write_fatal_report() {
+void write_fatal_report(const std::string &message,
+                        const std::string &details) {
   if (!crash_reports_on() || !take_report_slot()) {
     return;
   }
   xerces_core::pending_crash note;
   note.report_id = xerces_core::new_launch_id();
   note.kind = xerces_core::crash_kind::unknown_exit;
+  note.reason = "fatal_error";
+  note.summary = one_line(message);
+  note.script = one_line(running_script());
+  note.details = details;
   void *stack[xerces_core::crash_frame_cap]{};
   const USHORT count = RtlCaptureStackBackTrace(
       1, static_cast<DWORD>(std::size(stack)), stack, nullptr);
@@ -1046,7 +1433,30 @@ void write_fatal_report() {
       note.offset = frame.rva;
     }
   }
-  write_pending_note(std::move(note));
+  // The error's own words as the console's last line: the report's console
+  // tail then has them whatever the console itself printed.
+  write_pending_note(std::move(note),
+                     "[Fatal error] " + one_line(message, 1000));
+}
+
+// The text report of a fatal engine error: the error, what the game was
+// doing, the scripts running and where the error was raised.
+// stack: where show_fatal_error was called from, taken there so the report's
+// own calls are not in it.
+std::string fatal_text(const std::string &message, void *const *stack,
+                       const USHORT count) {
+  std::string info = "Xerces Fatal Error Report\r\n\r\n";
+  info +=
+      std::format("What happened: the game stopped itself with an error "
+                  "on the {} thread.\r\nError: {}\r\n\r\n",
+                  thread_role(), xerces_core::json::valid_utf8(message, 4000));
+  info += session_text() + "\r\n" + scripts_text();
+  info += "callstack:\r\n{\r\n";
+  for (USHORT i = 0; i < count; ++i) {
+    info += format_frame(resolve_address(stack[i]), i) + "\r\n";
+  }
+  info += "}\r\n\r\n" + memory_text() + settings_text();
+  return info;
 }
 
 bool is_harmless_error(const LPEXCEPTION_POINTERS exceptioninfo) {
@@ -1068,12 +1478,12 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
   // Xerces: a dump first, straight to a file. On 2026-11-05 two custom maps
   // with DS4C crashed while loading and the game ended (code 0xFFFFFFFF)
   // during the report below, before the zip with the dump was written.
+  const std::string stamp = get_timestamp();
   {
     std::error_code ec;
     const std::filesystem::path dir = game::get_appdata_path() / "minidumps";
     std::filesystem::create_directories(dir, ec);
-    const std::filesystem::path early =
-        dir / ("crash-" + get_timestamp() + ".dmp");
+    const std::filesystem::path early = dir / ("crash-" + stamp + ".dmp");
     exception_log(true, "Writing a crash dump to %s",
                   write_minidump_file(exceptioninfo, early.c_str())
                       ? early.string().c_str()
@@ -1145,11 +1555,34 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
               exception_data.access == 8
           ? *reinterpret_cast<void **>(exceptioninfo->ContextRecord->Rsp)
           : nullptr;
-  finish_pending_report(report_id, crash_frame, frames);
   exception_data.culprit = find_culprit(frames);
   exception_data.scripts = describe_scripts();
 
-  write_minidump(exceptioninfo);
+  // Xerces: the text report. On its own next to the dump first (the zip
+  // below was lost to a second fault once, see above), then in the crash
+  // report the launcher sends and in the zip. A fault while it is put
+  // together costs the text, never the report.
+  std::string report;
+  if (!run_guarded([&report, exceptioninfo] {
+        report = generate_crash_info(exceptioninfo);
+      })) {
+    report =
+        "Xerces Crash Report\r\n\r\n(the report could not be put together: "
+        "reading the game's state faulted)\r\n";
+  }
+  std::string local_report = report;
+  run_guarded([&local_report] { local_report += console_text(); });
+  {
+    const std::filesystem::path file =
+        game::get_appdata_path() / "minidumps" / ("crash-" + stamp + ".txt");
+    if (write_report_file(file, local_report)) {
+      crash_report_file = file.filename().string();
+      exception_log(true, "Crash report written to %s", file.string().c_str());
+    }
+  }
+  finish_pending_report(report_id, crash_frame, frames, report);
+
+  write_minidump(exceptioninfo, stamp, local_report);
 
   // Xerces: Windows cannot resume a C++ exception (0xE06D7363) or any other
   // that it marks noncontinuable. Asked to, it raises
@@ -1168,27 +1601,48 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
 }
 
 constexpr std::chrono::seconds FREEZE_TIME = 30s;
-std::atomic<uint32_t> frame_count{0};
-std::atomic<DWORD> frame_thread_id{0};
 
 // Xerces: a freeze is handled as a crash is (2026-11-08, after two freezes
 // left only the main thread's stack and a game that had to be ended by hand).
-// At FREEZE_TIME without a frame: a dump of every thread and a text file with
-// the main thread's stack and where each other thread is, next to the
-// crash dumps in the minidumps folder; and, when the launcher started the
-// game with crash reports on, a crash report for it to send (kind
-// unknown_exit; the console's "[Freeze]" line says what it was). If frames
-// come back, the report is taken back (a long stall). If they do not, the
-// game is closed, as a crash ends it: FREEZE_CLOSE_TIME after the last frame
-// in a match or the menus, FREEZE_CLOSE_LOADING while the journal says it is
+// At FREEZE_TIME without a frame: a text report with every thread's stack
+// (the main, server and renderer threads first and in full, then the threads
+// that are running, then the ones that wait, alike ones together), the
+// scripts running and what the game was doing, and a dump of every thread,
+// both next to the crash dumps in the minidumps folder; and, when the
+// launcher started the game with crash reports on, a crash report for it to
+// send (kind unknown_exit, reason "freeze", with that text). If frames come
+// back, the report is taken back (a long stall). If they do not, the game is
+// closed, as a crash ends it: FREEZE_CLOSE_TIME after the last frame in a
+// match or the menus, FREEZE_CLOSE_LOADING while the journal says it is
 // loading (a load can hold the main thread for a while on a large stack).
+//
+// The report is written by a thread of its own (2026-11-12): whatever it
+// waits for, the watchdog still closes the game on time. Its first version
+// goes to disk before it asks Windows for anything a frozen game may hold
+// (the loader's lock, the symbol engine): the stacks by module and offset,
+// from the list of modules the watchdog keeps while the game runs well.
 constexpr std::chrono::seconds FREEZE_CLOSE_TIME = 60s;
 constexpr std::chrono::seconds FREEZE_CLOSE_LOADING = 180s;
 // STATUS_POSSIBLE_DEADLOCK: the launcher reads any exit that is not clean as
 // a crash and sends the report the game left.
 constexpr UINT FREEZE_EXIT_CODE = 0xC0000194;
+
+// Shared by the watchdog and the report's thread, under freeze_mutex.
+std::mutex freeze_mutex;
 std::string freeze_report_id;
+bool freeze_report_running = false;
+// Frames came back while the report was still being written: it takes
+// itself back when it is done.
+std::optional<std::chrono::seconds> freeze_withdraw;
+// The report's thread only.
 std::filesystem::path freeze_dump;
+// The thread the report holds stopped for its stack walk, and since when:
+// the watchdog starts it again if the walk does not come back.
+std::atomic<DWORD> walk_thread_id{0};
+std::atomic<uint64_t> walk_started_ms{0};
+
+using thread_describe_fn = HRESULT(WINAPI *)(HANDLE, PWSTR *);
+thread_describe_fn thread_describe = nullptr;
 
 bool write_dump_file(const std::filesystem::path &path) {
   const HANDLE file =
@@ -1211,9 +1665,385 @@ bool write_dump_file(const std::filesystem::path &path) {
   return written;
 }
 
-void write_freeze_report(const std::vector<resolved_frame> &frames) {
-  if (!crash_reports_on() || !take_report_slot()) {
+// The loaded modules, noted by the watchdog every half minute while frames
+// come: a frozen game's report names addresses from this list.
+struct module_range {
+  uint64_t base = 0;
+  uint64_t size = 0;
+  std::string name;
+};
+std::mutex modules_mutex;
+std::vector<module_range> modules_seen;
+
+void note_modules() {
+  HMODULE handles[1024]{};
+  DWORD needed = 0;
+  const HANDLE process = GetCurrentProcess();
+  if (!EnumProcessModules(process, handles, sizeof(handles), &needed)) {
     return;
+  }
+  std::vector<module_range> list;
+  const std::size_t count =
+      std::min<std::size_t>(needed / sizeof(HMODULE), std::size(handles));
+  for (std::size_t i = 0; i < count; ++i) {
+    MODULEINFO info{};
+    if (GetModuleInformation(process, handles[i], &info, sizeof(info))) {
+      list.push_back({reinterpret_cast<uint64_t>(info.lpBaseOfDll),
+                      info.SizeOfImage,
+                      utils::nt::library(handles[i]).get_name()});
+    }
+  }
+  const std::lock_guard lock(modules_mutex);
+  modules_seen = std::move(list);
+}
+
+// A frame by module and offset from that list, as resolve_address names
+// them, without its function.
+resolved_frame frame_from_modules(const DWORD64 address) {
+  resolved_frame frame{};
+  frame.address = address;
+  frame.module_name = "unknown";
+  frame.rva = address;
+  const std::lock_guard lock(modules_mutex);
+  for (const module_range &module : modules_seen) {
+    if (address >= module.base && address < module.base + module.size) {
+      frame.module_name = module.name;
+      frame.module_base = module.base;
+      frame.rva = address - module.base;
+      if (frame.module_name == "BlackOps3.exe") {
+        frame.rva += 0x140000000;
+      }
+      break;
+    }
+  }
+  return frame;
+}
+
+struct thread_stack {
+  DWORD id = 0;
+  std::size_t count = 0;
+  std::array<DWORD64, 32> frames{};
+};
+
+// The return addresses up a stopped thread's stack. Code without unwind
+// data is a leaf function by the ABI, its return address on top of the
+// stack, or code a hook made: one such step is taken, a second in a row
+// would be a guess. A stack that cannot be read ends the walk.
+std::size_t walk_stack(CONTEXT &context, DWORD64 *frames,
+                       const std::size_t cap) {
+  std::size_t count = 0;
+  __try {
+    bool leaf_before = false;
+    while (count < cap && context.Rip) {
+      frames[count++] = context.Rip;
+      DWORD64 image_base = 0;
+      const PRUNTIME_FUNCTION function =
+          RtlLookupFunctionEntry(context.Rip, &image_base, nullptr);
+      if (!function) {
+        if (leaf_before || context.Rsp == 0) {
+          break;
+        }
+        leaf_before = true;
+        context.Rip = *reinterpret_cast<const DWORD64 *>(context.Rsp);
+        context.Rsp += 8;
+        continue;
+      }
+      leaf_before = false;
+      PVOID handler_data = nullptr;
+      DWORD64 establisher_frame = 0;
+      RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, context.Rip, function,
+                       &context, &handler_data, &establisher_frame, nullptr);
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+  }
+  return count;
+}
+
+// Every thread's stack but this one's. A thread is stopped only for its own
+// walk, and nothing here allocates or takes a lock of the game's while it
+// is (the list has its room already).
+std::vector<thread_stack> capture_threads() {
+  std::vector<thread_stack> stacks;
+  stacks.reserve(512);
+  const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+  if (snapshot == INVALID_HANDLE_VALUE) {
+    return stacks;
+  }
+  THREADENTRY32 entry{};
+  entry.dwSize = sizeof(entry);
+  const DWORD self = GetCurrentThreadId();
+  const DWORD process = GetCurrentProcessId();
+  for (BOOL more = Thread32First(snapshot, &entry);
+       more && stacks.size() < stacks.capacity();
+       more = Thread32Next(snapshot, &entry)) {
+    if (entry.th32OwnerProcessID != process || entry.th32ThreadID == self) {
+      continue;
+    }
+    const HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT,
+                                     FALSE, entry.th32ThreadID);
+    if (!thread) {
+      continue;
+    }
+    thread_stack &stack = stacks.emplace_back();
+    stack.id = entry.th32ThreadID;
+    CONTEXT context{};
+    context.ContextFlags = CONTEXT_FULL;
+    walk_started_ms = GetTickCount64();
+    walk_thread_id = stack.id;
+    if (SuspendThread(thread) != static_cast<DWORD>(-1)) {
+      if (GetThreadContext(thread, &context)) {
+        stack.count =
+            walk_stack(context, stack.frames.data(), stack.frames.size());
+      }
+      ResumeThread(thread);
+    }
+    walk_thread_id = 0;
+    CloseHandle(thread);
+  }
+  CloseHandle(snapshot);
+  return stacks;
+}
+
+// The watchdog's side of that: a walk that has not come back in two seconds
+// (it waits for something the stopped thread holds) gets its thread started
+// again, so the report cannot be what freezes a game that only stalled.
+void release_walked_thread() {
+  const DWORD id = walk_thread_id.load();
+  if (id == 0 || GetTickCount64() - walk_started_ms.load() < 2000) {
+    return;
+  }
+  if (const HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME, FALSE, id)) {
+    ResumeThread(thread);
+    CloseHandle(thread);
+  }
+  walk_thread_id = 0;
+}
+
+// A thread as a report sees it: what it is for, its name, its stack.
+struct seen_thread {
+  DWORD id = 0;
+  std::string title;
+  std::vector<resolved_frame> frames;
+};
+
+std::string thread_title(const DWORD id) {
+  const char *role = id == frame_thread_id.load()    ? "main"
+                     : id == server_thread_id.load() ? "server"
+                     : id == render_thread_id.load() ? "renderer"
+                                                     : nullptr;
+  if (id == GetCurrentThreadId()) {
+    role = "this report's";
+  }
+  std::string name;
+  if (thread_describe) {
+    if (const HANDLE handle =
+            OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, id)) {
+      PWSTR description = nullptr;
+      if (SUCCEEDED(thread_describe(handle, &description)) && description) {
+        name = utils::string::convert(description);
+        LocalFree(description);
+      }
+      CloseHandle(handle);
+    }
+  }
+  std::string title = std::format("Thread {}", id);
+  if (role) {
+    title += std::format(" ({})", role);
+  }
+  if (!name.empty()) {
+    title += std::format(" \"{}\"", name);
+  }
+  return title;
+}
+
+bool system_module(const std::string &name) {
+  static constexpr std::array<std::string_view, 6> names{
+      "ntdll.dll",    "win32u.dll", "kernelbase.dll",
+      "kernel32.dll", "user32.dll", "ucrtbase.dll"};
+  const std::string lower = utils::string::to_lower(name);
+  return std::ranges::find(names, lower) != names.end();
+}
+
+// Whether the thread is inside a system call: waiting for something, as an
+// idle thread is and a thread stuck on a lock is too.
+bool in_system_call(const std::vector<resolved_frame> &frames) {
+  if (frames.empty()) {
+    return false;
+  }
+  const std::string lower = utils::string::to_lower(frames[0].module_name);
+  return lower == "ntdll.dll" || lower == "win32u.dll";
+}
+
+std::string frame_place(const resolved_frame &frame) {
+  std::string text = frame_text(frame);
+  if (!frame.function_name.empty()) {
+    text += std::format(" ({})", frame.function_name);
+  }
+  return text;
+}
+
+// Where a thread is, in words. brief: for the one-line summary, by module
+// and offset only.
+std::string thread_place(const std::vector<resolved_frame> &frames,
+                         const bool brief = false) {
+  if (frames.empty()) {
+    return "its stack could not be read";
+  }
+  const auto place = [brief](const resolved_frame &frame) {
+    return brief ? frame_text(frame) : frame_place(frame);
+  };
+  if (!in_system_call(frames)) {
+    return "running in " + place(frames[0]);
+  }
+  std::string text = brief ? "waiting" : "waiting in a system call";
+  if (!brief && !frames[0].function_name.empty()) {
+    text += std::format(" ({})", frames[0].function_name);
+  }
+  for (const resolved_frame &frame : frames) {
+    if (!system_module(frame.module_name)) {
+      return text + (brief ? " under " : ", called from ") + place(frame);
+    }
+  }
+  return text;
+}
+
+std::string stack_text(const seen_thread &thread, const std::size_t most) {
+  std::string text =
+      std::format("{}: {}\r\n", thread.title, thread_place(thread.frames));
+  for (std::size_t i = 0; i < thread.frames.size() && i < most; ++i) {
+    text += format_frame(thread.frames[i], i) + "\r\n";
+  }
+  if (thread.frames.size() > most) {
+    text +=
+        std::format("\t... {} more frames\r\n", thread.frames.size() - most);
+  }
+  return text + "\r\n";
+}
+
+struct freeze_text_result {
+  std::string core;    // the report, without the console's lines
+  std::string summary; // one line
+};
+
+constexpr std::size_t WAITING_FRAMES = 8;
+
+// full: with the scripts running and what the game was doing, which read
+// the game's own state; the first version leaves them out.
+freeze_text_result freeze_text(const std::vector<seen_thread> &threads,
+                               const bool full) {
+  const auto find = [&threads](const DWORD id) -> const seen_thread * {
+    const auto found = std::ranges::find(threads, id, &seen_thread::id);
+    return id != 0 && found != threads.end() ? &*found : nullptr;
+  };
+  const std::array<std::pair<const char *, const seen_thread *>, 3> roles{{
+      {"main", find(frame_thread_id.load())},
+      {"server", find(server_thread_id.load())},
+      {"renderer", render_thread_id.load() != frame_thread_id.load() &&
+                           render_thread_id.load() != server_thread_id.load()
+                       ? find(render_thread_id.load())
+                       : nullptr},
+  }};
+
+  freeze_text_result out;
+  out.core = "Xerces Freeze Report\r\n\r\n";
+  out.core += std::format("What happened: the game has not finished a frame "
+                          "for {} seconds, so it is frozen.\r\n",
+                          FREEZE_TIME.count());
+  out.summary = "Freeze:";
+  for (const auto &[role, thread] : roles) {
+    if (!thread) {
+      continue;
+    }
+    const std::string place = thread_place(thread->frames);
+    out.core += std::format("The {} thread is {}.\r\n", role, place);
+    if (std::string_view(role) != "renderer") {
+      out.summary +=
+          std::format("{} {} thread {}", out.summary.ends_with(':') ? "" : ";",
+                      role, thread_place(thread->frames, true));
+    }
+  }
+  if (full) {
+    if (const std::string script = running_script(); !script.empty()) {
+      out.core += "Script running: " + script + "\r\n";
+      out.summary += "; script " + script;
+    }
+  }
+  out.core += std::format(
+      "The game closes {} seconds after its last frame ({} while it is "
+      "loading) unless frames come back.\r\n\r\n",
+      FREEZE_CLOSE_TIME.count(), FREEZE_CLOSE_LOADING.count());
+  if (full) {
+    out.core += session_text() + "\r\n" + scripts_text();
+  }
+
+  // The threads that matter most, in full
+  std::vector<DWORD> printed;
+  for (const auto &[role, thread] : roles) {
+    if (thread) {
+      out.core += stack_text(*thread, thread->frames.size());
+      printed.push_back(thread->id);
+    }
+  }
+  // then every other thread that is running,
+  for (const seen_thread &thread : threads) {
+    if (std::ranges::find(printed, thread.id) == printed.end() &&
+        !thread.frames.empty() && !in_system_call(thread.frames)) {
+      out.core += stack_text(thread, thread.frames.size());
+      printed.push_back(thread.id);
+    }
+  }
+  // then the ones that wait, alike ones together (a pool's workers all wait
+  // at one place).
+  std::vector<std::pair<std::string, std::vector<const seen_thread *>>> groups;
+  for (const seen_thread &thread : threads) {
+    if (std::ranges::find(printed, thread.id) != printed.end()) {
+      continue;
+    }
+    std::string key;
+    for (std::size_t i = 0; i < thread.frames.size() && i < WAITING_FRAMES;
+         ++i) {
+      key += std::format("{:X};", thread.frames[i].address);
+    }
+    const auto group = std::ranges::find(
+        groups, key,
+        &std::pair<std::string, std::vector<const seen_thread *>>::first);
+    if (group == groups.end()) {
+      groups.push_back({key, {&thread}});
+    } else {
+      group->second.push_back(&thread);
+    }
+  }
+  if (!groups.empty()) {
+    out.core +=
+        "Threads that wait (their full stacks are in the dump):\r\n\r\n";
+  }
+  for (const auto &[key, members] : groups) {
+    if (members.size() == 1) {
+      out.core += stack_text(*members.front(), WAITING_FRAMES);
+      continue;
+    }
+    std::string ids;
+    for (const seen_thread *member : members) {
+      ids += std::format("{}{}", ids.empty() ? "" : ", ", member->id);
+    }
+    seen_thread shown = *members.front();
+    shown.title =
+        std::format("{} threads at the same place ({})", members.size(), ids);
+    out.core += stack_text(shown, WAITING_FRAMES);
+  }
+  if (full) {
+    out.core += memory_text() + settings_text();
+  }
+  out.summary = one_line(out.summary, 250);
+  return out;
+}
+
+// The crash report of a freeze, for the launcher to send. Returns its id;
+// empty when none was written.
+std::string write_freeze_report(const std::vector<resolved_frame> &frames,
+                                const freeze_text_result &text) {
+  if (!crash_reports_on() || !take_report_slot()) {
+    return {};
   }
   const std::string id = xerces_core::new_launch_id();
   std::error_code ec;
@@ -1234,6 +2064,10 @@ void write_freeze_report(const std::vector<resolved_frame> &frames) {
   note.report_id = id;
   note.kind = xerces_core::crash_kind::unknown_exit;
   note.thread = "main";
+  note.reason = "freeze";
+  note.summary = text.summary;
+  note.script = one_line(running_script());
+  note.details = text.core;
   for (const resolved_frame &frame : frames) {
     if (note.frames.size() == xerces_core::crash_frame_cap) {
       break;
@@ -1241,20 +2075,19 @@ void write_freeze_report(const std::vector<resolved_frame> &frames) {
     note.frames.push_back(frame_text(frame));
     // The first frame in the game itself, as a crash's address
     if (!note.offset && frame.module_name != "unknown" &&
-        frame.module_name.find("ntdll") == std::string::npos &&
-        frame.module_name.find("KERNEL") == std::string::npos) {
+        !system_module(frame.module_name)) {
       note.module = frame.module_name;
       note.offset = frame.rva;
     }
   }
   write_pending_note(std::move(note),
                      std::format("[Freeze] The game has not finished a frame "
-                                 "for {} seconds, so it is frozen",
-                                 FREEZE_TIME.count()));
-  freeze_report_id = id;
+                                 "for {} seconds, so it is frozen. {}",
+                                 FREEZE_TIME.count(), text.summary));
+  return id;
 }
 
-// Frames came back: it was a long stall, not a freeze.
+// Frames came back: it was a long stall, not a freeze. freeze_mutex is held.
 void withdraw_freeze_report(std::chrono::seconds stalled) {
   if (freeze_report_id.empty()) {
     return;
@@ -1271,141 +2104,120 @@ void withdraw_freeze_report(std::chrono::seconds stalled) {
                 static_cast<long long>(stalled.count()));
 }
 
-// Where every thread but this one is: its name and its instruction, each
-// read while that thread alone is suspended (nothing here allocates or takes
-// a lock then), named after all of them are running again.
-std::string other_threads() {
-  struct seen {
-    DWORD id;
-    DWORD64 rip;
-  };
-  std::vector<seen> threads;
-  threads.reserve(256);
-  const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-  if (snapshot == INVALID_HANDLE_VALUE) {
-    return {};
-  }
-  THREADENTRY32 entry{};
-  entry.dwSize = sizeof(entry);
-  const DWORD self = GetCurrentThreadId();
-  const DWORD process = GetCurrentProcessId();
-  for (BOOL more = Thread32First(snapshot, &entry);
-       more && threads.size() < threads.capacity();
-       more = Thread32Next(snapshot, &entry)) {
-    if (entry.th32OwnerProcessID != process || entry.th32ThreadID == self ||
-        entry.th32ThreadID == frame_thread_id) {
-      continue;
+void write_freeze_files() {
+  const std::vector<thread_stack> stacks = capture_threads();
+  std::vector<seen_thread> threads;
+  threads.reserve(stacks.size());
+  for (const thread_stack &stack : stacks) {
+    seen_thread &thread = threads.emplace_back();
+    thread.id = stack.id;
+    thread.title = thread_title(stack.id);
+    for (std::size_t i = 0; i < stack.count; ++i) {
+      thread.frames.push_back(frame_from_modules(stack.frames[i]));
     }
-    const HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT,
-                                     FALSE, entry.th32ThreadID);
-    if (!thread) {
-      continue;
-    }
-    CONTEXT context{};
-    context.ContextFlags = CONTEXT_CONTROL;
-    if (SuspendThread(thread) != static_cast<DWORD>(-1)) {
-      if (GetThreadContext(thread, &context)) {
-        threads.push_back({entry.th32ThreadID, context.Rip});
-      }
-      ResumeThread(thread);
-    }
-    CloseHandle(thread);
-  }
-  CloseHandle(snapshot);
-
-  using describe_fn = HRESULT(WINAPI *)(HANDLE, PWSTR *);
-  const auto describe = reinterpret_cast<describe_fn>(GetProcAddress(
-      GetModuleHandleW(L"kernel32.dll"), "GetThreadDescription"));
-  std::string text;
-  for (const seen &thread : threads) {
-    std::string name;
-    if (describe) {
-      if (const HANDLE handle =
-              OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, thread.id)) {
-        PWSTR description = nullptr;
-        if (SUCCEEDED(describe(handle, &description)) && description) {
-          name = utils::string::convert(description);
-          LocalFree(description);
-        }
-        CloseHandle(handle);
-      }
-    }
-    text += std::format(
-        "\n\tthread {} {}: {}", thread.id, name.empty() ? "-" : name,
-        format_frame(resolve_address(reinterpret_cast<void *>(thread.rip)), 0));
-  }
-  return text;
-}
-
-void report_freeze() {
-  const HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT,
-                                   FALSE, frame_thread_id);
-  if (!thread) {
-    return;
   }
 
-  std::array<DWORD64, 16> frames{};
-  size_t count = 0;
-  CONTEXT context{};
-  context.ContextFlags = CONTEXT_FULL;
-  if (SuspendThread(thread) != static_cast<DWORD>(-1)) {
-    if (GetThreadContext(thread, &context)) {
-      while (count < frames.size() && context.Rip) {
-        frames[count++] = context.Rip;
-        DWORD64 image_base = 0;
-        const PRUNTIME_FUNCTION function =
-            RtlLookupFunctionEntry(context.Rip, &image_base, nullptr);
-        if (!function) {
-          break;
-        }
-        PVOID handler_data = nullptr;
-        DWORD64 establisher_frame = 0;
-        RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, context.Rip, function,
-                         &context, &handler_data, &establisher_frame, nullptr);
-      }
-    }
-    ResumeThread(thread);
-  }
-  CloseHandle(thread);
-
-  std::string text = std::format(
-      "The game has not finished a frame for {} seconds, so it is frozen. "
-      "Main thread stack:",
-      FREEZE_TIME.count());
-  std::vector<resolved_frame> resolved;
-  for (size_t i = 0; i < count; ++i) {
-    resolved.push_back(resolve_address(reinterpret_cast<void *>(frames[i])));
-    text += "\n" + format_frame(resolved.back(), i);
-  }
-
-  text +=
-      "\nOther threads (their full stacks are in the dump):" + other_threads();
-  text += std::format(
-      "\nThe game closes {} seconds after its last frame ({} while it is "
-      "loading) unless frames come back.",
-      FREEZE_CLOSE_TIME.count(), FREEZE_CLOSE_LOADING.count());
-
-  exception_log(true, "[Freeze] %s", text.c_str());
   const std::string stamp = get_timestamp();
   const std::filesystem::path minidumps =
       game::get_appdata_path() / "minidumps";
   std::error_code ec;
   std::filesystem::create_directories(minidumps, ec);
-  utils::io::write_file((minidumps / ("freeze-" + stamp + ".txt")).string(),
-                        text, false);
+  const std::filesystem::path text_file =
+      minidumps / ("freeze-" + stamp + ".txt");
+
+  // First what asks nothing of Windows that a frozen game may hold: the
+  // stacks by module and offset, on disk before anything else is tried.
+  const freeze_text_result first = freeze_text(threads, false);
+  write_report_file(text_file, first.core);
+  exception_log(false, "[Freeze] %s", first.summary.c_str());
+
   freeze_dump = minidumps / ("freeze-" + stamp + ".dmp");
   if (!write_dump_file(freeze_dump)) {
     freeze_dump.clear();
   }
+
+  // Then the names (functions, source lines), the scripts running and what
+  // the game was doing, and the same file again with them.
+  for (seen_thread &thread : threads) {
+    for (resolved_frame &frame : thread.frames) {
+      add_symbols(frame);
+    }
+  }
+  const freeze_text_result full = freeze_text(threads, true);
+  write_report_file(text_file, full.core + console_text());
+
+  const auto main_thread =
+      std::ranges::find(threads, frame_thread_id.load(), &seen_thread::id);
   // The console's own lock may be what the main thread holds: the report
-  // first (its console lines are read without waiting, runtime.cpp).
-  write_freeze_report(resolved);
-  console::print("^1[Freeze] " + text + "\n");
+  // first (its console lines are read without waiting, runtime.cpp), the
+  // console's line last.
+  const std::string id = write_freeze_report(
+      main_thread != threads.end() ? main_thread->frames
+                                   : std::vector<resolved_frame>{},
+      full);
+  {
+    const std::lock_guard lock(freeze_mutex);
+    freeze_report_id = id;
+    freeze_report_running = false;
+    if (freeze_withdraw) {
+      withdraw_freeze_report(*freeze_withdraw);
+      freeze_withdraw.reset();
+    }
+  }
+  console::print(std::format("^1[Freeze] The game has not finished a frame "
+                             "for {} seconds. {}\n^1[Freeze] Report: {}\n",
+                             FREEZE_TIME.count(), full.summary,
+                             text_file.string()));
+}
+
+// The report's thread.
+void report_freeze() {
+  try {
+    write_freeze_files();
+  } catch (const std::exception &error) {
+    exception_log(false, "[Freeze] The freeze report failed: %s", error.what());
+  }
+  // Also when it failed half way: the watchdog must be able to start the
+  // next one, and frames that came back meanwhile still take the note back.
+  const std::lock_guard lock(freeze_mutex);
+  freeze_report_running = false;
+  if (freeze_withdraw) {
+    withdraw_freeze_report(*freeze_withdraw);
+    freeze_withdraw.reset();
+  }
+}
+
+void start_freeze_report() {
+  {
+    const std::lock_guard lock(freeze_mutex);
+    if (freeze_report_running) {
+      return; // an earlier freeze's report is still being written
+    }
+    freeze_report_running = true;
+    freeze_withdraw.reset();
+  }
+  utils::thread::create_named_thread("Freeze Report", report_freeze).detach();
+}
+
+void frames_came_back(const std::chrono::seconds stalled) {
+  {
+    const std::lock_guard lock(freeze_mutex);
+    if (freeze_report_running) {
+      freeze_withdraw = stalled;
+    } else {
+      withdraw_freeze_report(stalled);
+    }
+  }
+  // The main thread runs again, so the console can be written to
+  console::print(std::format("^3[Freeze] Frames came back after {} seconds: "
+                             "it was a long stall, not a freeze. Its report "
+                             "stays in the minidumps folder and is not sent.\n",
+                             stalled.count()));
 }
 
 [[noreturn]] void close_frozen_game(std::chrono::seconds stalled) {
   crashed = true;
-  exception_log(true,
+  exception_log(false,
                 "[Freeze] No frame for %lld seconds: the game is closed, as "
                 "after a crash",
                 static_cast<long long>(stalled.count()));
@@ -1421,16 +2233,23 @@ bool loading_now() {
 }
 
 void watch_for_freezes() {
+  thread_describe = reinterpret_cast<thread_describe_fn>(GetProcAddress(
+      GetModuleHandleW(L"kernel32.dll"), "GetThreadDescription"));
   uint32_t last_frame = 0;
   auto last_progress = std::chrono::steady_clock::now();
   bool reported = false;
+  uint32_t ticks = 0;
   for (;;) {
     std::this_thread::sleep_for(1s);
+    release_walked_thread();
     const uint32_t frame = frame_count.load();
     if (frame != last_frame || frame == 0) {
       if (reported) {
-        withdraw_freeze_report(std::chrono::duration_cast<std::chrono::seconds>(
+        frames_came_back(std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::steady_clock::now() - last_progress));
+      }
+      if (ticks++ % 30 == 0) {
+        note_modules();
       }
       last_frame = frame;
       last_progress = std::chrono::steady_clock::now();
@@ -1440,7 +2259,7 @@ void watch_for_freezes() {
           std::chrono::steady_clock::now() - last_progress);
       if (!reported && stalled >= FREEZE_TIME) {
         reported = true;
-        report_freeze();
+        start_freeze_report();
       } else if (reported && stalled >= (loading_now() ? FREEZE_CLOSE_LOADING
                                                        : FREEZE_CLOSE_TIME)) {
         close_frozen_game(stalled);
@@ -1469,8 +2288,30 @@ void WINAPI set_unhandled_exception_filter_stub(LPTOP_LEVEL_EXCEPTION_FILTER) {
 
 void show_fatal_error(const std::string &message) {
   // Xerces: before the other threads are suspended, while their locks can
-  // still be released.
-  write_fatal_report();
+  // still be released. A text report and a dump of every thread stay on this
+  // PC, in the minidumps folder (an engine error wrote neither before
+  // 2026-11-12, so one could only be read from the console's last lines).
+  const std::string plain = error_help::strip_colors(message);
+  void *stack[xerces_core::crash_frame_cap]{};
+  const USHORT frames = RtlCaptureStackBackTrace(
+      1, static_cast<DWORD>(std::size(stack)), stack, nullptr);
+  std::string report;
+  if (!run_guarded([&report, &plain, &stack, frames] {
+        report = fatal_text(plain, stack, frames);
+      })) {
+    report = "Xerces Fatal Error Report\r\n\r\nError: " + plain + "\r\n";
+  }
+  {
+    const std::filesystem::path dir = game::get_appdata_path() / "minidumps";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    const std::string stamp = get_timestamp();
+    std::string local = report;
+    run_guarded([&local] { local += console_text(); });
+    write_report_file(dir / ("fatal-" + stamp + ".txt"), local);
+    write_dump_file(dir / ("fatal-" + stamp + ".dmp"));
+  }
+  write_fatal_report(plain, report);
   if (!game::quiet_crash() && !game::is_headless()) {
     utils::thread::suspend_other_threads();
     show_mouse_cursor();
@@ -1521,6 +2362,12 @@ struct component final : generic_component {
           ++frame_count;
         },
         scheduler::pipeline::main, 1s);
+    // Xerces: which threads run the server and the renderer, for the reports
+    scheduler::loop([] { server_thread_id = GetCurrentThreadId(); },
+                    scheduler::pipeline::server, 1s);
+    scheduler::loop([] { render_thread_id = GetCurrentThreadId(); },
+                    scheduler::pipeline::renderer, 1s);
+    scheduler::loop(note_settings, scheduler::pipeline::main, 5s);
     utils::thread::create_named_thread("Freeze Watchdog", watch_for_freezes)
         .detach();
 

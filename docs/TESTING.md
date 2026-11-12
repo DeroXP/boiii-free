@@ -2841,3 +2841,127 @@ Aim assist (`XERCES_AIM_TEST=1`, no mods, no real controller):
 - [x] 250 to 265 frames a second with it on, no crash; the log's "Aim assist is off"
       line as the level ended is now said only when it lasts.
 - [ ] Not tried: a real controller.
+
+## CHARACTERS as one screen with a live view, the client gone over, text reports (beta.22)
+
+Built on `launcher/upscale` on 2026-11-12; test home
+`C:\Users\Ginld\XercesDev\bench\20261106-modlabels`, `zm_zod`, the user's eight-mod stack
+(as in beta.21's section). The game was driven with keys and console commands
+(`bench\20261108-chars\run-lua.ps1`, `key:` and `shot:` steps); `lua_exec` crashed the
+UI's Lua VM twice that night and is not used for tests any more.
+
+CHARACTERS (DESIGN.md 7.13; runs `ui11` and, after the fixes below, `fix1` and `fix3`):
+
+- [x] Pause menu > CHARACTERS closes the pause menu and opens the screen over the match:
+      tabs DS4C PATCHE.., ASCENDANCE, DBZ VILLAIN.., GIRLS' FRON.., AVALI, HYPERDIMENS..,
+      ORIGINAL CH..; the list on a dark panel at the left, the player's character from the
+      front at the right (`bench\20261108-chars\fix1-grid.png`).
+- [x] Q and E change tab. Moving down a list changes the character shown (DS4C's, DBZ's,
+      Neptunia's, Ascendance's Misty seen).
+- [x] Back puts the look from before back. A pick keeps it: the camera stays for a moment,
+      the screen closes, the hands in first person are the character's.
+- [x] Opened again, the pick is the selected row. DEFAULT puts the match's own look back. A
+      second match in the same game works the same.
+- [x] The log: "Character slots: 103 characters from 7 sources, the table in use among
+      them" (beta.21 counted 73 beside the table in use; the screen now lists that table's
+      own 30 too).
+- [x] No Lua or script error in the console of either run; the round HUD and the pause
+      menu's Xerces rows are there after the fixes.
+- [x] A second stack, Girls' Frontline 2.0 on top with Neptunia under it and no DS4C
+      (`bench\20261112-crash\session.ps1`, keys sent one step at a time): the first try
+      showed the street and no character. The camera had not followed the angles it was
+      given (DESIGN.md 7.13). Aimed at an entity instead, the character stands right of the
+      list: Girls' Frontline's default and M16A1 3, Neptunia's Uni; Back returns the view
+      (`bench\20261112-crash\exp2-grid.png`). The log there: "66 characters from 3
+      sources".
+- [x] The DS4C stack again with the camera aimed that way (`fix3`): the default look, Broly
+      in DBZ's tab and Ram in Neptunia's, each from the front and right of the list; a pick
+      of Ram keeps her and her hands; opened again, the view shows her; Back returns
+      (`bench\20261108-chars\fix3-grid.png`); no Lua or script error.
+- [x] One mod that adds no characters (Classic Viewmodel FOV): one list without tabs,
+      "Characters: 13 characters", the game's own Dempsey 2 and Nikolai 3 shown live, a
+      pick kept (`bench\20261112-crash\base-grid.png`).
+- [x] A player who is down gets the list without the view (they lay under the camera's
+      sight in two test matches where the zombies had reached them first).
+- [ ] Not tried: a second player, a controller's LB/RB (Q and E were pressed), the fall-back
+      without the HUD menu, a custom map, no mods at all (safe mode).
+
+The fixes of DESIGN.md 7.14:
+
+- [x] `fix1`, the eight-mod stack: no "LUI event name is not precached" in 4,400 console
+      lines; CHARACTERS still offered (the host has Xerces' scripts); the round HUD's three
+      lines; the pause menu's rows.
+- [x] The aim assist after its fixes (`fix2`, `XERCES_AIM_TEST=1`, the eight-mod stack,
+      "Modern (MW3)"): no target and rotation 0 before the first zombie; after the pause
+      menu had been open and closed, rotation 0.75 and slowdown 0.51 on a zombie at 25 m,
+      0.71 and 0.51 on one at 37 m, as in beta.21; no jump of the view on the first frame
+      back.
+- [ ] XERCES SETTINGS' tab strip was not seen: the entry in a match opens the match's own
+      list, which has no tabs; the tabs are on the lobby's screen.
+- [x] Launcher, core, CLI (14 fixes): RmlUi opens its files as UTF-8 (a Xerces folder with
+      a character outside the ANSI code page loaded no font or page); a Steam library on
+      such a path is found, and the same Steam root is listed once; a pin an update left
+      behind offers "Unpin"; the friends listener stops cleanly; the saved sign-in stays
+      out of config backups; the CLI reads the profile folder and user name as UTF-8; a run
+      file caught half written no longer makes a running game look crashed (and is written
+      through a rename); Up and Down reach every control of Settings (a test now compares
+      the list with `settings.rml`); fastfiles at a Workshop item's root are not counted
+      as loose files in conflicts; a beta build meets a mod's `requires.xerces` as its
+      release does; the asset pool switch leaves a `launcher_settings.json` it cannot read
+      alone; a file held open for a moment (antivirus) is still replaced, and two programs
+      writing the same file no longer share one temporary name; the CLI says when it could
+      not write a file; nothing after an invite link on Xerces' command line is read as an
+      option.
+- [x] `xerces_tests`: 599 pass (585 before; 13 for the launcher fixes, 1 for the crash
+      report's new parts).
+- [x] `tools\dev\launcher\check-screens.ps1`: all ten screens captured, 0 warnings or
+      errors (`launcher-checks\beta22`).
+- [x] `tools\dev\session\m1-check.ps1 -Live`, all nine cases through Xerces.exe (vanilla 4
+      checks, modded 6, cli with load and unload 9, reopen 8, cliapply 8, dvars 8, crash 7,
+      restart 4, safeoff 6): 60 pass, none fails.
+- [ ] Not seen on screen: the Mods menu's delete, FOV Scale's row, a starting round at the
+      game's cap, a folder outside the ANSI code page (the unit tests cover it).
+
+Text reports (CRASH_REPORTS.md, "The text report"; `bench\20261112-crash\run-crash.ps1`
+starts the game with `-xerces-crash-test -quiet-crash` and turns crash reports on in the
+test home for the run; nothing is sent):
+
+- [x] `xerces_crash_test` in a `zm_zod` match with the eight-mod stack: exit 0xC0000005;
+      `crash-<time>.txt` (11 KB) with the sentence ("invalid memory access: tried to write
+      to 0x0 (null pointer) in boiii.exe+0x1E3F2B ... on the main thread"), the session
+      (map, the eight mods with their titles, 1 min 27 s), the stack, the bytes at the
+      address, memory (5.8 of 31.7 GB of RAM free, the game at 15.8 GB), the zone pools and
+      the settings; the same text as `info.txt` in the zip; the note for the launcher has
+      reason `exception`, the summary and the text (4.3 KB).
+- [x] `xerces_crash_test freeze` in the same match: `freeze-<time>.txt` at 30 s, 439 lines:
+      the main thread in full (its sleep, called from the test command), the server thread
+      in full, one running thread, then the waiting ones ("10 threads at the same place");
+      the game closed itself 60 s after its last frame with 0xC0000194; the note has reason
+      `freeze`, the summary and the dump (611 KB).
+- [x] `xerces_crash_test stall` in the menus: the report at 30 s; at 40 s the console says
+      "[Freeze] Frames came back after 40 seconds: it was a long stall, not a freeze", the
+      note for the launcher is gone, the game plays on and quits cleanly.
+- [x] `xerces_crash_test fatal` in the menus: exit 1; `fatal-<time>.txt` with the error's
+      words and where it was raised, `fatal-<time>.dmp` (615 KB); the note has reason
+      `fatal_error`, the error as its summary and "[Fatal error] ..." as the console's
+      last line.
+- [x] A report written off the main thread had no settings (the game answers for its dvars
+      on the main thread only); the main thread notes them every 5 s now and the stall's
+      report has them.
+- [x] End to end against the backend run on this PC (`uvicorn`, SQLite,
+      `XERCES_CRASH_URL=http://127.0.0.1:8765`, `xerces_cli crash send` on a scratch home
+      holding the three notes): three reports stored; `scripts\crashes.py list` prints each
+      with its summary, `show` prints the reason, the summary and the game's report before
+      the logs; the Windows user name is nowhere in what `show` prints (the source paths
+      read `%USERPROFILE%\...`).
+- [x] The backend's tests: 455 pass. Its change is commit `baec036e` on
+      `launcher/friends-backend`, not pushed: Railway runs the backend from before, which
+      drops the four new parts and keeps the rest of the report.
+- [ ] Not tried: a real freeze with the server thread inside a script (the "Script
+      running" line), a crash on the server thread, the crash dialog's new line on screen
+      (the tests ran with `-quiet-crash`), a report sent to Railway.
+
+One thing found on the way: the scrubbing of a report reads `name.ext:12` as a host and a
+port and writes `<address>`, so the text report names a script's line as
+`scripts/zm/zm_zod.gsc line 12`. A C++ source line from symbols (developer builds only)
+can still come out as `<address>` in the report that is sent; the file on the PC has it.

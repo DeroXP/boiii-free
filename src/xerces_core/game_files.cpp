@@ -6,6 +6,7 @@
 
 #include "asset_limits.hpp"
 #include "json.hpp"
+#include "launcher_home.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -139,18 +140,48 @@ bool asset_pools_enabled(std::string_view launcher_settings_json) {
   return parse_pool_settings(launcher_settings_json).enabled;
 }
 
-std::string set_asset_pools_enabled(std::string_view launcher_settings_json,
-                                    bool enabled) {
-  auto parsed = json::parse(launcher_settings_json);
+std::optional<std::string>
+set_asset_pools_enabled(std::string_view launcher_settings_json, bool enabled) {
   rapidjson::Document doc;
-  if (parsed.ok && parsed.document.IsObject()) {
-    doc.Swap(parsed.document);
+  if (trim(launcher_settings_json).empty()) {
+    doc.SetObject(); // no file yet, or an empty one: nothing to keep
   } else {
-    doc.SetObject();
+    auto parsed = json::parse(launcher_settings_json);
+    if (!parsed.ok || !parsed.document.IsObject()) {
+      // Text that does not read as an object: starting again from {} would
+      // write a file with this one key and lose every other setting in it
+      // (the pool sizes, friends_only) for a typo someone could have fixed.
+      return std::nullopt;
+    }
+    doc.Swap(parsed.document);
   }
   doc.RemoveMember("disable_asset_pools");
   json::set(doc, "asset_limits_enabled", enabled ? "1" : "0",
             doc.GetAllocator());
   return json::pretty(doc);
+}
+
+pool_switch switch_asset_pools(const std::filesystem::path &file,
+                               bool enabled) {
+  std::error_code ec;
+  const bool missing =
+      std::filesystem::status(file, ec).type() ==
+      std::filesystem::file_type::not_found;
+  std::string text;
+  if (!missing) {
+    // It is there (or cannot even be looked at): what cannot be read is not
+    // taken for "no settings yet".
+    const auto read = read_text_file(file);
+    if (!read) {
+      return pool_switch::unreadable;
+    }
+    text = *read;
+  }
+  const auto updated = set_asset_pools_enabled(text, enabled);
+  if (!updated) {
+    return pool_switch::not_an_object;
+  }
+  return write_text_file(file, *updated) ? pool_switch::written
+                                         : pool_switch::not_written;
 }
 } // namespace xerces_core

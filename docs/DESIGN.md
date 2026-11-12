@@ -2146,6 +2146,135 @@ Not built: portraits for a mod without a table (it has none of its own), a mod's
 names for its replaced characters (it gives none), and more than 16 outfits on a
 body or 16 bodies (what a player's character is sent as).
 
+### 7.13 Zombies: CHARACTERS as one screen with a tab per mod and the character shown live (built 2026-11-12, beta.22)
+
+Asked for by the user on 2026-11-12: make the character select like DS4C's, and
+show the model of the character the player is on, in 3D if it can be done.
+
+What is built (`data/ui_scripts/xerces_characters`, `xerces_characters.gsc`):
+
+- One screen, `XercesCharactersMenu`, in place of 7.12's screen per source. It has
+  the game's own tab bar (`CoD.FE_TabBar`): the table in use first (the main mod's
+  characters, or the game's), then a tab for each other source of 7.12, "Original
+  Characters" last. LB/RB or Q/E change tab. Each tab lists its characters under
+  DEFAULT; a title too long for its tab is cut ("DBZ VILLAIN.."). The names are
+  7.12's: a table's own names for the table in use and for table mods, what the
+  models are called for a mod without a table, numbered when two share a name.
+- The character under the selection is shown live, in 3D: it is put on the player
+  and a camera looks at them from the front, to the right of the list. Every
+  140 ms the screen sends `xerces_char:preview:<body>:<outfit>` when the row
+  changed, and `xerces_char:alive` about every two seconds; the script puts the
+  look on (`wear`), as a pick does.
+- The camera: `camera_on` traces in eight directions for the side with the most
+  room, turns the player to face it, and places a scripted camera 105 units away
+  (never nearer than 45) at 50 high, aimed at a point 40 high and a little to the
+  side of the player so the character stands clear of the list; the HUD is hidden
+  meanwhile. The camera is aimed at an entity made for it at that point (a
+  `tag_origin` model, `CameraSetLookAt`) and goes on a tenth of a second later,
+  when the player's game knows the entity; the player is put in the third-person
+  state while it is on, which is what has their own body drawn for them. Back puts
+  on what the player wore before; a pick keeps the look, the camera stays on it for
+  1.5 s, then the view returns. The preview ends by itself when the screen has
+  not said it is alive for 6 s, and when the player dies or goes down; a player
+  who is down when they open the screen gets the list without the view (they lie
+  on the ground, out of the camera's sight).
+- A solo match is paused under the pause menu, and a paused match redraws no
+  character. So the entry closes the pause menu and opens the screen over the HUD
+  (`StartMenuGoBack`, then `OpenPopup` on the root's `HUD` menu). The match runs
+  on; in a solo match the player cannot be hurt while the screen is open, zombies
+  ignore them and stand still (`SetEntityPaused`) and none spawn. With more
+  players in the match nothing is held for anyone: the preview is the same, the
+  player just stands where they are. If the HUD menu is not found, the screen opens
+  as a popup under the pause menu, without the preview.
+- The list covers the screen's left 480 units with a dark panel; the rest is the
+  match. `disableDarkenElement` on the menu keeps the game from dimming it.
+- What the player wore is noted as a body and the outfit's body model by name
+  (`note_look`), and found again by that model (`wear_look`): the outfit's index
+  can change when the looks are worked out anew.
+- The entry is left out when the host's game has no Xerces scripts
+  (`XercesHostHasScripts`, from the host's hidden text): its menu responses would
+  go nowhere.
+
+Learned the hard way:
+
+- `SetClientThirdPersonAngle` changes nothing here. A scripted camera does
+  (`CameraSetPosition`, `CameraActivate`).
+- The angles given to `CameraSetPosition` are not always followed. With DS4C on
+  top they were; with Girls' Frontline on top the camera looked the way the
+  player did and showed the street with nobody in it (found on 2026-11-12 by
+  trying the screen on a second stack, after the first version was thought done).
+  `CameraSetLookAt` on an entity is followed on both. The entity must be one the
+  player's game is told about: a `script_model` with `tag_origin`; the camera
+  turned away from a `script_origin`, which is not sent to it.
+- A test that waits half a minute in a match before opening the screen tests a
+  player who has been knocked down: the zombies get there first.
+- `disableBlur` on the menu takes its keys away: Escape then opens the pause menu
+  over it. Only the darkening is turned off.
+- Work added inside the game's `SetCharacter*` script calls can hang the server:
+  a wrapper that read a dvar after `SetCharacterBodyStyle` froze two of three match
+  starts in the game's own protected code ("server froze while running a script
+  zm_zod::givecustomcharacters"). The wrappers do nothing but call the game now,
+  and the looks are worked out on the main thread's frame only.
+- `OpenMenu` from GSC does not open a menu that Lua defines.
+- `lua_exec` typed into the console can crash the UI's Lua VM (twice on
+  2026-11-12, a write through a near-null pointer on the main thread). The tests
+  press keys instead.
+
+Not built: portraits beside the names (a mod without a table has none), the
+preview on mods' own character screens, and holding the zombies for a player who
+opens the screen in a match with other players.
+
+### 7.14 The client gone over (2026-11-12, beta.22)
+
+Asked for by the user on 2026-11-12: go through the whole client, make sure it
+works, improve what can be improved. Three reviews (the scripts, the game side,
+the launcher with the core and the CLI) and a play test of each fix that can be
+seen. What was wrong and is fixed:
+
+Scripts (`data/`):
+
+- XERCES SETTINGS showed five of its tabs' seven places, which left CONTROLLER
+  and the right shoulder end outside the strip.
+- A number set into a dvar from the UI's Lua goes as text in six digits: a million
+  starting points was set as "1e+06". Every such write is text now (the start
+  options, FOV Scale).
+- FOV Scale showed "1.0 (Default)" for any value under 1 and wrote that back on
+  the next change: the row now starts at the step nearest the real value.
+- Smart zombies alone (no round HUD, no self-revives) had no line for their
+  notice at round 20; "No hip-fire spread" was missing from the settings every
+  player is told at the start; a starting round at the game's cap began the
+  count again from 1; two runs of the HUD's set-up could cross and leave a player
+  with half a HUD.
+- Deleting a mod in the Mods menu left it in the load order until the menu was
+  reopened (the call went to the confirmation, not to the menu under it).
+- CHARACTERS was offered to a player whose host has no Xerces scripts.
+
+Game side (`src/client`):
+
+- The mods' precache lists: only the list in use and the last extra's were kept
+  alive across a reload, so a mod in between lost its LUI events ("LUI event name
+  is not precached", seen on the seven-mod stack on 2026-11-06). Every copy
+  behind the one in use counts now.
+- The zone plan's names lived in a local list that was gone before the engine had
+  taken the zones; they live as long as the thread now.
+- Aim assist: the controller was asked on all four slots every frame (asking an
+  empty slot costs far more than a read: now only the slot that answered, the
+  others every two seconds), and outside a Zombies level too; after a pause or a
+  menu the first frame could turn the view by the whole pause's motion (a zombie
+  seen "the frame before" from before the pause).
+- No hip-fire spread wrote zeros over whatever was at the weapon's spread offsets;
+  values that are no spread (another weapon format) are left alone now.
+- The out-of-memory box stopped every other thread before it showed, which could
+  stop the thread holding what the box needs.
+
+Launcher, core, CLI (`src/xerces_core`, `src/xerces_launcher`, `src/xerces_cli`):
+see `docs/TESTING.md`, "beta.22", for the list.
+
+Found and left as they are for now: the journal is written on the main thread; a
+vote is not counted again when a player leaves during it; the upscaler list is
+the same with or without the DLSS module; a join plans with the joiner's own
+profile.
+
 ## 8. Packs, profiles and safety nets (goal 6 and extras)
 
 ### 8.1 Pack file
@@ -4037,7 +4166,7 @@ release from v1.0.
 
 Beta packages for testers (2026-11-05) come first, as a zip by private link:
 
-- `VERSION` is the one place the version is set (`0.1.0-beta.21`). premake
+- `VERSION` is the one place the version is set (`0.1.0-beta.22`). premake
   writes it, the commit and whether the tree had changes into
   `build\src\xerces_version.h`; all three programs show "Xerces <version>
   (<commit>)" (About, the menu watermark, the console title, the crash report)

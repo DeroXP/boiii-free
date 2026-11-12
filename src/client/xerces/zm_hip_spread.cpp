@@ -96,6 +96,13 @@ void apply() {
         if (all_zero(now)) {
           return; // done already, or a weapon with none
         }
+        // The weapon's layout is this build's: numbers that are no spread
+        // (another game build, a mod's own weapon format) are left alone
+        if (!std::ranges::all_of(now, [](float f) {
+              return std::isfinite(f) && f >= 0.0f && f < 360.0f;
+            })) {
+          return;
+        }
         saved[variant->szInternalName] = now;
         write(variant->weapDef, values{});
         ++scan_count;

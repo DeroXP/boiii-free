@@ -190,6 +190,8 @@ private:
   void answer(const done &finished, account::outcome result);
   // Runs on the UI thread, unless this service is gone by then.
   void post_ui(std::function<void()> run);
+  // The destructor has begun: a thread in the middle of slow work gives up.
+  bool stopping();
   void refresh_all();
   void handle(const std::string &message);
   void after_sign_in(const account::outcome &result);

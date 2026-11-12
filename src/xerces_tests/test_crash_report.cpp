@@ -112,11 +112,18 @@ crash_report_input sample_input() {
   pending.thread = "main";
   pending.frames = {"BlackOps3.exe+0x14224FE5C", "boiii.exe+0x1234"};
   pending.phase = "in_game";
+  pending.reason = "exception";
+  pending.summary = "invalid memory access: tried to read 0x18 (null pointer) "
+                    "in BlackOps3.exe+0x14224FE5C on the main thread";
+  pending.script = "GSC zm_castle::main (scripts/zm/zm_castle.gsc line 42)";
   in.crash = crash_from_pending(pending, 0xC0000005);
   in.journal_json = R"({"phase":"in_game","schema":1})";
   in.game_log = {R"({"event":"loader.map.ready","msg":"zm_castle"})"};
   in.launcher_log = {R"({"event":"launcher.start","msg":"Xerces"})"};
   in.console = {"Loading fastfile 'zm_castle'"};
+  // The client's text report; the profile path in it is scrubbed.
+  in.details = "Xerces Crash Report\r\n\r\nWhat happened: invalid memory "
+               "access\r\nSource: C:\\Users\\Kevin\\src\\client.cpp line 7\r\n";
   in.minidump = "MDMP";
   return in;
 }
@@ -418,6 +425,58 @@ TEST_CASE("crash module: the client is the client, wherever its folder") {
   CHECK_EQ(module_file_name("C:/A/B/Thing.DLL"), std::string("thing.dll"));
 }
 
+TEST_CASE("crash report: the text report's parts") {
+  // What the note says in a line each reaches the report's crash object.
+  pending_crash pending;
+  pending.reason = "fatal_error";
+  pending.summary = "Could not find zone 'zm_x'";
+  const crash_facts facts = crash_from_pending(pending, std::nullopt);
+  CHECK_EQ(facts.reason.value_or(""), std::string("fatal_error"));
+  CHECK_EQ(facts.summary.value_or(""),
+           std::string("Could not find zone 'zm_x'"));
+  CHECK(!facts.script.has_value());
+  // A crash the client wrote no note for has none of them: the report says
+  // null, as for every other part it does not know.
+  crash_report_input in = sample_input();
+  in.crash = crash_from_exit(0xC0000409, false, "in_game");
+  in.details.clear();
+  const auto parsed = json::parse(build_crash_report(in));
+  REQUIRE(parsed.ok);
+  const auto &crash = *json::member(parsed.document, "crash");
+  for (const char *key : {"reason", "summary", "script"}) {
+    CHECK(json::member(crash, key) && json::member(crash, key)->IsNull());
+  }
+  const auto &logs = *json::member(parsed.document, "logs");
+  CHECK(json::member(logs, "details") &&
+        json::member(logs, "details")->IsNull());
+
+  // A player's name in the summary is hidden, as in the logs.
+  in = sample_input();
+  in.player_names = {"Kevin"};
+  in.crash.summary = "Kevin's game stopped";
+  const auto named = json::parse(build_crash_report(in));
+  REQUIRE(named.ok);
+  CHECK_EQ(json::get_string(*json::member(named.document, "crash"), "summary")
+               .value_or(""),
+           std::string("<player>'s game stopped"));
+
+  // The text report keeps its start, cut at a line.
+  CHECK_EQ(head_text("one\ntwo\nthree\n", 100),
+           std::string("one\ntwo\nthree\n"));
+  CHECK_EQ(head_text("one\ntwo\nthree\n", 9), std::string("one\ntwo\n"));
+  CHECK_EQ(head_text("abcdefgh", 4), std::string("abcd"));
+  in = sample_input();
+  in.details = std::string(crash_tail_cap, 'a') + "\nthe end\n";
+  const auto large = json::parse(build_crash_report(in));
+  REQUIRE(large.ok);
+  const std::string kept =
+      json::get_string(*json::member(large.document, "logs"), "details")
+          .value_or("");
+  CHECK(kept.size() <= crash_tail_cap);
+  CHECK(kept.starts_with("aaaa"));
+  CHECK(kept.find("the end") == std::string::npos);
+}
+
 TEST_CASE("crash report: the client's pending note round-trips") {
   pending_crash in;
   in.report_id = std::string(32, 'c');
@@ -433,8 +492,17 @@ TEST_CASE("crash report: the client's pending note round-trips") {
   in.game_log = "20261105-120000-game-42.jsonl";
   in.journal = R"({"phase":"frontend","schema":1})";
   in.names = {"DeroXP", "Kevin"};
+  in.reason = "freeze";
+  in.summary = "Freeze: main thread waiting in a system call";
+  in.script =
+      "GSC zm_zod::givecustomcharacters (scripts/zm/zm_zod.gsc line 12)";
+  in.details = "Xerces Freeze Report\r\n\r\nWhat happened: ...\r\n";
   const auto out = parse_pending_crash(pending_crash_to_json(in));
   REQUIRE(out.has_value());
+  CHECK_EQ(out->reason, in.reason);
+  CHECK_EQ(out->summary, in.summary);
+  CHECK_EQ(out->script, in.script);
+  CHECK_EQ(out->details, in.details);
   CHECK_EQ(out->report_id, in.report_id);
   CHECK_EQ(out->code, in.code);
   CHECK_EQ(out->module, in.module);
@@ -454,6 +522,9 @@ TEST_CASE("crash report: the client's pending note round-trips") {
   const std::string old_note =
       "{\"report_id\":\"" + std::string(32, 'c') + "\"}";
   CHECK(parse_pending_crash(old_note)->kind == crash_kind::exception);
+  // and has none of the parts added on 2026-11-12
+  CHECK(parse_pending_crash(old_note)->reason.empty());
+  CHECK(parse_pending_crash(old_note)->details.empty());
   CHECK(!parse_pending_crash(R"({"report_id":"not-hex"})"));
   CHECK(launch_flag_names(
             {"-xerces-plan", "abc", "-nointro", "+set", "a", "-x"}) ==

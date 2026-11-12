@@ -11,11 +11,13 @@
 #include <sddl.h>
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <iterator>
 #include <random>
 
 #include "json.hpp"
+#include "launcher_home.hpp"
 #include "log.hpp"
 
 // wingdi.h's GetObject macro would rename rapidjson's GetObject().
@@ -321,6 +323,18 @@ std::optional<run_entry> parse_run_entry(std::string_view text) {
   return out;
 }
 
+namespace {
+// A run file that does not parse is left alone until it is this old.
+constexpr std::chrono::seconds unreadable_run_file_age{5};
+
+bool unreadable_for_a_while(const std::filesystem::path &file) {
+  std::error_code ec;
+  const auto written = std::filesystem::last_write_time(file, ec);
+  return !ec && std::filesystem::file_time_type::clock::now() - written >
+                    unreadable_run_file_age;
+}
+} // namespace
+
 std::vector<run_entry> live_run_entries(const std::filesystem::path &run_dir) {
   std::vector<run_entry> out;
   std::error_code ec;
@@ -333,11 +347,22 @@ std::vector<run_entry> live_run_entries(const std::filesystem::path &run_dir) {
                            std::istreambuf_iterator<char>());
     in.close();
     const auto entry = parse_run_entry(text);
-    const std::string image = entry ? process_image(entry->pid) : "";
+    if (!entry) {
+      // Not a run file, or not yet: a game from before the server wrote it
+      // through a rename empties the file and then writes it, and a file
+      // being scanned may not open. Removing it in that moment would make a
+      // running game look crashed to the launcher, so it goes only once it
+      // has stayed unreadable for a while.
+      if (unreadable_for_a_while(file.path())) {
+        std::filesystem::remove(file.path(), ec);
+      }
+      continue;
+    }
+    const std::string image = process_image(entry->pid);
     // Compared as files, not strings: the same exe reached by another path
     // (a junction, a subst drive) is still the server, and removing its run
     // file would make a running game look crashed to the launcher.
-    if (!entry || image.empty() || !same_image(image, entry->image)) {
+    if (image.empty() || !same_image(image, entry->image)) {
       std::filesystem::remove(file.path(), ec); // gone, or the pid was reused
       continue;
     }
@@ -487,14 +512,13 @@ bool pipe_server::start(const std::filesystem::path &run_dir, std::string role,
   entry.image = image;
   entry.started = json_log::now_utc();
   run_file_ = run_dir / (role + "-" + std::to_string(pid) + ".json");
-  {
-    std::ofstream out(run_file_, std::ios::binary | std::ios::trunc);
-    out << run_entry_to_json(entry);
-    if (!out) {
-      CloseHandle(pipe);
-      first_instance_ = nullptr;
-      return fail("could not write " + utf8(run_file_.wstring()));
-    }
+  // Through a temporary file and a rename (write_text_file): written in
+  // place, the file is empty for a moment, and a launcher or xerces_cli that
+  // listed the run folder just then took it for a dead process's.
+  if (!write_text_file(run_file_, run_entry_to_json(entry))) {
+    CloseHandle(pipe);
+    first_instance_ = nullptr;
+    return fail("could not write " + utf8(run_file_.wstring()));
   }
   handler_ = std::move(on_request);
   stopping_ = false;

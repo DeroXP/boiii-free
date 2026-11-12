@@ -142,7 +142,7 @@ function __init__()
 		s.start_round = MAX_START_ROUND;
 	// The round as of its start_of_round (the game raises level.round_number as the last one ends), counted on by
 	// Xerces where the game's stops (255), and how many rounds have started
-	s.round = 1;
+	s.round = s.start_round > 1 ? s.start_round - 1 : 1;
 	s.rounds_started = 0;
 	// This round's skip (SKIP_*), whether the round 999 vote is open, and what it decided
 	s.skip = SKIP_NONE;
@@ -293,8 +293,17 @@ function first_spawn()
 // number may belong to another menu by now.
 function ensure_menus()
 {
-	self notify("xerces_ensure_menus");
-	self endon("xerces_ensure_menus");
+	// One at a time: a second run used to end the first while it was still opening the HUD's rows, then found the
+	// hidden text open and left the player with half a HUD for the rest of the match
+	if (IS_TRUE(self.xerces_menus_busy))
+		return;
+	self.xerces_menus_busy = 1;
+	self ensure_menus_now();
+	self.xerces_menus_busy = 0;
+}
+
+function ensure_menus_now()
+{
 	self endon("disconnect");
 	level endon("end_game");
 	wait_for_flag("initial_blackscreen_passed");
@@ -373,6 +382,9 @@ function show_settings()
 		text = add_setting(text, "Rounds to 999");
 	if (s.smart_zombies)
 		text = add_setting(text, "Smart zombies");
+	// said to everyone: a player who joined still sees a crosshair that spreads
+	if (s.no_hip_spread)
+		text = add_setting(text, "No hip-fire spread");
 	if (text != "")
 		self IPrintLn("Xerces settings: " + text);
 }
@@ -748,7 +760,8 @@ function round_ended()
 function create_hud()
 {
 	s = level.xerces_rounds;
-	if (!s.round_hud && !s.self_revives && !s.round_skips && !s.round_999)
+	// smart zombies too: their notice at round 20 goes on this HUD's line
+	if (!s.round_hud && !s.self_revives && !s.round_skips && !s.round_999 && !s.smart_zombies)
 		return;
 	grey = (0.75, 0.75, 0.75);
 	white = (1, 1, 1);

@@ -16,10 +16,12 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <cwctype>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <xerces_core/backup.hpp>
@@ -29,6 +31,7 @@
 #include <xerces_core/launcher_home.hpp>
 #include <xerces_core/launcher_launch.hpp>
 #include <xerces_core/launcher_state.hpp>
+#include <xerces_core/log.hpp>
 #include <xerces_core/log_tail.hpp>
 #include <xerces_core/mods_info.hpp>
 #include <xerces_core/pack_apply.hpp>
@@ -757,13 +760,26 @@ TEST_CASE("shared launcher: a game process is seen from its start") {
   CHECK(game_process_running(fs::path(name))); // names ignore case
 }
 
+namespace {
+// Files a write left behind in dir: every write_text_file temporary ends in
+// ".tmp".
+std::size_t temporaries_in(const fs::path &dir) {
+  std::size_t count = 0;
+  std::error_code ec;
+  for (const auto &entry : fs::directory_iterator(dir, ec)) {
+    count += entry.path().extension() == ".tmp" ? 1 : 0;
+  }
+  return count;
+}
+} // namespace
+
 TEST_CASE("shared launcher: text files are written whole") {
   const fs::path root = fresh("write");
   const fs::path file = root / "sub" / "launcher.json";
   CHECK(write_text_file(file, "one"));
   CHECK(write_text_file(file, "two"));
   CHECK(read_text_file(file) == std::optional<std::string>("two"));
-  CHECK(!fs::exists(root / "sub" / "launcher.json.tmp"));
+  CHECK_EQ(temporaries_in(root / "sub"), 0u);
   CHECK(!read_text_file(root / "missing").has_value());
 
   // A failed write says why and leaves no .tmp behind (services::save_config
@@ -783,20 +799,110 @@ TEST_CASE("shared launcher: text files are written whole") {
   CHECK(detail.starts_with("launcher.json: "));
   CHECK(detail.size() > std::string("launcher.json: ").size());
   CHECK(fs::exists(blocked / "keep.txt"));
-  CHECK(!fs::exists(root / "blocked" / "launcher.json.tmp"));
-  // The temporary file cannot be made: a folder holds its name.
+  CHECK_EQ(temporaries_in(root / "blocked"), 0u);
+  // The temporary file has a name of the write's own, so something else
+  // called launcher.json.tmp (another program's, a folder) is not in the way
+  // and is left alone.
   fs::create_directories(root / "tmp" / "launcher.json.tmp");
+  CHECK(write_text_file(root / "tmp" / "launcher.json", "five", &why, &detail));
+  CHECK(read_text_file(root / "tmp" / "launcher.json") ==
+        std::optional<std::string>("five"));
+  CHECK(fs::is_directory(root / "tmp" / "launcher.json.tmp"));
+  // The temporary file cannot be made: a file holds the folder's name.
+  write(root / "file", "x");
   CHECK(
-      !write_text_file(root / "tmp" / "launcher.json", "five", &why, &detail));
+      !write_text_file(root / "file" / "launcher.json", "six", &why, &detail));
   CHECK_EQ(why,
            std::string("A temporary file could not be created in its folder."));
-  CHECK_EQ(detail, std::string("launcher.json.tmp"));
-  CHECK(!fs::exists(root / "tmp" / "launcher.json"));
+  CHECK(detail.starts_with("launcher.json."));
+  CHECK(detail.ends_with(".tmp"));
+  CHECK(read_text_file(root / "file") == std::optional<std::string>("x"));
   // Without a detail, the reason alone.
-  CHECK(!write_text_file(blocked, "six", &why));
+  CHECK(!write_text_file(blocked, "seven", &why));
   CHECK_EQ(why, std::string("The old file could not be replaced."));
   std::error_code ec;
   fs::remove_all(root, ec);
+}
+
+TEST_CASE("shared launcher: a file held open for a moment is still replaced") {
+  // A reader that does not share deletion (an antivirus scan, the other
+  // program reading the file through an ifstream) makes the rename fail
+  // while it has the file open. The write used to give up at once; it now
+  // tries again for about a third of a second.
+  const fs::path root = fresh("write_busy");
+  const fs::path file = root / "launcher.json";
+  REQUIRE(write_text_file(file, "old"));
+  const HANDLE reader =
+      CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  REQUIRE(reader != INVALID_HANDLE_VALUE);
+  std::thread release([reader] {
+    Sleep(40);
+    CloseHandle(reader);
+  });
+  std::string why;
+  CHECK(write_text_file(file, "new", &why));
+  release.join();
+  CHECK(why.empty());
+  CHECK(read_text_file(file) == std::optional<std::string>("new"));
+  CHECK_EQ(temporaries_in(root), 0u);
+
+  // Held for good: the write fails, the old text stays and nothing is left
+  // next to it.
+  const HANDLE keeper =
+      CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  REQUIRE(keeper != INVALID_HANDLE_VALUE);
+  CHECK(!write_text_file(file, "newer", &why));
+  CHECK_EQ(why, std::string("The old file could not be replaced."));
+  CloseHandle(keeper);
+  CHECK(read_text_file(file) == std::optional<std::string>("new"));
+  CHECK_EQ(temporaries_in(root), 0u);
+  std::error_code ec;
+  fs::remove_all(root, ec);
+}
+
+TEST_CASE("shared launcher: a file under a folder outside the code page opens") {
+  // RmlUi hands its file interface UTF-8 paths with '/' between the parts;
+  // fopen reads them in the ANSI code page and finds nothing under a folder
+  // such as "<Igry in Cyrillic>".
+  const fs::path root = fresh("utf8_open");
+  const fs::path dir = root / L"\u0418\u0433\u0440\u044B" / "ui";
+  write(dir / "shell.rml", "<rml/>");
+  std::string text = path_utf8(dir / "shell.rml");
+  std::ranges::replace(text, '\\', '/');
+  std::FILE *file = open_file_utf8(text);
+  REQUIRE(file != nullptr);
+  char data[16] = {};
+  CHECK_EQ(std::fread(data, 1, sizeof(data), file), 6u);
+  CHECK_EQ(std::string(data), std::string("<rml/>"));
+  std::fclose(file);
+  CHECK(open_file_utf8(text + ".missing") == nullptr);
+  CHECK(open_file_utf8("") == nullptr);
+  // Not UTF-8: nothing opens, and nothing throws inside RmlUi.
+  CHECK(open_file_utf8("C:/\xFF\xFE/shell.rml") == nullptr);
+  std::error_code ec;
+  fs::remove_all(root, ec);
+}
+
+TEST_CASE("shared launcher: the profile and user name are read as UTF-8") {
+  // xerces_cli read USERPROFILE and USERNAME with getenv, in the ANSI code
+  // page, and redacted UTF-8 text with them: "Jos<e acute>" was one byte
+  // there and two in the text, so diag bundle and crash send left it in.
+  SetEnvironmentVariableW(L"XERCES_TEST_PROFILE", L"C:\\Users\\Jos\u00E9");
+  SetEnvironmentVariableW(L"XERCES_TEST_USER",
+                          L"\u0418\u0433\u043E\u0440\u044C");
+  const std::string profile = environment_utf8(L"XERCES_TEST_PROFILE");
+  CHECK_EQ(profile, std::string("C:\\Users\\Jos\xC3\xA9"));
+  CHECK_EQ(environment_utf8(L"XERCES_TEST_USER"),
+           std::string("\xD0\x98\xD0\xB3\xD0\xBE\xD1\x80\xD1\x8C"));
+  // The text a log or a report holds is UTF-8: the folder is found in it.
+  CHECK_EQ(redact_profile("C:\\Users\\Jos\xC3\xA9\\AppData\\Local\\Xerces",
+                          profile),
+           std::string("%USERPROFILE%\\AppData\\Local\\Xerces"));
+  SetEnvironmentVariableW(L"XERCES_TEST_PROFILE", nullptr);
+  SetEnvironmentVariableW(L"XERCES_TEST_USER", nullptr);
+  CHECK(environment_utf8(L"XERCES_TEST_PROFILE").empty());
 }
 
 TEST_CASE("log tail: one line per event") {

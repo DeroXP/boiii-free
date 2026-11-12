@@ -136,6 +136,24 @@ std::string utf8(const fs::path &path) {
   return {reinterpret_cast<const char *>(text.data()), text.size()};
 }
 
+// Writes a file a command goes on to report as written; false, with the
+// reason on stderr, when it could not be. A temporary std::ofstream said
+// nothing, and the command printed "Wrote ..." over a file that was not
+// there.
+bool write_or_report(const fs::path &file, std::string_view text) {
+  std::string why;
+  std::string detail;
+  if (write_text_file(file, text, &why, &detail)) {
+    return true;
+  }
+  std::cerr << "Could not write " << utf8(file) << ": " << why;
+  if (!detail.empty()) {
+    std::cerr << " (" << detail << ")";
+  }
+  std::cerr << "\n";
+  return false;
+}
+
 void print_diagnostics(const diagnostics &diags) {
   for (const auto &item : diags.items()) {
     std::cout << to_string(item.level) << ": " << item.message;
@@ -468,22 +486,34 @@ int cmd_mod_new(const arguments &args) {
   m.ver = *version::parse("0.1.0");
   m.license = "CC-BY-4.0";
   m.authors = {"you"};
-  m.requires_xerces_text = ">=1.0 <2";
+  // A range this build meets, not a fixed ">=1.0 <2": the mod it scaffolds
+  // has to plan on the Xerces that scaffolded it.
+  m.requires_xerces_text = scaffold_requires_xerces(
+      version::parse(xerces_version_text).value_or(version{}));
   m.modes = {mode};
   m.provides.push_back({"scriptparsetree", script, "", {}});
   m.entry_scripts = {script};
   const auto parsed = json::parse(manifest_to_json(m));
 
-  fs::create_directories(folder / "scripts" / mode);
-  std::ofstream(folder / std::string(manifest_file_name), std::ios::binary)
-      << json::pretty(parsed.document) << "\n";
-  std::ofstream(folder / script, std::ios::binary)
-      << "// " << m.name << " (" << id << ")\n#namespace " << short_name
-      << ";\n\nfunction autoexec __init__()\n{\n}\n";
-  std::ofstream(folder / "README.md", std::ios::binary)
-      << "# " << m.name
-      << "\n\nCheck the manifest with `xerces_cli mod validate " << id
-      << "` and list conflicts with `xerces_cli conflicts check`.\n";
+  // "Created" only when all three files are there: a folder that cannot be
+  // written to (read-only, a full disk) used to be reported as created.
+  std::error_code ec;
+  fs::create_directories(folder / "scripts" / mode, ec);
+  if (!write_or_report(folder / std::string(manifest_file_name),
+                       json::pretty(parsed.document) + "\n") ||
+      !write_or_report(folder / script,
+                       "// " + m.name + " (" + id + ")\n#namespace " +
+                           short_name +
+                           ";\n\nfunction autoexec __init__()\n{\n}\n") ||
+      !write_or_report(folder / "README.md",
+                       "# " + m.name +
+                           "\n\nCheck the manifest with `xerces_cli mod "
+                           "validate " +
+                           id +
+                           "` and list conflicts with `xerces_cli conflicts "
+                           "check`.\n")) {
+    return exit_error;
+  }
   std::cout << "Created " << utf8(folder) << "\n";
   return exit_ok;
 }
@@ -758,8 +788,8 @@ checked check(const catalog_scan &scan, const plan_request &request,
         });
     if (content != scan.catalog.end()) {
       manifests[entry.id] = content->info;
-      inputs.indexes.push_back(
-          index_loose_files(entry.id, read_files(entry.path)));
+      // Only the loose files: a Workshop item's fastfiles are gigabytes.
+      inputs.indexes.push_back(index_loose_folder(entry.id, entry.path));
     }
   };
   for (const auto &entry : out.resolved.stack) {
@@ -770,8 +800,8 @@ checked check(const catalog_scan &scan, const plan_request &request,
   }
   inputs.manifests = manifests;
   if (stock) {
-    inputs.stock = index_loose_files(std::string(stock_owner),
-                                     read_files(fs::path(*stock)));
+    inputs.stock =
+        index_loose_folder(std::string(stock_owner), fs::path(*stock));
   }
   if (decisions != nullptr) {
     inputs.allow_undeclared = decisions->allow_overrides;
@@ -853,7 +883,9 @@ int cmd_packs(const arguments &args) {
     out.requires_xerces = ">=1.0";
     const std::string text = pack_to_json(out);
     if (const auto file = args.get("--out")) {
-      std::ofstream(fs::path(*file), std::ios::binary) << text << "\n";
+      if (!write_or_report(fs::path(*file), text + "\n")) {
+        return exit_error;
+      }
       std::cout << "Wrote " << *file << "\n";
     }
     if (args.has("--code") || !args.get("--out")) {
@@ -1076,9 +1108,11 @@ int cmd_diag_bundle(const arguments &args) {
     std::ranges::replace(stamp, ':', '-');
     out = home / "crash" / ("xerces-bundle-" + stamp + ".zip");
   }
-  const char *profile = std::getenv("USERPROFILE");
+  // As UTF-8, which the bundle's text is: getenv gives the ANSI code page,
+  // and a profile folder such as C:\Users\Jos<e acute> was then not redacted.
   const bundle_result result =
-      make_bundle(home, out, profile ? profile : "", system_info_json());
+      make_bundle(home, out, environment_utf8(L"USERPROFILE"),
+                  system_info_json());
   if (!result.ok) {
     std::cerr << result.error << "\n";
     return exit_error;

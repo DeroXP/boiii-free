@@ -20,6 +20,7 @@
 
 #include <xerces_core/account.hpp>
 #include <xerces_core/json.hpp>
+#include <xerces_core/launcher_home.hpp>
 #include <xerces_core/launcher_pacing.hpp>
 
 #include "font_engine.hpp"
@@ -247,6 +248,32 @@ Rml::Input::KeyIdentifier key_by_name(const std::string &name) {
   const auto it = keys.find(name);
   return it == keys.end() ? Rml::Input::KI_UNKNOWN : it->second;
 }
+
+// RmlUi's file interface. Its default one calls fopen with the UTF-8 path
+// RmlUi is given, which the C runtime reads in the ANSI code page: Xerces
+// unzipped under a folder with a character outside that page could then load
+// no font, document, style sheet or image. This one opens the same paths as
+// UTF-8 (xerces_core::open_file_utf8).
+class utf8_files final : public Rml::FileInterface {
+public:
+  Rml::FileHandle Open(const Rml::String &path) override {
+    return reinterpret_cast<Rml::FileHandle>(
+        xerces_core::open_file_utf8(path));
+  }
+  void Close(Rml::FileHandle file) override {
+    std::fclose(reinterpret_cast<std::FILE *>(file));
+  }
+  size_t Read(void *buffer, size_t size, Rml::FileHandle file) override {
+    return std::fread(buffer, 1, size, reinterpret_cast<std::FILE *>(file));
+  }
+  bool Seek(Rml::FileHandle file, long offset, int origin) override {
+    return std::fseek(reinterpret_cast<std::FILE *>(file), offset, origin) ==
+           0;
+  }
+  size_t Tell(Rml::FileHandle file) override {
+    return size_t(std::ftell(reinterpret_cast<std::FILE *>(file)));
+  }
+};
 } // namespace
 
 // RmlUi's system interface: the window's, with logging into the launcher log
@@ -318,9 +345,21 @@ Rml::Element *view::search_field() {
 
 options parse_options(int argc, wchar_t **argv) {
   options out;
+  std::vector<std::string> args;
   for (int i = 1; i < argc; ++i) {
-    const std::string arg = narrow(argv[i]);
-    const auto next = [&]() { return i + 1 < argc ? narrow(argv[++i]) : ""; };
+    args.push_back(narrow(argv[i]));
+  }
+  // Nothing after an invite link is an option. Windows starts Xerces for a
+  // link as `... --join-link "%1"` (link_protocol.cpp) with the link's text
+  // in place of %1: a link that reaches it with a quote inside ends that
+  // argument early, and what it carries behind the quote (--home, --script)
+  // would be read as options of the link's choosing.
+  args.resize(xerces_core::account::arguments_through_link(args));
+  for (std::size_t i = 0; i < args.size(); ++i) {
+    const std::string &arg = args[i];
+    const auto next = [&]() {
+      return i + 1 < args.size() ? args[++i] : std::string();
+    };
     if (arg == "--home" || arg == "-xerces-home") {
       out.home = fs::path(widen(next()));
     } else if (arg == "--scale") {
@@ -1355,6 +1394,10 @@ int app::run() {
   system_ = std::make_unique<translator>(*this, window_.system_interface());
   Rml::SetSystemInterface(system_.get());
   Rml::SetRenderInterface(window_.render_interface());
+  // Before Initialise, which otherwise installs RmlUi's fopen one. It has no
+  // state and must outlive Rml::Shutdown, so it is a static.
+  static utf8_files files;
+  Rml::SetFileInterface(&files);
   install_font_engine();
   Rml::Initialise();
   rml_started_ = true;

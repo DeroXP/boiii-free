@@ -337,6 +337,11 @@ private:
          "scale-175", "scale-200"},
         {"reduced-motion"},
         {"lang-en", "lang-pseudo"},
+        // Privacy, in the document's order (settings.rml). A control left
+        // out here cannot be reached with Up and Down at all.
+        {"send-crash-reports"},
+        {"delete-crash-reports"},
+        {"report-by-hand"},
         {"open-home"},
         {"check-updates"},
     };

@@ -254,7 +254,11 @@ int32_t prepare_zones_stub(XZoneInfo *zones, const int32_t count, char *,
     ids = mod_load ? get() : loaded;
   }
   const std::vector<provider> extras = resolve_providers(ids);
-  std::deque<std::string> names;
+  // The plan's names must live until the engine has taken the zones
+  // (schedule_zones_stub, after this returns): the expander may keep the
+  // pointer it was given for a zone's own name
+  thread_local std::deque<std::string> names;
+  names.clear();
   std::vector<XZoneInfo> plan;
 
   const auto add_extras = [&](const std::string &zone, const int32_t flags) {
@@ -436,11 +440,30 @@ void merge_precache(const XAssetEntry *entry) {
   }
 
   // A zone reloaded under the same name frees its old caches, so only keep
-  // caches the asset pool still holds
+  // caches the asset pool still holds: the one in use, and the copies that
+  // lost to it, which the engine keeps behind it (nextOverride) and marks not
+  // in use. Every mod's list has the same name, so all but one are such
+  // copies: counting only entries in use left the main mod's list and the
+  // last extra's, and the mods in between lost their LUI events ("LUI event
+  // name is not precached", seven-mod stack, 2026-11-06).
   std::unordered_set<const void *> live{cache};
-  for (const auto &item : game::db::xasset::pool::g_assetEntryPool->pool) {
-    if (item.entry.inuse && item.entry.asset.type == XAssetType::BG_CACHE) {
-      live.insert(item.entry.asset.header.data);
+  auto &pool = game::db::xasset::pool::g_assetEntryPool->pool;
+  for (const auto &item : pool) {
+    if (!item.entry.inuse || item.entry.asset.type != XAssetType::BG_CACHE) {
+      continue;
+    }
+    live.insert(item.entry.asset.header.data);
+    uint32_t index = item.entry.nextOverride;
+    for (int steps = 0;
+         index != 0 &&
+         index < game::db::xasset::pool::XASSET_ENTRY_POOL_LENGTH &&
+         steps < 256;
+         ++steps) {
+      const XAssetEntry &copy = pool[index].entry;
+      if (copy.asset.type == XAssetType::BG_CACHE && copy.asset.header.data) {
+        live.insert(copy.asset.header.data);
+      }
+      index = copy.nextOverride;
     }
   }
 

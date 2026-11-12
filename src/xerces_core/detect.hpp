@@ -52,5 +52,10 @@ detection detect_game(const std::optional<std::filesystem::path> &saved,
 // HKCU\Software\Valve\Steam\SteamPath and
 // HKLM\SOFTWARE\WOW6432Node\Valve\Steam\InstallPath, when set.
 std::vector<std::filesystem::path> steam_roots_from_registry();
+// Adds a Steam root to the list, normalised, unless the list already names
+// the same folder (the two registry values usually do, with different case
+// and separators).
+void add_steam_root(std::vector<std::filesystem::path> &roots,
+                    const std::filesystem::path &found);
 detection_io real_filesystem();
 } // namespace xerces_core

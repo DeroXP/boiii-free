@@ -998,4 +998,10 @@ std::string strip_color_codes(std::string_view text) {
   }
   return tidy.empty() ? std::string(text) : tidy;
 }
+
+std::string scaffold_requires_xerces(const version &running) {
+  return ">=" + std::to_string(running.major) + "." +
+         std::to_string(running.minor) + " <" +
+         std::to_string(running.major + 1);
+}
 } // namespace xerces_core

@@ -107,15 +107,19 @@ hash, sent with the link, shows that the zip is the one we made.
   character mod has replaced (Hyperdimension Neptunia gives the first four their
   looks) says which mod. When you host, your last pick is put on again in the next
   match; other players pick again.
-  After a pick you see yourself in the third-person view for four seconds.
-- **Every character mod's characters (Zombies).** With several character mods on,
-  CHARACTERS lists each of them under DEFAULT with its count (DBZ VILLAIN
-  CHARACTERS (8), GIRLS' FRONTLINE (37)...), and ORIGINAL CHARACTERS for the game's
-  own where a mod replaced them. Select one to see its characters and pick one: it
-  is a slot of its own, with its own hands in first person, whatever the order of
-  your mods. A mod that only replaces the base characters has no names of its own,
-  so its rows are named after its models (Cooler, Noire) and say whose place each
-  takes: the game still names and voices you as that character.
+- **Every character mod's characters, on one screen with a live view (Zombies).**
+  Since beta.22 CHARACTERS is one screen with a tab for each character mod (LB/RB
+  or Q/E change tab): your main mod's characters first, then DBZ VILLAIN
+  CHARACTERS, GIRLS' FRONTLINE and so on, and ORIGINAL CHARACTERS for the game's
+  own where a mod replaced them. Moving over a name shows that character on you,
+  from the front, to the right of the list. Select keeps it; Back puts you back
+  as you were. In a solo match zombies stand still and cannot hurt you while the
+  screen is open; with other players in the match the game goes on around you.
+  Each character is a slot of its own, with its own hands in first person,
+  whatever the order of your mods. A mod that only replaces the base characters
+  has no names of its own, so its rows are named after its models (Cooler, Noire)
+  and say whose place each takes: the game still names and voices you as that
+  character.
 - **Aim assist like the newer Call of Duty games (Zombies, controller).** XERCES
   SETTINGS > CONTROLLER > Aim Assist (Zombies): Game's Own, Modern (MW3) or Modern,
   Stronger. It is on Game's Own until you change it. Modern slows your look speed
@@ -138,12 +142,21 @@ hash, sent with the link, shows that the zip is the one we made.
   game" starts the game again with the same mods, past Xerces, so Xerces cannot
   help with the next start.
 - **A freeze is handled like a crash.** When the game has shown no new frame for
-  30 seconds it writes `freeze-<time>.txt` (where every thread is) and
+  30 seconds it writes `freeze-<time>.txt` (what every thread is doing) and
   `freeze-<time>.dmp` in `%LOCALAPPDATA%\boiii\minidumps`, next to its crash
   dumps, and Xerces sends a crash report for it. If it is still frozen 60
   seconds after its last frame (3 minutes while a map loads), it closes itself;
   you do not have to end it in Task Manager. If it comes back on its own, the
   report is taken back.
+- **Every crash, freeze and fatal error leaves a report you can read** (since
+  beta.22): `crash-<time>.txt`, `freeze-<time>.txt` or `fatal-<time>.txt` in
+  `%LOCALAPPDATA%\boiii\minidumps`, next to the dump. It starts with what
+  happened in a sentence, then the Xerces version, the map, your mods in load
+  order, the scripts that were running, where the game was in its code, how
+  much memory was left and your Xerces settings, and ends with the console's
+  last lines. Attach it when you report a crash by hand. It holds no chat, and
+  player names in the console lines are written `<player>`; folder paths, which
+  can have your Windows user name in them, are as they are.
 - After a crash with mods on, Home offers to launch with mods off (safe mode),
   and "Find the culprit" tries your mods in smaller groups, one test launch at a
   time, to find the one that crashes.
@@ -154,7 +167,9 @@ hash, sent with the link, shows that the zip is the one we made.
   the mode, map and mods, the names of the launch flags, the Xerces version and
   commit and the game build, this PC's Windows version, CPU, graphics card and
   driver, RAM and display, the last lines of the game's and Xerces' logs
-  (without chat), and a small dump of the threads' stacks.
+  (without chat), the game's own text report of the crash (above, without the
+  console's lines, with the same things taken out as from the logs), and a small
+  dump of the threads' stacks.
 - What is taken out: in the logs, your Windows user name, player names and
   server addresses, and your user folder is written as `%USERPROFILE%`. Other
   folder paths stay, such as the game's, the Workshop's and the Xerces folder's.
@@ -186,7 +201,9 @@ the tester channel. Please include:
 - what you did, what you expected and what happened;
 - the mods you had on, in their order, the mode and the map;
 - Diagnostics > Copy report, pasted in;
-- a crash bundle if the game crashed and we ask for one.
+- if the game crashed or froze, its `crash-<time>.txt`, `freeze-<time>.txt` or
+  `fatal-<time>.txt` from `%LOCALAPPDATA%\boiii\minidumps`, and a crash bundle
+  if we ask for one.
 
 Never attach game files or files from the Workshop folder.
 

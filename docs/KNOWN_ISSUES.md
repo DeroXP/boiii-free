@@ -85,6 +85,13 @@ to report these again, but tell us if you see them somewhere else or worse.
   character screen for them (it cannot change a pick made in CHARACTERS until
   you pick DEFAULT).
 - **Only the host's last pick is remembered.** Other players pick again each match.
+- **The live view is safe in a solo match only.** There the zombies stand still
+  and cannot hurt you while CHARACTERS is open. With other players in the match
+  nothing is held, so open it somewhere safe. Not tried with a second player yet.
+- **A long mod title is cut on its tab** ("DBZ VILLAIN.."); the line under the
+  list has the full title.
+- **The other players see each character you look at**, since the live view puts
+  it on you; Back puts you back as you were.
 
 ## Zombies aim assist and hip-fire spread
 

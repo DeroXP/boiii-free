@@ -127,15 +127,30 @@ DataSources.BoiiiQuickSettingsVideo = DataSourceHelpers.ListSetup("BoiiiQuickSet
 
   -- FOV Scale (zoom FOV multiplier)
   -- NOTE: CreateDvarSettings uses DvarInt internally to match selection.
-  -- DvarInt("cg_fovScale") returns 1 for 1.0, so only 1.0 auto-selects.
-  -- We default to 1.0 and use float values directly.
+  -- DvarInt("cg_fovScale") returns 1 for 1.0, so only 1.0 auto-selects, and a value under 1 matches nothing: the row
+  -- then shows its default option. So the default is the step nearest the value the dvar really has, read as a
+  -- fraction: the row shows what is set, and opening the tab cannot put another value in its place.
+  local function nearestStep(dvarName, values, fallback)
+    local ok, current = pcall(Engine.DvarFloat, nil, dvarName)
+    if not ok or type(current) ~= "number" then
+      return fallback
+    end
+    local best = fallback
+    for _, value in ipairs(values) do
+      if math.abs(value - current) < math.abs(best - current) then
+        best = value
+      end
+    end
+    return best
+  end
   local fovScaleOptions = {}
   local fovScaleValues = { 0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.5, 2.0 }
+  local fovScaleNow = nearestStep("cg_fovScale", fovScaleValues, 1.0)
   for _, scale in ipairs(fovScaleValues) do
     table.insert(fovScaleOptions, {
       option = scale == 1.0 and "1.0 (Default)" or tostring(scale),
       value = scale,
-      default = scale == 1.0,
+      default = scale == fovScaleNow,
     })
   end
   table.insert(
@@ -150,7 +165,7 @@ DataSources.BoiiiQuickSettingsVideo = DataSourceHelpers.ListSetup("BoiiiQuickSet
       nil,
       function(controller, optionModel, optionsList, dvarName, extraParam)
         UpdateInfoModels(optionModel)
-        Engine.SetDvar(dvarName, optionModel.value)
+        Engine.SetDvar(dvarName, tostring(optionModel.value))
       end
     )
   )

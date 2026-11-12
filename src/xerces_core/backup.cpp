@@ -31,6 +31,14 @@ void prune(const fs::path &backups_dir, std::size_t keep) {
 
 bool is_credential_file(const fs::path &relative) {
   const std::string name = lower(utf8(relative.filename()));
+  // The saved sign-in (account.cpp's session_file): its refresh token would
+  // otherwise sit in every config backup. Also the temporary copy it is
+  // written through, "account.dat.tmp" or write_text_file's
+  // "account.dat.<pid>-<count>.tmp", should a backup run mid-write.
+  if (name == "account.dat" ||
+      (name.starts_with("account.dat.") && name.ends_with(".tmp"))) {
+    return true;
+  }
   for (const char *word :
        {"credential", "token", "secret", "password", "refresh"}) {
     if (name.find(word) != std::string::npos) {

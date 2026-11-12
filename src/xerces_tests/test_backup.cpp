@@ -2,6 +2,7 @@
 
 #include <fstream>
 
+#include <xerces_core/account.hpp>
 #include <xerces_core/backup.hpp>
 
 using namespace xerces_core;
@@ -32,6 +33,39 @@ TEST_CASE("backup: credentials never go in") {
   CHECK(is_credential_file("Credentials.dat"));
   CHECK(!is_credential_file("config.json"));
   CHECK(!is_credential_file("packs/weekend.xerces-pack.json"));
+}
+
+TEST_CASE("backup: the saved sign-in stays out of config backups") {
+  // config/account.dat holds the refresh token (account.cpp's
+  // session_file); nothing in its name said "credential", so every config
+  // backup took a copy of it.
+  CHECK(is_credential_file(
+      fs::relative(account::session_file("home"), fs::path("home") / "config")));
+  CHECK(is_credential_file("account.dat"));
+  CHECK(is_credential_file("Account.DAT"));
+  // Its temporary copies while it is written.
+  CHECK(is_credential_file("account.dat.tmp"));
+  CHECK(is_credential_file("account.dat.4242-7.tmp"));
+  CHECK(!is_credential_file("account.data.json"));
+  CHECK(!is_credential_file("launcher.json.4242-7.tmp"));
+
+  temp_dir root("xerces_tests_backup_account");
+  const fs::path config = root.path / "config";
+  write(config / "launcher.json", "{}");
+  write(config / "account.dat", "the refresh token");
+  write(config / "account.dat.tmp", "half a refresh token");
+  diagnostics diags;
+  const auto made = create_backup(root.path / "backups", {{"config", config}},
+                                  "20261112-100000", {}, diags);
+  REQUIRE(made.has_value());
+  CHECK(fs::exists(*made / "config" / "launcher.json"));
+  CHECK(!fs::exists(*made / "config" / "account.dat"));
+  CHECK(!fs::exists(*made / "config" / "account.dat.tmp"));
+  // A restore does not sign the player out either: the file stays in place.
+  REQUIRE(restore_backup(*made, root.path / "backups", {{"config", config}},
+                         "20261112-110000", {}, diags));
+  CHECK_EQ(xerces_tests::read_file(config / "account.dat"),
+           "the refresh token");
 }
 
 TEST_CASE("backup: snapshot, prune and restore") {

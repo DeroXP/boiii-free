@@ -7,6 +7,7 @@
 // files. Headless: no UI, no game headers. Windows only, as the launcher is.
 
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -127,8 +128,13 @@ bool dry_launch_from_environment();
 
 // The whole file, or nothing when it cannot be opened.
 std::optional<std::string> read_text_file(const std::filesystem::path &path);
-// Writes through <path>.tmp and a rename, so a reader never sees half a
-// file; creates the folder. The temporary file goes when anything fails.
+// Writes through a temporary file next to it and a rename, so a reader never
+// sees half a file; creates the folder. The temporary file has a name of
+// this write's own (<name>.<pid>-<count>.tmp: two programs writing the same
+// file do not share one), is flushed to the disk before the rename, and goes
+// when anything fails. A rename refused because something has the file open
+// for a moment (an antivirus scan, the other program reading it) is tried
+// again a few times, for about a third of a second in all.
 // why, when given, receives the reason as one fixed sentence (ui_text) a
 // screen translates; detail, the file's name and the system's message, for
 // the log. Both are cleared when the write worked.
@@ -137,4 +143,17 @@ bool write_text_file(const std::filesystem::path &path, std::string_view text,
 
 std::string path_utf8(const std::filesystem::path &path); // '\' kept
 std::filesystem::path path_from_utf8(std::string_view text);
+
+// An environment variable as UTF-8, read as wide text; empty when it is not
+// set. getenv and _dupenv_s give the ANSI code page instead, so a profile
+// folder or a user name with a letter outside ASCII would not be found in
+// the UTF-8 text it is redacted from (diag bundle, crash reports).
+std::string environment_utf8(const wchar_t *name);
+
+// fopen(path, "rb") for a path given as UTF-8 text, with '/' or '\' between
+// its parts. The C runtime's fopen reads its path in the ANSI code page, so
+// it cannot open a file under a folder with a character outside that page;
+// RmlUi's default file interface does exactly that with the launcher's
+// screens and fonts. Null when the file cannot be opened.
+std::FILE *open_file_utf8(std::string_view path);
 } // namespace xerces_core

@@ -222,12 +222,27 @@ private:
       if (!writable()) {
         return;
       }
+      // The file holds more than this switch (the pool sizes, friends_only):
+      // one that cannot be read, or does not read as JSON, is left alone
+      // instead of being replaced by a file with the switch only.
       const fs::path file = *folder() / "launcher_settings.json";
-      const std::string updated = xerces_core::set_asset_pools_enabled(
-          read_text(file).value_or(""), !pools_on_);
-      if (!write_text(file, updated)) {
-        owner_->notify(owner_->tr("launcher_settings.json could not be written."),
-                       true);
+      using xerces_core::pool_switch;
+      const pool_switch done = xerces_core::switch_asset_pools(file, !pools_on_);
+      if (done != pool_switch::written) {
+        log_warn("launcher.game_files.pools_refused",
+                 done == pool_switch::unreadable      ? "unreadable"
+                 : done == pool_switch::not_an_object ? "not a JSON object"
+                                                      : "not written");
+        owner_->notify(
+            done == pool_switch::unreadable
+                ? owner_->tr("launcher_settings.json could not be read, so it "
+                             "was left as it is.")
+            : done == pool_switch::not_an_object
+                ? owner_->tr("launcher_settings.json is not valid JSON, so it "
+                             "was left as it is. Fix or delete the file "
+                             "first.")
+                : owner_->tr("launcher_settings.json could not be written."),
+            true);
         return;
       }
       load();

@@ -219,6 +219,48 @@ TEST_CASE("detection: saved path first, then every Steam library") {
   CHECK(!missing.tried.empty());
 }
 
+TEST_CASE("detection: a library outside the ANSI code page is looked at") {
+  // D:\<Igry in Cyrillic>\SteamLibrary: path::string() converts to the ANSI
+  // code page and throws for such a folder on a Western Windows, so
+  // detection threw before it looked anywhere.
+  const std::filesystem::path library =
+      std::filesystem::path(L"D:\\\u0418\u0433\u0440\u044B") / "SteamLibrary";
+  const std::filesystem::path game =
+      library / "steamapps" / "common" / "Call of Duty Black Ops III";
+  const std::filesystem::path manifest =
+      library / "steamapps" / "appmanifest_311210.acf";
+  const detection_io io{
+      [&](const std::filesystem::path &p) -> std::optional<std::string> {
+        return p == manifest
+                   ? std::optional<std::string>(
+                         R"("AppState" { "installdir" "Call of Duty Black Ops III" })")
+                   : std::nullopt;
+      },
+      [&](const std::filesystem::path &p) {
+        return p == game / "BlackOps3.exe";
+      }};
+  const detection found = detect_game(std::nullopt, {library}, io);
+  REQUIRE(found.game_dir.has_value());
+  CHECK(*found.game_dir == game);
+  // What was tried is UTF-8 text (the screens and the CLI's JSON show it).
+  REQUIRE_EQ(found.tried.size(), 1u);
+  CHECK_EQ(found.tried[0],
+           "D:\\\xD0\x98\xD0\xB3\xD1\x80\xD1\x8B\\SteamLibrary\\steamapps\\"
+           "common\\Call of Duty Black Ops III");
+}
+
+TEST_CASE("detection: the same Steam root is listed once") {
+  // The two registry values name one folder in different case and with
+  // different separators; the comparison works on the wide text.
+  std::vector<std::filesystem::path> roots;
+  add_steam_root(roots, L"c:/\u0418\u0433\u0440\u044B/steam");
+  add_steam_root(roots, L"C:\\\u0418\u0433\u0440\u044B\\Steam");
+  add_steam_root(roots, L"C:\\\u0418\u0433\u0440\u044B\\Steam\\");
+  CHECK_EQ(roots.size(), 1u);
+  add_steam_root(roots, L"C:\\Program Files (x86)\\Steam");
+  CHECK_EQ(roots.size(), 2u);
+}
+
 TEST_CASE("safe mode: a crash with mods turns the next launch safe") {
   launch_journal journal;
   journal.plan_id = "sha256:abc";

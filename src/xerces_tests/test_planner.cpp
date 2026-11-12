@@ -191,6 +191,42 @@ TEST_CASE("planner: modes and the Xerces version are checked") {
   CHECK(result.diags.has("plan.xerces.version"));
 }
 
+TEST_CASE("planner: a beta build meets requires.xerces as its release does") {
+  // By npm's rule 0.1.0-beta.21 meets no range that does not name a
+  // prerelease of 0.1.0, so every mod with requires.xerces failed on every
+  // beta. The check now uses the version without its prerelease tag.
+  const std::vector<installed_content> catalog = {
+      make(mod("a.mod", "1.0.0", R"(,"requires":{"xerces":">=0.1"})")),
+      make(mod("later.mod", "1.0.0", R"(,"requires":{"xerces":">=0.2"})"))};
+  plan_request request = request_for({"a.mod"});
+  request.xerces_version = *version::parse("0.1.0-beta.21");
+  CHECK(resolve_plan(catalog, request).ok());
+  // A range the release does not meet still fails, and the message names
+  // the build as it is.
+  request.mods = {"later.mod"};
+  const plan later = resolve_plan(catalog, request);
+  CHECK(later.diags.has("plan.xerces.version"));
+  CHECK(std::ranges::any_of(later.diags.items(), [](const diagnostic &d) {
+    return d.code == "plan.xerces.version" &&
+           d.message.find("this is 0.1.0-beta.21") != std::string::npos;
+  }));
+
+  // xerces_cli mod new writes a range the build that ran it meets.
+  for (const char *text : {"0.1.0-beta.21", "0.0.0-unknown", "1.4.2", "2.0.0"}) {
+    const version running = *version::parse(text);
+    const std::string range = scaffold_requires_xerces(running);
+    const std::vector<installed_content> scaffolded = {make(
+        mod("new.mod", "0.1.0", ",\"requires\":{\"xerces\":\"" + range + "\"}"))};
+    plan_request made = request_for({"new.mod"});
+    made.xerces_version = running;
+    CHECK(resolve_plan(scaffolded, made).ok());
+  }
+  CHECK_EQ(scaffold_requires_xerces(*version::parse("0.1.0-beta.21")),
+           std::string(">=0.1 <1"));
+  CHECK_EQ(scaffold_requires_xerces(*version::parse("1.4.2")),
+           std::string(">=1.4 <2"));
+}
+
 TEST_CASE("planner: mod-stack's limits on stacked mods") {
   const std::vector<installed_content> catalog = {
       make(mod("a.mod", "1.0.0")),
@@ -353,6 +389,55 @@ TEST_CASE("planner: pins choose exact versions") {
   CHECK_EQ(pinned.stack[0].ver.to_string(), "1.2.0");
   request.pins["b.mod"] = "9.9.9";
   CHECK(resolve_plan(catalog, request).diags.has("plan.mod.version"));
+}
+
+TEST_CASE("planner: a pin left behind by an update offers unpin") {
+  // A pack pinned the Workshop item's version; Steam then updated the item,
+  // and a legacy mod's version is its content hash. The mod is installed,
+  // so "install" fixes nothing: the pin has to go, and the message names
+  // the version that is installed.
+  const std::vector<installed_content> catalog = {
+      make(mod("ws.123", "0.0.0+sha.bbbbbbbb"))};
+  plan_request request = request_for({"ws.123"});
+  request.pins["ws.123"] = "0.0.0+sha.aaaaaaaa";
+  const plan stale = resolve_plan(catalog, request);
+  CHECK(!stale.ok());
+  CHECK(stale.diags.has("plan.mod.version"));
+  REQUIRE_EQ(stale.fixes.size(), 1u);
+  CHECK_EQ(stale.fixes[0].kind, "unpin");
+  CHECK_EQ(stale.fixes[0].id, "ws.123");
+  CHECK_EQ(stale.fixes[0].detail, "0.0.0+sha.aaaaaaaa");
+  CHECK(std::ranges::any_of(stale.diags.items(), [](const diagnostic &d) {
+    return d.code == "plan.mod.version" &&
+           d.message.find("the installed version is 0.0.0+sha.bbbbbbbb") !=
+               std::string::npos;
+  }));
+  // Without the pin the installed version loads.
+  request.pins.clear();
+  CHECK(resolve_plan(catalog, request).ok());
+
+  // A mod that is not installed at all is still one to install.
+  plan_request missing = request_for({"ws.999"});
+  missing.pins["ws.999"] = "0.0.0+sha.aaaaaaaa";
+  const plan gone = resolve_plan(catalog, missing);
+  CHECK(gone.diags.has("plan.mod.missing"));
+  REQUIRE_EQ(gone.fixes.size(), 1u);
+  CHECK_EQ(gone.fixes[0].kind, "install");
+
+  // The same for a dependency nobody enabled by hand.
+  const std::vector<installed_content> with_dep = {
+      make(mod("a.mod", "1.0.0", R"(,"dependencies":[{"id":"b.mod"}])")),
+      make(mod("b.mod", "1.5.0"))};
+  plan_request dep = request_for({"a.mod"});
+  dep.pins["b.mod"] = "1.2.0";
+  const plan pinned_dep = resolve_plan(with_dep, dep);
+  CHECK(pinned_dep.diags.has("plan.dependency.unsatisfiable"));
+  CHECK(std::ranges::any_of(pinned_dep.fixes, [](const fix_action &f) {
+    return f.kind == "unpin" && f.id == "b.mod" && f.detail == "1.2.0";
+  }));
+  CHECK(std::ranges::none_of(pinned_dep.fixes, [](const fix_action &f) {
+    return f.kind == "update" || f.kind == "install";
+  }));
 }
 
 TEST_CASE("planner: optional dependencies join only when installed") {

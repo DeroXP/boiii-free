@@ -158,11 +158,33 @@ pad_state read_pad() {
   if (!xinput_get_state) {
     return out;
   }
+  // Only the slot that answered last is asked every frame: asking an empty
+  // slot makes Windows look for devices, which costs far more than a read
+  // (Microsoft's own advice), and three of the four are empty. The others are
+  // tried again every two seconds while none answers.
+  static int known_slot = -1;
+  static uint64_t next_scan_ms = 0;
+  const uint64_t now = GetTickCount64();
+  const bool scan = known_slot < 0 && now >= next_scan_ms;
+  if (known_slot < 0 && !scan) {
+    return out;
+  }
+  if (scan) {
+    next_scan_ms = now + 2000;
+  }
   for (DWORD index = 0; index < XUSER_MAX_COUNT; ++index) {
-    XINPUT_STATE state{};
-    if (xinput_get_state(index, &state) != ERROR_SUCCESS) {
+    if (!scan && static_cast<int>(index) != known_slot) {
       continue;
     }
+    XINPUT_STATE state{};
+    if (xinput_get_state(index, &state) != ERROR_SUCCESS) {
+      if (static_cast<int>(index) == known_slot) {
+        known_slot = -1;
+        next_scan_ms = now + 2000;
+      }
+      continue;
+    }
+    known_slot = static_cast<int>(index);
     out.connected = true;
     const XINPUT_GAMEPAD &pad = state.Gamepad;
     const float strafe = std::abs(static_cast<float>(pad.sThumbLX)) / 32767.0f;
@@ -175,6 +197,7 @@ pad_state read_pad() {
     out.active = out.active || strafe > 0.2f || ly > 0.2f || aim > 0.2f ||
                  pad.bLeftTrigger > 40 || pad.bRightTrigger > 40 ||
                  pad.wButtons != 0;
+    break;
   }
   return out;
 }
@@ -307,7 +330,7 @@ constexpr int ENTITIES = 0x700;
 
 struct state {
   std::array<seen, ENTITIES> tracks{};
-  uint32_t frame = 0;
+  uint32_t frame = 1; // never 0: a zombie never seen has frame 0
   float client_pitch = 0.0f; // the client's own angles as this left them
   float client_yaw = 0.0f;
   bool have_client = false;
@@ -333,7 +356,12 @@ state st;
 
 int64_t now_ms() { return static_cast<int64_t>(GetTickCount64()); }
 
+// Every way out of a frame comes through here, so what the zombies did
+// meanwhile never counts as one frame's motion: the frame number jumps, and
+// no track is "the frame before" any more (it used to be, and the first frame
+// after a pause turned the view by the whole pause's motion)
 void reset() {
+  st.frame += 2;
   st.have_client = false;
   st.target = -1;
   st.strength = 0.0f;
@@ -466,6 +494,13 @@ void frame() {
   }
   const rules &r = *level >= 2 ? STRONGER : GAME_STRENGTH;
 
+  // nothing is read, the controller included, outside a Zombies level
+  if (!in_zombies_level()) {
+    st.hip_tan_x = 0.0f;
+    st.last_qpc = 0;
+    reset();
+    return;
+  }
   const pad_state pad = read_pad();
   if (pad.active) {
     st.last_pad_ms = now_ms();
@@ -480,11 +515,6 @@ void frame() {
                              static_cast<float>(freq.QuadPart);
   st.last_qpc = qpc.QuadPart;
 
-  if (!in_zombies_level()) {
-    st.hip_tan_x = 0.0f;
-    reset();
-    return;
-  }
   if (!pad.connected || now_ms() - st.last_pad_ms > 2000) {
     reset();
     return;

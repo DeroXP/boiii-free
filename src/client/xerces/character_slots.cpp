@@ -106,7 +106,10 @@ BuiltinMethod set_helmet_style_orig = nullptr;
 
 // Whether a call from another script on this player is to be skipped
 bool locked(scr_entref_t *entref) {
-  if (entref->classnum != 0 || entref->u.entnum > 31) {
+  // Zombies only: the lock is Xerces' Zombies script's, and a bit left set
+  // must never hold back a multiplayer or campaign script
+  if (entref->classnum != 0 || entref->u.entnum > 31 ||
+      !game::com::Com_SessionMode_IsMode(game::eModes::ZOMBIES)) {
     return false;
   }
   const auto lock = game::get_dvar_int("xerces_char_lock");
@@ -191,6 +194,7 @@ struct record {
 
 std::mutex looks_mutex;
 std::vector<look> looks;
+std::string looks_owner; // whose table is in use; "" the game's
 std::unordered_map<uint8_t *, record> records;
 uint64_t built_links = UINT64_MAX;
 const void *built_table = nullptr;
@@ -280,6 +284,28 @@ bool read_items(const uint8_t *items, uint32_t count, std::vector<item_t> &out) 
     }
   }
   return true;
+}
+
+// A dvar of Xerces' own, set the way the console sets one: the game's own
+// code does the writing, on its own frame. Writing a dvar's memory directly,
+// or reading one more dvar inside a script call's wrapper, is not safe here:
+// on 2026-11-12 a wrapper that read a dvar after the game's own
+// SetCharacterBodyStyle hung the server in the game's protected code in two
+// of three match starts.
+void set_dvar(const char *name, int value) {
+  game::cbuf::Cbuf_AddText(game::LOCAL_CLIENT_0,
+                           std::format("set {} {}\n", name, value).c_str());
+}
+
+// How many characters the table in use has, for the game script's check of
+// a pick (xerces_characters.gsc valid()); 0 outside a Zombies match
+int told_bodies = -1;
+
+void tell_bodies(int bodies) {
+  if (bodies != told_bodies) {
+    told_bodies = bodies;
+    set_dvar("xerces_char_bodies", bodies);
+  }
 }
 
 // Works out every look and points the table in use at the outfits added.
@@ -426,6 +452,8 @@ bool build(const uint8_t *in_use) {
         }
       }
     }
+    // the table in use lists its own characters as they are
+    const bool in_use = own_table && templates[0] == 0;
     for (const size_t t : templates) {
       const table_copy &table = tables[t];
       for (uint32_t i = 0; i < table.bodies.size(); ++i) {
@@ -441,6 +469,12 @@ bool build(const uint8_t *in_use) {
           for (int m = 0; m < ITEM_MODEL_COUNT; ++m) {
             const size_t at = ITEM_MODELS + static_cast<size_t>(m) * 8;
             const void *model = field<const void *>(item.data(), at);
+            if (in_use) {
+              if (m == 0) {
+                body_model = model;
+              }
+              continue;
+            }
             const std::string &name = model_name(model);
             if (name.empty()) {
               continue;
@@ -472,14 +506,19 @@ bool build(const uint8_t *in_use) {
           }
           // a mod's character has a model of the mod's; the game's are all its
           // own
-          if (!source.empty() && (own_table ? !owned : !body_owned)) {
+          if (!in_use && !source.empty() &&
+              (own_table ? !owned : !body_owned)) {
             continue;
           }
           // an outfit whose body is no character (Girls' Frontline has two
           // made of an effect's model) would leave the player unseen
           xmodel::XModel model{};
-          if (!peek(body_model, model) || model.numBones < MIN_BONES) {
-            continue;
+          if (!peek(body_model, model) ||
+              (!in_use && model.numBones < MIN_BONES)) {
+            if (!in_use) {
+              continue;
+            }
+            model = {};
           }
 
           const auto same_models = [&](const item_t &other) {
@@ -532,10 +571,6 @@ bool build(const uint8_t *in_use) {
             at_style = static_cast<int>(slots[to].items.size() - 1);
             added = true;
           }
-          // the table in use lists its own characters already
-          if (!added && source == live_owner) {
-            continue;
-          }
           // one row for a slot: a mod that gives two characters the same
           // models (Avali's nine are four characters) has it once
           if (std::ranges::any_of(found, [&](const look &one) {
@@ -561,9 +596,12 @@ bool build(const uint8_t *in_use) {
               made_of += std::format(" {:p}", material);
             }
           }
-          const std::string display =
-              plain(text_at(field<const char *>(body.bytes.data(),
-                                                BODY_DISPLAY_NAME)));
+          std::string display = plain(text_at(
+              field<const char *>(body.bytes.data(), BODY_DISPLAY_NAME)));
+          if (display.empty()) {
+            display = plain(
+                text_at(field<const char *>(body.bytes.data(), BODY_NAME)));
+          }
           if (std::ranges::any_of(found, [&](const look &one) {
                 return one.source == source && one.name == display &&
                        one.made_of == made_of;
@@ -637,6 +675,7 @@ bool build(const uint8_t *in_use) {
     }
   }
 
+  tell_bodies(static_cast<int>(bodies));
   build_ms = std::chrono::duration<double, std::milli>(
                  std::chrono::steady_clock::now() - started)
                  .count();
@@ -648,13 +687,14 @@ bool build(const uint8_t *in_use) {
   }
   const bool changed = found.size() != looks.size() || dropped != dropped_looks;
   looks = std::move(found);
+  looks_owner = live_owner == "map" ? std::string{} : live_owner;
   dropped_looks = dropped;
   if (changed) {
     xerces_runtime::log_info(
         "xerces.char.looks",
-        std::format("Character slots: {} characters from {} sources beside the "
-                    "table in use ({} outfits added, {} left out for room), "
-                    "{:.1f} ms",
+        std::format("Character slots: {} characters from {} sources, the table "
+                    "in use among them ({} outfits added, {} left out for "
+                    "room), {:.1f} ms",
                     looks.size(), sources.size(), added, dropped, build_ms),
         std::format("{{\"looks\":{},\"sources\":{},\"added\":{},\"dropped\":{},"
                     "\"table_owner\":\"{}\"}}",
@@ -677,10 +717,10 @@ void fix_saved() {
     }
   }
   if (game::get_dvar_int("xerces_char_saved").value_or(0) != slot) {
-    game::set_dvar_int("xerces_char_saved", slot, false);
+    set_dvar("xerces_char_saved", slot);
   }
   if (slot == 0) {
-    game::set_dvar_int("xerces_char_saved_look", 0, false);
+    set_dvar("xerces_char_saved_look", 0);
   }
 }
 
@@ -707,15 +747,20 @@ void ensure() {
     fix_saved();
   } else {
     looks.clear();
+    tell_bodies(0);
   }
 }
 
 bool was_in_level = false;
+bool was_in_any_level = false;
 
+// The game's own frame. Everything that reads the game's assets or changes
+// the table happens here, never inside a script call (see set_dvar).
 void frame() {
-  const bool in_level = game::com::Com_IsInGame() &&
-                        !game::com::Com_IsRunningUILevel() &&
-                        game::com::Com_SessionMode_IsMode(game::eModes::ZOMBIES);
+  const bool in_any_level =
+      game::com::Com_IsInGame() && !game::com::Com_IsRunningUILevel();
+  const bool in_level =
+      in_any_level && game::com::Com_SessionMode_IsMode(game::eModes::ZOMBIES);
   if (in_level) {
     ensure();
   } else if (was_in_level) {
@@ -724,8 +769,15 @@ void frame() {
     looks.clear();
     built_table = nullptr;
     built_links = UINT64_MAX;
+    tell_bodies(0);
+  }
+  // a pick's lock is the match's: the next level, in any mode, starts without
+  if (was_in_any_level && !in_any_level &&
+      game::get_dvar_int("xerces_char_lock").value_or(0) != 0) {
+    set_dvar("xerces_char_lock", 0);
   }
   was_in_level = in_level;
+  was_in_any_level = in_any_level;
 }
 
 std::string title_of(const std::string &source) {
@@ -741,7 +793,7 @@ void list_looks() {
   ensure();
   std::scoped_lock lock(looks_mutex);
   std::string text =
-      std::format("{} characters beside the table in use, {} left out, {:.1f} ms",
+      std::format("{} characters, {} left out, {:.1f} ms",
                   looks.size(), dropped_looks, build_ms);
   std::string source = "\x01";
   for (const look &one : looks) {
@@ -770,8 +822,9 @@ void locked_call(const char *name, BuiltinMethod original, scriptInstance_t inst
     }
     return;
   }
-  // an outfit Xerces added must be there before the game is asked for it
-  ensure();
+  // nothing else here: this runs on the server's thread inside a script call
+  // (the outfits Xerces adds are put in from the game's frame, long before a
+  // player can pick one)
   original(inst, entref);
 }
 
@@ -793,6 +846,9 @@ std::string looks_text() {
   ensure();
   std::scoped_lock lock(looks_mutex);
   std::string out;
+  if (!looks.empty()) {
+    out += "@\t" + looks_owner + "\n";
+  }
   for (const look &one : looks) {
     out += std::format("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n", one.source,
                        one.name, one.hint, one.icon, one.body, one.style, one.id,
@@ -824,6 +880,11 @@ public:
         "Xerces' Zombies character slots: the character you last picked "
         "(index * 16 + outfit + 1, 0 for none). Put on again when you host a "
         "match.");
+    game::register_dvar_int(
+        "xerces_char_bodies", 0, 0, 16, no_flags,
+        "Xerces' Zombies character slots: how many characters the table in "
+        "use has (0 outside a Zombies match), for the game script's check of "
+        "a pick.");
     game::register_dvar_int(
         "xerces_char_saved_look", 0, 0, INT32_MAX, saved,
         "Xerces' Zombies character slots: which mod's character the saved "

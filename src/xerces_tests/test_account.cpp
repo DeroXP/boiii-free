@@ -179,6 +179,30 @@ TEST_CASE("account: invite link and pack codes, however they are pasted") {
   CHECK(!pack_code_from("XJN-AB12CD34").has_value());
 }
 
+TEST_CASE("account: nothing after an invite link is read as an option") {
+  // Windows runs `"Xerces.exe" --home "<home>" --join-link "%1"` with the
+  // link in place of %1. A link with a quote in it closes that argument, and
+  // the rest of it arrived as options: another home, a script to run.
+  using args = std::vector<std::string>;
+  CHECK_EQ(arguments_through_link(args{"--home", "C:\\Home", "--join-link",
+                                       "xerces://join/XJN-AB12CD34",
+                                       "--script", "evil", "--home", "D:\\x"}),
+           4u);
+  // A browser's bare link, the same.
+  CHECK_EQ(arguments_through_link(
+               args{"xerces://join/XJN-AB12CD34", "--home", "D:\\x"}),
+           1u);
+  CHECK_EQ(arguments_through_link(args{"--dry-launch", "xerces://join/x",
+                                       "--script", "evil"}),
+           2u);
+  // The option without its link ends the options too.
+  CHECK_EQ(arguments_through_link(args{"--view", "mods", "--join-link"}), 3u);
+  // No link: every argument counts, as before.
+  CHECK_EQ(arguments_through_link(args{"--home", "C:\\Home", "--view", "mods"}),
+           4u);
+  CHECK_EQ(arguments_through_link(args{}), 0u);
+}
+
 TEST_CASE("account: Discord's join secret carries the link's code only") {
   CHECK_EQ(discord_join_secret("XJN-AB12CD34"),
            std::string("xerces1 XJN-AB12CD34"));

@@ -4,6 +4,7 @@
 
 #include "harness.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -350,4 +351,95 @@ TEST_CASE("settings: the launcher's dvars stay out of the game's config.cfg") {
   first_run.add("cg_fov_default", "110", read_saved_dvar("", "cg_fov_default"));
   CHECK(!first_run.to_save("cg_fov_default", "110").has_value());
   CHECK(first_run.to_save("cg_fov_default", "95").has_value());
+}
+
+namespace {
+// The id="..." of every <button> and <input> in an RML document, in order.
+// Controls whose id is bound (data-attr-id, the "other dvars" rows) have
+// none to read and are skipped.
+std::vector<std::string> control_ids(const std::string &rml) {
+  std::vector<std::string> ids;
+  std::size_t at = 0;
+  while ((at = rml.find('<', at)) != std::string::npos) {
+    const bool control = rml.compare(at, 8, "<button ") == 0 ||
+                         rml.compare(at, 7, "<input ") == 0;
+    // The tag's end: the first '>' outside its quoted attribute values.
+    std::size_t end = at + 1;
+    for (bool quoted = false; end < rml.size(); ++end) {
+      if (rml[end] == '"') {
+        quoted = !quoted;
+      } else if (rml[end] == '>' && !quoted) {
+        break;
+      }
+    }
+    if (control) {
+      const std::string tag = rml.substr(at, end - at);
+      const std::size_t id = tag.find(" id=\"");
+      if (id != std::string::npos) {
+        const std::size_t from = id + 5;
+        ids.push_back(tag.substr(from, tag.find('"', from) - from));
+      }
+    }
+    at = end;
+  }
+  return ids;
+}
+
+// Every string literal between two markers of a source file, in order.
+std::vector<std::string> literals_between(const std::string &source,
+                                          const std::string &from,
+                                          const std::string &to) {
+  std::vector<std::string> out;
+  const std::size_t begin = source.find(from);
+  const std::size_t end =
+      begin == std::string::npos ? begin : source.find(to, begin);
+  if (end == std::string::npos) {
+    return out;
+  }
+  for (std::size_t at = source.find('"', begin); at < end;
+       at = source.find('"', at + 1)) {
+    const std::size_t close = source.find('"', at + 1);
+    if (close == std::string::npos || close > end) {
+      break;
+    }
+    out.push_back(source.substr(at + 1, close - at - 1));
+    at = close;
+  }
+  return out;
+}
+
+std::string joined(const std::vector<std::string> &items) {
+  std::string out;
+  for (const std::string &item : items) {
+    out += (out.empty() ? "" : " ") + item;
+  }
+  return out;
+}
+} // namespace
+
+TEST_CASE("settings: Up and Down reach every control of the screen") {
+  // The Settings screen moves Up and Down through a list of rows written by
+  // hand (nav_rows in views/settings.cpp), not through the document. The
+  // three Privacy controls were added to settings.rml and not to the list,
+  // so the keyboard and a controller jumped from Language to "Open folder".
+  // The list and the document are compared here, as text: every control
+  // with an id is in the list, in the document's order.
+  const fs::path repo = xerces_tests::fixtures_dir().parent_path().parent_path();
+  const std::string rml =
+      read_bytes(repo / "data" / "xerces" / "ui" / "views" / "settings.rml");
+  const std::string source = read_bytes(repo / "src" / "xerces_launcher" /
+                                        "views" / "settings.cpp");
+  if (rml.empty() || source.empty()) {
+    return; // run away from the repository: nothing to compare
+  }
+  const std::vector<std::string> controls = control_ids(rml);
+  std::vector<std::string> rows =
+      literals_between(source, "nav_rows() const {", "return rows;");
+  std::erase(rows, std::string("dvar-")); // the prefix of the bound ids
+  CHECK(controls.size() > 40);
+  CHECK_EQ(joined(rows), joined(controls));
+  for (const char *id :
+       {"send-crash-reports", "delete-crash-reports", "report-by-hand"}) {
+    CHECK(std::ranges::find(rows, std::string(id)) != rows.end());
+  }
 }

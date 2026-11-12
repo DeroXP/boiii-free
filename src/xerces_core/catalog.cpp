@@ -64,13 +64,23 @@ bool has_file(const std::vector<std::string> &files, std::string_view name) {
 } // namespace
 
 std::vector<std::pair<std::string, std::string>>
-read_files(const std::filesystem::path &folder) {
+read_files(const std::filesystem::path &folder,
+           const std::function<bool(std::string_view)> &wanted) {
   std::vector<std::pair<std::string, std::string>> files;
   for_each_file(folder, [&](const std::filesystem::path &file) {
-    files.emplace_back(relative_name(folder, file), read_text(file));
+    std::string name = relative_name(folder, file);
+    if (!wanted || wanted(name)) {
+      std::string text = read_text(file);
+      files.emplace_back(std::move(name), std::move(text));
+    }
   });
   std::ranges::sort(files);
   return files;
+}
+
+std::vector<std::pair<std::string, std::string>>
+read_files(const std::filesystem::path &folder) {
+  return read_files(folder, {});
 }
 
 std::vector<std::string> list_files(const std::filesystem::path &folder) {

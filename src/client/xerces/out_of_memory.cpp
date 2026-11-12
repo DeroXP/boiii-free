@@ -305,14 +305,12 @@ xerces_core::out_of_memory_message report(const void *return_address) {
     body.clear();
   }
 
-  // Only now: the log is written, and no suspended thread can hold a lock
-  // the report needed. From here on only the box (or the stderr lines) and
-  // TerminateProcess run.
-  try {
-    utils::thread::suspend_other_threads();
-  } catch (...) {
-    // Show the box anyway; the process ends right after it.
-  }
+  // The other threads are left running. They used to be suspended here, but a
+  // thread stopped inside an allocation, a DLL load or a printf holds a lock
+  // the message box needs, and then there is no box and the game stays frozen
+  // for good (the freeze watchdog is one of the stopped threads). A second
+  // thread that runs out of memory meanwhile waits behind the reporter flag,
+  // and the process ends right after the box.
   if (quiet) {
     std::fprintf(stderr, "%s\n%s\n",
                  text.title.empty() ? short_title : text.title.c_str(),

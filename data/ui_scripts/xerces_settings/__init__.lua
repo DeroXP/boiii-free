@@ -235,7 +235,8 @@ if Engine.GetCurrentMap() == "core_frontend" then
   local function updateDvar(controller, optionModel, optionsList, dvarName)
     UpdateInfoModels(optionModel)
     if Engine.DvarInt(nil, dvarName) ~= optionModel.value then
-      Engine.SetDvar(dvarName, optionModel.value)
+      -- as text: a number is set with six digits ("1e+06" for a million starting points)
+      Engine.SetDvar(dvarName, tostring(optionModel.value))
     end
   end
 
@@ -405,7 +406,9 @@ if Engine.GetCurrentMap() == "core_frontend" then
     local tabs = CoD.FE_TabBar.new(self, controller)
     tabs:setLeftRight(true, false, 0, 2496)
     tabs:setTopBottom(true, false, 84, 123)
-    tabs.Tabs.grid:setHorizontalCount(5)
+    -- one for each tab and the two shoulder-button ends (it was 5 when there were three tabs, which left CONTROLLER
+    -- and the right end outside the strip)
+    tabs.Tabs.grid:setHorizontalCount(7)
     tabs.Tabs.grid:setDataSource("XercesSettingsTabs")
     self:addElement(tabs)
     self.TabList = tabs
@@ -473,7 +476,18 @@ local function hasBit(mask, bit)
   return math.floor(mask / bit) % 2 == 1
 end
 
-local function matchData()
+local matchData
+
+-- For the other in-match screens of Xerces (data/ui_scripts/xerces_characters): whether the host's game runs Xerces'
+-- scripts, without which their menu responses go nowhere
+function XercesHostHasScripts()
+  local ok, match = pcall(function()
+    return matchData()
+  end)
+  return ok and match ~= nil
+end
+
+matchData = function()
   local found = nil
   local function walk(element, depth)
     if found or not element or depth > 4 then

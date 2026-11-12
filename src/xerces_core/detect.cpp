@@ -9,6 +9,8 @@
 
 #include <Windows.h>
 
+#include "launcher_home.hpp"
+
 namespace xerces_core {
 namespace {
 bool iequals(std::string_view a, std::string_view b) {
@@ -228,7 +230,10 @@ detection detect_game(const std::optional<std::filesystem::path> &saved,
                       const detection_io &io) {
   detection out;
   const auto check = [&](const std::filesystem::path &dir) {
-    out.tried.push_back(dir.string());
+    // UTF-8, as the screens and the CLI's JSON show it. string() converts to
+    // the ANSI code page and throws for a folder outside it (a Steam library
+    // with a Cyrillic name on a Western Windows).
+    out.tried.push_back(path_utf8(dir));
     return io.exists(dir / std::string(bo3_exe));
   };
   if (saved && check(*saved)) {
@@ -266,6 +271,17 @@ detection detect_game(const std::optional<std::filesystem::path> &saved,
   return out;
 }
 
+void add_steam_root(std::vector<std::filesystem::path> &roots,
+                    const std::filesystem::path &found) {
+  const auto normal = found.lexically_normal();
+  // same_path compares the wide text, so a root outside the ANSI code page
+  // is compared too (string() throws for it).
+  if (std::ranges::none_of(
+          roots, [&](const auto &p) { return same_path(p, normal); })) {
+    roots.push_back(normal);
+  }
+}
+
 std::vector<std::filesystem::path> steam_roots_from_registry() {
   std::vector<std::filesystem::path> out;
   for (const auto &found :
@@ -275,12 +291,7 @@ std::vector<std::filesystem::path> steam_roots_from_registry() {
                       L"SOFTWARE\\WOW6432Node\\Valve\\Steam",
                       L"InstallPath")}) {
     if (found) {
-      const auto normal = found->lexically_normal();
-      if (std::ranges::none_of(out, [&](const auto &p) {
-            return iequals(p.string(), normal.string());
-          })) {
-        out.push_back(normal);
-      }
+      add_steam_root(out, *found);
     }
   }
   return out;

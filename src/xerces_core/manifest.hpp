@@ -124,6 +124,12 @@ manifest_result parse_manifest(std::string_view text);
 // Canonical JSON for a manifest (synthesized ones, templates, tests).
 std::string manifest_to_json(const manifest &value);
 
+// The requires.xerces range a new mod starts with (xerces_cli mod new): from
+// the running version's major.minor up to the next major, ">=0.1 <1" for
+// 0.1.0-beta.21. The version that wrote it meets it; a fixed ">=1.0 <2"
+// made every scaffolded mod fail on the 0.x builds that made it.
+std::string scaffold_requires_xerces(const version &running);
+
 // Mods without a manifest (every Workshop mod today) get one, marked legacy.
 struct legacy_input {
   std::string folder;                        // folder name on disk

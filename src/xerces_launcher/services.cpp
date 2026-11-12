@@ -39,15 +39,6 @@ bool write_text(const fs::path &path, std::string_view text) {
   return xerces_core::write_text_file(path, text);
 }
 
-std::optional<fs::path> env_path(const wchar_t *name) {
-  wchar_t buffer[32768];
-  const DWORD size = GetEnvironmentVariableW(name, buffer, 32768);
-  if (size == 0 || size >= 32768) {
-    return std::nullopt;
-  }
-  return fs::path(std::wstring(buffer, size));
-}
-
 std::string now_utc() { return xerces_core::json_log::now_utc(); }
 
 crash_notice notice(crash_notice::kind what, std::size_t count = 0,
@@ -694,10 +685,8 @@ fs::path services::make_bundle(std::string *error) const {
   std::string stamp = now_utc().substr(0, 19);
   std::ranges::replace(stamp, ':', '-');
   const fs::path out = paths_.crash / ("xerces-bundle-" + stamp + ".zip");
-  std::string profile;
-  if (const auto dir = env_path(L"USERPROFILE")) {
-    profile = utf8(*dir);
-  }
+  // The same helper xerces_cli uses, so both redact the same text.
+  const std::string profile = xerces_core::environment_utf8(L"USERPROFILE");
   const xerces_core::bundle_result result = xerces_core::make_bundle(
       paths_.home, out, profile, xerces_core::system_info_json());
   if (!result.ok) {
@@ -738,12 +727,8 @@ void services::run_crash_job(crash_job job) {
     ctx.game_checksum = game_.exe->checksum;
   }
   ctx.steam_build = game_.steam_build;
-  if (const auto profile = env_path(L"USERPROFILE")) {
-    ctx.profile = utf8(*profile);
-  }
-  if (const auto user = env_path(L"USERNAME")) {
-    ctx.user_name = utf8(*user);
-  }
+  ctx.profile = xerces_core::environment_utf8(L"USERPROFILE");
+  ctx.user_name = xerces_core::environment_utf8(L"USERNAME");
   // Only for the report's flags and the words to hide (player name,
   // favourites); the report never carries the config itself.
   ctx.config_text = xerces_core::launcher_config_to_json(config_);

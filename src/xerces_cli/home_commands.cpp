@@ -1384,18 +1384,11 @@ int cmd_crash(const arguments &args, const std::string &action) {
   ctx.commit = xerces_report_commit;
   ctx.dirty = xerces_dirty;
   ctx.config_text = config_text;
-  const auto env = [](const char *name) {
-    char *value = nullptr;
-    std::size_t size = 0;
-    std::string out;
-    if (_dupenv_s(&value, &size, name) == 0 && value != nullptr) {
-      out = value;
-    }
-    std::free(value);
-    return out;
-  };
-  ctx.profile = env("USERPROFILE");
-  ctx.user_name = env("USERNAME");
+  // As UTF-8 (the report's text is), the way Xerces.exe reads them: read in
+  // the ANSI code page, a user name with a letter outside ASCII was not
+  // found in the report and went out with it.
+  ctx.profile = environment_utf8(L"USERPROFILE");
+  ctx.user_name = environment_utf8(L"USERNAME");
   ctx.system = [] { return collect_crash_system(); };
   ctx.now_utc = json_log::now_utc();
   ctx.now = std::chrono::duration_cast<std::chrono::seconds>(

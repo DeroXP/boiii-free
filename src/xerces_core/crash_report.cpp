@@ -681,6 +681,10 @@ std::string pending_crash_to_json(const pending_crash &value) {
     names.push_back(json::valid_utf8(name, crash_name_cap));
   }
   json::set(doc, "names", json::string_array(names, alloc), alloc);
+  json::set(doc, "reason", cap(value.reason, 64), alloc);
+  json::set(doc, "summary", cap(value.summary), alloc);
+  json::set(doc, "script", cap(value.script), alloc);
+  json::set(doc, "details", head_text(value.details, crash_details_cap), alloc);
   auto journal = json::parse(value.journal);
   json::set(doc, "journal",
             journal.ok && journal.document.IsObject()
@@ -716,6 +720,11 @@ std::optional<pending_crash> parse_pending_crash(std::string_view text) {
   out.flags = strings_of(root, "flags");
   out.game_log = json::get_string(root, "game_log").value_or("");
   out.names = strings_of(root, "names");
+  // Notes written before 2026-11-12 have none of these.
+  out.reason = json::get_string(root, "reason").value_or("");
+  out.summary = json::get_string(root, "summary").value_or("");
+  out.script = json::get_string(root, "script").value_or("");
+  out.details = json::get_string(root, "details").value_or("");
   if (const auto *journal = json::member(root, "journal");
       journal != nullptr && journal->IsObject()) {
     out.journal = json::canonical(*journal);
@@ -776,6 +785,15 @@ crash_facts crash_from_pending(const pending_crash &crash,
     out.frames.resize(crash_frame_cap);
   }
   out.phase = crash.phase;
+  if (!crash.reason.empty()) {
+    out.reason = crash.reason;
+  }
+  if (!crash.summary.empty()) {
+    out.summary = crash.summary;
+  }
+  if (!crash.script.empty()) {
+    out.script = crash.script;
+  }
   return out;
 }
 
@@ -905,6 +923,19 @@ std::string tail_text(std::string_view text, std::size_t max_bytes) {
   return json::valid_utf8(tail, max_bytes);
 }
 
+std::string head_text(std::string_view text, std::size_t max_bytes) {
+  if (text.size() <= max_bytes) {
+    return json::valid_utf8(text, max_bytes);
+  }
+  std::string_view head = text.substr(0, max_bytes);
+  // End at a line: the last one is cut.
+  if (const std::size_t line = head.rfind('\n');
+      line != std::string_view::npos && line > 0) {
+    head = head.substr(0, line + 1);
+  }
+  return json::valid_utf8(head, max_bytes);
+}
+
 std::string build_crash_report(const crash_report_input &in) {
   const crash_redaction redaction{in.profile, in.user_name, in.player_names,
                                   in.known_addresses};
@@ -985,6 +1016,19 @@ std::string build_crash_report(const crash_report_input &in) {
   }
   json::set(crash, "frames", std::move(frames), alloc);
   json::set(crash, "phase", cap(in.crash.phase, 64), alloc);
+  // A line each from the client's note, scrubbed as the logs are: they can
+  // name a path or a player.
+  const auto scrubbed = [&](const std::optional<std::string> &text,
+                            std::size_t bytes) {
+    return text ? json::string_value(
+                      cap(redact_crash_text(*text, redaction, false), bytes),
+                      alloc)
+                : Value();
+  };
+  json::set(crash, "reason", scrubbed(in.crash.reason, 64), alloc);
+  json::set(crash, "summary", scrubbed(in.crash.summary, crash_name_cap),
+            alloc);
+  json::set(crash, "script", scrubbed(in.crash.script, crash_name_cap), alloc);
   json::set(doc, "crash", std::move(crash), alloc);
 
   Value logs(rapidjson::kObjectType);
@@ -1008,6 +1052,15 @@ std::string build_crash_report(const crash_report_input &in) {
             tail_of(in.launcher_log, crash_launcher_log_lines, true), alloc);
   json::set(logs, "console_tail",
             tail_of(in.console, crash_console_lines, false), alloc);
+  // The client's text report: its start matters most, so that is what stays.
+  json::set(logs, "details",
+            in.details.empty()
+                ? Value()
+                : json::string_value(
+                      head_text(redact_crash_text(in.details, redaction, false),
+                                crash_tail_cap),
+                      alloc),
+            alloc);
   json::set(doc, "logs", std::move(logs), alloc);
 
   json::set(doc, "minidump_b64",

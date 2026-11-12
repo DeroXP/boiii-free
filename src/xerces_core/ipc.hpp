@@ -44,7 +44,9 @@ struct run_entry {
 std::string run_entry_to_json(const run_entry &value);
 std::optional<run_entry> parse_run_entry(std::string_view text);
 // Entries in run_dir whose process is still running with the image it named;
-// files of processes that are gone are removed.
+// files of processes that are gone are removed. A file that does not read
+// as a run file is left alone for its first few seconds (it may be one
+// being written) and removed after that.
 std::vector<run_entry> live_run_entries(const std::filesystem::path &run_dir);
 
 struct request {

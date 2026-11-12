@@ -115,6 +115,13 @@ std::string new_ticket();
 // case, without its dash, Crockford look-alikes (O, I, L), or a link that
 // ends in one (https://.../join/<code>, xerces://join/<code>).
 std::optional<std::string> link_code_from(std::string_view text);
+// How many of Xerces.exe's arguments (argv[1] on, as UTF-8) may hold
+// options: all of them, or, when one is an invite link ("--join-link
+// <link>", or a bare xerces:// argument), those up to and including the
+// link. Windows starts Xerces for a link with the link's text pasted into
+// the command line; whatever a crafted link puts after itself (a quote,
+// then --home or --script) must not be read as options.
+std::size_t arguments_through_link(const std::vector<std::string> &args);
 // The same for a pack code, "XRC-XXXXXXXX".
 std::optional<std::string> pack_code_from(std::string_view text);
 

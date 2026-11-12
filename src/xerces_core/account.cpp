@@ -337,6 +337,18 @@ std::optional<std::string> link_code_from(std::string_view text) {
   return code_from(text, "XJN");
 }
 
+std::size_t arguments_through_link(const std::vector<std::string> &args) {
+  for (std::size_t i = 0; i < args.size(); ++i) {
+    if (args[i] == "--join-link") {
+      return std::min(i + 2, args.size()); // the option and its link
+    }
+    if (args[i].starts_with("xerces://")) {
+      return i + 1;
+    }
+  }
+  return args.size();
+}
+
 std::optional<std::string> pack_code_from(std::string_view text) {
   return code_from(text, "XRC");
 }

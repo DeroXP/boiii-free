@@ -37,6 +37,9 @@ inline constexpr std::size_t crash_frame_cap = 32;
 inline constexpr std::size_t crash_game_log_lines = 200;
 inline constexpr std::size_t crash_launcher_log_lines = 100;
 inline constexpr std::size_t crash_console_lines = 200;
+// The client's text report as its note carries it (the report sends at most
+// crash_tail_cap of it).
+inline constexpr std::size_t crash_details_cap = 256 * 1024;
 
 enum class crash_kind {
   exception,     // the client's handler ran and wrote the small dump
@@ -78,6 +81,15 @@ struct pending_crash {
   // The player names the game knew (its own, the players it was in a match
   // with): words the report hides. Never sent.
   std::vector<std::string> names;
+  // What the report is about, a line each (2026-11-12): why it was written
+  // ("exception", "freeze", "fatal_error"), what happened in words, and the
+  // script that was running. And the client's text report, the one it leaves
+  // in the minidumps folder, without the console's lines: what happened,
+  // what the game was doing, the stacks, memory and settings.
+  std::string reason;
+  std::string summary;
+  std::string script;
+  std::string details;
 };
 std::string pending_crash_to_json(const pending_crash &value);
 std::optional<pending_crash> parse_pending_crash(std::string_view text);
@@ -106,6 +118,9 @@ struct crash_facts {
   std::optional<std::string> module, offset, thread;
   std::vector<std::string> frames;
   std::string phase;
+  // From the client's note (pending_crash); none for a crash it wrote no
+  // note for.
+  std::optional<std::string> reason, summary, script;
 };
 crash_facts crash_from_pending(const pending_crash &crash,
                                std::optional<std::uint32_t> exit_code);
@@ -164,6 +179,7 @@ struct crash_report_input {
   std::vector<std::string> game_log;     // lines of the game's JSON log
   std::vector<std::string> launcher_log; // lines of the launcher's log
   std::vector<std::string> console;      // the console's last lines
+  std::string details;                   // the client's text report
   std::string minidump;                  // raw bytes; empty for none
   // Redaction: the profile folder, the Windows user name, and words to
   // hide (the player name, favourites' names, server addresses).
@@ -207,6 +223,9 @@ std::optional<std::string> mask_minidump(std::string_view dump,
 
 // The last max_bytes of text, starting at a line, as valid UTF-8.
 std::string tail_text(std::string_view text, std::size_t max_bytes);
+// The first max_bytes of text, ending at a line, as valid UTF-8: the text
+// report says what matters most first.
+std::string head_text(std::string_view text, std::size_t max_bytes);
 
 // The report body (contract xerces.crash/1), compact JSON.
 std::string build_crash_report(const crash_report_input &input);

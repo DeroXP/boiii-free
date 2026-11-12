@@ -43,6 +43,10 @@ first run) and `xerces_cli crash list|send`.
   launcher's log (100) and the console (200), each at most 64 KiB. Chat lines
   never enter the console lines the client keeps (`chat.cpp`), so neither the
   game log nor a report has them.
+- The game's own text report (from 0.1.0-beta.22, "The text report" below), at
+  most 64 KiB from its start, and three lines taken from it: why the report was
+  written (`exception`, `freeze` or `fatal_error`), what happened in words, and
+  the script that was running. They are scrubbed as the logs are.
 
 Before anything leaves the PC the client removes from the logs: the profile
 folder (written `%USERPROFILE%`), any other `X:\Users\<name>` (written
@@ -67,13 +71,78 @@ the server then. "Delete my crash reports" deletes every report of that id. The
 server keeps reports 90 days and stores no IP address (it uses the address in
 memory for rate limits only).
 
+## The text report (2026-11-12, beta.22)
+
+Before beta.22 a crash left a dump and a zip, a freeze a text file with the main
+thread's stack and one line for each other thread, and a fatal engine error
+nothing but the console's last lines. Reading any of them meant opening a dump.
+On 2026-11-12 a server thread stuck in a script had to be dug out of a freeze dump
+by hand, and the report's version line was of no use for telling two builds
+apart. Now each of the three leaves a text file in
+`%LOCALAPPDATA%\boiii\minidumps`, next to its dump, that opens with what
+happened and what the game was doing (`exception.cpp`, from `session_text`):
+
+| What | Files | Kind in the report sent |
+| --- | --- | --- |
+| A crash | `crash-<time>.txt`, `crash-<time>.dmp`, `xerces-crash-<time>.zip` (the dump and the same text as `info.txt`) | `exception`, reason `exception` |
+| A freeze (no frame for 30 s) | `freeze-<time>.txt`, `freeze-<time>.dmp` | `unknown_exit`, reason `freeze` |
+| A fatal engine error (`Com_Error` fatal, `Sys_Error`) | `fatal-<time>.txt`, `fatal-<time>.dmp` (every thread, new) | `unknown_exit`, reason `fatal_error` |
+
+Every text report has, in this order:
+
+- What happened, in a sentence ("invalid memory access: tried to write to 0x18
+  (null pointer) in BlackOps3.exe+0x141D3DA12 on the main thread"; for a freeze,
+  where the main and the server thread are; for a fatal error, its words), the
+  diagnosis when there is one, and the script that was running.
+- The session: Xerces' version and when this client was built (the PE header's
+  time, which tells two builds with one version label apart), the time, Windows,
+  how long the game had run, the journal's phase, the mode and map, the mods in
+  load order with their Workshop titles (the main mod first), the launch flags,
+  and the ids of the main and server threads (to find them in the dump).
+- The scripts each VM was running, innermost first, as `function (file:line)`.
+- The stacks. A crash: the crashing thread's (48 frames, with function names and
+  source lines where symbols know them), the bytes at the crash address and the
+  registers. A fatal error: where it was raised. A freeze: every thread's, see
+  below.
+- Memory (the PC's RAM and commit left, what the game holds and the most it
+  held, the zone pools when the larger zone memory is on) and the settings that
+  change what the game does (the upscaler, the Zombies options, the frame cap,
+  the display mode).
+- The console's last 80 lines. This part stays on the PC: the report that is
+  sent has the console's lines already.
+
+A crash's text is put together under a fault guard: if reading the game's state
+faults again, the report says so and is still written and sent. The text file is
+written on its own before the zip, which a second fault has cost before
+(2026-11-05).
+
+A freeze's report is written by a thread of its own, so whatever it waits for,
+the watchdog still closes the game on time. It reads every thread's stack (each
+thread stopped only for its own walk, up to 32 frames, one step through code
+without unwind data), and writes the file twice: first with addresses by module
+and offset only, from a list of modules the watchdog keeps while the game runs
+well, so nothing is asked of Windows that a frozen game may hold (the loader's
+lock, the symbol engine); then again with function names, the scripts running
+and the session. The main and the server thread come first and in full, then
+every other thread that is running, then the ones that wait in a system call,
+with threads at the same place listed once ("12 threads at the same place").
+If a stack walk does not come back in two seconds, the watchdog starts the
+stopped thread again, so the report cannot turn a long stall into a freeze.
+
+To see them without waiting for a real one: start the game with
+`-xerces-crash-test` and type `xerces_crash_test` (a crash),
+`xerces_crash_test fatal`, `xerces_crash_test freeze` (the game closes after
+60 s) or `xerces_crash_test stall` (40 s without a frame: a freeze report that
+is taken back).
+
 ## How a crash becomes a report
 
 1. The game's crash handler, when the launcher started the game (`XERCES_HOME`
    is set) and the setting is on, writes `<home>\crash\pending\<report_id>.dmp`
    (the stacks-only dump) and `<report_id>.json` next to it (code, module,
    offset, thread, frames, phase, the console's last lines, the flags, the game
-   log's file name, the journal and the player names to hide). Upstream's own
+   log's file name, the journal, the player names to hide, and from beta.22 the
+   reason, the summary, the script and the text report). Upstream's own
    dump and zip stay as they are. A fatal engine error (`Com_Error` with
    `ERR_FATAL`, `Sys_Error`) writes the note alone, kind `unknown_exit`: the
    frames from where the error was raised, and the first frame outside the
@@ -82,10 +151,10 @@ memory for rate limits only).
    report is sent when the game closes (the launcher is open) or when Xerces
    opens next; with the setting off it points to GitHub and the bundle. A freeze
    (no frame for 30 s, a watchdog thread in the client) is reported the same
-   way, kind `unknown_exit`: a dump of every thread as it stands and the main
-   thread's frames, with a last console line "[Freeze] ...". The same dump and a
-   text file of where every thread is go to the minidumps folder whatever the
-   setting. If frames come back, the pending report is removed; if not, the game
+   way, kind `unknown_exit`: a dump of every thread as it stands, the main
+   thread's frames, every thread's stack in the text report, and a last console
+   line "[Freeze] ..." that says where the main and server threads are. The same
+   dump and text report go to the minidumps folder whatever the setting. If frames come back, the pending report is removed; if not, the game
    ends itself with exit code 0xC0000194 (STATUS_POSSIBLE_DEADLOCK) 60 s after
    its last frame, 180 s while the journal says it is loading (2026-11-08).
 2. When the game the launcher started exits, the launcher counts it as a crash
@@ -185,13 +254,17 @@ Body: UTF-8 JSON, at most 4 MiB after gzip decoding.
     "offset": "<hex or null>",
     "thread": "<main|server|auxiliary or null>",
     "frames": ["<module>+0x<hex>"],
-    "phase": "<launching|symbols|frontend|loading_map|in_game|clean_exit>"
+    "phase": "<launching|symbols|frontend|loading_map|in_game|clean_exit>",
+    "reason": "<exception|freeze|fatal_error or null>",
+    "summary": "<what happened, one line, or null>",
+    "script": "<the script that was running, one line, or null>"
   },
   "logs": {
     "journal": {},
     "game_log_tail": "<last <= 200 lines, redacted>",
     "launcher_log_tail": "<last <= 100 lines, redacted>",
-    "console_tail": "<last <= 200 lines, redacted>"
+    "console_tail": "<last <= 200 lines, redacted>",
+    "details": "<the game's text report, its first <= 64 KiB, redacted, or null>"
   },
   "minidump_b64": "<base64 of the stacks-only minidump, <= 2 MiB raw, or null>"
 }
@@ -206,6 +279,13 @@ Body: UTF-8 JSON, at most 4 MiB after gzip decoding.
   `fail_fast` (exit 0xC0000409, no dump), `out_of_memory` (exit 0xFFFFFFFF after
   the out-of-memory box), `unknown_exit` (any other end that was not clean, a
   fatal engine error among them).
+- `reason`, `summary`, `script` and `details` were added on 2026-11-12
+  (beta.22) without a new schema name: a backend from before ignores them, as
+  it does every field it does not know, and a client from before sends none. A
+  report for a crash the client wrote no note for has `null` for all four. The
+  backend stores them from the commit "Backend: the game's text report in crash
+  reports" on (`launcher/friends-backend`); until that runs on Railway the
+  summary still reaches the developer, as the console tail's last lines.
 - `tests/fixtures/crash/report_golden.json` is a full report the client's
   builder must produce field for field (`xerces_tests crash`).
 
@@ -227,7 +307,9 @@ Header `X-Xerces-Install`. Deletes every report of that install:
 compared in constant time; unset, the admin routes answer 404):
 
 - `GET /v1/admin/crashes?since=<iso>&signature=<hex>&version=<v>&limit=<<=200>&cursor=<opaque>`:
-  newest first, metadata only.
+  newest first, metadata only, with the report's `reason` and `summary` when
+  the game wrote them (`scripts/crashes.py list` prints the summary under each
+  report, and `show` prints the game's text report before the logs).
 - `GET /v1/admin/crashes/{id}`: the full report without the minidump's bytes,
   plus `has_minidump`.
 - `GET /v1/admin/crashes/{id}/minidump`: `application/octet-stream`.

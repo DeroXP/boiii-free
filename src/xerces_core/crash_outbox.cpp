@@ -514,6 +514,7 @@ std::string report_from_pending(const pending_entry &pending,
   in.game_log = log_lines(game_log, crash_game_log_lines);
   in.map = crash_map(in.game_log, in.crash.phase, facts);
   in.console = pending.crash.console;
+  in.details = pending.crash.details;
   // The names the game knew: its own (which launcher.json often does not
   // hold) and the players it was in a match with.
   for (const auto &name : pending.crash.names) {

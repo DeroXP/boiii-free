@@ -25,7 +25,10 @@
     "windows": "10.0.26300"
   },
   "launch": {
-    "flags": ["-nointro", "-xerces-db-pool"],
+    "flags": [
+      "-nointro",
+      "-xerces-db-pool"
+    ],
     "map": "zm_castle",
     "mode": "zm",
     "mods": [
@@ -41,12 +44,18 @@
   "crash": {
     "code": "0xC0000005",
     "exit_code": "0xC0000005",
-    "frames": ["BlackOps3.exe+0x14224FE5C", "boiii.exe+0x1234"],
+    "frames": [
+      "BlackOps3.exe+0x14224FE5C",
+      "boiii.exe+0x1234"
+    ],
     "kind": "exception",
     "module": "BlackOps3.exe",
     "offset": "0x14224FE5C",
     "phase": "in_game",
-    "thread": "main"
+    "thread": "main",
+    "reason": "exception",
+    "summary": "invalid memory access: tried to read 0x18 (null pointer) in BlackOps3.exe+0x14224FE5C on the main thread",
+    "script": "GSC zm_castle::main (scripts/zm/zm_castle.gsc line 42)"
   },
   "logs": {
     "console_tail": "Loading fastfile 'zm_castle'\n",
@@ -55,7 +64,8 @@
       "phase": "in_game",
       "schema": 1
     },
-    "launcher_log_tail": "{\"event\":\"launcher.start\",\"msg\":\"Xerces\"}\n"
+    "launcher_log_tail": "{\"event\":\"launcher.start\",\"msg\":\"Xerces\"}\n",
+    "details": "Xerces Crash Report\r\n\r\nWhat happened: invalid memory access\r\nSource: C:\\Users\\<user>\\src\\client.cpp line 7\r\n"
   },
   "minidump_b64": "TURNUA=="
 }

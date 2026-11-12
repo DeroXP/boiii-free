@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 
+#include "catalog.hpp"
 #include "json.hpp"
 #include "sha256.hpp"
 
@@ -107,6 +108,29 @@ bool has_exact_hash(std::string_view type) {
          t == "localize" || t == "localizedstring" || t == "localize_entry";
 }
 
+bool loose_index_skips(std::string_view relative) {
+  const std::string name = normalize_asset_name(relative);
+  const std::string ext = extension(name);
+  // The game's packed files, wherever they sit: a Workshop item keeps
+  // core_mod.ff, zm_mod.ff and their .xpak, .sabl and .sabs at its root, not
+  // under zone/. What is inside them comes from index runs; as loose files
+  // any two mods would "both replace zm_mod.ff".
+  if (ext == ".ff" || ext == ".xpak" || ext == ".sabl" || ext == ".sabs") {
+    return true;
+  }
+  // Metadata, previews and the rest of zone/.
+  return name == manifest_file_name || name.ends_with("workshop.json") ||
+         name.starts_with("zone/") || ext == ".png" || ext == ".jpg" ||
+         ext == ".md" || (ext == ".txt" && name.starts_with("readme"));
+}
+
+asset_index index_loose_folder(const std::string &owner,
+                               const std::filesystem::path &folder) {
+  return index_loose_files(owner, read_files(folder, [](std::string_view name) {
+                             return !loose_index_skips(name);
+                           }));
+}
+
 asset_index index_loose_files(
     const std::string &owner,
     const std::vector<std::pair<std::string, std::string>> &files) {
@@ -116,10 +140,8 @@ asset_index index_loose_files(
     const std::string name = normalize_asset_name(path);
     const std::string ext = extension(name);
     std::string type;
-    if (name == manifest_file_name || name.ends_with("workshop.json") ||
-        name.starts_with("zone/") || ext == ".png" || ext == ".jpg" ||
-        ext == ".md" || (ext == ".txt" && name.starts_with("readme"))) {
-      continue; // metadata, previews and fastfiles (those come from index runs)
+    if (loose_index_skips(name)) {
+      continue;
     }
     if (ext == ".gsc" || ext == ".csc") {
       type = "scriptparsetree";

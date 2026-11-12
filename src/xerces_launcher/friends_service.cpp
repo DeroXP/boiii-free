@@ -203,10 +203,17 @@ void friends_service::listen() {
                         &error) &&
         socket_.send(account::auth_message(token))) {
       {
-        // Signed out while it connected: that socket is not wanted.
+        // Signed out, or Xerces closing, while it connected: that socket is
+        // not wanted. The destructor's close() came while connect() still
+        // held the handles itself and closed nothing, so the receive below
+        // would wait on this socket for ever, and the destructor's join
+        // with it: a hidden Xerces.exe holding the home's mutex.
         std::scoped_lock lock(mutex_);
-        if (!want_socket_) {
+        if (stopping_ || !want_socket_) {
           socket_.close();
+          if (stopping_) {
+            return;
+          }
           continue;
         }
       }
@@ -389,10 +396,17 @@ void friends_service::answer(const done &finished, account::outcome result) {
 }
 
 // ------------------------------------------------------------- the data
+bool friends_service::stopping() {
+  std::scoped_lock lock(mutex_);
+  return stopping_;
+}
+
 void friends_service::refresh_all() {
   if (!client_ || !client_->signed_in()) {
     return;
   }
+  // Seven calls, each up to 15 s when the backend does not answer, and
+  // closing Xerces waits for this thread: it stops between them.
   std::vector<account::friend_info> friends;
   if (client_->friends(friends).ok) {
     // The socket's presence is newer than the list's for friends it named.
@@ -413,12 +427,15 @@ void friends_service::refresh_all() {
     });
     work_.friends = std::move(friends);
   }
-  if (!client_->signed_in()) {
+  if (stopping() || !client_->signed_in()) {
     return; // the sign-in ended on the way (ended() published)
   }
   account::friend_requests requests;
   if (client_->requests(requests).ok) {
     work_.requests = std::move(requests);
+  }
+  if (stopping()) {
+    return;
   }
   account::invites invites;
   if (client_->list_invites(invites).ok) {
@@ -429,17 +446,29 @@ void friends_service::refresh_all() {
       }
     }
   }
+  if (stopping()) {
+    return;
+  }
   std::vector<account::block_info> blocks;
   if (client_->blocks(blocks).ok) {
     work_.blocks = std::move(blocks);
+  }
+  if (stopping()) {
+    return;
   }
   account::privacy_settings privacy;
   if (client_->privacy(privacy).ok) {
     work_.privacy = privacy;
   }
+  if (stopping()) {
+    return;
+  }
   std::optional<account::invite_link> link;
   if (client_->own_link(link).ok) {
     work_.link = std::move(link);
+  }
+  if (stopping()) {
+    return;
   }
   account::knock_list knocks;
   if (client_->knocks(knocks).ok) {

@@ -184,6 +184,13 @@ load_mod_folder(const std::filesystem::path &folder,
 // index, which needs the contents, reads loose files this way.
 std::vector<std::pair<std::string, std::string>>
 read_files(const std::filesystem::path &folder);
+// The same for the files wanted(relative '/' path) says yes to; the others
+// are not opened. The conflict index reads a mod folder this way
+// (index_loose_folder), so a Workshop item's multi-gigabyte fastfiles never
+// sit in memory.
+std::vector<std::pair<std::string, std::string>>
+read_files(const std::filesystem::path &folder,
+           const std::function<bool(std::string_view)> &wanted);
 
 // Every regular file under a folder as a relative '/' path, sorted.
 std::vector<std::string> list_files(const std::filesystem::path &folder);

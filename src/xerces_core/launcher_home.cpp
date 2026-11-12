@@ -8,9 +8,14 @@
 #endif
 #include <windows.h>
 
+#include <share.h>
+
+#include <algorithm>
+#include <atomic>
 #include <cwctype>
 #include <fstream>
 #include <iterator>
+#include <system_error>
 
 #include "ui_text.hpp"
 
@@ -304,6 +309,30 @@ std::optional<std::string> read_text_file(const fs::path &path) {
                      std::istreambuf_iterator<char>());
 }
 
+namespace {
+constexpr int rename_retries = 5;
+
+// The rename failed for a reason a moment's wait can clear: an antivirus
+// scanner, or the other program reading the file, has it open (a reader
+// that does not share deletion makes the rename fail with "access denied").
+// A folder of that name or a read-only file stays in the way, so those are
+// not waited for.
+bool held_for_a_moment(DWORD error, const fs::path &target) {
+  if (error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION) {
+    return true;
+  }
+  if (error != ERROR_ACCESS_DENIED) {
+    return false;
+  }
+  // No attributes: the old file is not there, or is on its way out (deleted
+  // while someone still has it open), which also clears by itself.
+  const DWORD attributes = GetFileAttributesW(target.c_str());
+  return attributes == INVALID_FILE_ATTRIBUTES ||
+         (attributes &
+          (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_READONLY)) == 0;
+}
+} // namespace
+
 bool write_text_file(const fs::path &path, std::string_view text,
                      std::string *why, std::string *detail) {
   const std::string name = path_utf8(path.filename());
@@ -320,30 +349,58 @@ bool write_text_file(const fs::path &path, std::string_view text,
   };
   std::error_code ec;
   fs::create_directories(path.parent_path(), ec);
+  // A name of this write's own: the launcher, xerces_cli and the game write
+  // some of the same files, and with one shared "<name>.tmp" each would
+  // truncate the other's half-written copy.
+  static std::atomic<unsigned> writes{0};
   fs::path temporary = path;
-  temporary += ".tmp";
-  {
-    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    if (!out) {
-      return fail(ui_text("A temporary file could not be created in its "
-                          "folder."),
-                  name + ".tmp");
-    }
-    out.write(text.data(), static_cast<std::streamsize>(text.size()));
-    out.close(); // flushes: failbit when the data did not reach the file
-    if (out.fail()) {
-      fs::remove(temporary, ec);
-      return fail(ui_text("Writing the temporary file failed (is the disk "
-                          "full?)."),
-                  name + ".tmp");
-    }
+  temporary += "." + std::to_string(GetCurrentProcessId()) + "-" +
+               std::to_string(++writes) + ".tmp";
+  const std::string temporary_name = path_utf8(temporary.filename());
+  const HANDLE file =
+      CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                  FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return fail(ui_text("A temporary file could not be created in its "
+                        "folder."),
+                temporary_name);
   }
-  fs::rename(temporary, path, ec);
-  if (ec) {
-    std::error_code ignored;
-    fs::remove(temporary, ignored);
+  bool written = true;
+  for (std::size_t done = 0; written && done < text.size();) {
+    const DWORD part =
+        DWORD(std::min<std::size_t>(text.size() - done, 1u << 20));
+    DWORD wrote = 0;
+    written = WriteFile(file, text.data() + done, part, &wrote, nullptr) &&
+              wrote > 0;
+    done += wrote;
+  }
+  // On the disk before the rename: without this, a power cut just after the
+  // rename can leave the new name with nothing behind it.
+  written = written && FlushFileBuffers(file);
+  CloseHandle(file);
+  if (!written) {
+    DeleteFileW(temporary.c_str());
+    return fail(ui_text("Writing the temporary file failed (is the disk "
+                        "full?)."),
+                temporary_name);
+  }
+  DWORD error = 0;
+  for (int attempt = 0;; ++attempt) {
+    if (MoveFileExW(temporary.c_str(), path.c_str(),
+                    MOVEFILE_REPLACE_EXISTING)) {
+      error = 0;
+      break;
+    }
+    error = GetLastError();
+    if (attempt >= rename_retries || !held_for_a_moment(error, path)) {
+      break;
+    }
+    Sleep(10u << attempt); // 10, 20, 40, 80, 160 ms
+  }
+  if (error != 0) {
+    DeleteFileW(temporary.c_str());
     return fail(ui_text("The old file could not be replaced."),
-                name + ": " + ec.message());
+                name + ": " + std::system_category().message(int(error)));
   }
   if (why) {
     why->clear();
@@ -362,5 +419,40 @@ std::string path_utf8(const fs::path &path) {
 fs::path path_from_utf8(std::string_view text) {
   return fs::path(std::u8string(reinterpret_cast<const char8_t *>(text.data()),
                                 text.size()));
+}
+
+std::string environment_utf8(const wchar_t *name) {
+  const auto value = env_path(name);
+  if (!value || value->empty()) {
+    return {};
+  }
+  const std::wstring &wide = value->native();
+  const int size = WideCharToMultiByte(CP_UTF8, 0, wide.data(),
+                                       int(wide.size()), nullptr, 0, nullptr,
+                                       nullptr);
+  std::string out(size > 0 ? std::size_t(size) : 0, '\0');
+  if (size > 0) {
+    WideCharToMultiByte(CP_UTF8, 0, wide.data(), int(wide.size()), out.data(),
+                        size, nullptr, nullptr);
+  }
+  return out;
+}
+
+std::FILE *open_file_utf8(std::string_view path) {
+  if (path.empty() || path.size() > 32767) {
+    return nullptr;
+  }
+  // Converted here and not through fs::path, which throws for text that is
+  // not UTF-8: this is called from inside RmlUi.
+  const int size = MultiByteToWideChar(CP_UTF8, 0, path.data(),
+                                       int(path.size()), nullptr, 0);
+  if (size <= 0) {
+    return nullptr;
+  }
+  std::wstring wide(std::size_t(size), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, path.data(), int(path.size()), wide.data(),
+                      size);
+  // Shared as fopen shares it (others may read and write meanwhile).
+  return _wfsopen(wide.c_str(), L"rb", _SH_DENYNO);
 }
 } // namespace xerces_core

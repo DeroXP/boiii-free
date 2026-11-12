@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <string>
 #include <thread>
 
@@ -74,6 +75,46 @@ TEST_CASE("ipc: run files round trip and only name xerces pipes") {
   CHECK_EQ(back->image, entry.image);
   entry.pipe = "\\\\.\\pipe\\someone-else";
   CHECK(!ipc::parse_run_entry(ipc::run_entry_to_json(entry)).has_value());
+}
+
+TEST_CASE("ipc: a run file caught half written is left alone") {
+  // A game that writes its run file in place empties it first; a launcher
+  // listing the folder in that moment read "" and removed a live game's
+  // file. Only a file that has stayed unreadable for a while goes.
+  const fs::path run = fs::temp_directory_path() / "xerces_ipc_run_partial";
+  fs::remove_all(run);
+  fs::create_directories(run);
+  std::ofstream(run / "game-100.json") << "";
+  std::ofstream(run / "game-101.json") << "{\"role\":\"game\",\"pi";
+  CHECK(ipc::live_run_entries(run).empty());
+  CHECK(fs::exists(run / "game-100.json"));
+  CHECK(fs::exists(run / "game-101.json"));
+  // The same two files a minute later: nobody is going to finish them.
+  const auto old = fs::file_time_type::clock::now() - std::chrono::minutes(1);
+  fs::last_write_time(run / "game-100.json", old);
+  fs::last_write_time(run / "game-101.json", old);
+  CHECK(ipc::live_run_entries(run).empty());
+  CHECK(!fs::exists(run / "game-100.json"));
+  CHECK(!fs::exists(run / "game-101.json"));
+
+  // The server writes its own through a rename, so there is no such moment:
+  // the file is whole from the start and nothing is left next to it.
+  ipc::pipe_server server;
+  REQUIRE(server.start(run, "test", [](const ipc::request &request) {
+    return ipc::make_result(request.id, "{}");
+  }));
+  std::size_t files = 0;
+  for (const auto &entry : fs::directory_iterator(run)) {
+    ++files;
+    CHECK_EQ(entry.path().extension().string(), std::string(".json"));
+    std::ifstream in(entry.path(), std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    CHECK(ipc::parse_run_entry(text).has_value());
+  }
+  CHECK_EQ(files, std::size_t{1});
+  server.stop();
+  fs::remove_all(run);
 }
 
 TEST_CASE("ipc: a pipe served and called in one process") {

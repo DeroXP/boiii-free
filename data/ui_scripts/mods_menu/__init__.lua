@@ -27,10 +27,15 @@ CoD.OverlayUtility.AddSystemOverlay("DeleteModConfirmation", {
           models = { displayText = "DELETE" },
           properties = {
             action = function(_, _, controller, _, menu)
-              GoBack(menu, controller)
+              -- the Mods menu under this confirmation: it keeps the load order
+              local mods = menu.occludedMenu
+              local back = GoBack(menu, controller)
+              if type(mods) ~= "table" and type(mods) ~= "userdata" then
+                mods = back
+              end
               local failure = ModsMenu.Delete(ugcName)
-              if not failure and menu.removeFromStack then
-                menu:removeFromStack(ugcName)
+              if not failure and mods and mods.removeFromStack then
+                mods:removeFromStack(ugcName)
               end
               if failure then
                 LuaUtils.UI_ShowErrorMessageDialog(controller, failure)

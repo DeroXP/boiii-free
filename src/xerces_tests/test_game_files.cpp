@@ -14,6 +14,7 @@
 #undef GetObject
 
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #include <xerces_core/game_files.hpp>
@@ -89,8 +90,9 @@ TEST_CASE("game files: the asset pool switch keeps the other settings") {
   CHECK(!asset_pools_enabled(R"({"disable_asset_pools":"1"})"));
 
   const std::string off = set_asset_pools_enabled(
-      R"({"ap_image":"9000","friends_only":"1","disable_asset_pools":"1"})",
-      false);
+                              R"({"ap_image":"9000","friends_only":"1","disable_asset_pools":"1"})",
+                              false)
+                              .value_or("");
   CHECK(!asset_pools_enabled(off));
   const auto parsed = json::parse(off);
   REQUIRE(parsed.ok);
@@ -99,8 +101,61 @@ TEST_CASE("game files: the asset pool switch keeps the other settings") {
   CHECK_EQ(json::get_string(parsed.document, "friends_only").value_or(""),
            std::string("1"));
   CHECK(!parsed.document.HasMember("disable_asset_pools"));
-  CHECK(asset_pools_enabled(set_asset_pools_enabled(off, true)));
-  CHECK(asset_pools_enabled(set_asset_pools_enabled("not json", true)));
+  CHECK(asset_pools_enabled(set_asset_pools_enabled(off, true).value_or("")));
+  // No file yet, or a blank one: an object with the switch alone.
+  CHECK(!asset_pools_enabled(set_asset_pools_enabled("", false).value_or("")));
+  CHECK(set_asset_pools_enabled(" \r\n", true).has_value());
+  // Text that is not a JSON object is not started again from {}: that wrote
+  // a file with the switch alone and lost every other key for one typo.
+  CHECK(!set_asset_pools_enabled("not json", true).has_value());
+  CHECK(!set_asset_pools_enabled(R"({"ap_image":"9000",})", false).has_value());
+  CHECK(!set_asset_pools_enabled("[1]", false).has_value());
+}
+
+TEST_CASE("game files: the pool switch leaves a file it cannot use alone") {
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() / "xerces_game_files_pools";
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  const fs::path file = dir / "user" / "launcher_settings.json";
+
+  // No file: it is made (and its folder).
+  CHECK(switch_asset_pools(file, false) == pool_switch::written);
+  CHECK(!asset_pools_enabled(xerces_tests::read_file(file)));
+
+  // The other keys stay.
+  {
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    out << R"({"ap_image":"9000","asset_limits_enabled":"0"})";
+  }
+  CHECK(switch_asset_pools(file, true) == pool_switch::written);
+  const auto kept = json::parse(xerces_tests::read_file(file));
+  REQUIRE(kept.ok);
+  CHECK_EQ(json::get_string(kept.document, "ap_image").value_or(""),
+           std::string("9000"));
+  CHECK_EQ(json::get_string(kept.document, "asset_limits_enabled").value_or(""),
+           std::string("1"));
+
+  // There but unreadable (here: opened by something that shares nothing, as
+  // a scanner can). It used to count as "no file" and was replaced by a
+  // file with the switch alone.
+  const std::string before = xerces_tests::read_file(file);
+  const HANDLE held = CreateFileW(file.c_str(), GENERIC_READ, 0, nullptr,
+                                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  REQUIRE(held != INVALID_HANDLE_VALUE);
+  CHECK(switch_asset_pools(file, false) == pool_switch::unreadable);
+  CloseHandle(held);
+  CHECK_EQ(xerces_tests::read_file(file), before);
+
+  // Readable, but not a JSON object: left as it is, byte for byte.
+  const std::string broken = R"({"ap_image":"9000", "friends_only":"1",})";
+  {
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    out << broken;
+  }
+  CHECK(switch_asset_pools(file, false) == pool_switch::not_an_object);
+  CHECK_EQ(xerces_tests::read_file(file), broken);
+  fs::remove_all(dir);
 }
 
 TEST_CASE("game files: a client Xerces did not start still counts as running") {

@@ -12,6 +12,12 @@
 //   xerces_crash_test fatal      a fatal engine error (Com_Error): the
 //                                fatal-error dialog, a note without a dump
 //                                ("unknown_exit")
+//   xerces_crash_test freeze     the main thread never finishes its frame:
+//                                the freeze report after 30 s, the game
+//                                closed after 60 s ("unknown_exit", reason
+//                                "freeze")
+//   xerces_crash_test stall      the main thread sleeps 40 s and goes on: a
+//                                freeze report that is taken back
 
 #include <component/command.hpp>
 #include <game/game.hpp>
@@ -37,6 +43,12 @@ constexpr std::string_view flag = "-xerces-crash-test";
     game::com::Com_Error(game::errorParm::FATAL,
                          "xerces_crash_test: a fatal error on purpose");
   }
+  if (kind == "freeze") {
+    // The freeze watchdog ends the process (exception.cpp).
+    for (;;) {
+      Sleep(100);
+    }
+  }
   volatile int *nowhere = nullptr;
   *nowhere = 0x58455243; // "XERC"
   __assume(false);
@@ -54,7 +66,15 @@ public:
       return;
     }
     command::add("xerces_crash_test", [](const command::params &params) {
-      crash(params.size() > 1 ? params.get(1) : "access");
+      const std::string kind = params.size() > 1 ? params.get(1) : "access";
+      if (kind == "stall") {
+        xerces_runtime::log_warn(
+            "xerces.crash_test",
+            "Stalling on purpose (xerces_crash_test stall)");
+        Sleep(40000);
+        return;
+      }
+      crash(kind);
     });
     xerces_runtime::log_info(
         "xerces.crash_test.ready",
