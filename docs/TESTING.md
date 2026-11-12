@@ -3191,3 +3191,80 @@ A name that ends as a file does (lua, gsc, csc, gsh, cpp, hpp, c, h, inl, json, 
 log) is left as it is now (`xerces_core/log.cpp`, `file_ending`; `xerces_tests` checks
 both that and that `lua.example.org:27017` is still scrubbed). The text report writes a
 script's line as `scripts/zm/zm_zod.gsc line 12` all the same.
+
+## Beta.23 pushed and checked in the game; a crash while quitting found and fixed (2026-11-12)
+
+After beta.23 was built (its section is "Town Reimagined's 140 ms frames"), on the user's
+word: both pushes, then the in-game checks on the beta.23 code.
+
+The pushes:
+
+- [x] `xerces-main` to `origin` at 5ec8a398 (14 commits, beta.21 to beta.23; a
+      fast-forward, no tags).
+- [x] The backend's branch to `origin/xerces-design` at baec036e (one commit, a
+      fast-forward). GitHub's record of Railway's deployment of baec036e to
+      "production": `in_progress` 4 s after the push, `success` 45 s after it. The live
+      service: `/healthz` answers `{"ok":true}`, `/v1/meta` 200, `GET /v1/crashes` 405 (it
+      takes reports).
+- [ ] Not shown: that a report sent to Railway now keeps the game's text. Both versions
+      of the backend answer a broken report with the same first error, so nothing short of
+      a real report tells them apart, and test reports are not sent there. The first real
+      report from beta.22 or later will show it (`scripts\crashes.py show`).
+
+The in-game checks (`tools\dev\session\m1-check.ps1 -Live`, through Xerces.exe, the build
+of beta.23's code in the test home `XercesHome-m1`):
+
+- [x] vanilla 4, modded 6, cli with load and unload 9, reopen 8, cliapply 8, dvars 8,
+      crash 7, restart 4, safeoff 6: 60 pass.
+- [x] The first run of `reopen` failed one check, "quitting leaves clean_exit: phase
+      frontend": the game had crashed as it quit (`crash-2026-11-12-12-21-51.txt` and
+      `.dmp`, kept in `bench\20261112-town\quit-crash`). The report: "tried to read 0x0
+      (null pointer) in BlackOps3.exe+0x142BDC8C6 on the auxiliary thread", under the
+      game's `fopen` (through `patches::fsopen_adjustpath`), after the console's last
+      "Unloaded fastfile" lines. The dump's main thread: `exit_hook`,
+      `component_loader::pre_destroy`, `xerces_core::ipc::pipe_server::stop`,
+      `std::thread::join`. The pipe's thread was in `on_main`, waiting up to 2 s for the
+      main thread to run a status request from the reopened launcher, and the main thread
+      was the one waiting for it. In that time a game thread opened a file the game's
+      runtime had already closed its table for. KNOWN_ISSUES.md had this since the first
+      betas as "once in 12 quits with mods the game crashed while closing".
+
+The fix (DESIGN.md 5.6, "How a launch ends"): the pipe's wait is called off when the game
+is closing; a fault on another thread after the game has called `ExitProcess` in a clean
+exit ends the launch as that exit.
+
+- [x] `xerces_crash_test latefault`, then quit (mods off, `-xerces-crash-test
+      -quiet-crash`): the log has `loader.phase clean_exit` and, in the same millisecond,
+      `loader.exit.late_fault` "A thread faulted at boiii.exe+0x1E5058 while the game was
+      closing; the launch ends as the exit it was"; the journal says `clean_exit`; no file
+      appears in the minidumps folder.
+- [x] `xerces_crash_test exitfault`, then quit: the shutdown's own thread faults, and that
+      is a crash as before: `crash-2026-11-12-15-59-02.dmp` and `.txt` ("tried to write to
+      0x0 (null pointer) in boiii.exe+0x1E48F8
+      (xerces_crash_test::component::pre_destroy+0x14) on the main thread"), the journal
+      still at `frontend`.
+- [x] `reopen` again: 8 of 8 three times with the first version of the fix and once more
+      with the final one, `clean_exit` every time, no `late_fault` line (the wait that
+      made room for the fault is gone), no crash file. `modded`: 6 of 6, twice.
+- [x] Unit tests (613 pass): the wait that can be called off (called off in time, at
+      once, while the task runs, never; the result when nobody calls it off), and the rule
+      for a late fault as a table (`late_fault_is_part_of_exit`: the three clean exits,
+      not before `ExitProcess`, not on the exiting thread, not after a crash, not when the
+      engine gave up; whenever it says yes the journal's own rule says clean).
+- [x] A review by two other readers with a sceptic for each finding, before the commit.
+      One thing had to change: the handler decided by "a quit or code 0" and wrote the
+      journal by "a quit", so an exit with code 0 and no quit seen would have ended "as a
+      quit" with the journal left as a crash; both now go by one rule. Also done: the
+      first call of the exit hook is the one that counts (a second thread reaching
+      `ExitProcess` no longer becomes "the exiting thread"); a second fault in the handler
+      on the same thread ends the process; `upnp::close_port_now` is waited for by every
+      caller, so the handler cannot end the process under a removal the shutdown began;
+      the test for the other branch (`exitfault`). Left as it is and written down: a
+      fault after the game's `exit()` has closed its tables and before it calls
+      `ExitProcess` is still a crash, because nothing marks that stretch.
+- [ ] Not tried: a quit from the game's menus (the test runs quit through the console,
+      which forces the exit after 3 s), a late fault while a router port is mapped, the
+      real fault itself after the fix (it came once in two runs of `reopen` before it and
+      in none of four after; the forced one stands in for it).
+- [ ] Not in a package: beta.23's zip was built before this. The fix is on
+      `launcher/upscale` only.

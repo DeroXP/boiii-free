@@ -313,6 +313,74 @@ TEST_CASE("handoff: a task already running at the deadline is waited for") {
   CHECK_EQ(runs.load(), 1);
 }
 
+TEST_CASE("handoff: a wait that is called off does not wait out its time") {
+  // The game's main thread stops taking tasks when the game quits: the pipe's
+  // thread must not keep the exit waiting for two seconds
+  std::atomic<int> runs = 0;
+  std::atomic<int> asked = 0;
+  handoff call([&] {
+    ++runs;
+    return std::string("late");
+  });
+  const auto before = std::chrono::steady_clock::now();
+  const auto result = call.wait(
+      5000ms, [&] { return ++asked >= 3; }, 10ms);
+  const auto took = std::chrono::steady_clock::now() - before;
+  CHECK(!result.has_value());
+  CHECK(asked.load() >= 3);
+  CHECK(took < 2000ms);
+  CHECK(!call.run()); // told "busy": it never runs
+  CHECK_EQ(runs.load(), 0);
+
+  // Called off before the first look: no waiting at all (the step is as long
+  // as the timeout, so one step of waiting would show)
+  handoff other([] { return std::string("x"); });
+  const auto start = std::chrono::steady_clock::now();
+  CHECK(!other.wait(5000ms, [] { return true; }, 5000ms).has_value());
+  CHECK(std::chrono::steady_clock::now() - start < 2000ms);
+  CHECK(!other.run());
+}
+
+TEST_CASE("handoff: a wait that can be called off still gives the result") {
+  // Nobody calls it off and the task runs: its result, as with wait(timeout)
+  handoff call([] { return std::string("done"); });
+  std::thread worker([&] {
+    std::this_thread::sleep_for(30ms);
+    call.run();
+  });
+  const auto result = call.wait(5000ms, [] { return false; }, 5ms);
+  worker.join();
+  CHECK(result == std::optional<std::string>("done"));
+
+  // Its time runs out with nobody calling it off: dropped, never run late
+  handoff slow([] { return std::string("late"); });
+  CHECK(!slow.wait(20ms, [] { return false; }, 5ms).has_value());
+  CHECK(!slow.run());
+
+  // No function to ask is the same as never calling it off
+  handoff plain([] { return std::string("ok"); });
+  CHECK(plain.run());
+  CHECK(plain.wait(0ms, std::function<bool()>{}) ==
+        std::optional<std::string>("ok"));
+}
+
+TEST_CASE("handoff: called off while the task runs, the task is waited for") {
+  std::atomic<bool> started = false;
+  handoff call([&] {
+    started = true;
+    std::this_thread::sleep_for(150ms);
+    return std::string("reloaded");
+  });
+  std::thread worker([&] { call.run(); });
+  while (!started) {
+    std::this_thread::yield();
+  }
+  // What the task does is happening: the answer is its result, not "busy"
+  const auto result = call.wait(5000ms, [] { return true; });
+  worker.join();
+  CHECK(result == std::optional<std::string>("reloaded"));
+}
+
 TEST_CASE("handoff: the task's exception reaches the waiter") {
   handoff call([]() -> std::string { throw std::runtime_error("broken"); });
   CHECK(call.run());

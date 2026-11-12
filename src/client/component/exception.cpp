@@ -25,6 +25,7 @@
 #include <xerces/db_pool.hpp>
 #include <xerces/loader.hpp>
 #include <xerces/runtime.hpp>
+#include "upnp.hpp"
 #include <xerces_core/crash_report.hpp>
 #include <xerces_core/journal.hpp>
 #include <xerces_core/json.hpp>
@@ -1573,9 +1574,102 @@ bool is_harmless_error(const LPEXCEPTION_POINTERS exceptioninfo) {
 
 std::atomic<bool> crashed{false};
 
+// Xerces: a fault on another thread once the game has called ExitProcess
+// after a quit (or with code 0). The engine has shut itself down; main.cpp's
+// exit hook is running the components' shutdown on the exiting thread. The
+// game's own runtime has closed its file table by then, and a game thread
+// that still opens a file reads through a null pointer there (2026-11-12:
+// BlackOps3.exe+0x2BDC8C6 under the game's fopen, while the hook waited for
+// the command pipe's thread; "once in 12 quits" in the first betas' notes).
+// That was written up as a crash, and the next start of the launcher offered
+// safe mode for a game that had quit. The launch ends here instead as the
+// exit it was, the way the console's forced exit ends one (console.cpp): the
+// journal gets clean_exit, a lobby's router port is given back, and the
+// process ends with the code the game gave. No dump, no report, no dialog.
+//
+// Not covered, and still a crash: a fault on the exiting thread itself (a
+// fault in that shutdown), anything before the game calls ExitProcess (a
+// crash while the engine shuts itself down, including the short stretch in
+// which its exit() has closed its tables and has not called ExitProcess yet:
+// nothing marks it), and any exit that is not a clean one. The rule is
+// xerces_core::late_fault_is_part_of_exit.
+
+// Ends the process after 3 s whatever happens: the steps below take locks
+// (the journal's, the log's) and wait for the router, and the thread that
+// faulted might be the one holding a lock.
+DWORD WINAPI late_fault_failsafe(const LPVOID code) {
+  Sleep(3000);
+  TerminateProcess(GetCurrentProcess(),
+                   static_cast<UINT>(reinterpret_cast<std::uintptr_t>(code)));
+  return 0;
+}
+
+[[noreturn]] void end_exit_after_late_fault(
+    const LPEXCEPTION_POINTERS exceptioninfo) {
+  const auto code = xerces_runtime::exit_code().value_or(0);
+  // A fault in what follows comes back here on the same thread: the second
+  // time there is nothing left to try. (Per thread: two game threads can
+  // fault close together, and the second must not cut the first one short.)
+  static thread_local bool entered = false;
+  if (entered) {
+    TerminateProcess(GetCurrentProcess(), code);
+    for (;;) {
+      Sleep(INFINITE);
+    }
+  }
+  entered = true;
+  if (const HANDLE failsafe = CreateThread(
+          nullptr, 0, late_fault_failsafe,
+          reinterpret_cast<LPVOID>(static_cast<std::uintptr_t>(code)), 0,
+          nullptr)) {
+    CloseHandle(failsafe);
+  }
+  // First what matters to the next start of the launcher
+  xerces_runtime::journal_exit_after_late_fault();
+  const auto address = reinterpret_cast<std::uintptr_t>(
+      exceptioninfo->ExceptionRecord->ExceptionAddress);
+  // Which module, without the symbol engine: a name and an offset are enough
+  // to find the place in a dump of the game or in the client's own symbols
+  char where[160] = {};
+  HMODULE module = nullptr;
+  char path[MAX_PATH] = {};
+  if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                             GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                         reinterpret_cast<LPCSTR>(address), &module) &&
+      module && GetModuleFileNameA(module, path, MAX_PATH) != 0) {
+    const char *name = std::strrchr(path, '\\');
+    std::snprintf(where, sizeof(where), "%s+0x%llX", name ? name + 1 : path,
+                  static_cast<unsigned long long>(
+                      address - reinterpret_cast<std::uintptr_t>(module)));
+  } else {
+    std::snprintf(where, sizeof(where), "0x%llX",
+                  static_cast<unsigned long long>(address));
+  }
+  char data[320] = {};
+  std::snprintf(data, sizeof(data),
+                "{\"at\":\"%s\",\"exception\":\"0x%08lX\",\"thread\":%lu,"
+                "\"exit_code\":%lu}",
+                where, exceptioninfo->ExceptionRecord->ExceptionCode,
+                GetCurrentThreadId(), static_cast<unsigned long>(code));
+  xerces_runtime::log_warn(
+      "loader.exit.late_fault",
+      std::string("A thread faulted at ") + where +
+          " while the game was closing; the launch ends as the exit it was",
+      data);
+  // Waits for a removal the exiting thread may already have begun
+  upnp::close_port_now();
+  TerminateProcess(GetCurrentProcess(), code);
+  for (;;) {
+    Sleep(INFINITE);
+  }
+}
+
 long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
   if (is_harmless_error(exceptioninfo)) {
     return EXCEPTION_CONTINUE_EXECUTION;
+  }
+  if (xerces_runtime::late_fault_is_part_of_exit()) {
+    end_exit_after_late_fault(exceptioninfo);
   }
   crashed = true;
   crash_handler_code = exceptioninfo->ExceptionRecord->ExceptionCode;

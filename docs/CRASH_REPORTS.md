@@ -168,6 +168,14 @@ is taken back), `xerces_crash_test heap` or `xerces_crash_test guard` (above),
 or `xerces_crash_test script` and then a pick in CHARACTERS (the server's thread
 hangs inside that script call: the freeze report names the script).
 
+A fault while the game is closing is told apart (DESIGN.md 5.6, "How a launch
+ends"). `xerces_crash_test latefault`, then quit: a thread writes through a null
+pointer as soon as the game has called `ExitProcess`; no dump and no report are
+made, the journal says `clean_exit` and the log has `loader.exit.late_fault`.
+`xerces_crash_test exitfault`, then quit: the thread that runs the shutdown
+faults in it, which is a crash like any other, with its dump and text report
+and no `clean_exit`.
+
 ## How a crash becomes a report
 
 1. The game's crash handler, when the launcher started the game (`XERCES_HOME`

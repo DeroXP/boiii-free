@@ -148,6 +148,9 @@ void map_port(const uint16_t port, const callback &done) {
     done(out);
 }
 
+// Removals of the mapped port begun by close_port_now and not finished
+std::atomic_int removals_running{};
+
 uint16_t take_mapped_port() {
   std::lock_guard lock(state_mutex);
   mapped_endpoint.clear();
@@ -177,16 +180,33 @@ void close_port_now() {
   // sees wanted is false and removes what it mapped itself.
   for (int i = 0; i < 10 && operation_running; ++i)
     std::this_thread::sleep_for(100ms);
-  const uint16_t port = take_mapped_port();
-  if (!port)
-    return;
-  // A router that stops answering would hold the exit for as long as
-  // Windows waits for it, so the removal runs on its own thread and the
-  // exit waits for it at most 2 s.
-  std::packaged_task<void()> task([port] { unmap_port(port); });
-  std::future<void> removed = task.get_future();
-  std::thread(std::move(task)).detach();
-  if (removed.wait_for(2s) != std::future_status::ready)
+  uint16_t port = 0;
+  {
+    std::lock_guard lock(state_mutex);
+    mapped_endpoint.clear();
+    port = std::exchange(mapped_port, uint16_t{});
+    if (port)
+      ++removals_running;
+  }
+  if (port) {
+    // A router that stops answering would hold the exit for as long as
+    // Windows waits for it, so the removal runs on its own thread.
+    try {
+      std::thread([port] {
+        unmap_port(port);
+        --removals_running;
+      }).detach();
+    } catch (const std::system_error &) {
+      --removals_running;
+    }
+  }
+  // Every caller waits for the removal, at most 2 s, whoever began it: the
+  // exit's shutdown and a late fault's exit (exception.cpp) can both be here,
+  // and the one that found no port must not end the process under the
+  // other's request.
+  for (int i = 0; i < 40 && removals_running; ++i)
+    std::this_thread::sleep_for(50ms);
+  if (port && removals_running)
     printf("[UPnP] The router did not answer in time; it may still forward "
            "UDP port %u until the port is mapped again\n",
            static_cast<unsigned>(port));

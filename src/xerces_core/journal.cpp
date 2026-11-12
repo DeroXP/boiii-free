@@ -360,6 +360,15 @@ bool game_exit_is_clean(bool quit_requested,
   return quit_requested || !exit_code || *exit_code == 0;
 }
 
+bool late_fault_is_part_of_exit(bool quit_requested,
+                                std::optional<std::uint32_t> exit_code,
+                                bool crash_seen, std::uint32_t faulting_thread,
+                                std::uint32_t exiting_thread) {
+  return exit_code.has_value() && !crash_seen && exiting_thread != 0 &&
+         faulting_thread != exiting_thread &&
+         game_exit_is_clean(quit_requested, exit_code);
+}
+
 bool journal_crashed(const std::optional<launch_journal> &journal) {
   return !journal || journal->phase != launch_phase::clean_exit;
 }

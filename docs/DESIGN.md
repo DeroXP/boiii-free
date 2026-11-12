@@ -910,7 +910,21 @@ together.
   `ExitProcess` (main.cpp's exit hook), or, when the console's close forces the
   exit 3 s after `quit` (before any shutdown code runs, code 1), just before
   that forced exit. Never once the crash handler has run, so a crash while the
-  game shuts down still counts. Without a quit, an exit with a code other than 0
+  game shuts down still counts. One kind of fault is no crash (2026-11-12):
+  once the game has called `ExitProcess` after a quit or with code 0, its own
+  runtime has closed its file table while the exit hook is still in the
+  components' shutdown, and a game thread that opens a file then reads through
+  a null pointer. The crash handler asks first whether a fault is that
+  (`xerces_core::late_fault_is_part_of_exit`: the exit is a clean one, nothing
+  crashed before, and the fault is not on the exiting thread); if so it writes
+  `clean_exit`, logs `loader.exit.late_fault` with the place, gives a lobby's
+  router port back and ends the process with the game's code, within 3 s
+  whatever happens: no dump, no report, no dialog. A fault on the exiting
+  thread, or before the game calls `ExitProcess`, stays a crash. The command
+  pipe no longer keeps that shutdown waiting: a request for the game's main
+  thread is answered "busy" at once when the game is closing, and one already
+  waiting is called off (it had waited up to two seconds, which is when the
+  fault was seen). Without a quit, an exit with a code other than 0
   (two custom maps with DS4C ended the game with 0xFFFFFFFF in the middle of
   their load) keeps the journal's phase and logs `loader.exit.unexpected` with
   the code, the phase, the map and the last 60 console lines

@@ -30,6 +30,15 @@
 //   xerces_crash_test guard      reads and writes a bad address through
 //                                xerces_safe: the console says whether the
 //                                fault was caught; the game plays on
+//   xerces_crash_test latefault  a thread that writes through a null pointer
+//                                as soon as the game, quitting, has called
+//                                ExitProcess (quit after it): no dump and no
+//                                report, the journal says clean_exit, the
+//                                log has loader.exit.late_fault
+//   xerces_crash_test exitfault  the thread that runs the shutdown writes
+//                                through a null pointer in it (quit after
+//                                it): that is a crash like any other, with
+//                                its dump and report, and no clean_exit
 
 #include <component/command.hpp>
 #include <game/game.hpp>
@@ -44,6 +53,9 @@
 namespace xerces_crash_test {
 namespace {
 constexpr std::string_view flag = "-xerces-crash-test";
+
+// xerces_crash_test exitfault: this component's shutdown faults
+std::atomic_bool fault_in_shutdown{false};
 
 [[noreturn]] void crash(const std::string &kind) {
   xerces_runtime::log_warn("xerces.crash_test",
@@ -113,6 +125,28 @@ public:
         xerces_character_slots::test_hang_in_script();
         return;
       }
+      if (kind == "latefault") {
+        xerces_runtime::log_warn(
+            "xerces.crash_test",
+            "A thread will fault once the game is quitting "
+            "(xerces_crash_test latefault)");
+        std::thread([] {
+          while (!xerces_runtime::exit_code().has_value()) {
+            Sleep(1);
+          }
+          volatile int *nowhere = nullptr;
+          *nowhere = 0x58455243; // "XERC"
+        }).detach();
+        return;
+      }
+      if (kind == "exitfault") {
+        xerces_runtime::log_warn(
+            "xerces.crash_test",
+            "The shutdown will fault once the game is quitting "
+            "(xerces_crash_test exitfault)");
+        fault_in_shutdown = true;
+        return;
+      }
       if (kind == "stall") {
         xerces_runtime::log_warn(
             "xerces.crash_test",
@@ -125,6 +159,13 @@ public:
     xerces_runtime::log_info(
         "xerces.crash_test.ready",
         "xerces_crash_test is available (-xerces-crash-test)");
+  }
+
+  void pre_destroy() override {
+    if (fault_in_shutdown) {
+      volatile int *nowhere = nullptr;
+      *nowhere = 0x58455243; // "XERC"
+    }
   }
 };
 } // namespace xerces_crash_test

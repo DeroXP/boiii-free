@@ -59,8 +59,19 @@ std::string strings(const std::vector<std::string> &items) {
 // only for a request the main thread had not started within two seconds,
 // which then never runs; one it had started (a reload setting fs_extramods)
 // is waited for, so the caller is never told to retry a change that happened.
+//
+// Once the game is quitting, its main thread is in the exit (main.cpp's exit
+// hook, which stops this pipe and joins its thread) and takes nothing more.
+// The wait ends there at once: on 2026-11-12 a status request from a
+// reopened launcher kept the exit waiting for these two seconds, and in them
+// a game thread opened a file that the game's runtime had already closed its
+// table for, which was reported as a crash of a game that had quit.
 std::string on_main(const ipc::request &request,
                     std::function<std::string()> fn) {
+  const auto quitting = [] { return xerces_runtime::exit_code().has_value(); };
+  if (quitting()) {
+    return ipc::make_error(request.id, ipc::busy, "the game is closing");
+  }
   auto call = std::make_shared<xerces_core::handoff>(
       [fn = std::move(fn)]() -> std::string {
         try {
@@ -72,10 +83,12 @@ std::string on_main(const ipc::request &request,
         }
       });
   scheduler::once([call] { call->run(); }, scheduler::main);
-  std::optional<std::string> result = call->wait(2s);
+  std::optional<std::string> result = call->wait(2s, quitting);
   if (!result) {
     return ipc::make_error(request.id, ipc::busy,
-                           "the game is busy (loading?); try again");
+                           quitting()
+                               ? "the game is closing"
+                               : "the game is busy (loading?); try again");
   }
   std::string value = std::move(*result);
   if (!value.empty() && value.front() == '!') {

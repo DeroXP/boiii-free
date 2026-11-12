@@ -33,7 +33,19 @@ public:
   // here.
   std::optional<std::string> wait(std::chrono::milliseconds timeout);
 
+  // The same, and it also stops waiting as soon as `give_up` says so (asked
+  // every `step`): for a worker that may stop taking tasks for good, such as
+  // the game's main thread once the game is quitting. A task that had not
+  // started then never runs; one that had is still waited for to its end.
+  std::optional<std::string>
+  wait(std::chrono::milliseconds timeout, const std::function<bool()> &give_up,
+       std::chrono::milliseconds step = std::chrono::milliseconds(20));
+
 private:
+  // The waiter stops waiting: nothing if the task had not started (it then
+  // never will), its result if it had.
+  std::optional<std::string> give_up_or_finish();
+
   enum class state { pending, running, cancelled };
 
   std::function<std::string()> fn_;

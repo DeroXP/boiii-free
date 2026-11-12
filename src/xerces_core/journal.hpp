@@ -86,6 +86,21 @@ bool exit_counts_as_clean(const launch_journal &journal,
 bool game_exit_is_clean(bool quit_requested,
                         std::optional<std::uint32_t> exit_code);
 
+// A thread faults after the game has called ExitProcess (`exit_code` is the
+// code it gave; without one the exit has not reached that point). The exit
+// hook is then running the components' shutdown on `exiting_thread`, the
+// game's own runtime has closed its file table, and a game thread that still
+// opens a file reads through a null pointer there. Such a fault is part of
+// the exit, not a crash of the player's game, when the exit itself is a clean
+// one (game_exit_is_clean), no crash was seen before it, and it is not on the
+// exiting thread: a fault there is a fault in that shutdown and stays a
+// crash. The client's crash handler asks this before anything else
+// (exception.cpp), and the journal's clean_exit is written by the same rule.
+bool late_fault_is_part_of_exit(bool quit_requested,
+                                std::optional<std::uint32_t> exit_code,
+                                bool crash_seen, std::uint32_t faulting_thread,
+                                std::uint32_t exiting_thread);
+
 // No journal, or one that does not end in clean_exit: the launch crashed.
 bool journal_crashed(const std::optional<launch_journal> &journal);
 

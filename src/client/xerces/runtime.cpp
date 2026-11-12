@@ -347,8 +347,10 @@ namespace {
 // Plain values: read during shutdown, after other statics may be gone.
 std::atomic_bool quit_seen{false};
 std::atomic_bool crashed{false};
+std::atomic_bool exit_code_claimed{false};
 std::atomic_bool exit_code_known{false};
 std::atomic<std::uint32_t> exit_code_value{0};
+std::atomic<std::uint32_t> exit_thread{0};
 
 std::mutex console_mutex;
 xerces_core::text_tail console_tail; // a fixed buffer, no destructor work
@@ -387,8 +389,29 @@ void journal_quit_forced() {
 }
 
 void note_exit_code(std::uint32_t code) {
+  // The first exit is the one whose thread runs the shutdown
+  if (exit_code_claimed.exchange(true)) {
+    return;
+  }
   exit_code_value = code;
+  exit_thread = GetCurrentThreadId();
   exit_code_known = true;
+}
+
+std::uint32_t exit_thread_id() {
+  return exit_code_known ? exit_thread.load() : 0;
+}
+
+bool late_fault_is_part_of_exit() {
+  return xerces_core::late_fault_is_part_of_exit(
+      quit_seen, exit_code(), crashed, GetCurrentThreadId(), exit_thread_id());
+}
+
+void journal_exit_after_late_fault() {
+  if (exit_code_known && !crashed &&
+      xerces_core::game_exit_is_clean(quit_seen, exit_code_value.load())) {
+    set_journal_phase(xerces_core::launch_phase::clean_exit);
+  }
 }
 
 std::optional<std::uint32_t> exit_code() {

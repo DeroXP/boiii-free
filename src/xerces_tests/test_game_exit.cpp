@@ -114,3 +114,46 @@ TEST_CASE("journal: the game's own exit is clean only after a quit or with 0") {
   CHECK(!game_exit_is_clean(false, 0xFFFFFFFFu)); // mid-load on two maps
   CHECK(!game_exit_is_clean(false, 1u));
 }
+
+TEST_CASE("game exit: a fault on another thread after ExitProcess is part of "
+          "a clean exit") {
+  const std::uint32_t exiting = 100;
+  const std::uint32_t other = 200;
+  // The case of 2026-11-12: the player quit, the game called ExitProcess(0),
+  // and a game thread faulted while the exit hook was still in the shutdown
+  CHECK(late_fault_is_part_of_exit(true, 0u, false, other, exiting));
+  // A quit after a match gives code 1; an exit with code 0 and no quit seen
+  // is clean too (game_exit_is_clean), so its late faults are as well
+  CHECK(late_fault_is_part_of_exit(true, 1u, false, other, exiting));
+  CHECK(late_fault_is_part_of_exit(false, 0u, false, other, exiting));
+
+  // Not before the game has called ExitProcess: a crash while the engine
+  // shuts itself down still counts
+  CHECK(!late_fault_is_part_of_exit(true, std::nullopt, false, other, exiting));
+  CHECK(!late_fault_is_part_of_exit(true, std::nullopt, false, other, 0));
+  // Not on the exiting thread: that is a fault in the shutdown itself
+  CHECK(!late_fault_is_part_of_exit(true, 0u, false, exiting, exiting));
+  // Not when the exiting thread is not known
+  CHECK(!late_fault_is_part_of_exit(true, 0u, false, other, 0));
+  // Not after a crash, and not when the exit is the engine giving up
+  CHECK(!late_fault_is_part_of_exit(true, 0u, true, other, exiting));
+  CHECK(!late_fault_is_part_of_exit(false, 0xFFFFFFFFu, false, other, exiting));
+  CHECK(!late_fault_is_part_of_exit(false, 1u, false, other, exiting));
+
+  // Whenever a late fault is part of the exit, the exit is one the journal
+  // marks clean: the two can never disagree
+  for (const bool quit : {false, true}) {
+    for (const std::optional<std::uint32_t> code :
+         {std::optional<std::uint32_t>{}, std::optional<std::uint32_t>{0u},
+          std::optional<std::uint32_t>{1u},
+          std::optional<std::uint32_t>{0xFFFFFFFFu}}) {
+      for (const bool crashed : {false, true}) {
+        if (late_fault_is_part_of_exit(quit, code, crashed, other, exiting)) {
+          CHECK(game_exit_is_clean(quit, code));
+          CHECK(!crashed);
+          CHECK(code.has_value());
+        }
+      }
+    }
+  }
+}

@@ -111,6 +111,22 @@ void journal_quit_forced();
 // the components' shutdown runs; nullopt when the process ends another way.
 void note_exit_code(std::uint32_t code);
 std::optional<std::uint32_t> exit_code();
+// Only the first call counts: a second thread that reaches ExitProcess while
+// the first is in the shutdown changes nothing here.
+// The thread that made that call (the one running the components' shutdown);
+// 0 before.
+std::uint32_t exit_thread_id();
+// A fault on the calling thread now is part of a clean exit and no crash
+// (xerces_core::late_fault_is_part_of_exit with what is noted here): the game
+// has called ExitProcess after a quit or with code 0, nothing crashed before,
+// and this is not the exiting thread. The crash handler asks this first
+// (exception.cpp). A fault between the game's exit() closing its tables and
+// its call of ExitProcess is not covered: nothing marks that stretch.
+bool late_fault_is_part_of_exit();
+// What the crash handler then writes into the journal: clean_exit, by the
+// same rule (the loader's shutdown would write it moments later on the
+// exiting thread).
+void journal_exit_after_late_fault();
 
 // ------------------------------------------------------- the console tail
 // console.cpp passes everything the console shows; the last lines go into the

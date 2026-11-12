@@ -183,10 +183,16 @@ to report these again, but tell us if you see them somewhere else or worse.
   such as `C:\Games\Xerces`.
 - **Some crashes are not explained yet.** In our tests the game sometimes closed
   while a map was starting, with no crash report, and ran fine the next time.
-  Once in 12 quits with mods the game crashed while closing; the next start of
-  Xerces then offers safe mode, and launching normally is fine. If either
-  happens to you, report it (README.txt, Reporting bugs) and say what you did
-  just before.
+  If it happens to you, report it (README.txt, Reporting bugs) and say what you
+  did just before.
+- **A crash while the game closes (up to beta.23).** Once in 12 quits with mods
+  in the first betas, and once in the tests of beta.23 with Xerces closed and
+  opened again while the game ran, the game crashed as it quit; the next start
+  of Xerces then offers safe mode, and launching normally is fine. The cause is
+  known now: a game thread opened a file after the game had closed its file
+  table, while Xerces was still finishing its own shutdown. Builds after
+  beta.23 finish that shutdown without the wait that made room for it, and end
+  such a quit as the quit it was.
 - **The two experimental display settings do not help yet.** In our tests on one
   PC, "Flip-model presentation (experimental)" changed nothing measurable in
   borderless, and "Precise FPS limit (experimental)" held about 235 FPS at a 240
