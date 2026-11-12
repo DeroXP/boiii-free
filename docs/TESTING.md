@@ -3014,8 +3014,13 @@ test home for the run; nothing is sent):
       622 KB, note). The eight-mod stack once more (`fix4`): 103 characters from 7
       sources, the live view, a pick, and the aim assist's rotation 0.56 at 42 m rising
       to 0.75 at 35 m.
+- [x] The backend as Railway runs it today (`8affa1fc`, started on this PC from a scratch
+      checkout): the final build's three reports (crash, freeze, fatal error) are taken
+      and stored, the four new parts dropped as unknown; `show` has the freeze's summary
+      as the console tail's last line. The deployed service itself answers 405 to
+      `GET /v1/crashes`, which means it takes reports.
 - [ ] Not tried: a real freeze with the server thread inside a script (the "Script
-      running" line), a crash on the server thread, a report sent to Railway.
+      running" line), a crash on the server thread, a report sent to Railway itself.
 
 One thing found on the way: the scrubbing of logs and reports read `name.ext:12` as a host
 and a port and wrote `<address>`. The game's own log had "lua/shared/<address>: function
