@@ -2234,7 +2234,8 @@ seen. What was wrong and is fixed:
 Scripts (`data/`):
 
 - XERCES SETTINGS showed five of its tabs' seven places, which left CONTROLLER
-  and the right shoulder end outside the strip.
+  and the right shoulder end outside the strip. Q and E now go from tab to tab
+  there too, as in CHARACTERS: on a keyboard the tabs could only be clicked.
 - A number set into a dvar from the UI's Lua goes as text in six digits: a million
   starting points was set as "1e+06". Every such write is text now (the start
   options, FOV Scale).

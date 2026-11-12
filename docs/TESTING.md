@@ -2896,8 +2896,10 @@ The fixes of DESIGN.md 7.14:
       menu had been open and closed, rotation 0.75 and slowdown 0.51 on a zombie at 25 m,
       0.71 and 0.51 on one at 37 m, as in beta.21; no jump of the view on the first frame
       back.
-- [ ] XERCES SETTINGS' tab strip was not seen: the entry in a match opens the match's own
-      list, which has no tabs; the tabs are on the lobby's screen.
+- [x] XERCES SETTINGS in the Zombies lobby (the entry in a match opens the match's own
+      list, which has no tabs): the strip shows ZOMBIES, GAMBLING, ROUNDS, GRAPHICS and
+      CONTROLLER; E four times reaches CONTROLLER (Aim Assist: Game's Own), Q goes back to
+      GRAPHICS (`bench\20261112-crash\lobby-grid3.png`).
 - [x] Launcher, core, CLI (14 fixes): RmlUi opens its files as UTF-8 (a Xerces folder with
       a character outside the ANSI code page loaded no font or page); a Steam library on
       such a path is found, and the same Steam root is listed once; a pin an update left

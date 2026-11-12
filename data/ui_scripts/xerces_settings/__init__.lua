@@ -436,6 +436,34 @@ if Engine.GetCurrentMap() == "core_frontend" then
       end,
       false
     )
+    -- Q and E on a keyboard go from tab to tab, as the shoulder buttons do and as in CHARACTERS: without them the
+    -- tabs could only be clicked
+    for _, turn in ipairs({
+      { button = Enum.LUIButton.LUI_KEY_LB, key = "Q", step = -1 },
+      { button = Enum.LUIButton.LUI_KEY_RB, key = "E", step = 1 },
+    }) do
+      self:AddButtonCallbackFunction(
+        self,
+        controller,
+        turn.button,
+        turn.key,
+        function(element, menu, actionController)
+          pcall(function()
+            if turn.step < 0 then
+              tabs.Tabs.grid:navigateItemLeft()
+            else
+              tabs.Tabs.grid:navigateItemRight()
+            end
+          end)
+          return true
+        end,
+        function(element, menu)
+          CoD.Menu.SetButtonLabel(menu, turn.button, "")
+          return true
+        end,
+        false
+      )
+    end
 
     background.MenuFrame:setModel(self.buttonModel, controller)
     options.id = "Options"
