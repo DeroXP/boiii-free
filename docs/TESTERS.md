@@ -100,6 +100,13 @@ hash, sent with the link, shows that the zip is the one we made.
   ten minutes of frame times, from 20 seconds into its first level, to a `bench`
   folder next to Xerces.exe (four small files, one listing what the game was doing during each long frame); leaving the level writes them early. Play as usual, then send those
   files to show where a map stutters. Turn it off afterwards.
+- **Long frames on large custom maps** (since beta.23). On a big map with many
+  mods the game could show a frame of about 140 ms several times a second: it
+  re-sorted its list of loaded textures with a sort that is slow when the list
+  is far out of order. Xerces now sorts that list about a hundred times quicker,
+  into the same order. Nothing to turn on. If a map still stutters like that,
+  send the game's log; to compare with the game's own sort, type
+  `-xerces-stream-sort-engine` into Settings > Launch, Extra launch flags.
 - **CHARACTERS (Zombies).** The pause menu of a Zombies match has a CHARACTERS
   entry: every character the game or DS4C lists (DS4C's portraits and outfits),
   and DEFAULT. Your pick stays on you: another mod's own character screen

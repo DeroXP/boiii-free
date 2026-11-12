@@ -71,10 +71,14 @@ to report these again, but tell us if you see them somewhere else or worse.
 - **A long frame (about 140 ms) every third of a second on a large custom map.**
   Seen on TOWN REIMAGINED with eight mods, from about a minute into a match. The
   game re-sorts its list of loaded textures with a sort that is slow when the list
-  is far out of order, and the frame waits for it. Builds after beta.22 sort that
-  list another way (a hundred times quicker in that case, the same result). If
-  you still see it there, send the game's log: its `xerces.stream_sort.far` lines
-  say how often the list was that far out of order and what the sorts cost.
+  is far out of order, and the frame waits for it. Since beta.23 Xerces sorts that
+  list another way (about a hundred times quicker in that case, into the same
+  order). What puts the list that far out of order there is not known, so this
+  has not been seen to help in a real match yet. If you still see the long
+  frames, send the game's log: its `xerces.stream_sort.far` lines say how often
+  the list was that far out of order and what the sorts cost. To compare with
+  the game's own sort, type `-xerces-stream-sort-engine` into Settings > Launch,
+  Extra launch flags.
 
 ## Zombies characters (CHARACTERS)
 
