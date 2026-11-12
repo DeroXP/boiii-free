@@ -2898,8 +2898,10 @@ CHARACTERS (DESIGN.md 7.13; runs `ui11` and, after the fixes below, `fix1` and `
       Start). With no mods and the same Xerces settings the match runs; so it does with
       DS4C alone and with Ascendance, im_oxo QOL, DBZ, Girls' Frontline, Avali or
       Classic Viewmodel FOV alone; the seven mods without DS4C fail as the eight do. It
-      takes several of the mods together (KNOWN_ISSUES.md). The Giant (`zm_factory`) is
-      not installed on this PC.
+      takes several of the mods together (KNOWN_ISSUES.md). With the eight mods and
+      `xerces_zm_powerOn 0` the match was still running 40 s in, no script error. The
+      Giant (`zm_factory`) is not installed on this PC.
+- [x] The final build once more through `m1-check.ps1 -Live`: 60 checks pass, none fails.
 - [ ] Not tried: a second player, a controller's LB/RB (Q and E were pressed), the fall-back
       without the HUD menu, a custom map, CHARACTERS on a Chronicles map (the match above
       ended first).

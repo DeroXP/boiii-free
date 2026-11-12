@@ -68,8 +68,12 @@ to report these again, but tell us if you see them somewhere else or worse.
   "ClientSysSetState - state index (-1) out of bounds (0 - 8)", from the map's own
   magic box script. With Power On at Start that is 13 seconds into the match. No
   one mod does it alone, and the map runs with no mods: several of them together
-  leave the map's box lights without one of the game's nine client systems. Play
-  that map with fewer mods. Other Chronicles maps were not tried.
+  leave the map's box lights without one of the game's nine client systems (a
+  guess that fits what was seen; not proven). With XERCES SETTINGS > Power On at
+  Start off, the same stack played on (40 seconds watched); whether the match
+  then ends when you turn the power on yourself is not known. So: turn Power On
+  at Start off for that map, or play it with fewer mods. Other Chronicles maps
+  were not tried.
 
 ## Zombies characters (CHARACTERS)
 
