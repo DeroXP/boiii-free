@@ -828,7 +828,18 @@ void locked_call(const char *name, BuiltinMethod original, scriptInstance_t inst
   original(inst, entref);
 }
 
+// xerces_crash_test script (crash_test.cpp): the next script call that sets a
+// player's character never returns, so the server's thread is stuck inside a
+// script, as it was for real on 2026-11-12. One flag read; nothing else may
+// be added here (see locked_call).
+std::atomic<bool> test_hang{false};
+
 void SetCharacterBodyType(scriptInstance_t inst, scr_entref_t *entref) {
+  if (test_hang.load(std::memory_order_relaxed)) {
+    for (;;) {
+      Sleep(100);
+    }
+  }
   locked_call("SetCharacterBodyType", set_body_type_orig, inst, entref);
 }
 void SetCharacterBodyStyle(scriptInstance_t inst, scr_entref_t *entref) {
@@ -838,6 +849,8 @@ void SetCharacterHelmetStyle(scriptInstance_t inst, scr_entref_t *entref) {
   locked_call("SetCharacterHelmetStyle", set_helmet_style_orig, inst, entref);
 }
 } // namespace
+
+void test_hang_in_script() { test_hang = true; }
 
 std::string looks_text() {
   if (!game::com::Com_IsInGame() || game::com::Com_IsRunningUILevel()) {

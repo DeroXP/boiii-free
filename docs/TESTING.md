@@ -3019,8 +3019,19 @@ test home for the run; nothing is sent):
       and stored, the four new parts dropped as unknown; `show` has the freeze's summary
       as the console tail's last line. The deployed service itself answers 405 to
       `GET /v1/crashes`, which means it takes reports.
-- [ ] Not tried: a real freeze with the server thread inside a script (the "Script
-      running" line), a crash on the server thread, a report sent to Railway itself.
+- [x] A freeze with the server's thread stuck inside a script, as on the night this was
+      written for (`xerces_crash_test script`, then a character picked in CHARACTERS: the
+      script call that sets the character never returns). The report: "The main thread
+      is waiting in a system call (NtWaitForSingleObject+0x14), called from
+      BlackOps3.exe+0x14212BCF3. The server thread is waiting in a system call
+      (ZwDelayExecution+0x14), called from boiii.exe+0x1DF444
+      (...SetCharacterBodyType+0x2B). Script running: GSC xerces_characters::wear
+      (custom_scripts/zm/xerces_characters.gsc line 1099)", then the script stack (`wear`,
+      called from `menu_responses`) and the server thread's stack down into the game's
+      script VM; the game closed itself with 0xC0000194. The line numbers of Xerces' own
+      scripts count the lines of the headers they insert (about 960 too many here); the
+      function names are right.
+- [ ] Not tried: a crash on the server thread, a report sent to Railway itself.
 
 One thing found on the way: the scrubbing of logs and reports read `name.ext:12` as a host
 and a port and wrote `<address>`. The game's own log had "lua/shared/<address>: function

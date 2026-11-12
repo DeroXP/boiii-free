@@ -13,4 +13,8 @@ namespace xerces_character_slots {
 // models the mod replaces (the hint then says who it is); tab separated. For the CHARACTERS
 // screen (data/ui_scripts/xerces_characters). "" outside a Zombies match.
 std::string looks_text();
+
+// Test only (xerces_crash_test script): the next script call that sets a
+// player's character hangs the server's thread inside it.
+void test_hang_in_script();
 } // namespace xerces_character_slots

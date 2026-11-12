@@ -164,7 +164,9 @@ To see them without waiting for a real one: start the game with
 `-xerces-crash-test` and type `xerces_crash_test` (a crash),
 `xerces_crash_test fatal`, `xerces_crash_test freeze` (the game closes after
 60 s), `xerces_crash_test stall` (40 s without a frame: a freeze report that
-is taken back), `xerces_crash_test heap` or `xerces_crash_test guard` (above).
+is taken back), `xerces_crash_test heap` or `xerces_crash_test guard` (above),
+or `xerces_crash_test script` and then a pick in CHARACTERS (the server's thread
+hangs inside that script call: the freeze report names the script).
 
 ## How a crash becomes a report
 

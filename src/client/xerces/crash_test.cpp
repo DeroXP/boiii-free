@@ -22,6 +22,11 @@
 //                                never gives it back: no report can be
 //                                written, and the watchdog must still close
 //                                the game after 60 s
+//   xerces_crash_test script     the next script call that sets a player's
+//                                character never returns (pick one in
+//                                CHARACTERS): the server's thread is stuck
+//                                inside a script, and the freeze report
+//                                must name that script
 //   xerces_crash_test guard      reads and writes a bad address through
 //                                xerces_safe: the console says whether the
 //                                fault was caught; the game plays on
@@ -32,6 +37,7 @@
 
 #include <xerces_core/launch.hpp>
 
+#include "character_slots.hpp"
 #include "runtime.hpp"
 #include "safe_memory.hpp"
 
@@ -97,6 +103,14 @@ public:
             "xerces_safe on a bad address: read %d, write %d, text %d (all 0: "
             "the faults were caught)\n",
             read ? 1 : 0, wrote ? 1 : 0, static_cast<int>(length));
+        return;
+      }
+      if (kind == "script") {
+        xerces_runtime::log_warn(
+            "xerces.crash_test",
+            "The next character change hangs the server (xerces_crash_test "
+            "script)");
+        xerces_character_slots::test_hang_in_script();
         return;
       }
       if (kind == "stall") {
