@@ -2921,6 +2921,14 @@ The fixes of DESIGN.md 7.14:
 - [x] `tools\dev\session\m1-check.ps1 -Live`, all nine cases through Xerces.exe (vanilla 4
       checks, modded 6, cli with load and unload 9, reopen 8, cliapply 8, dvars 8, crash 7,
       restart 4, safeoff 6): 60 pass, none fails.
+- [x] The other pause-menu entries on the eight-mod stack after the round script's fixes:
+      PACK-A-PUNCH WHEEL answers "Hold a Pack-a-Punched gun to spin the wheel", COIN FLIP
+      opens its bets (`bench\20261112-crash\sweep2-grid.png`).
+- [x] The package itself (`C:\Games\xerces-0.1.0-beta.22`, started with
+      `session.ps1 -Bin`): a `zm_zod` match on the eight-mod stack, CHARACTERS with its
+      tabs and the live view, a pick; the log's "103 characters from 7 sources". Windows
+      Firewall asked about the new `boiii.exe` (a new folder is a new program to it); the
+      question was left for the user to answer.
 - [ ] Not seen on screen: the Mods menu's delete, FOV Scale's row, a starting round at the
       game's cap, a folder outside the ANSI code page (the unit tests cover it).
 
@@ -2959,9 +2967,29 @@ test home for the run; nothing is sent):
 - [x] The backend's tests: 455 pass. Its change is commit `baec036e` on
       `launcher/friends-backend`, not pushed: Railway runs the backend from before, which
       drops the four new parts and keeps the rest of the report.
+- [x] The crash dialog without `-quiet-crash`: "Crash report (crash-2026-11-12-06-57-18.txt)
+      and dump saved in: ...\boiii\minidumps", then the line about sending (its text was
+      read through accessibility: Windows Firewall's question lay over it). It comes up
+      13 s after the crash, when the zip is written.
+- [x] A second, independent read of the new report code found four defects and several
+      things to harden (CRASH_REPORTS.md, "The text report"): the watchdog logged, and
+      asked for the journal's phase, before it ended a frozen game; every dump stopped
+      the watchdog; a `__try` block does not catch a fault of its own instructions with
+      this compiler (the stack walk's read, and all of `safe_memory.hpp`); a stall's
+      report kept its place among the game's three. All fixed, then tested:
+- [x] `xerces_crash_test heap` (the main thread holds the heap's lock for good): nothing
+      can be written, and the game closes itself after 62 s with 0xC0000194.
+- [x] `xerces_crash_test guard`: "xerces_safe on a bad address: read 0, write 0, text 0
+      (all 0: the faults were caught)", and the game plays on.
+- [x] With those changes, again: `freeze` (closed at 60 s, text 29 KB, dump 602 KB, the
+      note and its dump for the launcher; the report does not say the dump stopped the
+      watchdog), `stall` (report at 30 s, taken back at 40 s, the game plays on), a crash
+      (0xC0000005; dump 954 KB, text, zip 21 MB, note) and `fatal` (exit 1; text, dump
+      622 KB, note). The eight-mod stack once more (`fix4`): 103 characters from 7
+      sources, the live view, a pick, and the aim assist's rotation 0.56 at 42 m rising
+      to 0.75 at 35 m.
 - [ ] Not tried: a real freeze with the server thread inside a script (the "Script
-      running" line), a crash on the server thread, the crash dialog's new line on screen
-      (the tests ran with `-quiet-crash`), a report sent to Railway.
+      running" line), a crash on the server thread, a report sent to Railway.
 
 One thing found on the way: the scrubbing of logs and reports read `name.ext:12` as a host
 and a port and wrote `<address>`. The game's own log had "lua/shared/<address>: function

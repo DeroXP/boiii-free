@@ -82,6 +82,11 @@ void exception_log(bool err, const char *fmt, ...) {
 }
 static uint32_t main_thread_id{};
 static std::once_flag sym_init_flag{};
+// Xerces: dbghelp serves one thread at a time, and since 2026-11-12 two may
+// ask it: a crash's handler and the freeze report's thread. Whoever does not
+// get it within two seconds goes on without names rather than wait on a
+// thread that may never come back.
+static std::recursive_timed_mutex symbols_mutex{};
 
 void ensure_symbols_initialized() {
   std::call_once(sym_init_flag, [] {
@@ -102,6 +107,10 @@ struct resolved_frame {
 
 // The function's name and its source line, where symbols know them.
 void add_symbols(resolved_frame &frame) {
+  std::unique_lock lock(symbols_mutex, std::defer_lock);
+  if (!lock.try_lock_for(2s)) {
+    return;
+  }
   ensure_symbols_initialized();
 
   // Try to resolve function name from PDB symbols
@@ -171,6 +180,10 @@ capture_stackwalk(const LPEXCEPTION_POINTERS exceptioninfo,
   if (!exceptioninfo || !exceptioninfo->ContextRecord)
     return frames;
 
+  std::unique_lock lock(symbols_mutex, std::defer_lock);
+  if (!lock.try_lock_for(2s)) {
+    return frames;
+  }
   ensure_symbols_initialized();
 
   CONTEXT ctx = *exceptioninfo->ContextRecord;
@@ -212,6 +225,55 @@ std::string get_crash_module_info(void *address) {
 
 utils::hook::detour mini_dump_write_dump_hook;
 
+// Xerces: MiniDumpWriteDump stops every other thread of this process while
+// it works, the freeze watchdog among them, and then needs the heap and the
+// loader's lock. If a stopped thread holds one of those the dump never comes
+// back, and with the watchdog stopped nothing would close the game. A thread
+// that is left out of a dump is left running, so every dump leaves the
+// watchdog out: it sleeps in a loop and tells nothing. dump_watchdog_stops
+// is how often the watchdog was stopped when the last dump wrote its first
+// thread (0: it kept running), for the freeze report to say.
+std::atomic<DWORD> watchdog_thread_id{0};
+std::atomic<int> dump_watchdog_stops{-1};
+
+BOOL CALLBACK dump_callback(PVOID, const PMINIDUMP_CALLBACK_INPUT input,
+                            PMINIDUMP_CALLBACK_OUTPUT output) {
+  if (!input || !output) {
+    return FALSE;
+  }
+  // The answers dbghelp's own documentation gives for a callback that
+  // changes nothing; any other kind of call gets FALSE, "not handled".
+  switch (input->CallbackType) {
+  case IncludeThreadCallback:
+    return input->IncludeThread.ThreadId != watchdog_thread_id.load();
+  case ThreadCallback:
+  case ThreadExCallback:
+    if (dump_watchdog_stops.load() < 0) {
+      int stops = 0;
+      if (const HANDLE watchdog = OpenThread(THREAD_SUSPEND_RESUME, FALSE,
+                                             watchdog_thread_id.load())) {
+        const DWORD before = SuspendThread(watchdog);
+        if (before != static_cast<DWORD>(-1)) {
+          ResumeThread(watchdog);
+          stops = static_cast<int>(before);
+        }
+        CloseHandle(watchdog);
+      }
+      dump_watchdog_stops = stops;
+    }
+    return TRUE;
+  case IncludeModuleCallback:
+  case ModuleCallback:
+    return TRUE;
+  case IncludeVmRegionCallback:
+    // every region, and go on to the next
+    output->Continue = TRUE;
+    return TRUE;
+  default:
+    return FALSE;
+  }
+}
+
 qboolean WINAPI mini_dump_write_dump_stub(
     const HANDLE h_process, const uint32_t process_id, const HANDLE h_file,
     const MINIDUMP_TYPE dump_type,
@@ -226,6 +288,12 @@ qboolean WINAPI mini_dump_write_dump_stub(
       path = path.substr(4);
     }
 
+    // Xerces: a dump that brings no callback of its own gets the one that
+    // leaves the watchdog running.
+    MINIDUMP_CALLBACK_INFORMATION own_callback{dump_callback, nullptr};
+    const PMINIDUMP_CALLBACK_INFORMATION callback =
+        callback_param ? callback_param : &own_callback;
+    dump_watchdog_stops = -1;
     const std::filesystem::path p(path);
     const std::filesystem::path minidumps_path =
         game::get_appdata_path() / "minidumps";
@@ -242,11 +310,14 @@ qboolean WINAPI mini_dump_write_dump_stub(
       if (new_handle != INVALID_HANDLE_VALUE) {
         const qboolean result = mini_dump_write_dump_hook.invoke<qboolean>(
             h_process, process_id, new_handle, dump_type, exception_param,
-            user_stream_param, callback_param);
+            user_stream_param, callback);
         CloseHandle(new_handle);
         return result;
       }
     }
+    return mini_dump_write_dump_hook.invoke<qboolean>(
+        h_process, process_id, h_file, dump_type, exception_param,
+        user_stream_param, callback);
   }
 
   return mini_dump_write_dump_hook.invoke<qboolean>(
@@ -265,6 +336,25 @@ thread_local struct {
 } exception_data{};
 
 bool is_game_thread();
+
+// Runs fn; false when it faulted. For reads of game state by a report: after
+// a crash, or from the freeze watchdog's side, that state may be half
+// written. What fn had built stays as it was (no destructors run), which is
+// a leak in a process that is about to end.
+bool run_guarded_raw(void (*fn)(void *), void *arg) {
+  __try {
+    fn(arg);
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+template <typename F> bool run_guarded(F &&fn) {
+  return run_guarded_raw(
+      [](void *arg) { (*static_cast<std::remove_reference_t<F> *>(arg))(); },
+      &fn);
+}
 
 constexpr std::array<uint32_t, game::scr::SCRIPTINSTANCE_MAX>
     SCRIPT_VARIABLE_COUNT{game::scr::var::SCRIPTVARIABLE_POOL_SIZE.server,
@@ -340,7 +430,13 @@ std::string describe_scripts() {
   for (const game::scr::scriptInstance_t inst :
        {game::scr::SCRIPTINSTANCE_SERVER, game::scr::SCRIPTINSTANCE_CLIENT}) {
     script_state state{};
-    if (!read_script_state(inst, state)) {
+    // Through run_guarded: with clang a __try block catches a fault inside a
+    // function it calls, not one its own instructions raise, and the reads
+    // in read_script_state are its own.
+    bool read = false;
+    if (!run_guarded(
+            [&read, &state, inst] { read = read_script_state(inst, state); }) ||
+        !read) {
       continue;
     }
 
@@ -371,6 +467,18 @@ bool is_game_thread() { return main_thread_id == GetCurrentThreadId(); }
 // Xerces: the name of the text report the crash handler wrote (crash-<time>
 // .txt in the minidumps folder), for the dialog.
 std::string crash_report_file;
+
+// Xerces: a time limit on the crash handler. It reads the game's state on a
+// thread that just crashed, and after a crash the freeze watchdog stands
+// down, so a handler stuck on a lock the crashed code held would leave a
+// game that neither plays nor closes. While this is not 0 the handler (or the
+// fatal error's report) is at work since that tick; the watchdog ends the
+// game with crash_handler_code when it has been at it for
+// CRASH_HANDLER_LIMIT_MS. The dump is written first, so it is there by then.
+// The dialog clears it: that one waits for the player.
+constexpr uint64_t CRASH_HANDLER_LIMIT_MS = 120'000;
+std::atomic<uint64_t> crash_handler_started_ms{0};
+std::atomic<uint32_t> crash_handler_code{0};
 
 void show_mouse_cursor() {
   while (ShowCursor(TRUE) < 0)
@@ -477,6 +585,7 @@ void display_error_dialog() {
                                 : std::format(" ({})", crash_report_file),
       minidumps_out, crash_report_note());
 
+  crash_handler_started_ms = 0;
   utils::thread::suspend_other_threads();
   show_mouse_cursor();
 
@@ -646,25 +755,6 @@ std::atomic<DWORD> server_thread_id{0};
 std::atomic<DWORD> render_thread_id{0};
 const std::chrono::steady_clock::time_point process_start =
     std::chrono::steady_clock::now();
-
-// Runs fn; false when it faulted. For reads of game state by a report: after
-// a crash, or from the freeze watchdog's side, that state may be half
-// written. What fn had built stays as it was (no destructors run), which is
-// a leak in a process that is about to end.
-bool run_guarded_raw(void (*fn)(void *), void *arg) {
-  __try {
-    fn(arg);
-    return true;
-  } __except (EXCEPTION_EXECUTE_HANDLER) {
-    return false;
-  }
-}
-
-template <typename F> bool run_guarded(F &&fn) {
-  return run_guarded_raw(
-      [](void *arg) { (*static_cast<std::remove_reference_t<F> *>(arg))(); },
-      &fn);
-}
 
 std::string duration_text(const std::chrono::steady_clock::duration time) {
   const long long total =
@@ -837,7 +927,11 @@ std::string settings_text() {
 std::vector<std::string> script_stack(const game::scr::scriptInstance_t inst) {
   std::vector<std::string> lines;
   run_guarded([&lines, inst] {
-    if (game::scr::vm::gScrVmPub->instance[inst].function_count <= 0) {
+    const auto depth = game::scr::vm::gScrVmPub->instance[inst].function_count;
+    // more frames than the VM has room for: its state is not to be walked
+    if (depth <= 0 || static_cast<std::size_t>(depth) >
+                          std::size(game::scr::vm::gScrVmPub->instance[inst]
+                                        .function_frame_start)) {
       return;
     }
     for (const script::script_frame &frame : script::get_script_frames(inst)) {
@@ -1305,10 +1399,13 @@ std::string find_culprit(const std::vector<resolved_frame> &frames) {
 // Xerces: at most three reports from one game. A server drops the map after
 // a crash and plays on, so one fault it meets again and again would
 // otherwise send a report each time (and the server limits each PC anyway).
-bool take_report_slot() {
-  static std::atomic<int> taken{0};
-  return taken.fetch_add(1) < 3;
-}
+std::atomic<int> report_slots_taken{0};
+
+bool take_report_slot() { return report_slots_taken.fetch_add(1) < 3; }
+
+// A report that was taken back (a stall, not a freeze) gives its slot back:
+// three long stalls used to leave a later crash without a report.
+void return_report_slot() { --report_slots_taken; }
 
 std::string begin_pending_report(const LPEXCEPTION_POINTERS exceptioninfo) {
   if (!crash_reports_on() || !take_report_slot()) {
@@ -1365,6 +1462,15 @@ std::string one_line(std::string text, const std::size_t cap = 250) {
   for (char &c : text) {
     if (c == '\r' || c == '\n' || c == '\t') {
       c = ' ';
+    }
+  }
+  if (text.size() > cap) {
+    // Cut at a word: half a player's name at the end would not be seen as
+    // that name by the scrubbing of what is sent.
+    text.resize(cap);
+    if (const std::size_t space = text.rfind(' ');
+        space != std::string::npos && space > cap / 2) {
+      text.resize(space);
     }
   }
   return xerces_core::json::valid_utf8(text, cap);
@@ -1472,6 +1578,8 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
     return EXCEPTION_CONTINUE_EXECUTION;
   }
   crashed = true;
+  crash_handler_code = exceptioninfo->ExceptionRecord->ExceptionCode;
+  crash_handler_started_ms = GetTickCount64();
   // Xerces' journal: no exit after this counts as clean (xerces/runtime.hpp).
   xerces_runtime::note_crash();
 
@@ -1555,6 +1663,10 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
               exception_data.access == 8
           ? *reinterpret_cast<void **>(exceptioninfo->ContextRecord->Rsp)
           : nullptr;
+  // Xerces: the note for the launcher first, without the text, so that it is
+  // there whatever the rest of this meets; it is written again with the text
+  // below.
+  finish_pending_report(report_id, crash_frame, frames, {});
   exception_data.culprit = find_culprit(frames);
   exception_data.scripts = describe_scripts();
 
@@ -1595,6 +1707,7 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
       EXCEPTION_NONCONTINUABLE) {
     display_error_dialog(); // ends the process
   }
+  crash_handler_started_ms = 0;
   exceptioninfo->ContextRecord->Rip = get_reset_state_stub();
 
   return EXCEPTION_CONTINUE_EXECUTION;
@@ -1627,13 +1740,22 @@ constexpr std::chrono::seconds FREEZE_CLOSE_LOADING = 180s;
 // a crash and sends the report the game left.
 constexpr UINT FREEZE_EXIT_CODE = 0xC0000194;
 
-// Shared by the watchdog and the report's thread, under freeze_mutex.
+// Shared by the watchdog and the report's thread. The watchdog's way to the
+// end of a frozen game takes no lock and no memory (2026-11-12): the heap's
+// lock may be the very thing the frozen thread holds. So the report's thread
+// is started when the game starts and waits for freeze_report_event, whether
+// one is being written is an atomic, and whether the game is loading is
+// noted while frames still come.
+HANDLE freeze_report_event = nullptr;
+std::atomic<bool> freeze_report_running{false};
+std::atomic<bool> loading_noted{false};
+// Frames came back while the report was still being written, after this many
+// seconds: the report takes itself back when it is done. -1: they did not.
+std::atomic<long long> freeze_withdraw{-1};
+// The id of the freeze's crash report; under freeze_mutex, which the
+// watchdog takes only once frames have come back.
 std::mutex freeze_mutex;
 std::string freeze_report_id;
-bool freeze_report_running = false;
-// Frames came back while the report was still being written: it takes
-// itself back when it is done.
-std::optional<std::chrono::seconds> freeze_withdraw;
 // The report's thread only.
 std::filesystem::path freeze_dump;
 // The thread the report holds stopped for its stack walk, and since when:
@@ -1729,6 +1851,14 @@ struct thread_stack {
 // data is a leaf function by the ABI, its return address on top of the
 // stack, or code a hook made: one such step is taken, a second in a row
 // would be a guess. A stack that cannot be read ends the walk.
+// One value off a stopped thread's stack; false when it cannot be read. In a
+// function of its own, never inlined: with clang a __try block catches a
+// fault inside a function it calls, not one its own instructions raise.
+__declspec(noinline) void read_stack_value(const DWORD64 address,
+                                           DWORD64 *value) {
+  *value = *reinterpret_cast<const volatile DWORD64 *>(address);
+}
+
 std::size_t walk_stack(CONTEXT &context, DWORD64 *frames,
                        const std::size_t cap) {
   std::size_t count = 0;
@@ -1744,7 +1874,9 @@ std::size_t walk_stack(CONTEXT &context, DWORD64 *frames,
           break;
         }
         leaf_before = true;
-        context.Rip = *reinterpret_cast<const DWORD64 *>(context.Rsp);
+        DWORD64 return_address = 0;
+        read_stack_value(context.Rsp, &return_address);
+        context.Rip = return_address;
         context.Rsp += 8;
         continue;
       }
@@ -1776,7 +1908,9 @@ std::vector<thread_stack> capture_threads() {
   for (BOOL more = Thread32First(snapshot, &entry);
        more && stacks.size() < stacks.capacity();
        more = Thread32Next(snapshot, &entry)) {
-    if (entry.th32OwnerProcessID != process || entry.th32ThreadID == self) {
+    // Never the watchdog: it must stay able to end the game
+    if (entry.th32OwnerProcessID != process || entry.th32ThreadID == self ||
+        entry.th32ThreadID == watchdog_thread_id.load()) {
       continue;
     }
     const HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT,
@@ -1808,7 +1942,7 @@ std::vector<thread_stack> capture_threads() {
 // (it waits for something the stopped thread holds) gets its thread started
 // again, so the report cannot be what freezes a game that only stalled.
 void release_walked_thread() {
-  const DWORD id = walk_thread_id.load();
+  DWORD id = walk_thread_id.load();
   if (id == 0 || GetTickCount64() - walk_started_ms.load() < 2000) {
     return;
   }
@@ -1816,7 +1950,8 @@ void release_walked_thread() {
     ResumeThread(thread);
     CloseHandle(thread);
   }
-  walk_thread_id = 0;
+  // only if it is still that walk: the next one may have begun meanwhile
+  walk_thread_id.compare_exchange_strong(id, 0);
 }
 
 // A thread as a report sees it: what it is for, its name, its stack.
@@ -2038,27 +2173,24 @@ freeze_text_result freeze_text(const std::vector<seen_thread> &threads,
   return out;
 }
 
-// The crash report of a freeze, for the launcher to send. Returns its id;
-// empty when none was written.
-std::string write_freeze_report(const std::vector<resolved_frame> &frames,
-                                const freeze_text_result &text) {
+// The id for a freeze's crash report, for the launcher to send; empty when
+// none is to be written (reports off, or this game has written its three).
+std::string new_freeze_report() {
   if (!crash_reports_on() || !take_report_slot()) {
     return {};
   }
-  const std::string id = xerces_core::new_launch_id();
   std::error_code ec;
-  const std::filesystem::path dir =
-      xerces_runtime::home() / "crash" / "pending";
-  std::filesystem::create_directories(dir, ec);
-  // The dump already written, copied as .dmp.tmp and renamed: the
-  // MiniDumpWriteDump hook above sends every other .dmp to the minidumps
-  // folder.
-  const std::filesystem::path temporary = dir / (id + ".dmp.tmp");
-  if (!freeze_dump.empty() &&
-      std::filesystem::copy_file(
-          freeze_dump, temporary,
-          std::filesystem::copy_options::overwrite_existing, ec)) {
-    std::filesystem::rename(temporary, dir / (id + ".dmp"), ec);
+  std::filesystem::create_directories(
+      xerces_runtime::home() / "crash" / "pending", ec);
+  return xerces_core::new_launch_id();
+}
+
+// Writes the report's note, or writes it again with more in it.
+void write_freeze_note(const std::string &id,
+                       const std::vector<resolved_frame> &frames,
+                       const freeze_text_result &text) {
+  if (id.empty()) {
+    return;
   }
   xerces_core::pending_crash note;
   note.report_id = id;
@@ -2084,27 +2216,53 @@ std::string write_freeze_report(const std::vector<resolved_frame> &frames,
                      std::format("[Freeze] The game has not finished a frame "
                                  "for {} seconds, so it is frozen. {}",
                                  FREEZE_TIME.count(), text.summary));
-  return id;
 }
 
-// Frames came back: it was a long stall, not a freeze. freeze_mutex is held.
-void withdraw_freeze_report(std::chrono::seconds stalled) {
-  if (freeze_report_id.empty()) {
+// The dump already written, copied next to the note as .dmp.tmp and renamed:
+// the MiniDumpWriteDump hook above sends every other .dmp to the minidumps
+// folder.
+void attach_freeze_dump(const std::string &id) {
+  if (id.empty() || freeze_dump.empty()) {
+    return;
+  }
+  std::error_code ec;
+  const std::filesystem::path dir =
+      xerces_runtime::home() / "crash" / "pending";
+  const std::filesystem::path temporary = dir / (id + ".dmp.tmp");
+  if (std::filesystem::copy_file(
+          freeze_dump, temporary,
+          std::filesystem::copy_options::overwrite_existing, ec)) {
+    std::filesystem::rename(temporary, dir / (id + ".dmp"), ec);
+  }
+}
+
+// Frames came back: it was a long stall, not a freeze, and its report is not
+// to be sent. No lock is held here.
+void withdraw_freeze_report(const std::string &id,
+                            const std::chrono::seconds stalled) {
+  if (id.empty()) {
     return;
   }
   const std::filesystem::path dir =
       xerces_runtime::home() / "crash" / "pending";
   std::error_code ec;
-  std::filesystem::remove(dir / (freeze_report_id + ".json"), ec);
-  std::filesystem::remove(dir / (freeze_report_id + ".dmp"), ec);
-  freeze_report_id.clear();
+  std::filesystem::remove(dir / (id + ".json"), ec);
+  std::filesystem::remove(dir / (id + ".dmp"), ec);
+  return_report_slot();
   exception_log(false,
                 "[Freeze] Frames came back after %lld seconds; the freeze "
                 "report was taken back",
                 static_cast<long long>(stalled.count()));
 }
 
-void write_freeze_files() {
+struct freeze_files {
+  std::string id;      // the crash report's, empty without one
+  std::string summary; // for the console
+  std::filesystem::path text_file;
+};
+
+freeze_files write_freeze_files() {
+  freeze_files out;
   const std::vector<thread_stack> stacks = capture_threads();
   std::vector<seen_thread> threads;
   threads.reserve(stacks.size());
@@ -2116,113 +2274,144 @@ void write_freeze_files() {
       thread.frames.push_back(frame_from_modules(stack.frames[i]));
     }
   }
+  const auto main_thread =
+      std::ranges::find(threads, frame_thread_id.load(), &seen_thread::id);
+  const auto main_frames = [&threads, &main_thread] {
+    return main_thread != threads.end() ? main_thread->frames
+                                        : std::vector<resolved_frame>{};
+  };
 
   const std::string stamp = get_timestamp();
   const std::filesystem::path minidumps =
       game::get_appdata_path() / "minidumps";
   std::error_code ec;
   std::filesystem::create_directories(minidumps, ec);
-  const std::filesystem::path text_file =
-      minidumps / ("freeze-" + stamp + ".txt");
+  out.text_file = minidumps / ("freeze-" + stamp + ".txt");
 
   // First what asks nothing of Windows that a frozen game may hold: the
-  // stacks by module and offset, on disk before anything else is tried.
+  // stacks by module and offset, on disk and in the launcher's note before
+  // anything else is tried.
   const freeze_text_result first = freeze_text(threads, false);
-  write_report_file(text_file, first.core);
+  out.summary = first.summary;
+  write_report_file(out.text_file, first.core);
   exception_log(false, "[Freeze] %s", first.summary.c_str());
+  out.id = new_freeze_report();
+  write_freeze_note(out.id, main_frames(), first);
 
+  // Then the dump, which stops every thread but this one and the watchdog.
   freeze_dump = minidumps / ("freeze-" + stamp + ".dmp");
   if (!write_dump_file(freeze_dump)) {
     freeze_dump.clear();
   }
+  attach_freeze_dump(out.id);
 
   // Then the names (functions, source lines), the scripts running and what
-  // the game was doing, and the same file again with them.
+  // the game was doing: the same file and the same note again with them.
   for (seen_thread &thread : threads) {
     for (resolved_frame &frame : thread.frames) {
       add_symbols(frame);
     }
   }
-  const freeze_text_result full = freeze_text(threads, true);
-  write_report_file(text_file, full.core + console_text());
+  freeze_text_result full = freeze_text(threads, true);
+  if (const int stops = dump_watchdog_stops.load(); stops > 0) {
+    full.core += std::format("The dump stopped the watchdog ({}).\r\n", stops);
+  }
+  out.summary = full.summary;
+  write_report_file(out.text_file, full.core + console_text());
+  write_freeze_note(out.id, main_frames(), full);
+  return out;
+}
 
-  const auto main_thread =
-      std::ranges::find(threads, frame_thread_id.load(), &seen_thread::id);
-  // The console's own lock may be what the main thread holds: the report
-  // first (its console lines are read without waiting, runtime.cpp), the
-  // console's line last.
-  const std::string id = write_freeze_report(
-      main_thread != threads.end() ? main_thread->frames
-                                   : std::vector<resolved_frame>{},
-      full);
+// The report is done, or gave up: the watchdog may ask for the next one, and
+// frames that came back meanwhile take this one back.
+void finish_freeze_report(const std::string &id) {
+  std::string taken_back;
+  long long stalled = -1;
   {
     const std::lock_guard lock(freeze_mutex);
     freeze_report_id = id;
     freeze_report_running = false;
-    if (freeze_withdraw) {
-      withdraw_freeze_report(*freeze_withdraw);
-      freeze_withdraw.reset();
+    stalled = freeze_withdraw.exchange(-1);
+    if (stalled >= 0) {
+      taken_back = std::exchange(freeze_report_id, {});
     }
   }
-  console::print(std::format("^1[Freeze] The game has not finished a frame "
-                             "for {} seconds. {}\n^1[Freeze] Report: {}\n",
-                             FREEZE_TIME.count(), full.summary,
-                             text_file.string()));
+  withdraw_freeze_report(taken_back, std::chrono::seconds(stalled));
 }
 
-// The report's thread.
-void report_freeze() {
-  try {
-    write_freeze_files();
-  } catch (const std::exception &error) {
-    exception_log(false, "[Freeze] The freeze report failed: %s", error.what());
-  }
-  // Also when it failed half way: the watchdog must be able to start the
-  // next one, and frames that came back meanwhile still take the note back.
-  const std::lock_guard lock(freeze_mutex);
-  freeze_report_running = false;
-  if (freeze_withdraw) {
-    withdraw_freeze_report(*freeze_withdraw);
-    freeze_withdraw.reset();
+// The report's thread: made when the game starts, so that asking for a
+// report is setting an event.
+void freeze_report_thread() {
+  for (;;) {
+    WaitForSingleObject(freeze_report_event, INFINITE);
+    freeze_files files;
+    try {
+      files = write_freeze_files();
+    } catch (const std::exception &error) {
+      exception_log(false, "[Freeze] The freeze report failed: %s",
+                    error.what());
+    }
+    finish_freeze_report(files.id);
+    // The console's own lock may be what the main thread holds: its line
+    // last, after everything that matters.
+    if (!files.text_file.empty()) {
+      console::print(std::format("^1[Freeze] The game has not finished a "
+                                 "frame for {} seconds. {}\n^1[Freeze] "
+                                 "Report: {}\n",
+                                 FREEZE_TIME.count(), files.summary,
+                                 files.text_file.string()));
+    }
   }
 }
 
+// The watchdog's side. No lock and no memory: see freeze_report_event.
 void start_freeze_report() {
-  {
-    const std::lock_guard lock(freeze_mutex);
-    if (freeze_report_running) {
-      return; // an earlier freeze's report is still being written
-    }
-    freeze_report_running = true;
-    freeze_withdraw.reset();
+  if (!freeze_report_event || freeze_report_running.exchange(true)) {
+    return; // an earlier freeze's report is still being written
   }
-  utils::thread::create_named_thread("Freeze Report", report_freeze).detach();
+  freeze_withdraw = -1;
+  SetEvent(freeze_report_event);
 }
 
+// The game runs again, so locks and memory are safe to take.
 void frames_came_back(const std::chrono::seconds stalled) {
+  std::string taken_back;
   {
     const std::lock_guard lock(freeze_mutex);
     if (freeze_report_running) {
-      freeze_withdraw = stalled;
+      freeze_withdraw = stalled.count();
     } else {
-      withdraw_freeze_report(stalled);
+      taken_back = std::exchange(freeze_report_id, {});
     }
   }
-  // The main thread runs again, so the console can be written to
+  withdraw_freeze_report(taken_back, stalled);
   console::print(std::format("^3[Freeze] Frames came back after {} seconds: "
                              "it was a long stall, not a freeze. Its report "
                              "stays in the minidumps folder and is not sent.\n",
                              stalled.count()));
 }
 
-[[noreturn]] void close_frozen_game(std::chrono::seconds stalled) {
-  crashed = true;
+DWORD WINAPI log_freeze_close(LPVOID seconds) {
   exception_log(false,
                 "[Freeze] No frame for %lld seconds: the game is closed, as "
                 "after a crash",
-                static_cast<long long>(stalled.count()));
+                static_cast<long long>(reinterpret_cast<intptr_t>(seconds)));
   xerces_runtime::log_error("exception.freeze.closed",
                             "the game froze and was closed");
+  return 0;
+}
+
+[[noreturn]] void close_frozen_game(std::chrono::seconds stalled) {
+  crashed = true;
+  // The lines for the logs are written by a thread of their own, waited for
+  // one second: the log's lock or the heap's may be what the frozen game
+  // holds, and nothing may stand between the watchdog and the end.
+  if (const HANDLE writer = CreateThread(
+          nullptr, 0, log_freeze_close,
+          reinterpret_cast<LPVOID>(static_cast<intptr_t>(stalled.count())), 0,
+          nullptr)) {
+    WaitForSingleObject(writer, 1000);
+  }
   TerminateProcess(GetCurrentProcess(), FREEZE_EXIT_CODE);
   std::abort();
 }
@@ -2233,6 +2422,7 @@ bool loading_now() {
 }
 
 void watch_for_freezes() {
+  watchdog_thread_id = GetCurrentThreadId();
   thread_describe = reinterpret_cast<thread_describe_fn>(GetProcAddress(
       GetModuleHandleW(L"kernel32.dll"), "GetThreadDescription"));
   uint32_t last_frame = 0;
@@ -2242,6 +2432,12 @@ void watch_for_freezes() {
   for (;;) {
     std::this_thread::sleep_for(1s);
     release_walked_thread();
+    if (const uint64_t started = crash_handler_started_ms.load();
+        started != 0 && GetTickCount64() - started > CRASH_HANDLER_LIMIT_MS) {
+      // Nothing before this: whatever the handler is stuck on may be what a
+      // log line would wait for too.
+      TerminateProcess(GetCurrentProcess(), crash_handler_code.load());
+    }
     const uint32_t frame = frame_count.load();
     if (frame != last_frame || frame == 0) {
       if (reported) {
@@ -2251,6 +2447,8 @@ void watch_for_freezes() {
       if (ticks++ % 30 == 0) {
         note_modules();
       }
+      // Noted while the game runs: asking when it is frozen takes memory
+      loading_noted = loading_now();
       last_frame = frame;
       last_progress = std::chrono::steady_clock::now();
       reported = false;
@@ -2260,8 +2458,9 @@ void watch_for_freezes() {
       if (!reported && stalled >= FREEZE_TIME) {
         reported = true;
         start_freeze_report();
-      } else if (reported && stalled >= (loading_now() ? FREEZE_CLOSE_LOADING
-                                                       : FREEZE_CLOSE_TIME)) {
+      } else if (reported &&
+                 stalled >= (loading_noted.load() ? FREEZE_CLOSE_LOADING
+                                                  : FREEZE_CLOSE_TIME)) {
         close_frozen_game(stalled);
       }
     }
@@ -2291,6 +2490,8 @@ void show_fatal_error(const std::string &message) {
   // still be released. A text report and a dump of every thread stay on this
   // PC, in the minidumps folder (an engine error wrote neither before
   // 2026-11-12, so one could only be read from the console's last lines).
+  crash_handler_code = 1;
+  crash_handler_started_ms = GetTickCount64();
   const std::string plain = error_help::strip_colors(message);
   void *stack[xerces_core::crash_frame_cap]{};
   const USHORT frames = RtlCaptureStackBackTrace(
@@ -2309,9 +2510,12 @@ void show_fatal_error(const std::string &message) {
     std::string local = report;
     run_guarded([&local] { local += console_text(); });
     write_report_file(dir / ("fatal-" + stamp + ".txt"), local);
+    // The note for the launcher before the dump: the dump asks the most of
+    // a process that is already in trouble.
+    write_fatal_report(plain, report);
     write_dump_file(dir / ("fatal-" + stamp + ".dmp"));
   }
-  write_fatal_report(plain, report);
+  crash_handler_started_ms = 0;
   if (!game::quiet_crash() && !game::is_headless()) {
     utils::thread::suspend_other_threads();
     show_mouse_cursor();
@@ -2368,6 +2572,13 @@ struct component final : generic_component {
     scheduler::loop([] { render_thread_id = GetCurrentThreadId(); },
                     scheduler::pipeline::renderer, 1s);
     scheduler::loop(note_settings, scheduler::pipeline::main, 5s);
+    // Xerces: the freeze report's thread exists from the start, waiting, so
+    // that the watchdog asks for a report without making a thread
+    freeze_report_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (freeze_report_event) {
+      utils::thread::create_named_thread("Freeze Report", freeze_report_thread)
+          .detach();
+    }
     utils::thread::create_named_thread("Freeze Watchdog", watch_for_freezes)
         .detach();
 

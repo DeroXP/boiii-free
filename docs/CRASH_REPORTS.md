@@ -113,9 +113,22 @@ Every text report has, in this order:
   sent has the console's lines already.
 
 A crash's text is put together under a fault guard: if reading the game's state
-faults again, the report says so and is still written and sent. The text file is
-written on its own before the zip, which a second fault has cost before
-(2026-11-05).
+faults again, the report says so and is still written and sent. The note for
+the launcher is written before the text, without it, and again with it. The
+text file is written on its own before the zip, which a second fault has cost
+before (2026-11-05). The guard is a call: this build's compiler (clang, without
+`-fasync-exceptions`) catches a fault inside a function a `__try` block calls,
+not one raised by the block's own instructions, so every guarded read is in a
+function of its own (`run_guarded`, `xerces_safe` in `safe_memory.hpp`, the
+stack walk's read). `xerces_crash_test guard` reads a bad address that way.
+
+The crash handler itself has two minutes. It reads the game's state on a thread
+that has just crashed, and the freeze watchdog stands down once a crash is being
+handled, so a handler stuck on something the crashed code held would leave a
+game that neither plays nor closes. If the handler (or a fatal error's report)
+has not reached its dialog or returned after 120 s, the watchdog ends the game
+with the crash's code; the dump is the first thing written, so it is there. The
+dialog is not timed: it waits for the player.
 
 A freeze's report is written by a thread of its own, so whatever it waits for,
 the watchdog still closes the game on time. It reads every thread's stack (each
@@ -124,17 +137,34 @@ without unwind data), and writes the file twice: first with addresses by module
 and offset only, from a list of modules the watchdog keeps while the game runs
 well, so nothing is asked of Windows that a frozen game may hold (the loader's
 lock, the symbol engine); then again with function names, the scripts running
-and the session. The main and the server thread come first and in full, then
-every other thread that is running, then the ones that wait in a system call,
-with threads at the same place listed once ("12 threads at the same place").
-If a stack walk does not come back in two seconds, the watchdog starts the
-stopped thread again, so the report cannot turn a long stall into a freeze.
+and the session. The note for the launcher is written with the first version,
+before the dump, and again with the second. The main and the server thread come
+first and in full, then every other thread that is running, then the ones that
+wait in a system call, with threads at the same place listed once ("12 threads
+at the same place"). If a stack walk does not come back in two seconds, the
+watchdog starts the stopped thread again, so the report cannot turn a long stall
+into a freeze.
+
+The watchdog's own way to the end of a frozen game takes no lock and no memory
+(a second read of this code on 2026-11-12 found that it logged, and asked the
+journal for its phase, before it ended the game: either waits forever if the
+frozen thread holds the heap's lock or the log's). The report's thread is made
+when the game starts and waits for an event; whether the game is loading is
+noted while frames still come; the lines for the logs are written by a thread
+that is waited for one second. `MiniDumpWriteDump` stops every other thread of
+the process while it works, so every dump the game writes leaves the watchdog
+out (a thread left out of a dump is left running), and the stack walk never
+stops it either. `xerces_crash_test heap` freezes the game with the heap's lock
+held: no report can be written, and the game still closes after 60 s.
+
+A stall's report gives its place among a game's three reports back when it is
+taken back; three long stalls used to leave a later crash without a report.
 
 To see them without waiting for a real one: start the game with
 `-xerces-crash-test` and type `xerces_crash_test` (a crash),
 `xerces_crash_test fatal`, `xerces_crash_test freeze` (the game closes after
-60 s) or `xerces_crash_test stall` (40 s without a frame: a freeze report that
-is taken back).
+60 s), `xerces_crash_test stall` (40 s without a frame: a freeze report that
+is taken back), `xerces_crash_test heap` or `xerces_crash_test guard` (above).
 
 ## How a crash becomes a report
 

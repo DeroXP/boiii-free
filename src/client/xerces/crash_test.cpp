@@ -18,6 +18,13 @@
 //                                "freeze")
 //   xerces_crash_test stall      the main thread sleeps 40 s and goes on: a
 //                                freeze report that is taken back
+//   xerces_crash_test heap       the main thread takes the heap's lock and
+//                                never gives it back: no report can be
+//                                written, and the watchdog must still close
+//                                the game after 60 s
+//   xerces_crash_test guard      reads and writes a bad address through
+//                                xerces_safe: the console says whether the
+//                                fault was caught; the game plays on
 
 #include <component/command.hpp>
 #include <game/game.hpp>
@@ -26,6 +33,7 @@
 #include <xerces_core/launch.hpp>
 
 #include "runtime.hpp"
+#include "safe_memory.hpp"
 
 namespace xerces_crash_test {
 namespace {
@@ -49,6 +57,13 @@ constexpr std::string_view flag = "-xerces-crash-test";
       Sleep(100);
     }
   }
+  if (kind == "heap") {
+    // The same, holding what every allocation needs.
+    HeapLock(GetProcessHeap());
+    for (;;) {
+      Sleep(100);
+    }
+  }
   volatile int *nowhere = nullptr;
   *nowhere = 0x58455243; // "XERC"
   __assume(false);
@@ -67,6 +82,23 @@ public:
     }
     command::add("xerces_crash_test", [](const command::params &params) {
       const std::string kind = params.size() > 1 ? params.get(1) : "access";
+      if (kind == "guard") {
+        // An address that passes for one (above 0x10000) and is not mapped
+        auto *nowhere = reinterpret_cast<void *>(uintptr_t{0x10000});
+        uint64_t value = 0;
+        char text[16]{};
+        const bool read = xerces_safe::read(nowhere, &value, sizeof(value));
+        const bool wrote = xerces_safe::write(nowhere, &value, sizeof(value));
+        const size_t length =
+            xerces_safe::read_text(nowhere, text, sizeof(text));
+        game::com::Com_Printf(
+            game::consoleChannel_e::CHANNEL_DONT_FILTER,
+            game::consoleLabel_e::DEFAULT,
+            "xerces_safe on a bad address: read %d, write %d, text %d (all 0: "
+            "the faults were caught)\n",
+            read ? 1 : 0, wrote ? 1 : 0, static_cast<int>(length));
+        return;
+      }
       if (kind == "stall") {
         xerces_runtime::log_warn(
             "xerces.crash_test",

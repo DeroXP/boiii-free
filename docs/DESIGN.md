@@ -2267,6 +2267,11 @@ Game side (`src/client`):
   values that are no spread (another weapon format) are left alone now.
 - The out-of-memory box stopped every other thread before it showed, which could
   stop the thread holding what the box needs.
+- The guarded reads of game memory (`safe_memory.hpp`, beta.21) guarded nothing:
+  with this compiler a `__try` block catches a fault inside a function it calls,
+  not one its own instructions raise, and the copy was compiled into the block.
+  The copy is a function of its own now. No fault had happened in play; the
+  character slots and the aim assist read through it every frame.
 
 Launcher, core, CLI (`src/xerces_core`, `src/xerces_launcher`, `src/xerces_cli`):
 see `docs/TESTING.md`, "beta.22", for the list. One of them shows in every log:
