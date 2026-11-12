@@ -3586,10 +3586,12 @@ The first load and launcher baseline from existing logs is in
      stretches that are in order already, which asks the engine's own
      comparison (`r.stream_sort.compare`, what its `std::sort` uses for the
      same lists) which part goes first. A list in order costs one comparison a
-     part and no write; any other less than parts x (log2(stretches) + 1)
-     comparisons: under 2 ms for 16,200 parts back to front.
+     part and no write; any other less than parts x (passes + 1) comparisons,
+     passes being log2(stretches) rounded up: under 2 ms for 16,200 parts back
+     to front.
    - The lists end up in the same order by that comparison. Parts that compare
-     equal (same side of the importance line, same file, same offset) keep the
+     equal (same side of the importance line, both a part 0 or neither, same
+     file, same offset) keep the
      order they had; the engine's insertion sort puts a part it moves in front
      of its equals instead. So the two leave the same list where no two parts
      are equal and lists that differ only in the order of equal parts
@@ -4268,7 +4270,7 @@ release from v1.0.
 
 Beta packages for testers (2026-11-05) come first, as a zip by private link:
 
-- `VERSION` is the one place the version is set (`0.1.0-beta.22`). premake
+- `VERSION` is the one place the version is set (`0.1.0-beta.23`). premake
   writes it, the commit and whether the tree had changes into
   `build\src\xerces_version.h`; all three programs show "Xerces <version>
   (<commit>)" (About, the menu watermark, the console title, the crash report)

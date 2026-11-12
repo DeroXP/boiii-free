@@ -227,12 +227,15 @@ TEST_CASE("stream sort: every number of stretches, the last one unpaired or "
     std::vector<std::uint32_t> items;
     for (std::size_t s = 0; s < stretches; ++s) {
       const std::size_t length = 1 + rng() % 40;
-      // Inside a stretch the places fall, which is "in order" here; the next
-      // stretch starts higher again
+      // Inside a stretch the places fall, which is "in order" here. Each
+      // stretch starts one higher than the one before it started, so its
+      // first item goes before the last item of that one, whatever its
+      // length: a new stretch every time. Stretches two apart share places
+      // (equal items), neighbours interleave.
       for (std::size_t i = 0; i < length; ++i) {
         items.push_back(static_cast<std::uint32_t>(o.place.size()));
         o.matters.push_back(1);
-        o.place.push_back(static_cast<std::uint32_t>(1000 - 2 * i + s % 2));
+        o.place.push_back(static_cast<std::uint32_t>(1001 + s - 2 * i));
       }
     }
     std::vector<std::uint32_t> expected = items;
@@ -240,8 +243,8 @@ TEST_CASE("stream sort: every number of stretches, the last one unpaired or "
     const ss::result done =
         ss::sort(std::span<std::uint32_t>(items), std::ref(o), work);
     CHECK(done.sorted);
-    CHECK(done.runs <= stretches);
-    CHECK(done.passes == log2_up(done.runs));
+    CHECK(done.runs == stretches);
+    CHECK(done.passes == log2_up(stretches));
     CHECK(items == expected);
     CHECK(done.steps == moves);
   }
@@ -321,7 +324,7 @@ TEST_CASE("stream sort: parts that change sides cost items x log2, not "
 }
 
 TEST_CASE("stream sort: a list in no order, and one back to front") {
-  // No order at all: the most comparisons, still under items x (log2 + 1)
+  // No order at all: the most comparisons, still under items x (passes + 1)
   std::mt19937 rng(3);
   const std::size_t count = 4096;
   order o = make_order(count, rng);
@@ -380,6 +383,12 @@ TEST_CASE("stream sort: a scratch too small leaves the list alone") {
 
   ss::scratch small = scratch_for(7);
   CHECK(small.room() == 7);
+  // The marks need one entry more than the buffer: eight and eight is room
+  // for seven
+  ss::scratch uneven;
+  uneven.buffer.assign(8, 0);
+  uneven.starts.assign(8, 0);
+  CHECK(uneven.room() == 7);
   done = ss::sort(std::span<std::uint32_t>(items), std::ref(o), small);
   CHECK(!done.sorted);
   CHECK(items == before);
@@ -405,8 +414,14 @@ TEST_CASE("stream sort: a scratch too small leaves the list alone") {
 TEST_CASE("stream sort: a comparison that contradicts itself cannot lose or "
           "invent an item") {
   // The engine's comparison reads values other threads change. Whatever it
-  // answers, the list must come back with the items it had and the scratch's
-  // guard entries untouched.
+  // answers, the list must come back with the items it had, and nothing may
+  // be written past the list or past the part of the scratch a list of that
+  // length may use (its buffer's first `count` entries, `count + 1` marks):
+  // the entries after those carry a mark of their own. Every other round the
+  // scratch has exactly that room and nothing spare, as the client's has for
+  // the longest list.
+  const std::uint32_t list_mark = 0xFEEDFACEu;
+  const std::uint32_t scratch_mark = 0xC0FFEE00u;
   std::mt19937 rng(41);
   for (const std::size_t count :
        {std::size_t{2}, std::size_t{3}, std::size_t{17}, std::size_t{1000},
@@ -414,11 +429,19 @@ TEST_CASE("stream sort: a comparison that contradicts itself cannot lose or "
     for (int round = 0; round < 6; ++round) {
       std::vector<std::uint32_t> items = indices(count);
       std::shuffle(items.begin(), items.end(), rng);
-      // Room for exactly this list inside a larger block, with marks around
-      // it that a stray write would spoil
-      ss::scratch work = scratch_for(count);
+      // The list inside a larger block, with marks around it that a stray
+      // write would spoil
       const std::size_t guard = 16;
-      std::vector<std::uint32_t> block(count + 2 * guard, 0xFEEDFACEu);
+      const bool exact = round % 2 == 1;
+      ss::scratch work;
+      if (exact) {
+        work = scratch_for(count);
+      } else {
+        work.buffer.assign(count + guard, scratch_mark);
+        work.starts.assign(count + 1 + guard, scratch_mark);
+      }
+      CHECK(work.room() == (exact ? count : count + guard));
+      std::vector<std::uint32_t> block(count + 2 * guard, list_mark);
       std::copy(items.begin(), items.end(), block.begin() + guard);
 
       std::mt19937 coin(rng());
@@ -431,15 +454,24 @@ TEST_CASE("stream sort: a comparison that contradicts itself cannot lose or "
       CHECK(done.runs >= 1);
       CHECK(done.runs <= count);
       for (std::size_t i = 0; i < guard; ++i) {
-        CHECK(block[i] == 0xFEEDFACEu);
-        CHECK(block[guard + count + i] == 0xFEEDFACEu);
+        CHECK(block[i] == list_mark);
+        CHECK(block[guard + count + i] == list_mark);
       }
       std::vector<std::uint32_t> got(block.begin() + guard,
                                      block.begin() + guard + count);
       std::sort(got.begin(), got.end());
       CHECK(got == indices(count));
-      CHECK(work.buffer.size() == count);
-      CHECK(work.starts.size() == count + 1);
+      if (exact) {
+        CHECK(work.buffer.size() == count);
+        CHECK(work.starts.size() == count + 1);
+      } else {
+        REQUIRE(work.buffer.size() == count + guard);
+        REQUIRE(work.starts.size() == count + 1 + guard);
+        for (std::size_t i = 0; i < guard; ++i) {
+          CHECK(work.buffer[count + i] == scratch_mark);
+          CHECK(work.starts[count + 1 + i] == scratch_mark);
+        }
+      }
     }
   }
 }

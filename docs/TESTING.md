@@ -1851,8 +1851,9 @@ From the recordings and the game's code:
       wanted and not loaded, and the image parts loaded (one array of 0x30040 entries at
       0x150904100, filled from both ends). When the first list is as long as it was at
       the last sort it calls an insertion sort (0x141D01870, the order of
-      0x141D036B0 inlined: parts whose importance is over 0.75 first, then by file and
-      offset); otherwise `std::sort` (0x141D02C30).
+      0x141D036B0 inlined: parts whose importance is over 0.75 first, then by whether
+      the part number is 0, then by file and offset); otherwise `std::sort`
+      (0x141D02C30).
 - [x] That insertion sort is not the textbook one: a part moves only when it goes before
       its left neighbour, and then past every part that does not go before it, the
       parts equal to it too (the loops from 0x141D019B0 and 0x141D01CD3 ask the
@@ -1914,9 +1915,10 @@ but the first runs; a scripted player that walks, turns and, in one run, fires a
       list item for item when no two items are equal; the pairs out of order it counts
       are the textbook insertion sort's moves, and never more than the engine's; one
       comparison an item and no write for a list in order; under items x (passes + 1)
-      comparisons otherwise; 1 to 33 stretches of unequal lengths; a scratch too small
-      leaves the list alone; a comparison that answers at random loses and invents no
-      item and writes nothing outside the list; the launch flag; the registry entries.
+      comparisons otherwise; 1 to 33 stretches of unequal lengths, each count found
+      as that many; a scratch too small leaves the list alone; a comparison that
+      answers at random loses and invents no item and writes nothing past the list or
+      past the part of the scratch it may use; the launch flag; the registry entries.
       Built against nine deliberately broken copies of the merge (equal items swapped,
       no copy back, the unpaired stretch or a stretch's tail dropped, the marks or the
       count wrong, the room check off by one), the tests fail for eight; the ninth
@@ -1935,6 +1937,19 @@ but the first runs; a scripted player that walks, turns and, in one run, fires a
       streamer's "everything is loaded" flag through an offset nothing checked and did
       not make the game sort more (removed); no way for a tester to go back to the
       game's sort (the launch flag).
+- [x] The package (`xerces-0.1.0-beta.23.zip` from bec147ea, unpacked in `C:\Games`
+      with the two DLSS files), the worst-case test once: 19 of 19 signatures, "sorted
+      by merging", 43 sorts far out of order, the worst (16,198 parts, 131 million
+      moves) in 0.7 ms, no frame over 8.5 ms in the 60 s recorded.
+- [x] A second review of the revised code (three readers, a sceptic for each finding)
+      after the package was built: nothing against the client's code; two gaps in
+      the tests (no mark after the scratch's used part; the stretch counts were only
+      "at most") and four inaccuracies in comments and notes (the comparison bound
+      needs log2 rounded up, "in no order" for the back-to-front figure, the part-0
+      key left out of "equal", the version in DESIGN.md), all put right in the commit
+      after the package's: tests, comments and notes only, so the package stands. With
+      the scratch marked, the tests also fail for a merge that writes one entry past
+      a stretch's end and for one that writes a mark too many.
 
 - [ ] Not reproduced: the state the player's game was in. In none of the scripted
       sessions did the game call the insertion sort between the load and the level's

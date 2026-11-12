@@ -8,19 +8,20 @@
 // wants and has not loaded, and the ones it has loaded. When the first list
 // is as long as it was the last time, the engine takes both to be almost in
 // order already and uses an insertion sort, which is quick then and takes a
-// step for every pair that is out of order otherwise: over 100 ms for a list
-// of 14,000 parts in no order, and the game's main thread waits for the job
+// step for every pair that is out of order otherwise: 151 ms for a list of
+// 13,800 parts back to front, and the game's main thread waits for the job
 // at the start of the next frame.
 //
 // This is a natural merge sort: it finds the stretches that are in order
 // already and merges them, pair by pair. A list in order costs one comparison
 // an item and no writes, like the engine's; any other costs less than
-// items x (log2(stretches) + 1) comparisons: one pass to find the stretches,
-// and one for each halving of their number.
+// items x (passes + 1) comparisons, passes being log2(stretches) rounded up:
+// one pass to find the stretches, and one for each halving of their number.
 //
 // It leaves the list in order by the same comparison, and keeps equal items
-// (parts on the same side of the importance line, in the same file at the
-// same offset) in the order they had. The engine's insertion sort does not
+// (parts on the same side of the importance line, both a part 0 or neither,
+// in the same file at the same offset) in the order they had. The engine's
+// insertion sort does not
 // keep that order: an item it moves goes in front of the items it is equal
 // to. So the two leave the same list wherever no two items are equal, and
 // lists that differ only in the order of equal items otherwise; the engine's
