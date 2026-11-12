@@ -221,6 +221,47 @@
       },
       "features": ["upscale_temporal"],
       "note": "In the T2x resolve (0x141C63AB0, the fragment from 0x141C63C4B): the call that draws the resolve (rcx the command state), the same full-screen draw helper the final composite calls. When it returns, the resolve's inputs are still bound (t0 the jittered colour, t11 this frame's velocity, t15 depth) and its outputs (colour, luma, filmic history). Made with sigmaker.py --site-in 0x141C63C4B."
+    },
+    {
+      "id": "r.stream_sort.wanted_insertion_call",
+      "symbol": "r_stream_sort's list sort+0x31C (call the insertion sort, image parts wanted)",
+      "kind": "site",
+      "section": ".text",
+      "patterns": ["44 0F B6 C1 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ??"],
+      "offset": 11,
+      "known": {
+        "0x6531394": "0x1D0883C"
+      },
+      "features": ["stream_sort"],
+      "note": "In the function the r_stream_sort job calls (0x141D08520), the branch taken when the list of wanted image parts is as long as it was at the last sort: rcx the list's first entry (the array of 0x30040 entries at 0x150904100), rdx one past its last, r8b the empty predicate. The target (0x141D01870) is an insertion sort, four steps unrolled, with the comparison of r.stream_sort.compare inlined; these two calls are its only ones. Made with sigmaker.py --site-in 0x141D08520."
+    },
+    {
+      "id": "r.stream_sort.loaded_insertion_call",
+      "symbol": "r_stream_sort's list sort+0x345 (call the insertion sort, image parts loaded)",
+      "kind": "site",
+      "section": ".text",
+      "patterns": ["E8 ?? ?? ?? ?? 8B C3 45 33 C9 48 8B CF"],
+      "offset": 0,
+      "known": {
+        "0x6531394": "0x1D08865"
+      },
+      "features": ["stream_sort"],
+      "note": "The second call of the same insertion sort, for the loaded image parts at the array's other end (rcx the first of them, rdx the array's end, 0x1509C4200). This is the call the stall sampler found the time in on TOWN REIMAGINED (return address 0x141D0886A). Made with sigmaker.py --site-in 0x141D08520."
+    },
+    {
+      "id": "r.stream_sort.compare",
+      "symbol": "r_stream_sort's order (the predicate of its std::sort)",
+      "kind": "function",
+      "section": ".text",
+      "patterns": [
+        "48 83 EC 08 F3 0F 10 05 ?? ?? ?? ?? 45 8B D8 4C 8D 05 ?? ?? ?? ?? 8B C2 43 0F 2F 84 98 00 C0 02 00 0F 93 C1 41 0F 2F 84 80 00 C0 02 00 0F 93 C0 3A C1"
+      ],
+      "offset": 0,
+      "known": {
+        "0x6531394": "0x1D036B0"
+      },
+      "features": ["stream_sort"],
+      "note": "rcx the (empty) predicate object, edx an image part, r8d the part it is compared with; al is 1 when the first goes before the second: parts whose importance is over 0.75 first, then by whether the part number is 0, then by the low 6 bits of the part's file field, then by its offset. The engine's std::sort for the streamer's lists (0x141D02C30) calls it; Xerces only calls it, nothing is written here. Made with sigmaker.py --through 0x141D036E0."
     }
   ]
 }

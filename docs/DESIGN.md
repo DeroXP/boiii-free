@@ -3565,6 +3565,44 @@ The first load and launcher baseline from existing logs is in
    affinity for the main and render threads on hybrid CPUs like your Core Ultra
    9 285K.
 6. Not pursued: Sleep and Wait hooks (crashed), draw skipping (no gain).
+7. The texture streamer's sort (built 2026-11-12, feature `stream_sort`,
+   `src/client/xerces/stream_sort.cpp` and `src/xerces_core/stream_sort.hpp`).
+   The streamer works in rounds; a round's last step queues the job
+   `r_stream_sort` (about three a second while a level loads), and the next
+   frame's streamer update waits for it (Sleep(0) in a loop) before it does
+   anything else. While the streamer takes
+   the level to be still loading, the job puts its two lists (image parts
+   wanted, image parts loaded) in order whole, and when the wanted list is as
+   long as it was the last time it does so with an insertion sort: fine for a
+   list almost in order, a step for every pair out of order otherwise. On TOWN
+   REIMAGINED with eight mods the loaded list has about 16,000 parts and the
+   player's recordings show a frame of 125 to 143 ms up to three times a
+   second, all of it in that sort: what it needs for a list of that length in
+   no order at all (measured: 151 ms for 13,800 parts back to front).
+   - The two calls of the insertion sort (`r.stream_sort.wanted_insertion_call`,
+     `r.stream_sort.loaded_insertion_call`) are pointed at a merge of the
+     stretches that are in order already, which asks the engine's own
+     comparison (`r.stream_sort.compare`, what its `std::sort` uses for the
+     same lists) which part goes first. Equal parts keep their order, as with
+     an insertion sort, so the lists end up exactly as the engine's sort would
+     have left them. A list in order costs one comparison a part and no write;
+     any other at most parts x log2(stretches): 2 ms for 14,600 parts back to
+     front.
+   - Before the calls are changed the client checks that both are calls to one
+     function that starts as the insertion sort does, and the comparison's
+     whole pattern again. A miss leaves the engine's sort.
+   - `xerces.stream_sort.far` in the log, at most once a minute: how often a
+     list of 4,096 parts or more had 512 or more stretches out of order, and
+     the longest such sort.
+   - For tests: `XERCES_STREAM_SORT=engine` keeps the engine's sort and times
+     it, `=off` installs nothing; `XERCES_STREAM_SORT_LOG=1` (or
+     `XERCES_BENCH=1`) logs every 10 s what the sorts cost;
+     `XERCES_STREAM_SORT_TEST=loading` holds the streamer in its loading
+     state, `=reverse` also turns the loaded list back to front before each
+     sort.
+   - What puts the player's game in the state where this sort runs all the
+     time was not reproduced (docs/TESTING.md, "Town Reimagined's 140 ms
+     frames").
 
 #### Precise frame limiter (item 4)
 

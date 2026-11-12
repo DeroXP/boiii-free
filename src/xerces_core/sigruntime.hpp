@@ -89,6 +89,22 @@ inline constexpr std::array all = {jitter_offset, jitter_projection,
                                    resolve_draw_call};
 } // namespace upscale_temporal_signatures
 
+// The registry entries the texture streamer's quicker sort uses
+// (src/client/xerces/stream_sort.cpp, docs/DESIGN.md 12.4 item 7): the two
+// calls of the engine's insertion sort in the r_stream_sort job, and the
+// comparison the engine's std::sort uses for the same lists. A miss turns
+// only that feature off: the engine's own sort stays.
+namespace stream_sort_signatures {
+inline constexpr std::string_view wanted_insertion_call =
+    "r.stream_sort.wanted_insertion_call";
+inline constexpr std::string_view loaded_insertion_call =
+    "r.stream_sort.loaded_insertion_call";
+inline constexpr std::string_view compare = "r.stream_sort.compare";
+
+inline constexpr std::array all = {wanted_insertion_call, loaded_insertion_call,
+                                   compare};
+} // namespace stream_sort_signatures
+
 // Whether code about to be detoured is exactly what the detour was written
 // for (DESIGN.md 4.3: no code bytes are written before the whole expected
 // instruction sequence is checked). `entry` is the bytes the detour's jmp

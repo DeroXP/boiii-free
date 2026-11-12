@@ -68,6 +68,13 @@ to report these again, but tell us if you see them somewhere else or worse.
   with the eight-mod test stack, when the power came on. Since beta.22 Xerces
   leaves such a system out instead, so the match goes on; on Kino the lights
   that show where the mystery box is then stay dark. Fewer mods bring them back.
+- **A long frame (about 140 ms) every third of a second on a large custom map.**
+  Seen on TOWN REIMAGINED with eight mods, from about a minute into a match. The
+  game re-sorts its list of loaded textures with a sort that is slow when the list
+  is far out of order, and the frame waits for it. Builds after beta.22 sort that
+  list another way (a hundred times quicker in that case, the same result). If
+  you still see it there, send the game's log: its `xerces.stream_sort.far` lines
+  say how often the list was that far out of order and what the sorts cost.
 
 ## Zombies characters (CHARACTERS)
 

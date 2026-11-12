@@ -258,6 +258,10 @@ state resolve() {
       s.report, "upscale_temporal",
       xerces_core::upscale_temporal_signatures::all,
       s.problem.empty() ? "not in compat/signatures.json" : s.problem);
+  // The same for the texture streamer's quicker sort (stream_sort.cpp).
+  xerces_core::require_signatures(
+      s.report, "stream_sort", xerces_core::stream_sort_signatures::all,
+      s.problem.empty() ? "not in compat/signatures.json" : s.problem);
 
   std::size_t matched = 0;
   for (const auto &result : s.report.results) {

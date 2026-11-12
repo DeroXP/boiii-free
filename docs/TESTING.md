@@ -1824,6 +1824,93 @@ Not found yet: the player's stutter. Near the spawn the level was smooth in both
 modes. It may be elsewhere or later (streaming while moving through the map,
 many zombies, a round's script work), which a capture in real play would show.
 
+### Town Reimagined's 140 ms frames: the streamer's sort (2026-11-12)
+
+What the main thread waits for in the long frames of the player's two recordings
+(`C:\Games\xerces-0.1.0-beta.17\...\bench\20261108-171142-auto-ingame.*`, DLSS, and
+`C:\Games\xerces-0.1.0-beta.20\...\bench\20261112-011942-auto-ingame.*`, FSR 1), and the
+fix (DESIGN.md 12.4 item 7, `src/client/xerces/stream_sort.cpp`). Bench:
+`C:\Users\Ginld\XercesDev\bench\20261112-town` (`town-sort.ps1`, a folder per run with
+the probe's files, the game log and two captures); the dump of 2026-11-04 read with
+`func_of.py`, `llvm-objdump` and `dump-xrefs.ps1`.
+
+From the recordings and the game's code:
+
+- [x] The long frames are 125 to 143 ms every time (355 s recording: 561 of them, none in
+      the first 30 s, about 3 a second from 3 minutes on; they grow from 128 to 143 ms).
+      Between two of them lie 14, 25, 36 or 47 frames in one recording (the 240 cap,
+      4.2 ms a frame) and 13, 20, 27 or 34 in the other (DLSS, 6.5 ms): steps of about
+      46 ms in both, a cadence of time and not of frames.
+- [x] The wait is no lock and no event. The three system frames are Sleep(0): the main
+      thread spins in the job system's "wait until this kind of job has none queued or
+      running" (0x14000A420, reached through 0x142257F60), asked for the job
+      `r_stream_sort` (its module at 0x1432FAED0) by the streamer's "end the query"
+      (0x141D07940), which every frame's streamer update (0x141D07480, then 0x141D09A70)
+      calls before it starts the next query.
+- [x] The job (0x141D0B040, then 0x141D08520) puts two lists in order: the image parts
+      wanted and not loaded, and the image parts loaded (one array of 0x30040 entries at
+      0x150904100, filled from both ends). When the first list is as long as it was at
+      the last sort it calls an insertion sort (0x141D01870, the order of
+      0x141D036B0 inlined: parts whose importance is over 0.75 first, then by file and
+      offset); otherwise `std::sort` (0x141D02C30).
+- [x] The time is in that insertion sort. In 20 of the 591 stalls the sampler caught in
+      the second recording the main thread took the job itself: every sample of those
+      frames, 12 or 13 in a row over 100 ms, is inside 0x141D01870 called from
+      0x141D08865 (the list of loaded parts). In the others a worker runs the same job
+      and the main thread waits.
+- [x] The streamer works in rounds (4 + 2 + 1 steps once a level has loaded, a counter
+      at 0x150AB2668) and queues the sort with a round's last step. It sorts the lists
+      whole only while it takes the level to be still loading (a flag at 0x150AB26BE is
+      0, or a frame had no view) and its lists changed (0x150AB271C); once everything
+      wanted at the start is loaded it takes a cheaper path (0x141D0AB20). The loading
+      state is set again when a newly loaded zone of certain kinds is found
+      (0x141424D20 calls 0x141CFE3A0 with the zone's name).
+
+In the game (the player's eight mods, `zm_town`, 4K, their launch flags
+`-xerces-precise-limiter -xerces-db-pool -xerces-db-pool-8gb` and `com_maxfps 240` in the
+later runs; a scripted player that walks, turns and, in one run, fires and aims):
+
+- [x] The game's own sort, timed (`XERCES_STREAM_SORT=engine`): while the level loads the
+      lists are sorted up to 30 times in 10 s, in at most 0.8 ms (the loaded list grows to
+      16,000 parts, the wanted one starts at 17,900); afterwards no whole sort and no
+      long frame until the player is down and the level ends (90 to 120 s in), in every
+      run. There the lists are sorted a few times more: a loaded list of 14,200 parts
+      with 10 stretches out of order already costs the game's sort 1.5 ms, one with 137
+      stretches 2.0 ms.
+- [x] The worst case on purpose (`XERCES_STREAM_SORT_TEST=reverse`: the loaded list turned
+      back to front before each sort). The game's sort: 42 ms for 7,700 parts, 151 ms for
+      13,800, 174 ms for 16,000, 227 ms for 19,200. So the player's 125 to 143 ms is what
+      this sort needs for a list of that length in no order at all.
+- [x] The same with Xerces' merge: 2.0 ms for 14,600 parts (14,287 stretches), 1.3 ms for
+      16,200; `xerces.stream_sort.far` says so in the log ("far out of order 36 times in
+      the last minute; the longest sort took 2.0 ms"); no frame over 8.5 ms in the 75 s
+      recorded.
+- [x] The merge as shipped, no test switch: the same sorts as the game's during the load
+      (0.3 ms at most for 15,300 parts), the two at the level's end 0.34 and 0.27 ms
+      where the game's took 1.5 and 2.0; in the 90 s before the level ends the median
+      frame is 4.5 ms at the 240 cap, p99 6.6 ms, the longest 12 ms (the game's sort
+      with the same flags: 4.5, 7.0 and 13 ms); textures look as before in the
+      captures; no new warning or error in the log.
+- [x] `xerces_cli sig check --dump`: 19 of 19 signatures, the three new ones at
+      0x1D0883C, 0x1D08865 and 0x1D036B0. Unit tests: the merge leaves what a stable
+      insertion sort leaves (random lists up to 4,000 items), one comparison an item for
+      a list in order, at most items x (passes + 1) for the others, the registry
+      entries (604 pass).
+
+- [ ] Not reproduced: the state the player's game was in. In none of seven scripted
+      sessions did the game call the insertion sort between the load and the level's
+      end: with the player's flags and frame cap, while walking, firing, with the pause
+      menu open, or with the streamer held in its loading state
+      (`XERCES_STREAM_SORT_TEST=loading`). What keeps the player's lists changing while
+      the wanted list keeps its length, from the first minute on, is not known:
+      `r_stream` and `r_streamClear` cannot be set from the console, and the scripted
+      player is down after 90 to 120 s. The fix does not depend on it (the two calls
+      are the only ones of that sort), but it has not been seen in the player's own
+      play: after a session on Town Reimagined the log's `xerces.stream_sort.far` lines
+      say how often the lists were far out of order and what the sorts cost.
+- [ ] Not tried: other maps and Multiplayer or Campaign with the merge (the code is the
+      same for all), a game build other than 0x6531394.
+
 ### AMD FSR 1 upscaler (2026-11-08)
 
 DESIGN.md 13.3 (Phase A). Bench:
