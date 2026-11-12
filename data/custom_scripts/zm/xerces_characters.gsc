@@ -49,6 +49,32 @@ function __init__()
 {
 	callback::on_connect(&on_player_connect);
 	callback::on_spawned(&on_player_spawned);
+	level thread drop_failed_client_systems();
+}
+
+// The game has room for eight client systems (the channels a level's scripts use to tell its client scripts something).
+// One registered after that gets the id -1 and stays in the list, and the first script that sets its state ends the
+// match: "ClientSysSetState - state index (-1) out of bounds (0 - 8)". Seen on 2026-11-12 on Kino der Toten with eight
+// mods stacked: the map needs four (musicCmd, levelNotify, lsm, box_indicator), DS4C takes three, two more came from
+// other mods, so the map's box lights (box_indicator) had none, and the match ended when the power came on. The game's
+// own util::setClientSysState leaves out a system that is not in the list, so the ones without an id are taken out of
+// it: that map's lights then do not show where the box is, and the match goes on. This script is here for every Zombies
+// level, which is why it lives in this file.
+function drop_failed_client_systems()
+{
+	// after every script registered its own, before anything is turned on; and once more for a late one
+	for (pass = 0; pass < 2; pass++)
+	{
+		wait 3 + pass * 9;
+		if (!isdefined(level._clientSys))
+			continue;
+		foreach (name in GetArrayKeys(level._clientSys))
+		{
+			system = level._clientSys[name];
+			if (isdefined(system) && isdefined(system.sysID) && system.sysID < 0)
+				level._clientSys[name] = undefined;
+		}
+	}
 }
 
 function on_player_connect()

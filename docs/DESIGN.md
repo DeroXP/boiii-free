@@ -2290,6 +2290,21 @@ Game side (`src/client`):
   The copy is a function of its own now. No fault had happened in play; the
   character slots and the aim assist read through it every frame.
 
+A map that ended when the power came on (`xerces_characters.gsc`,
+`drop_failed_client_systems`). Trying CHARACTERS on Kino der Toten with the
+eight-mod stack, the match ended 13 s in: "ClientSysSetState - state index (-1)
+out of bounds (0 - 8)", from the map's magic box script. The game has room for
+eight client systems. Read from the game on that map: with no mods four
+(`musicCmd`, `levelNotify`, `lsm`, `box_indicator` = 3); with the eight mods
+nine, DS4C's three (`ds4c_lua_text`, `ds4c_print`, `ds4c_pts_color`),
+`clientsystem` and `zm_character_icon` from other mods, and `box_indicator` = -1.
+A system that found no room stays in the game's list with the id -1, and the
+first script to set its state ends the match; the game's own
+`util::setClientSysState` leaves out a system that is not in the list. So 3 s
+into a level, and once more at 15 s, Xerces takes the ones without an id out of
+the list. Kino with the eight mods and Power On at Start then plays on; its box
+lights stay dark.
+
 Launcher, core, CLI (`src/xerces_core`, `src/xerces_launcher`, `src/xerces_cli`):
 see `docs/TESTING.md`, "beta.22", for the list. One of them shows in every log:
 the scrubbing of server addresses took a file's name and line (`luautils.lua:57`,

@@ -2902,6 +2902,12 @@ CHARACTERS (DESIGN.md 7.13; runs `ui11` and, after the fixes below, `fix1` and `
       `xerces_zm_powerOn 0` the match was still running 40 s in, no script error. The
       Giant (`zm_factory`) is not installed on this PC.
 - [x] The final build once more through `m1-check.ps1 -Live`: 60 checks pass, none fails.
+- [x] The client systems on Kino, read from the game (a test thread that listed
+      `level._clientSys` into a dvar, since removed): no mods "n=4 box_indicator=3 lsm=2
+      levelNotify=1 musicCmd=0"; the eight mods "n=9 box_indicator=-1 lsm=7
+      ds4c_pts_color=6 ds4c_print=5 zm_character_icon=4 ds4c_lua_text=3 levelNotify=2
+      clientsystem=1 musicCmd=0". With `drop_failed_client_systems`: the eight mods and
+      Power On at Start on, still in the match 30 s after it began, no script error.
 - [ ] Not tried: a second player, a controller's LB/RB (Q and E were pressed), the fall-back
       without the HUD menu, a custom map, CHARACTERS on a Chronicles map (the match above
       ended first).

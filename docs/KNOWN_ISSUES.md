@@ -61,19 +61,13 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## Maps
 
-- **Kino der Toten ends with a script error when the power comes on, with many
-  mods stacked.** Seen on 2026-11-12 with the eight-mod test stack (DS4C,
-  Ascendance, im_oxo QOL, Classic Viewmodel FOV, DBZ Villain Characters, Girls'
-  Frontline 2.0, Avali, Hyperdimension Neptunia) and with the seven without DS4C:
-  "ClientSysSetState - state index (-1) out of bounds (0 - 8)", from the map's own
-  magic box script. With Power On at Start that is 13 seconds into the match. No
-  one mod does it alone, and the map runs with no mods: several of them together
-  leave the map's box lights without one of the game's nine client systems (a
-  guess that fits what was seen; not proven). With XERCES SETTINGS > Power On at
-  Start off, the same stack played on (40 seconds watched); whether the match
-  then ends when you turn the power on yourself is not known. So: turn Power On
-  at Start off for that map, or play it with fewer mods. Other Chronicles maps
-  were not tried.
+- **With many mods stacked, a map's lights or sounds that its scripts drive may
+  not work.** The game has room for eight "client systems"; a map and each mod
+  take some (Kino der Toten four, DS4C three). The ones that find no room used to
+  end the match with "ClientSysSetState - state index (-1) out of bounds": Kino
+  with the eight-mod test stack, when the power came on. Since beta.22 Xerces
+  leaves such a system out instead, so the match goes on; on Kino the lights
+  that show where the mystery box is then stay dark. Fewer mods bring them back.
 
 ## Zombies characters (CHARACTERS)
 
