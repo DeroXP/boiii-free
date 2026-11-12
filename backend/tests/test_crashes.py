@@ -217,6 +217,41 @@ async def test_unknown_fields_are_ignored(client: httpx.AsyncClient, app: FastAP
     assert "motherboard" not in (row.system or {})
 
 
+async def test_the_games_own_report_is_kept_from_its_start(
+    client: httpx.AsyncClient, app: FastAPI
+) -> None:
+    report = crash_report()
+    report["crash"]["reason"] = "freeze"
+    report["crash"]["summary"] = "Freeze: main thread waiting\nin C:\\Users\\kevin\\game"
+    report["crash"]["script"] = "GSC zm_zod::give (scripts/zm/zm_zod.gsc:12)"
+    report["logs"]["details"] = "first line C:\\Users\\kevin\\x\n" + "a" * 65000
+    response = await post_crash(client, report)
+    assert response.status_code == 201, response.text
+    [row] = await _rows(app)
+    assert row.crash["reason"] == "freeze"
+    # One line, and no profile folder's name
+    assert row.crash["summary"] == "Freeze: main thread waiting in C:\\Users\\<user>\\game"
+    assert row.crash["script"] == "GSC zm_zod::give (scripts/zm/zm_zod.gsc:12)"
+    details = row.logs["details"]
+    assert details.startswith("first line C:\\Users\\<user>\\x\n") and "kevin" not in details
+    assert len(details) <= 64 * 1024
+
+    # Older clients send none of these parts.
+    old = crash_report()
+    for key in ("reason", "summary", "script"):
+        del old["crash"][key]
+    del old["logs"]["details"]
+    assert (await post_crash(client, old)).status_code == 201
+    rows = await _rows(app)
+    older = next(row for row in rows if row.report_id == old["report_id"])
+    assert older.crash["reason"] is None and older.logs["details"] is None
+
+    # Longer than the cap is refused, as every tail is.
+    large = crash_report()
+    large["logs"]["details"] = "a" * (64 * 1024 + 1)
+    assert (await post_crash(client, large)).status_code == 400
+
+
 async def test_only_the_required_parts_are_needed(client: httpx.AsyncClient, app: FastAPI) -> None:
     response = await post_crash(client, minimal_report())
     assert response.status_code == 201, response.text

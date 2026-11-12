@@ -111,8 +111,15 @@ _SUMMARY_COLUMNS = (
     CrashReport.phase,
     CrashReport.mode,
     CrashReport.map,
+    CrashReport.crash,
     CrashMinidump.size,
 )
+
+
+def _crash_text(crash: Any, key: str) -> str | None:
+    """A line the game wrote into the report's crash part, when it is there and is text."""
+    value = crash.get(key) if isinstance(crash, dict) else None
+    return value if isinstance(value, str) and value else None
 
 
 @router.get("/crashes", response_model=CrashListOut)
@@ -162,6 +169,8 @@ async def list_crashes(
             phase=row.phase,
             mode=row.mode,
             map=row.map,
+            reason=_crash_text(row.crash, "reason"),
+            summary=_crash_text(row.crash, "summary"),
             has_minidump=row.size is not None,
             minidump_size=row.size,
         )

@@ -183,8 +183,12 @@ lower-case hex, made by the launcher), `created_utc`, `xerces` (`version`,
 `commit`, `dirty`), `game` (`build`, `steam_build`), `system` (`windows`, `cpu`,
 `logical_cpus`, `ram_mib`, `gpus`, `display`), `launch` (`mode`, `map`,
 `plan_id`, `mods`, `flags`, `safe_mode`), `crash` (`kind`, `code`, `exit_code`,
-`module`, `offset`, `thread`, `frames`, `phase`), `logs` (`journal`,
-`game_log_tail`, `launcher_log_tail`, `console_tail`) and `minidump_b64`. Only
+`module`, `offset`, `thread`, `frames`, `phase`, and from 0.1.0-beta.22 a line
+each for `reason` (`exception`, `freeze` or `fatal_error`), `summary` (what
+happened, in words) and `script` (the script that was running)), `logs`
+(`journal`, `game_log_tail`, `launcher_log_tail`, `console_tail`, and from
+0.1.0-beta.22 `details`: the game's own text report, at most 64 KiB, of which
+the start is kept) and `minidump_b64`. Only
 `schema`, `report_id`, `created_utc`, `xerces.version` and `crash.kind` are
 required; any other part may be missing or null, and unknown fields are ignored
 (and not stored). `crash.kind` is `exception`, `fail_fast`, `out_of_memory` or

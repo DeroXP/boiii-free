@@ -65,12 +65,16 @@ def crash_report(**overrides: Any) -> dict[str, Any]:
                 "ntdll.dll+0x10",
             ],
             "phase": "in_game",
+            "reason": "exception",
+            "summary": "invalid memory access: tried to read 0x18 in BlackOps3.exe+0x1a2b3c",
+            "script": "GSC zm_castle::main (scripts/zm/zm_castle.gsc:42)",
         },
         "logs": {
             "journal": {"phase": "in_game", "clean_exit": False, "plan_id": "plan-7"},
             "game_log_tail": "loading zm_castle\nerror: something broke",
             "launcher_log_tail": "launcher started the game",
             "console_tail": "]map zm_castle",
+            "details": "Xerces Crash Report\n\nWhat happened: invalid memory access\nMap: zm_castle",
         },
         "minidump_b64": base64.b64encode(minidump(b"stack")).decode("ascii"),
     }

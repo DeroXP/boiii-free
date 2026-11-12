@@ -9,7 +9,8 @@
     python scripts/crashes.py minidump ID [-o FILE] [--force]
 
 `groups` puts reports with the same signature together, the most frequent first. `list` shows
-the newest reports first; `--all` follows every page. `show` prints one report in full, logs
+the newest reports first, each with what happened in a line when the game said so; `--all`
+follows every page. `show` prints one report in full, the game's own text report and the logs
 included. `minidump` saves its stacks-only minidump, which WinDbg or Visual Studio opens (point
 the symbol path at the release PDBs). `--since` takes 30m, 12h, 7d or an ISO date or time (UTC).
 
@@ -282,6 +283,8 @@ def cmd_list(backend: Backend, args: argparse.Namespace, out: TextIO) -> int:
                 f"{_where(item['module'], item['offset'])}",
                 file=out,
             )
+            if item.get("summary"):
+                print(f"{'':<20}  {line(item['summary'])}", file=out)
         if not args.all or not page["next_cursor"]:
             break
         params["cursor"] = page["next_cursor"]
@@ -321,7 +324,10 @@ def cmd_show(backend: Backend, args: argparse.Namespace, out: TextIO) -> int:
     print(f"  game       build {_or_dash(game.get('build'))}, Steam build {steam}", file=out)
 
     _section("Crash", out)
-    for key in ("kind", "code", "exit_code", "module", "offset", "thread", "phase"):
+    for key in ("summary", "script"):
+        if crash.get(key):
+            print(f"  {key:<10} {line(crash[key])}", file=out)
+    for key in ("kind", "reason", "code", "exit_code", "module", "offset", "thread", "phase"):
         print(f"  {key:<10} {_or_dash(crash.get(key))}", file=out)
     for index, frame in enumerate(crash.get("frames") or []):
         print(f"  #{index:<3} {line(frame)}", file=out)
@@ -349,6 +355,9 @@ def cmd_show(backend: Backend, args: argparse.Namespace, out: TextIO) -> int:
         name, driver = _or_dash(gpu.get("name")), _or_dash(gpu.get("driver"))
         print(f"  GPU {name}, driver {driver}", file=out)
 
+    if logs.get("details"):
+        _section("The game's report", out)
+        print(text_block(logs["details"]).rstrip("\n"), file=out)
     if logs.get("journal") is not None:
         _section("Journal", out)
         print(json_text(logs["journal"]), file=out)

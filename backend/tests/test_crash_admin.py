@@ -130,6 +130,9 @@ async def test_list_is_newest_first_with_filters_and_pages(
         if cursor is None:
             break
     assert len(seen) == 8 and len({item["id"] for item in seen}) == 8
+    # What happened, in a line, when the game said so
+    assert seen[0]["reason"] == "exception" and seen[0]["summary"].startswith("invalid memory")
+    assert (seen[-1]["reason"], seen[-1]["summary"]) == (None, None)
     keys = [(item["received_at"], item["id"]) for item in seen]
     assert keys == sorted(keys, reverse=True)
     assert seen[-1]["id"] == odd
@@ -137,7 +140,7 @@ async def test_list_is_newest_first_with_filters_and_pages(
     assert set(first) == {
         "id", "report_id", "install_id", "received_at", "created_utc", "version", "commit",
         "game_build", "kind", "code", "module", "offset", "signature", "phase", "mode", "map",
-        "has_minidump", "minidump_size",
+        "reason", "summary", "has_minidump", "minidump_size",
     }  # metadata only: no logs, system or minidump
     assert first["has_minidump"] is True and first["minidump_size"] == len(minidump(b"stack"))
 

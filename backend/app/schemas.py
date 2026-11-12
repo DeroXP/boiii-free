@@ -492,6 +492,11 @@ def _tail(text: str) -> str:
     return scrub_text(text)[-CRASH_TAIL_MAX:]
 
 
+def _head(text: str) -> str:
+    # The game's own text report keeps its start: it says what happened first.
+    return scrub_text(text)[:CRASH_TAIL_MAX]
+
+
 def _journal(value: Any) -> Any:
     """The size and depth checks as sent, then a scrubbed copy (keys included)."""
     if not isinstance(value, dict):
@@ -519,6 +524,7 @@ CrashShort = Annotated[
 ]
 CrashHex = Annotated[str, Field(max_length=18, pattern=_HEX_NUMBER)]
 CrashTail = Annotated[str, Field(max_length=CRASH_TAIL_MAX), _Storable, AfterValidator(_tail)]
+CrashHead = Annotated[str, Field(max_length=CRASH_TAIL_MAX), _Storable, AfterValidator(_head)]
 CrashJournal = Annotated[dict[str, Any], BeforeValidator(_journal)]
 
 
@@ -575,6 +581,11 @@ class CrashDetailsIn(_Lenient):
     thread: CrashShort | None = None
     frames: list[CrashName] | None = Field(default=None, max_length=CRASH_FRAMES_MAX)
     phase: CrashShort | None = None
+    # A line each from the game (clients from 0.1.0-beta.22): why the report was written
+    # ("exception", "freeze", "fatal_error"), what happened in words, the script that was running.
+    reason: CrashShort | None = None
+    summary: CrashName | None = None
+    script: CrashName | None = None
 
 
 class CrashLogsIn(_Lenient):
@@ -582,6 +593,9 @@ class CrashLogsIn(_Lenient):
     game_log_tail: CrashTail | None = None
     launcher_log_tail: CrashTail | None = None
     console_tail: CrashTail | None = None
+    # The game's own text report: what happened, what the game was doing, the stacks (every
+    # thread's for a freeze), the scripts running, memory and settings.
+    details: CrashHead | None = None
 
 
 class CrashReportIn(_Lenient):
@@ -634,6 +648,8 @@ class CrashSummaryOut(BaseModel):
     phase: str | None
     mode: str | None
     map: str | None
+    reason: str | None
+    summary: str | None
     has_minidump: bool
     minidump_size: int | None
 

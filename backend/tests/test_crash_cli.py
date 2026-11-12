@@ -92,6 +92,7 @@ async def test_groups_list_show_and_minidump(
         code, out, err = await _run(client, "list", "--limit", "1", "--all", seen=seen)
         assert (code, err) == (0, "")
         assert crash_id in out and bare in out
+        assert "invalid memory access: tried to read 0x18" in out  # what happened, in a line
         assert len(seen) == 2 and "cursor=" in seen[1]  # followed the second page
         code, out, _ = await _run(client, "list", "--limit", "1")
         assert "(more: add --all)" in out
@@ -99,7 +100,9 @@ async def test_groups_list_show_and_minidump(
         code, out, err = await _run(client, "show", crash_id)
         assert (code, err) == (0, "")
         for text in ("signature", "0xC0000005", "#0   BlackOps3.exe+0x1a2b3c", "zm_castle",
-                     "RTX 5070 Ti", "error: something broke", "== Journal"):
+                     "RTX 5070 Ti", "error: something broke", "== Journal",
+                     "summary    invalid memory access", "script     GSC zm_castle::main",
+                     "reason     exception", "== The game's report", "Xerces Crash Report"):
             assert text in out, text
         code, out, _ = await _run(client, "show", crash_id, "--json")
         assert code == 0 and '"report_id"' in out
