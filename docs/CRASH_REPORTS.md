@@ -99,7 +99,8 @@ Every text report has, in this order:
   how long the game had run, the journal's phase, the mode and map, the mods in
   load order with their Workshop titles (the main mod first), the launch flags,
   and the ids of the main and server threads (to find them in the dump).
-- The scripts each VM was running, innermost first, as `function (file:line)`.
+- The scripts each VM was running, innermost first, as `function (file line
+  12)`.
 - The stacks. A crash: the crashing thread's (48 frames, with function names and
   source lines where symbols know them), the bytes at the crash address and the
   registers. A fatal error: where it was raised. A freeze: every thread's, see

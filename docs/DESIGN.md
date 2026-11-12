@@ -2269,7 +2269,11 @@ Game side (`src/client`):
   stop the thread holding what the box needs.
 
 Launcher, core, CLI (`src/xerces_core`, `src/xerces_launcher`, `src/xerces_cli`):
-see `docs/TESTING.md`, "beta.22", for the list.
+see `docs/TESTING.md`, "beta.22", for the list. One of them shows in every log:
+the scrubbing of server addresses took a file's name and line (`luautils.lua:57`,
+`zm_zod.gsc:412`) for a host and a port, so Lua and script errors in the game's
+log and in crash reports lost where they were. A name that ends as a file does
+is left alone now.
 
 Found and left as they are for now: the journal is written on the main thread; a
 vote is not counted again when a player leaves during it; the upscaler list is

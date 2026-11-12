@@ -199,9 +199,38 @@ std::size_t bare_ipv6_length(std::string_view text, std::size_t at) {
   return end - at;
 }
 
+// A file's name and its line have the shape of a host and a port
+// ("zm_zod.gsc:412", "luautils.lua:57", "client.cpp:7"), and they are what a
+// script or Lua error is found by: scrubbed as an address, the game's own log
+// said "lua/shared/<address>: function expected instead of nil" and a crash
+// report lost its source lines (2026-11-12). No host name ends in one of
+// these, so text that does is left as it is.
+bool file_ending(std::string_view label) {
+  static constexpr std::string_view endings[] = {
+      "lua", "gsc", "csc", "gsh", "cpp", "hpp", "c",
+      "h",   "inl", "json", "cfg", "txt", "log"};
+  for (const std::string_view ending : endings) {
+    if (label.size() != ending.size()) {
+      continue;
+    }
+    bool same = true;
+    for (std::size_t i = 0; same && i < label.size(); ++i) {
+      char c = label[i];
+      if (c >= 'A' && c <= 'Z') {
+        c = static_cast<char>(c + 32);
+      }
+      same = c == ending[i];
+    }
+    if (same) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Length of "host.name:port" at text[at], or 0: at least two labels of
 // letters, digits and '-' (not at either end), the last starting with a
-// letter so "1.2:3" is not one, then a port.
+// letter so "1.2:3" is not one and not a file's ending, then a port.
 std::size_t host_port_length(std::string_view text, std::size_t at) {
   std::size_t end = at;
   std::size_t labels = 0;
@@ -223,7 +252,8 @@ std::size_t host_port_length(std::string_view text, std::size_t at) {
     }
     break;
   }
-  if (labels < 2 || !is_alpha(text[label_start])) {
+  if (labels < 2 || !is_alpha(text[label_start]) ||
+      file_ending(text.substr(label_start, end - label_start))) {
     return 0;
   }
   const std::size_t port = port_length(text, end);

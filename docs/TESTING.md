@@ -2963,7 +2963,10 @@ test home for the run; nothing is sent):
       running" line), a crash on the server thread, the crash dialog's new line on screen
       (the tests ran with `-quiet-crash`), a report sent to Railway.
 
-One thing found on the way: the scrubbing of a report reads `name.ext:12` as a host and a
-port and writes `<address>`, so the text report names a script's line as
-`scripts/zm/zm_zod.gsc line 12`. A C++ source line from symbols (developer builds only)
-can still come out as `<address>` in the report that is sent; the file on the PC has it.
+One thing found on the way: the scrubbing of logs and reports read `name.ext:12` as a host
+and a port and wrote `<address>`. The game's own log had "lua/shared/<address>: function
+expected instead of nil" for a Lua error, and a report's source lines went the same way.
+A name that ends as a file does (lua, gsc, csc, gsh, cpp, hpp, c, h, inl, json, cfg, txt,
+log) is left as it is now (`xerces_core/log.cpp`, `file_ending`; `xerces_tests` checks
+both that and that `lua.example.org:27017` is still scrubbed). The text report writes a
+script's line as `scripts/zm/zm_zod.gsc line 12` all the same.

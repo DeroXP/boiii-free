@@ -57,6 +57,17 @@ TEST_CASE("logs: server addresses are replaced") {
   CHECK_EQ(redact_addresses("full 2001:db8:0:0:1:0:0:1"), "full " + a);
   CHECK_EQ(redact_addresses("favorite add daves-house.example.org:27017"),
            "favorite add " + a);
+  // A file's name and its line are no address: a script or Lua error is
+  // found by them.
+  for (const char *text :
+       {"lua/shared/luautils.lua:57: function expected instead of nil",
+        "scripts/zm/zm.gsc:412", "at client.cpp:7", "see Config.CFG:3",
+        "exe_common.inl:288"}) {
+    CHECK_EQ(redact_addresses(text), std::string(text));
+  }
+  // A host that only starts like one still is.
+  CHECK_EQ(redact_addresses("join lua.example.org:27017"), "join " + a);
+  CHECK_EQ(redact_addresses("join my.luas:27017"), "join " + a);
   // A host name without a port is only caught after +connect.
   CHECK_EQ(redact_addresses("-launch +connect dave.example.org"),
            "-launch +connect " + a);
