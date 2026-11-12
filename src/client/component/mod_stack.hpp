@@ -54,4 +54,23 @@ std::string workshop_title(const std::string &id);
 // the lobby Lua engine's fallback (ui_scripting.cpp, lobby_game_copies).
 const void *game_copy(int32_t type, const std::string &name);
 
+// Every loaded copy of an asset: the one in use first, then the ones it
+// replaced, in priority order. The game keeps a replaced copy's own data for
+// as long as its zone is loaded, so a header here can be used in place of the
+// one in use (Xerces' character looks, src/client/xerces/character_slots.cpp).
+// owner is the Workshop id of the mod or custom map, "" for the game's own.
+// Call it on the main thread while nothing is loading.
+struct asset_copy {
+  const void *header = nullptr;
+  std::string owner;
+  std::string zone;
+  bool from_map = false;
+};
+std::vector<asset_copy> asset_copies(int32_t type, const std::string &name);
+// A number that changes whenever the game links an asset: what was read from
+// the asset copies is out of date once it does.
+uint64_t link_generation();
+// The main mod's Workshop id; "" without one.
+std::string main_id();
+
 } // namespace mod_stack

@@ -1982,10 +1982,8 @@ What is built:
   player wears to the game log (event `char.call`, at most 600 lines, and the lock's
   skips); off otherwise.
 
-Not built: a character mod's characters as slots *beside* the base ones. They
-share the base characters' asset names, so only one look of an index can be in the
-game at a time; separate slots would need the mod's models loaded under other names
-and the game's character table to point at them.
+A character mod's characters as slots *beside* the base ones were not built here
+(they share the base characters' asset names); they are section 7.12, beta.21.
 
 ### 7.11 Zombies: modern controller aim assist and no hip-fire spread (built 2026-11-11, beta.20)
 
@@ -2014,6 +2012,17 @@ assist" and `aimtuner/codkit.py`, style `classic`; community measurements):
   pull toward a target and no snap on aiming down sights: those games have neither.
 - "Stronger" keeps the rules with 80% rotation and 60% slowdown.
 
+Those are those games' numbers, and what beta.20 had. The user asked for more on
+2026-11-12 (beta.21). Those games tune for players 10 to 40 m away; zombies are
+fought from the hip at 1 to 5 m, where the range rule left a fifth of the rotation.
+So for Zombies: 75% rotation and 60% slowdown (95% and 75% for "Stronger"), 0.85 of
+the slowdown from the hip and 0.85 of the rotation up and down, the bubble a third
+larger (0.19 by 0.25), the left stick counted from 15% sideways, rotation full from
+1.5 m (0.35 of it at 0 m) and slowdown from 1 m (half at 0 m), and at range 50% of
+the rotation at 50 m and 15% at 70 m. Measured with the simulated stick: the view
+followed 75% of a zombie's motion from 4 m to 26 m (95% with "Stronger"), 0.53 at
+0.8 m, slowdown 0.51 from the hip.
+
 It reads the controller itself (XInput), so a mouse never gets it, and it is off in
 menus, in the console and while the window is not in front. Zombies are the game's
 actors (`ET_ACTOR`) in the client's entities; their place is their bounds.
@@ -2032,8 +2041,11 @@ Where the game keeps what it needs was measured in the running game
   passes no names).
 - Every frame both are checked (the camera over the player's own entity with a
   unit forward axis and sane tangents; the angles readable numbers) before anything
-  is moved; if not, the assist stays off and says so once in the log
-  (`xerces.aim_assist.off`).
+  is moved; if not, the assist stays off, and says so once in the log
+  (`xerces.aim_assist.off`) when that lasts 2000 frames (the camera is away from
+  the player for a moment when a level ends or the player is down). The angles are
+  read and written with the fault caught, not checked with `VirtualQuery` first
+  (beta.21: section 7.12).
 - No game function is called from the frame except the sight trace:
   `CG_IsFullyInitialized`, asked while a level loaded, waited on the loader and
   froze the game (2026-11-11), and a log line from inside the allocation detour did
@@ -2054,6 +2066,85 @@ the weapons changed are remembered by name and, in any level that is not a hoste
 Zombies match with the setting on, each one still loaded and still at 0 gets its
 spread back within a second of the level starting. Weapons are only touched inside
 a level, in the game's own frame.
+
+### 7.12 Zombies: every character mod's characters as slots (built 2026-11-12, beta.21)
+
+Asked for by the user on 2026-11-12: with DBZ Villain Characters, Girls' Frontline,
+Avali and Hyperdimension Neptunia stacked under DS4C, only the mod highest in the
+stack was seen; the others' characters had no slots.
+
+What was found in the game (a dump command, since removed, on the user's eight-mod
+stack; the layouts in `game/structs` were not exact here):
+
+- A Zombies match uses one character table, the asset `zm_character_customization`
+  (or `zm_character_customization_zmhd`): its name, a count and that many bodies in
+  a row. A body is 0x1C0 bytes (name, display name, a portrait's name at 0x40, the
+  count of outfits at 0xA8 and their list at 0xB0); an outfit is 0xA8 bytes (its
+  name, display name, an icon, then up to eleven models from 0x18: body, first-person
+  hands, legs, body seen from the eyes). A player's character goes over the network
+  as a body index and an outfit index of 4 bits each: 16 bodies of 16 outfits.
+- Character mods are of two kinds. DS4C (16 bodies), Ascendance (10), Girls'
+  Frontline 2.0 (16) and Avali (9) ship a table of their own; the game uses the one
+  highest in the stack and the others sit loaded and unused. DBZ Villain Characters
+  and Hyperdimension Neptunia have no table: they replace the base characters'
+  models by name (`c_zom_der_dempsey_mpc_fb`...), and so do the table mods; every
+  table points at the copy of the mod highest in the stack.
+- The game keeps each copy that lost (section 6.3's override chain): the asset's
+  own header with its own contents. A replaced model's copy has its own meshes and
+  materials (Girls' Frontline's Dempsey is drawn from `t7_gfl_m16a1_prime_fb`,
+  Neptunia's from `xmodel_noire`), so it can be drawn as it is. Shown on screen
+  2026-11-12: outfits pointed at Neptunia's, Girls' Frontline's, Avali's and the
+  game's own copies drew those characters, hands included, while DBZ's copy was the
+  one in use.
+
+What is built (`src/client/xerces/character_slots.cpp`, `mod_stack::asset_copies`):
+
+- While a Zombies match runs, every source below the table in use (each mod of the
+  stack from the top, then the game) gets its characters: a mod with a table, the
+  outfits of its own table; a mod without, the outfits of the table in use and of
+  the game's whose body model it has a copy of. Each model of the outfit is the
+  source's own copy, the game's where the source has none. An outfit whose body is
+  not a character (fewer than 30 bones: Girls' Frontline has two made of an effect)
+  is left out.
+- An outfit that draws the same models as one already there is that slot; any other
+  is added to the table in use as one more outfit of the body with the same index,
+  or of the body with the most room when that one has 16. On the user's stack: 73
+  characters from six sources, 69 outfits added, none left out, in 2 to 3 ms.
+- The table is not copied: each body's outfit list and count are pointed at a list
+  of Xerces' own (the body's own outfits first, unchanged), the list first and the
+  count after it, and back when the match ends. It is worked out again whenever the
+  game has linked an asset since or uses another table, on the game's frame and
+  before any script call that sets a player's character.
+- The pick is an ordinary (body, outfit) pair, so `xerces_characters.gsc` and the
+  game send it as they always did; every player's Xerces adds the same outfits in
+  the same order because a match's players have the same stack.
+- CHARACTERS lists a row per source under DEFAULT, each with its count, then the
+  table in use as before. A source's screen lists its characters: a table mod's by
+  their names in its table (M16A1, Thomas Frost); a mod without a table by what its
+  models are made of, less what all of them start and end with (`dv_coolerfz_fb`,
+  `dv_brolyfz_fb` are Cooler and Broly), with the character whose place it takes in
+  the description. "Original Characters" are the game's own where a mod replaced
+  them. Two outfits of one name drawn from the same mesh and materials are one row.
+- The saved pick (`xerces_char_saved`) is a slot, and a slot depends on the mods
+  loaded, so a pick of a source's character also saves which one it is
+  (`xerces_char_saved_look`, a hash of the source, the body's and the outfit's
+  names), and the slot is found again when the looks are worked out; if it is gone,
+  nothing is put on.
+- `xerces_char_looks` in the console lists them with their slots.
+
+Two things learned the hard way:
+
+- `VirtualQuery` on the game's memory takes 5 to 20 ms a call (it measures the
+  whole region, and the zone memory is gigabytes): 2000 calls made the first
+  version take 9.7 s. Game memory that may be gone is read and written with the
+  fault caught instead (`safe_memory.hpp`); the aim assist checked its angles with
+  `VirtualQuery` every frame and now does the same.
+- A number set into a dvar from the UI's Lua goes as text in six digits
+  ("2.00557e+09" read back as 2): the saved look is set as text.
+
+Not built: portraits for a mod without a table (it has none of its own), a mod's
+names for its replaced characters (it gives none), and more than 16 outfits on a
+body or 16 bodies (what a player's character is sent as).
 
 ## 8. Packs, profiles and safety nets (goal 6 and extras)
 
@@ -3946,7 +4037,7 @@ release from v1.0.
 
 Beta packages for testers (2026-11-05) come first, as a zip by private link:
 
-- `VERSION` is the one place the version is set (`0.1.0-beta.20`). premake
+- `VERSION` is the one place the version is set (`0.1.0-beta.21`). premake
   writes it, the commit and whether the tree had changes into
   `build\src\xerces_version.h`; all three programs show "Xerces <version>
   (<commit>)" (About, the menu watermark, the console title, the crash report)

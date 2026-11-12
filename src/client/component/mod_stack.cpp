@@ -1202,6 +1202,75 @@ const void *game_copy(const int32_t type, const std::string &name) {
   return nullptr;
 }
 
+uint64_t link_generation() {
+  return link_count.load(std::memory_order_relaxed);
+}
+
+std::string main_id() { return main_mod(); }
+
+std::vector<asset_copy> asset_copies(const int32_t type,
+                                     const std::string &name) {
+  std::vector<asset_copy> result;
+  const auto asset_type = static_cast<XAssetType>(type);
+  const void *data = game::db::xasset::DB_FindXAssetHeader(
+                         asset_type, name.c_str(), false, 0)
+                         .data;
+  if (!data || game::db::xasset::DB_IsXAssetDefault(asset_type, name.c_str())) {
+    return result;
+  }
+  const XAssetEntry *entry = live_entry(asset_type, data);
+  if (!entry) {
+    return result;
+  }
+  std::scoped_lock lock(mutex);
+  const std::string main = main_mod();
+  const auto add = [&](const XAssetEntry *copy) {
+    const std::string zone = zone_name(copy);
+    const xerces_core::zone_class found =
+        xerces_core::classify_zone(zone, current_usermap(), priorities);
+    asset_copy out;
+    out.header = copy->asset.header.data;
+    out.zone = zone;
+    switch (found.kind) {
+    case xerces_core::zone_kind::main_tier:
+      out.owner = main;
+      break;
+    case xerces_core::zone_kind::extra:
+      if (found.extra_index < priorities.size()) {
+        out.owner = priorities[found.extra_index];
+      }
+      break;
+    case xerces_core::zone_kind::usermap: {
+      const char *id = game::ugc::active_usermap->publisherId;
+      out.owner.assign(
+          id, strnlen(id, sizeof(game::ugc::active_usermap->publisherId)));
+      out.from_map = true;
+      break;
+    }
+    default:
+      break;
+    }
+    result.push_back(std::move(out));
+  };
+  add(entry);
+  // as game_copy: the copies that lost, in priority order, while their zones
+  // are loaded
+  auto &pool = game::db::xasset::pool::g_assetEntryPool->pool;
+  uint32_t index = entry->nextOverride;
+  for (int steps = 0; index != 0 &&
+                      index < game::db::xasset::pool::XASSET_ENTRY_POOL_LENGTH &&
+                      steps < 256;
+       ++steps) {
+    const XAssetEntry *candidate = &pool[index].entry;
+    if (candidate->asset.type == asset_type && candidate->asset.header.data &&
+        zone_alive(zone_name(candidate))) {
+      add(candidate);
+    }
+    index = candidate->nextOverride;
+  }
+  return result;
+}
+
 std::string workshop_title(const std::string &id) {
   for (const game::ugc::UGCItem *item :
        {game::ugc::UGC_UnwrapOptionalUGCItem(

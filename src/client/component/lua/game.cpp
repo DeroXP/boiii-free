@@ -24,6 +24,7 @@
 #include <utils/http.hpp>
 #include <utils/string.hpp>
 
+#include <xerces/character_slots.hpp>
 #include <xerces_core/asset_limits.hpp>
 
 namespace game_lua {
@@ -285,6 +286,13 @@ luaReturnCount_e getmodtitle(lua_State *luaVM) {
   return call(luaVM, [](const std::string &id) -> std::string {
     return mod_stack::workshop_title(id);
   });
+}
+
+// Xerces (DESIGN.md 7.12): the other mods' and the game's own Zombies
+// characters as slots, one line each (src/client/xerces/character_slots.hpp).
+luaReturnCount_e getcharacterlooks(lua_State *luaVM) {
+  lua_pushstring(luaVM, xerces_character_slots::looks_text().c_str());
+  return luaReturnCount_e::ONE;
 }
 
 luaReturnCount_e israwfile(lua_State *luaVM) {
@@ -723,6 +731,8 @@ public:
         lua_state::luaL_LoggedReg<"game", "israwfile", israwfile>(),
         lua_state::luaL_LoggedReg<"game", "getassetowner", getassetowner>(),
         lua_state::luaL_LoggedReg<"game", "getmodtitle", getmodtitle>(),
+        lua_state::luaL_LoggedReg<"game", "getcharacterlooks",
+                                  getcharacterlooks>(),
         lua_state::luaL_LoggedReg<"game", "purchasevials", purchasevials>(),
         lua_state::luaL_LoggedReg<"game", "purchasedistills",
                                   purchasedistills>(),

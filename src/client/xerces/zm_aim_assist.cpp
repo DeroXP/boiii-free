@@ -9,23 +9,28 @@
 // AimAssist, style "classic"), from the community's measurements:
 //
 // - slowdown: while a zombie is inside a bubble around the crosshair (a fixed
-//   area of the screen), your own look speed is cut, by 50% at full strength,
-//   0.6 of that from the hip;
-// - rotational: the view turns by itself to follow 60% of the zombie's motion
-//   across your screen, whether it moved or you strafed (0.7 of that up and
-//   down). It needs stick input: the left stick at least a quarter over
-//   sideways, or the right stick at least 5% in any direction;
-// - both need a clear line of sight and fade with distance: slowdown is full
-//   from 3 m to 50 m and gone at 100 m, rotation fades in to full at 6 m, is
-//   full to 35 m and all but gone past 70 m.
+//   area of the screen), your own look speed is cut;
+// - rotational: the view turns by itself to follow a share of the zombie's
+//   motion across your screen, whether it moved or you strafed. It needs
+//   stick input: the left stick sideways, or the right stick at least 5% in
+//   any direction;
+// - both need a clear line of sight and fade with distance.
 //
 // There is no pull toward a target and no snap when aiming down sights: those
 // games have neither. Only zombies (actors) count. It is off in multiplayer
 // and campaign, in menus and the console, while the window is not in front,
 // and without a controller (it reads the sticks itself, so a mouse never gets
-// it). xerces_zm_aimAssist: 0 the game's own only, 1 those games' strength, 2
-// the same rules a step stronger (80% rotation, 60% slowdown); saved on this
-// PC.
+// it). xerces_zm_aimAssist: 0 the game's own only, 1 "Modern", 2 "Modern,
+// Stronger"; saved on this PC.
+//
+// The numbers started as those games' own (60% rotation, 50% slowdown, 0.6 of
+// the slowdown from the hip, rotation fading in from nothing at 0 m to full at
+// 6 m). The user asked for more on 2026-11-12, and those numbers are made for
+// players 10 to 40 m away, while zombies are fought from the hip at 1 to 5 m,
+// where they left a fifth of the rotation. So, for Zombies: 75% rotation and
+// 60% slowdown (95% and 75% for "Stronger"), all of it from 1.5 m (rotation)
+// and 1 m (slowdown), 0.85 of the slowdown from the hip, a bubble a third
+// larger, and the left stick counts from 15% sideways.
 //
 // Where the game keeps things was measured in the running game on 2026-11-11
 // (xerces_aim_debug), because Xerces' layouts of this data are not exact:
@@ -49,6 +54,7 @@
 #include <loader/component_loader.hpp>
 
 #include "runtime.hpp"
+#include "safe_memory.hpp"
 
 #include <utils/hook.hpp>
 
@@ -63,17 +69,19 @@ struct rules {
   float rotation; // share of the target's motion across the view followed
   float slowdown; // share of your own look speed taken away in the bubble
 };
-constexpr rules GAME_STRENGTH{0.60f, 0.50f}; // "roughly 60%", "roughly 50%"
-constexpr rules STRONGER{0.80f, 0.60f};
+// Those games' own are 0.60 and 0.50; see the top for why these are more
+constexpr rules GAME_STRENGTH{0.75f, 0.60f};
+constexpr rules STRONGER{0.95f, 0.75f};
 
-constexpr float HIP_SLOWDOWN = 0.6f;   // slowdown from the hip, of the above
-constexpr float ROTATION_PITCH = 0.7f; // the vertical share of rotation
-constexpr float STRAFE_MIN = 0.25f;    // left stick sideways that counts
-constexpr float AIM_MIN = 0.05f;       // right stick that counts
+constexpr float HIP_SLOWDOWN = 0.85f;   // slowdown from the hip, of the above
+constexpr float ROTATION_PITCH = 0.85f; // the vertical share of rotation
+constexpr float STRAFE_MIN = 0.15f;     // left stick sideways that counts
+constexpr float AIM_MIN = 0.05f;        // right stick that counts
 // The bubble: half its width and height in screen units (-1 to 1), all of the
-// assist inside ZONE_FULL of it and none at its edge
-constexpr float BUBBLE_X = 0.14f;
-constexpr float BUBBLE_Y = 0.19f;
+// assist inside ZONE_FULL of it and none at its edge (those games': 0.14 by
+// 0.19)
+constexpr float BUBBLE_X = 0.19f;
+constexpr float BUBBLE_Y = 0.25f;
 constexpr float ZONE_FULL = 0.75f;
 constexpr float UNITS_PER_METRE = 39.37f;
 // The sights count as up when the view is this much narrower than from the hip
@@ -83,11 +91,13 @@ struct ramp_point {
   float metres;
   float gain;
 };
+// Those games': slowdown from nothing at 0 m to full at 3 m; rotation from
+// nothing at 0 m to full at 6 m, 0.3 at 50 m and 0.05 at 70 m
 constexpr ramp_point RANGE_SLOWDOWN[] = {
-    {0.0f, 0.0f}, {3.0f, 1.0f}, {50.0f, 1.0f}, {100.0f, 0.0f}};
-constexpr ramp_point RANGE_ROTATION[] = {{0.0f, 0.0f},   {6.0f, 1.0f},
-                                         {35.0f, 1.0f},  {50.0f, 0.3f},
-                                         {70.0f, 0.05f}, {95.0f, 0.0f}};
+    {0.0f, 0.5f}, {1.0f, 1.0f}, {50.0f, 1.0f}, {100.0f, 0.0f}};
+constexpr ramp_point RANGE_ROTATION[] = {{0.0f, 0.35f},  {1.5f, 1.0f},
+                                         {35.0f, 1.0f},  {50.0f, 0.5f},
+                                         {70.0f, 0.15f}, {95.0f, 0.0f}};
 
 template <size_t N> float ramp(float x, const ramp_point (&points)[N]) {
   if (x <= points[0].metres) {
@@ -189,30 +199,21 @@ void *hunk_alloc_stub(game::hunk::HunkUser *user, size_t size,
   return result;
 }
 
-bool writable(const void *address, size_t size) {
-  MEMORY_BASIC_INFORMATION info{};
-  if (!VirtualQuery(address, &info, sizeof(info)) || info.State != MEM_COMMIT ||
-      (info.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE)) == 0) {
-    return false;
-  }
-  const auto begin = reinterpret_cast<uintptr_t>(address);
-  const auto end =
-      reinterpret_cast<uintptr_t>(info.BaseAddress) + info.RegionSize;
-  return begin + size <= end;
-}
-
-// The client's own pitch and yaw, or null while they cannot be trusted
-float *client_angles() {
+// Where the client's own pitch and yaw are, with what they are now; null
+// while they cannot be trusted. Read and written with a fault caught, not
+// with VirtualQuery first: this runs every frame, and on the game's memory
+// that call took milliseconds (safe_memory.hpp).
+float *client_angles(float now[2]) {
   uint8_t *data = client_data.load(std::memory_order_acquire);
-  if (!data || !writable(data + CLIENT_ANGLES, 8)) {
+  if (!data ||
+      !xerces_safe::read(data + CLIENT_ANGLES, now, 2 * sizeof(float))) {
     return nullptr;
   }
-  auto *angles = reinterpret_cast<float *>(data + CLIENT_ANGLES);
-  if (!std::isfinite(angles[0]) || !std::isfinite(angles[1]) ||
-      std::abs(angles[0]) > 360.0f || std::abs(angles[1]) > 1.0e7f) {
+  if (!std::isfinite(now[0]) || !std::isfinite(now[1]) ||
+      std::abs(now[0]) > 360.0f || std::abs(now[1]) > 1.0e7f) {
     return nullptr;
   }
-  return angles;
+  return reinterpret_cast<float *>(data + CLIENT_ANGLES);
 }
 
 // ------------------------------------------------------------- the camera
@@ -312,6 +313,7 @@ struct state {
   bool have_client = false;
   float hip_tan_x = 0.0f; // the widest view seen in this level: from the hip
   bool warned = false;
+  int failed_frames = 0; // frames in a row the camera or the angles were not found
   int64_t last_pad_ms = 0;
   int64_t last_qpc = 0;
   // what the last frame did, for xerces_aim_debug and the test log
@@ -338,15 +340,18 @@ void reset() {
   st.slow = 0.0f;
 }
 
+// Said once, and only when it lasts: the camera is away from the player for a
+// moment whenever a level ends or the player is down and watching
 void warn_once(const char *what) {
-  if (st.warned) {
+  if (st.warned || ++st.failed_frames < 2000) {
     return;
   }
   st.warned = true;
   xerces_runtime::log_warn("xerces.aim_assist.off",
                            std::string("Aim assist is off: ") + what +
                                " is not where this build of Xerces looks for "
-                               "it (another game build?)");
+                               "it (another game build, or a view that is not "
+                               "the player's own)");
 }
 
 struct candidate {
@@ -500,20 +505,22 @@ void frame() {
     reset();
     return;
   }
-  float *view = client_angles();
+  float angles[2];
+  float *view = client_angles(angles);
   if (!view) {
     warn_once("the client's view angles");
     reset();
     return;
   }
 
+  st.failed_frames = 0;
   ++st.frame;
   // your own turn since this last left the view
   float own_pitch = 0.0f;
   float own_yaw = 0.0f;
   if (st.have_client) {
-    own_pitch = normalize(view[0] - st.client_pitch);
-    own_yaw = normalize(view[1] - st.client_yaw);
+    own_pitch = normalize(angles[0] - st.client_pitch);
+    own_yaw = normalize(angles[1] - st.client_yaw);
   }
   st.hip_tan_x = std::max(st.hip_tan_x, cam.tan_x);
   st.sights_up = cam.tan_x < st.hip_tan_x * SIGHTS_UP_FOV;
@@ -571,10 +578,13 @@ void frame() {
   // a frame's change is never more than 10 degrees
   add_pitch = std::clamp(add_pitch, -10.0f, 10.0f);
   add_yaw = std::clamp(add_yaw, -10.0f, 10.0f);
-  view[0] += add_pitch;
-  view[1] += add_yaw;
-  st.client_pitch = view[0];
-  st.client_yaw = view[1];
+  if (add_pitch != 0.0f || add_yaw != 0.0f) {
+    angles[0] += add_pitch;
+    angles[1] += add_yaw;
+    xerces_safe::write(view, angles, sizeof(angles));
+  }
+  st.client_pitch = angles[0];
+  st.client_yaw = angles[1];
   st.have_client = true;
   test_log();
 }
@@ -594,7 +604,8 @@ void debug() {
     camera cam;
     int client = 0;
     const bool camera_ok = read_camera(cam, client);
-    const float *view = client_angles();
+    float angles[2] = {0.0f, 0.0f};
+    const float *view = client_angles(angles);
     std::snprintf(line, sizeof(line),
                   "\ncamera %s: eye %.1f %.1f %.1f, pitch %.2f, yaw %.2f, "
                   "tangents %.3f %.3f, sights %s\nclient angles %s: %.2f %.2f"
@@ -602,7 +613,7 @@ void debug() {
                   camera_ok ? "ok" : "NOT ok", cam.eye.x, cam.eye.y, cam.eye.z,
                   cam.pitch, cam.yaw, cam.tan_x, cam.tan_y,
                   st.sights_up ? "up" : "down", view ? "ok" : "NOT ok",
-                  view ? view[0] : 0.0f, view ? view[1] : 0.0f, st.target,
+                  angles[0], angles[1], st.target,
                   st.target_metres, st.target_e, st.strength, st.slow);
     text += line;
   }
@@ -623,8 +634,8 @@ public:
     game::register_dvar_int(
         "xerces_zm_aimAssist", 0, 0, 2, saved,
         "Zombies only, on this PC: controller aim assist like the newer Call "
-        "of Duty games' (slowdown and rotational). 0 the game's own, 1 those "
-        "games' strength, 2 a step stronger.");
+        "of Duty games' (slowdown and rotational). 0 the game's own, 1 "
+        "modern, 2 modern and stronger.");
     load_xinput();
     wchar_t buffer[4];
     test_pad = GetEnvironmentVariableW(L"XERCES_AIM_TEST", buffer, 4) > 0 &&

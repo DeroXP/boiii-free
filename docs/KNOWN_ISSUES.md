@@ -61,11 +61,25 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## Zombies characters (CHARACTERS)
 
-- **Character mods change the base characters, they are not new slots.** Hyperdimension
-  Neptunia (and similar mods) replace the models of existing characters by name,
-  so with it loaded Dempsey, Nikolai, Richtofen and Takeo look like its characters
-  and the original looks are not there to pick. CHARACTERS says which mod changed
-  a look.
+- **A character from a mod that only replaces models keeps the base character's
+  name and voice.** DBZ Villain Characters and Hyperdimension Neptunia give no names
+  or portraits: Cooler in Dempsey's place is still called Dempsey by the game and
+  speaks as him, and its row has no portrait. Its name in the list is taken from
+  its model's name.
+- **A mod's character sits on one of the characters of the list in use.** The game
+  sends a character as one of 16 characters and one of 16 outfits, so another mod's
+  character is added as an outfit of the character with the same number (the name
+  on the scoreboard and the voice are that character's). With more than 16 on one
+  character the rest go to the character with the most room; past 256 in all, the
+  mods lowest in the stack are left out (the log says how many).
+- **Everyone in a match needs the same mods in the same order** for these slots, as
+  for the match itself; then each player sees the others' picks.
+- **Some rows look alike.** A mod may put the same character on several of the
+  base characters (DBZ's Broly is on Nikolai and on Floyd): each is a row, because
+  the name and voice differ.
+- **Not tried:** two players, a joined match, and custom maps that bring their own
+  character list (a map's own characters stay as they are; the mods' are added to
+  them).
 - **DS4C's own extra characters are not in the CHARACTERS list.** Disciple, Misty
   and Shimo (indexes 500 and up) are made by DS4C's own scripts; use DS4C's
   character screen for them (it cannot change a pick made in CHARACTERS until
@@ -74,18 +88,21 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## Zombies aim assist and hip-fire spread
 
-- **The modern aim assist has not been played with a real controller yet.** Its
-  rules were checked in a match with a simulated stick (the view followed 60% of a
-  zombie's motion; slowdown and the fades read as designed), but how it feels is
-  untested. Say what feels off: strength and ranges are single numbers.
+- **The modern aim assist is off until you turn it on.** XERCES SETTINGS >
+  CONTROLLER > Aim Assist (Zombies) starts on Game's Own, which is the game's own
+  assist and nothing of Xerces'.
+- **Its feel is still tuned by numbers, not by play.** Its rules were checked in a
+  match with a simulated stick (beta.21: the view followed 75% of a zombie's motion,
+  95% on Stronger). Say what feels off: strength and ranges are single numbers.
 - **It needs an XInput controller.** A controller in another mode (DualShock or
   Switch mode without a wrapper) is not seen; `xerces_aim_debug` in a match says
   "controller NOT found". It is tied to this build of the game: after a game update
   it turns itself off and writes `xerces.aim_assist.off` to the log.
 - **The game's own aim assist still runs under it.** Game's Own leaves only that.
-- **Up close it is weak on purpose.** As in Modern Warfare III, rotation fades in
-  from nothing at point blank to full at 6 m, so a zombie at arm's length gets
-  little of it.
+- **It is no longer Modern Warfare III's numbers.** Those faded to nothing at
+  point blank and were lower from the hip; since beta.21 it is full from 1.5 m and
+  nearly full from the hip. Inside arm's length it still eases off, so a zombie on
+  top of you does not swing the view.
 - **No Hip-Fire Spread is the host's setting.** It does nothing in a match you
   joined, and the crosshair of players who joined still shows their own spread.
 

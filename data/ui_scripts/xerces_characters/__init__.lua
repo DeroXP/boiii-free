@@ -5,6 +5,9 @@
 -- ("xerces_char:<index>:<style>", or "xerces_char:default"), which data/custom_scripts/zm/xerces_characters.gsc applies and
 -- holds against other mods' own character scripts (src/client/xerces/character_slots.cpp). The last pick is saved in the
 -- dvar xerces_char_saved, which the host's game puts on again in the next match.
+--
+-- Every other character mod's characters, and the game's own where a mod replaced them, are slots too (DESIGN.md 7.12):
+-- the game gives them as extra outfits of the table in use (game.getcharacterlooks), and the screen lists them by mod.
 if type(LUI) ~= "table" or type(LUI.UIList) ~= "table" or __xercesCharactersInstalled then
   return
 end
@@ -100,6 +103,20 @@ end
 -- it) and the new look can be seen
 local pauseMenus = {}
 local picked = {}
+-- The screens open now, by name and controller: a pick made on a second screen closes the first too
+local openMenus = {}
+
+local function closeAll(controller, menu)
+  GoBack(menu, controller)
+  local first = openMenus.XercesCharactersMenu and openMenus.XercesCharactersMenu[controller]
+  if first and first ~= menu then
+    GoBack(first, controller)
+  end
+  if pauseMenus[controller] then
+    StartMenuGoBack(pauseMenus[controller], controller)
+    pauseMenus[controller] = nil
+  end
+end
 
 local function send(controller, response)
   Engine.SendMenuResponse(controller, "StartMenu_Main", response)
@@ -109,28 +126,19 @@ local function choose(character, style)
   return function(self, element, controller, param, menu)
     local pick = character.index .. ":" .. style
     pcall(Engine.SetDvar, "xerces_char_saved", character.index * 16 + style + 1)
+    pcall(Engine.SetDvar, "xerces_char_saved_look", 0)
     picked[controller] = pick
     send(controller, "xerces_char:" .. pick)
-    GoBack(menu, controller)
-    if character.styles > 1 then
-      GoBack(self, controller)
-    end
-    if pauseMenus[controller] then
-      StartMenuGoBack(pauseMenus[controller], controller)
-      pauseMenus[controller] = nil
-    end
+    closeAll(controller, menu)
   end
 end
 
 local function chooseDefault(self, element, controller, param, menu)
   pcall(Engine.SetDvar, "xerces_char_saved", 0)
+  pcall(Engine.SetDvar, "xerces_char_saved_look", 0)
   picked[controller] = nil
   send(controller, "xerces_char:default")
-  GoBack(menu, controller)
-  if pauseMenus[controller] then
-    StartMenuGoBack(pauseMenus[controller], controller)
-    pauseMenus[controller] = nil
-  end
+  closeAll(controller, menu)
 end
 
 local openStyles
@@ -159,6 +167,183 @@ local function titleOf(id)
   return nil
 end
 
+-- A mod's Workshop title cut to one row of the list (about 22 letters beside the count): the name in front of its
+-- brackets, version and subtitle. "[ Ascendance ] 0.9.9.8.5 Aesthetic" is Ascendance, "Avali: Solspace - Character
+-- Pack" is Avali: Solspace.
+local ROW_LETTERS = 22
+local function shortTitle(title)
+  local name = title
+  local bracketed = string.match(name, "^%s*[%[%(]%s*(.-)%s*[%]%)]")
+  if bracketed and #bracketed >= 3 then
+    name = bracketed
+  else
+    name = string.gsub(name, "%s*%b[]", "")
+    name = string.gsub(name, "%s*%b()", "")
+  end
+  name = string.gsub(name, "^%s+", "")
+  name = string.gsub(name, "%s+$", "")
+  for _, cut in ipairs({ " - ", ": " }) do
+    if #name > ROW_LETTERS then
+      local at = string.find(name, cut, 1, true)
+      if at and at > 6 then
+        name = string.sub(name, 1, at - 1)
+      end
+    end
+  end
+  if #name > ROW_LETTERS then
+    name = string.sub(name, 1, ROW_LETTERS - 2) .. ".."
+  end
+  if name == "" then
+    return title
+  end
+  return name
+end
+
+-- A mod that replaces the base characters' models names nobody: its rows are named after what the models are made of.
+-- What all of a mod's model names start and end with says nothing ("xmodel_noire", "xmodel_blanc" are Noire and Blanc;
+-- "dv_coolerfz_fb", "dv_brolyfz_fb" are Cooler and Broly).
+local function modelNames(hints)
+  local list = {}
+  local seen = {}
+  for _, hint in ipairs(hints) do
+    if hint ~= "" and not seen[hint] then
+      seen[hint] = true
+      table.insert(list, hint)
+    end
+  end
+  local front, back = 0, 0
+  if #list > 1 then
+    local first = list[1]
+    front = #first
+    back = #first
+    for i = 2, #list do
+      local other = list[i]
+      local n = 0
+      while n < front and n < #other and string.sub(first, n + 1, n + 1) == string.sub(other, n + 1, n + 1) do
+        n = n + 1
+      end
+      front = n
+      n = 0
+      while n < back and n < #other and string.sub(first, #first - n, #first - n) == string.sub(other, #other - n, #other - n) do
+        n = n + 1
+      end
+      back = n
+    end
+    -- never down to nothing
+    for _, hint in ipairs(list) do
+      if #hint - front - back < 2 then
+        back = 0
+      end
+    end
+    for _, hint in ipairs(list) do
+      if #hint - front < 2 then
+        front = 0
+      end
+    end
+  end
+  local names = {}
+  for _, hint in ipairs(list) do
+    local name = string.sub(hint, front + 1, #hint - back)
+    name = string.gsub(name, "_", " ")
+    name = string.gsub(name, "^%s+", "")
+    name = string.gsub(name, "%s+$", "")
+    if name == "" then
+      name = hint
+    end
+    names[hint] = string.upper(string.sub(name, 1, 1)) .. string.sub(name, 2)
+  end
+  return names
+end
+
+-- The other mods' characters and the game's own, as the game lists them (src/client/xerces/character_slots.hpp): one
+-- group per mod, in the stack's order, the game's own last. {id, title, looks = {{name, hint, image, index, style, id}}}
+local function modLooks()
+  local groups = {}
+  local byId = {}
+  if type(game) ~= "table" or type(game.getcharacterlooks) ~= "function" then
+    return groups
+  end
+  local ok, text = pcall(game.getcharacterlooks)
+  if not ok or type(text) ~= "string" then
+    return groups
+  end
+  for line in string.gmatch(text, "[^\n]+") do
+    local fields = {}
+    for field in string.gmatch(line .. "\t", "(.-)\t") do
+      table.insert(fields, field)
+    end
+    if #fields >= 8 then
+      local source = fields[1]
+      local group = byId[source]
+      if not group then
+        local title = "Original Characters"
+        if source ~= "" then
+          title = titleOf(source) or source
+        end
+        group = { id = source, title = title, looks = {}, names = {} }
+        byId[source] = group
+        table.insert(groups, group)
+      end
+      local name = fields[2]
+      if name == "" then
+        name = "Character"
+      elseif string.find(name, "^[A-Z0-9_]+$") and string.find(name, "_", 1, true) then
+        local localized = Engine.Localize(name)
+        if type(localized) == "string" and localized ~= "" then
+          name = localized
+        end
+      end
+      table.insert(group.looks, {
+        name = name,
+        hint = fields[3],
+        image = fields[4],
+        index = tonumber(fields[5]) or 0,
+        style = tonumber(fields[6]) or 0,
+        -- kept as text: a number this large is set as "1.75927e+09" and read back as 1
+        id = fields[7],
+        inPlace = fields[9] == "1",
+      })
+    end
+  end
+  for _, group in ipairs(groups) do
+    local hints = {}
+    for _, look in ipairs(group.looks) do
+      if look.inPlace then
+        table.insert(hints, look.hint)
+      end
+    end
+    local names = modelNames(hints)
+    local used = {}
+    for _, look in ipairs(group.looks) do
+      if look.inPlace and names[look.hint] then
+        look.inPlaceOf = look.name
+        look.name = names[look.hint]
+      end
+      -- a name the mod uses more than once is numbered
+      local count = (used[look.name] or 0) + 1
+      used[look.name] = count
+      if count > 1 then
+        look.name = look.name .. " " .. count
+      end
+    end
+  end
+  return groups
+end
+
+local openLooks
+local lookGroup = {}
+
+local function chooseLook(look)
+  return function(self, element, controller, param, menu)
+    local pick = look.index .. ":" .. look.style
+    pcall(Engine.SetDvar, "xerces_char_saved", look.index * 16 + look.style + 1)
+    pcall(Engine.SetDvar, "xerces_char_saved_look", tostring(look.id))
+    picked[controller] = pick
+    send(controller, "xerces_char:" .. pick)
+    closeAll(controller, menu)
+  end
+end
+
 -- A list made when the screen opens, so it shows the roster the loaded mods have now and what was picked
 local sources = 0
 local function charactersSource(controller)
@@ -172,6 +357,30 @@ local function charactersSource(controller)
         chooseDefault
       ),
     }
+    for _, group in ipairs(modLooks()) do
+      local description = group.title
+        .. ": "
+        .. #group.looks
+        .. " characters from this mod, each a slot of its own. Select to see them."
+      if group.id == "" then
+        description = #group.looks
+          .. " characters as the game made them, where a mod changed how they look. Select to see them."
+      end
+      local name = shortTitle(group.title) .. " (" .. #group.looks .. ")"
+      for _, look in ipairs(group.looks) do
+        if picked[controller] == look.index .. ":" .. look.style then
+          name = "^3" .. name
+          break
+        end
+      end
+      table.insert(
+        rows,
+        row(name, description, function(self, element, controller_, param, menu)
+          lookGroup[controller_] = group
+          openLooks(self, element, controller_, param, menu)
+        end)
+      )
+    end
     for _, character in ipairs(roster()) do
       local description = "Character " .. character.index
       if character.styles > 1 then
@@ -185,7 +394,9 @@ local function charactersSource(controller)
         description = description .. " Looks from " .. owner .. "."
       end
       local name = character.name
-      if picked[controller] and picked[controller]:match("^" .. character.index .. ":") then
+      local pickedIndex, pickedStyle = string.match(picked[controller] or "", "^(%d+):(%d+)$")
+      -- an outfit past the character's own is another mod's character
+      if tonumber(pickedIndex) == character.index and tonumber(pickedStyle) < character.styles then
         name = "^3" .. name .. " (picked)"
       end
       local action
@@ -229,11 +440,44 @@ local function stylesSource(controller)
   return sourceName
 end
 
+local function looksSource(controller)
+  sources = sources + 1
+  local sourceName = "XercesCharacterLooks" .. sources
+  DataSources[sourceName] = ListHelper_SetupDataSource(sourceName, function()
+    local group = lookGroup[controller]
+    local rows = {}
+    if not group then
+      return rows
+    end
+    for _, look in ipairs(group.looks) do
+      local description = "Select to play as this character."
+      if look.hint ~= "" then
+        description = "Model: " .. look.hint .. ". " .. description
+      end
+      if look.inPlaceOf then
+        description = "In "
+          .. look.inPlaceOf
+          .. "'s place: the game still names and voices you as "
+          .. look.inPlaceOf
+          .. ". "
+          .. description
+      end
+      local name = look.name
+      if picked[controller] == look.index .. ":" .. look.style then
+        name = "^3" .. name .. " (picked)"
+      end
+      table.insert(rows, row(name, description, chooseLook(look), look.image))
+    end
+    return rows
+  end, false)
+  return sourceName
+end
+
 require("ui.uieditor.widgets.Scrollbars.verticalScrollbar")
 
 -- Like XERCES SETTINGS (data/ui_scripts/xerces_settings): a list on the left, the focused row, its description and its
 -- portrait on the right; a row with an action runs it.
-local function createListMenu(name, title, dataSource)
+local function createListMenu(name, title, dataSource, alpha)
   LUI.createMenu[name] = function(controller)
     local self = CoD.Menu.NewForUIEditor(name)
     self.soundSet = "ChooseDecal"
@@ -248,7 +492,7 @@ local function createListMenu(name, title, dataSource)
     background:setLeftRight(true, true, 0, 0)
     background:setTopBottom(true, true, 0, 0)
     background:setRGB(0, 0, 0)
-    background:setAlpha(0.92)
+    background:setAlpha(alpha or 0.92)
     self:addElement(background)
 
     local list = LUI.UIList.new(self, controller, 2, 0, nil, false, false, 0, 0, false, false)
@@ -344,6 +588,8 @@ local function createListMenu(name, title, dataSource)
     )
 
     list.id = "Options"
+    openMenus[name] = openMenus[name] or {}
+    openMenus[name][controller] = self
     self:processEvent({ name = "menu_loaded", controller = controller })
     self:processEvent({ name = "update_state", menu = self })
     if not self:restoreState() then
@@ -351,6 +597,9 @@ local function createListMenu(name, title, dataSource)
     end
 
     LUI.OverrideFunction_CallOriginalSecond(self, "close", function(element)
+      if openMenus[name][controller] == element then
+        openMenus[name][controller] = nil
+      end
       element.MenuFrame:close()
       element.Options:close()
       Engine.UnsubscribeAndFreeModel(
@@ -362,10 +611,15 @@ local function createListMenu(name, title, dataSource)
 end
 
 createListMenu("XercesCharactersMenu", TITLE, charactersSource)
-createListMenu("XercesCharacterStylesMenu", "OUTFITS", stylesSource)
+createListMenu("XercesCharacterStylesMenu", "OUTFITS", stylesSource, 1)
+createListMenu("XercesCharacterLooksMenu", TITLE, looksSource, 1)
 
 openStyles = function(self, element, controller, param, menu)
   OpenPopup(self, "XercesCharacterStylesMenu", controller)
+end
+
+openLooks = function(self, element, controller, param, menu)
+  OpenPopup(self, "XercesCharacterLooksMenu", controller)
 end
 
 -- The pause menu entry, in the game options list in use (the stock one, DS4C's StartMenuGameOptions_Death or a template's),

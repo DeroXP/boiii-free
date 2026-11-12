@@ -2791,3 +2791,53 @@ No hip-fire spread:
       tab entries) and no Lua or script error; the menu itself was not opened on screen.
 - [ ] Not tried: co-op (a second player's shots), turning the setting off in the middle
       of a match, a custom map's own weapons loaded late.
+
+## Zombies: every character mod's characters as slots, stronger aim assist (beta.21)
+
+Built on `launcher/upscale`; test home `C:\Users\Ginld\XercesDev\bench\20261106-modlabels`,
+`zm_zod`, driven with `bench\20261108-chars\run-lua.ps1`. The stack is the user's own:
+DS4C Patched, Ascendance, im_oxo Zombies QOL, Classic Viewmodel FOV, DBZ Villain
+Characters, Girls' Frontline 2.0, Avali: Solspace, Hyperdimension Neptunia.
+
+Character slots:
+
+- [x] The log: "Character slots: 73 characters from 6 sources beside the table in use
+      (69 outfits added, 0 left out for room)", 1.8 to 3.0 ms (the first version, with
+      `VirtualQuery`: 9.7 s).
+- [x] Slots put on with the menu response and seen in third person: Neptunia's Noire
+      (0:10), Girls' Frontline's M16A1 (0:2) and a character on outfit 14 (9:14), Avali's
+      Thomas Frost, the game's own Dempsey (0:13) while DBZ's Cooler is the Dempsey in use
+      (`bench\20261108-chars\looks2-*.png`).
+- [x] CHARACTERS on screen: DEFAULT, ASCENDANCE (1), DBZ VILLAIN CHARACTERS, GIRLS'
+      FRONTLINE, AVALI: SOLSPACE, HYPERDIMENSION NEPTU.., ORIGINAL CHARACTERS, then DS4C's
+      roster; each name on one row (`menu3-menu.png`).
+- [x] DBZ's screen: Cooler, Broly, Cell, Frieza and their second places, "In Nikolai's
+      place: the game still names and voices you as Nikolai. Model: dv_brolyfz_fb"
+      (`menu5-dbzrow.png`). Girls' Frontline's: M16A1, AK-12, HK416... by its table's names.
+- [x] A pick in Neptunia's screen: all three menus close, Neptune in third person, her
+      own hands in first person (`menu4-neptune.png`, `menu4-nephands.png`). A pick of an
+      outfit of DS4C's roster closes all menus too (it left the first open before).
+- [x] Saved pick: `xerces_char_saved` 38 and `xerces_char_saved_look` 2005565732 after
+      picking Neptune; `disconnect`, a second match: the slots are worked out again (the
+      log line again), both dvars as before, and `SetCharacterBodyType 2`,
+      `SetCharacterBodyStyle 5` nine seconds after the spawn (`XERCES_CHAR_TRACE=1`).
+- [x] DS4C's own calls on a locked player are still skipped; no Lua or script error; no
+      crash or freeze in fourteen matches, leaving to the menu and stopping the game
+      included.
+- [x] Without DS4C (Girls' Frontline on top, Neptunia under it): 26 characters from 2
+      sources, 25 outfits added; Neptunia's Noire (slot 0:4) seen in third person while
+      Girls' Frontline's table is the one in use (`gfl1-pick.png`). With no mods: nothing
+      added, nothing logged.
+- [ ] Not tried: two players and a joined match, a custom map with its own character
+      table, a Chronicles map (the `_zmhd` table), a mod reload from the mods menu between
+      matches.
+
+Aim assist (`XERCES_AIM_TEST=1`, no mods, no real controller):
+
+- [x] "Modern (MW3)": rotation 0.75 and slowdown 0.51 from the hip on zombies from 4 m to
+      26 m; over a second the target moved 2.65 degrees and the view followed 1.99 (75%);
+      at 0.8 m rotation 0.53 and slowdown 0.46; at the bubble's edge (e 0.99) 0.03.
+- [x] "Modern, Stronger": rotation 0.95, slowdown 0.64.
+- [x] 250 to 265 frames a second with it on, no crash; the log's "Aim assist is off"
+      line as the level ended is now said only when it lasts.
+- [ ] Not tried: a real controller.

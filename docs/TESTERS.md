@@ -106,14 +106,23 @@ hash, sent with the link, shows that the zip is the one we made.
   (DS4C's) cannot change it until you pick DEFAULT. A character whose look a
   character mod has replaced (Hyperdimension Neptunia gives the first four their
   looks) says which mod. When you host, your last pick is put on again in the next
-  match; other players pick again. It is not yet a set of *new* slots next to the
-  base characters: a character mod changes how the base characters look.
+  match; other players pick again.
   After a pick you see yourself in the third-person view for four seconds.
+- **Every character mod's characters (Zombies).** With several character mods on,
+  CHARACTERS lists each of them under DEFAULT with its count (DBZ VILLAIN
+  CHARACTERS (8), GIRLS' FRONTLINE (37)...), and ORIGINAL CHARACTERS for the game's
+  own where a mod replaced them. Select one to see its characters and pick one: it
+  is a slot of its own, with its own hands in first person, whatever the order of
+  your mods. A mod that only replaces the base characters has no names of its own,
+  so its rows are named after its models (Cooler, Noire) and say whose place each
+  takes: the game still names and voices you as that character.
 - **Aim assist like the newer Call of Duty games (Zombies, controller).** XERCES
   SETTINGS > CONTROLLER > Aim Assist (Zombies): Game's Own, Modern (MW3) or Modern,
-  Stronger. Modern slows your look speed while a zombie is near the crosshair and
-  turns the view with a zombie as it moves or you strafe; like those games it needs
-  stick input, has no snap, and fades up close and far away. It needs an Xbox-style
+  Stronger. It is on Game's Own until you change it. Modern slows your look speed
+  while a zombie is near the crosshair and turns the view with a zombie as it moves
+  or you strafe; like those games it needs stick input and has no snap. Since
+  beta.21 it is stronger than those games' own and at full strength from arm's
+  length and from the hip, where zombies are fought. It needs an Xbox-style
   (XInput) controller, works in Zombies only and never with a mouse. In a match the
   console command `xerces_aim_debug` says whether it sees your controller.
 - **No Hip-Fire Spread (Zombies).** XERCES SETTINGS > ZOMBIES, when you host: shots
