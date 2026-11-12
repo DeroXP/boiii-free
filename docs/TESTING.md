@@ -2908,9 +2908,17 @@ CHARACTERS (DESIGN.md 7.13; runs `ui11` and, after the fixes below, `fix1` and `
       ds4c_pts_color=6 ds4c_print=5 zm_character_icon=4 ds4c_lua_text=3 levelNotify=2
       clientsystem=1 musicCmd=0". With `drop_failed_client_systems`: the eight mods and
       Power On at Start on, still in the match 30 s after it began, no script error.
-- [ ] Not tried: a second player, a controller's LB/RB (Q and E were pressed), the fall-back
-      without the HUD menu, a custom map, CHARACTERS on a Chronicles map (the match above
-      ended first).
+- [x] Two players, the second a bot (the console's `spawnBot 1`, "[EXE]Aimbot.exe
+      Connected"; a line added for the test, since removed, wrote what the preview's safety
+      saw into a dvar): "players 2 safe 0 held -1", so nothing is held and the player can
+      be hurt, as meant; the preview shows the default look and Dempsey 2
+      (`bench\20261112-crash\bot-grid.png`); the player, standing still, is knocked down
+      about 45 s into the match and the preview ends by itself (its safety stops being
+      asked); both players go down, the match ends in the After Action Report, the game
+      quits cleanly; no script or Lua error.
+- [ ] Not tried: a second person's own game (what they see of the previews, their own
+      screen), a controller's LB/RB (Q and E were pressed), the fall-back without the HUD
+      menu, a custom map, CHARACTERS on a Chronicles map (the match above ended first).
 
 The fixes of DESIGN.md 7.14:
 

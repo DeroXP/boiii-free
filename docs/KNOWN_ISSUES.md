@@ -97,7 +97,8 @@ to report these again, but tell us if you see them somewhere else or worse.
 - **Only the host's last pick is remembered.** Other players pick again each match.
 - **The live view is safe in a solo match only.** There the zombies stand still
   and cannot hurt you while CHARACTERS is open. With other players in the match
-  nothing is held, so open it somewhere safe. Not tried with a second player yet.
+  nothing is held, so open it somewhere safe: if you go down, the view closes by
+  itself. Tried with a bot as the second player, not yet with a second person.
 - **A long mod title is cut on its tab** ("DBZ VILLAIN.."); the line under the
   list has the full title.
 - **The other players see each character you look at**, since the live view puts
