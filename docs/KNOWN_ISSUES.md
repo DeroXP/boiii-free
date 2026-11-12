@@ -59,6 +59,18 @@ to report these again, but tell us if you see them somewhere else or worse.
   blocked), but any other DLL a mod loads runs on your PC with your rights.
   Xerces does not ask first yet. Only turn on mods you trust.
 
+## Maps
+
+- **Kino der Toten ends with a script error when the power comes on, with many
+  mods stacked.** Seen on 2026-11-12 with the eight-mod test stack (DS4C,
+  Ascendance, im_oxo QOL, Classic Viewmodel FOV, DBZ Villain Characters, Girls'
+  Frontline 2.0, Avali, Hyperdimension Neptunia) and with the seven without DS4C:
+  "ClientSysSetState - state index (-1) out of bounds (0 - 8)", from the map's own
+  magic box script. With Power On at Start that is 13 seconds into the match. No
+  one mod does it alone, and the map runs with no mods: several of them together
+  leave the map's box lights without one of the game's nine client systems. Play
+  that map with fewer mods. Other Chronicles maps were not tried.
+
 ## Zombies characters (CHARACTERS)
 
 - **A character from a mod that only replaces models keeps the base character's

@@ -658,7 +658,11 @@ LUI.createMenu[MENU] = function(controller)
     if element.TabList then
       element.TabList:close()
     end
-    Engine.UnsubscribeAndFreeModel(Engine.GetModel(Engine.GetModelForController(controller), MENU .. ".buttonPrompts"))
+    -- gone already when a second screen of this controller closed first
+    local prompts = Engine.GetModel(Engine.GetModelForController(controller), MENU .. ".buttonPrompts")
+    if prompts then
+      Engine.UnsubscribeAndFreeModel(prompts)
+    end
   end)
   return self
 end
@@ -676,6 +680,19 @@ local BELOW = {
 }
 
 local function openCharacters(self, element, controller, param, menu)
+  -- one screen for a controller: a second (the pause menu can come up over the first when the game loses focus) would
+  -- share its rows and its button prompts
+  local open = openMenus[controller]
+  if open then
+    -- still on screen? One that went without its close being heard must not keep the entry shut for good.
+    local ok, parent = pcall(function()
+      return open:getParent()
+    end)
+    if ok and parent then
+      return
+    end
+    openMenus[controller] = nil
+  end
   local hud = hudMenu()
   if not hud then
     -- no HUD to open it from: under the pause menu, without the preview

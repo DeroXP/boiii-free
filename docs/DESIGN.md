@@ -2208,6 +2208,23 @@ Learned the hard way:
   turned away from a `script_origin`, which is not sent to it.
 - A test that waits half a minute in a match before opening the screen tests a
   player who has been knocked down: the zombies get there first.
+- A script thread that notifies the event it ends on stops at that line. The
+  preview's watch (no word from the screen for 6 s, the player dead or down)
+  ended the preview by calling `preview_end`, which notifies the watch's own
+  ending: the look, the camera, the zombies and the player's safety were never
+  put back. It starts `preview_end` as a thread of its own now. Shown with the
+  timeout set to 1 s: the view returns by itself with the screen still open.
+- What DEFAULT gives back is noted when the preview begins. Noted at the first
+  pick, as before the preview existed, it was the character under the selection.
+- Found by a second reading of the scripts, after the screen had passed every
+  solo test: a second player would have met the first within minutes.
+
+Also from that reading: a pick the script refuses still ends the preview; the
+preview ends and does not start while the game is ending; a player who leaves
+with the preview on has the camera's target deleted, and what was held for them
+alone goes on; a response that is no pair of numbers is no pick (a newer screen's
+`preview:3:2` on this script would have read as character 0); one screen for a
+controller.
 - `disableBlur` on the menu takes its keys away: Escape then opens the pause menu
   over it. Only the darkening is turned off.
 - Work added inside the game's `SetCharacter*` script calls can hang the server:

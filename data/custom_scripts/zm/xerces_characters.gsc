@@ -210,6 +210,7 @@ function preview_begin()
 	self SetClientThirdPerson(0);
 	self camera_on(self.xerces_preview);
 	self thread preview_watch();
+	self thread preview_left(self.xerces_preview);
 }
 
 // The camera goes in front of the player, who is turned to where there is most room: the game's own third-person view
@@ -352,6 +353,10 @@ function preview_end(picked)
 	before = self.xerces_preview;
 	self.xerces_preview = undefined;
 	self notify("xerces_char_preview_end");
+	// The look DEFAULT gives back: noted here, from before the preview. apply() notes what the player wears when it
+	// runs, and after a preview that is the character under the selection, not the match's.
+	if (!isdefined(self.xerces_char_default) && !isdefined(self.xerces_char_index))
+		self.xerces_char_default = before.look;
 	if (!picked)
 	{
 		if (isdefined(self.xerces_char_index))
@@ -370,8 +375,34 @@ function preview_end(picked)
 
 function preview_finish(preview)
 {
+	self notify("xerces_char_preview_done");
 	self preview_unsafe(preview);
 	self camera_off(preview);
+}
+
+// The player left with the preview on. Nothing here is called on the player, who is gone: the camera's target is
+// deleted, and the zombies and the spawning that were held for a player alone go on (a server that lives on without
+// them would otherwise keep them held).
+function preview_left(preview)
+{
+	self endon("xerces_char_preview_done");
+	self waittill("disconnect");
+	if (isdefined(preview.target))
+		preview.target Delete();
+	if (!IS_TRUE(preview.safe))
+		return;
+	if (isdefined(preview.frozen))
+	{
+		foreach (zombie in preview.frozen)
+		{
+			if (!isdefined(zombie))
+				continue;
+			zombie.xerces_frozen = undefined;
+			zombie SetEntityPaused(false);
+		}
+	}
+	if (IS_TRUE(preview.spawning))
+		level flag::set("spawn_zombies");
 }
 
 function linger(preview)
@@ -402,9 +433,13 @@ function preview_watch()
 		wait 1;
 		if (!isdefined(self.xerces_preview))
 			return;
-		if (GetTime() - self.xerces_preview.heard > PREVIEW_TIMEOUT * 1000 || !IsAlive(self) || self is_down())
+		if (GetTime() - self.xerces_preview.heard > PREVIEW_TIMEOUT * 1000 || !IsAlive(self) || self is_down()
+			|| IS_TRUE(level.intermission))
 		{
-			self preview_end(false);
+			// On a thread of its own: preview_end notifies the very event this thread ends on, and a thread that
+			// notifies its own endon stops there, before the look, the camera and the zombies were put back (found
+			// by a second reading, 2026-11-12; with PREVIEW_TIMEOUT 1 the camera stayed on for good)
+			self thread preview_end(false);
 			return;
 		}
 		self preview_safety();
@@ -438,7 +473,7 @@ function menu_responses()
 		{
 			// a player who is down lies on the ground, out of the camera's sight (seen 2026-11-12): the list works
 			// for them, without the view
-			if (!IsAlive(self) || self is_down())
+			if (!IsAlive(self) || self is_down() || IS_TRUE(level.intermission))
 				continue;
 			self preview_begin();
 			continue;
@@ -475,12 +510,18 @@ function menu_responses()
 				self thread show_off();
 			continue;
 		}
-		if (words.size < 3)
+		// A pick is two numbers. A word that is not one (a response this script does not know, from a newer screen)
+		// would read as 0 and put the first character on.
+		if (words.size < 3 || words[1] != "" + Int(words[1]) || words[2] != "" + Int(words[2]))
 			continue;
 		index = Int(words[1]);
 		style = Int(words[2]);
 		if (!valid(index, style))
+		{
+			// the screen has closed and says no more: without this the camera stayed until the watch gave up
+			self preview_end(false);
 			continue;
+		}
 		// with the preview the camera stays on the pick a moment; without it (the screen under the pause menu) the
 		// third-person view shows it
 		previewed = isdefined(self.xerces_preview);

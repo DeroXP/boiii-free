@@ -2883,8 +2883,26 @@ CHARACTERS (DESIGN.md 7.13; runs `ui11` and, after the fixes below, `fix1` and `
       pick kept (`bench\20261112-crash\base-grid.png`).
 - [x] A player who is down gets the list without the view (they lay under the camera's
       sight in two test matches where the zombies had reached them first).
+- [x] A second, independent read of the screen's scripts found two defects that no solo
+      test had met (DESIGN.md 7.13, the last three points). After the fixes: with
+      `PREVIEW_TIMEOUT` set to 1, the camera, the HUD and the first-person view come back
+      by themselves 5 s after the screen opened, the screen still open
+      (`bench\20261112-crash\to-grid.png`); with no saved pick, the match's own character
+      (red hair, black beret), a pick of M16A1 3 through the preview ("M16A1 3 (PICKED)"),
+      then DEFAULT: the match's own character again (`nd-crops.png`). With the saved pick
+      the user's config has (178), DEFAULT gives the match's character, not the pick.
+- [x] Kino der Toten (`zm_theater`, Zombies Chronicles, the `_zmhd` table) with the
+      eight-mod stack: "114 characters from 7 sources", then the match ends 13 s in with
+      "ClientSysSetState - state index (-1) out of bounds (0 - 8)" from the map's
+      `zm_theater_magic_box.gsc` when the power comes on (the test home has Power On at
+      Start). With no mods and the same Xerces settings the match runs; so it does with
+      DS4C alone and with Ascendance, im_oxo QOL, DBZ, Girls' Frontline, Avali or
+      Classic Viewmodel FOV alone; the seven mods without DS4C fail as the eight do. It
+      takes several of the mods together (KNOWN_ISSUES.md). The Giant (`zm_factory`) is
+      not installed on this PC.
 - [ ] Not tried: a second player, a controller's LB/RB (Q and E were pressed), the fall-back
-      without the HUD menu, a custom map, no mods at all (safe mode).
+      without the HUD menu, a custom map, CHARACTERS on a Chronicles map (the match above
+      ended first).
 
 The fixes of DESIGN.md 7.14:
 
