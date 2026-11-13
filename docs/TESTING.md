@@ -3334,7 +3334,7 @@ In the game (the test homes, mods off unless said):
         Mods, naming both folders (unit test: a Steam copy and a manual copy in `mods`
         are both named, another item is not; 614 pass).
       - `xerces_cli` reads its arguments as UTF-8 (CommandLineToArgvW) and makes every
-        path from them as UTF-8: `mod new utf8test --dir "...\\Тест модов" --name "Мод —
+        path from them as UTF-8: `mod new utf8test --dir "...\Тест модов" --name "Мод —
         テスト"` wrote `xerces.mod.json` with that name into that folder, and `mods
         list` read it back the same.
       - The upscaler and DLSS keep the game's own picture in a frame with more than one
