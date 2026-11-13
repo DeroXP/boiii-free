@@ -3456,8 +3456,13 @@ In the game (the user approved the runs; the friends build, test homes):
 - [ ] Seen in that run: on the "Original Characters" tab the live character stood at the
       bottom edge of the frame (only the head and shoulders showed), while ZM_BEAST on
       DS4C's tab filled the view and the run before framed Nikolai 3 well. The camera's
-      code did not change; its framing seems to vary with where the player stands. Not
-      looked into.
+      code did not change. Read closer, the picture is the game's own third-person view from
+      behind the player (the back of the head at the bottom, the alley ahead), not the
+      scripted camera in front: in that run the camera most likely did not come on, while
+      the third-person state did. A guess at why: camera_start aims at its target entity
+      0.1 s after making it, and if the player's game did not know the entity yet the camera
+      is not followed (DESIGN.md 7.13 saw the same with a script_origin). Not fixed: it
+      needs runs that bring it about.
 - [ ] Not tried in the game: the crash handler's re-entry, a second player_downed for one
       down, aim assist with a real controller, UPnP with two PCs, the Workshop helper from
       the in-game menu.
