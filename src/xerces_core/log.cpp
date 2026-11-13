@@ -682,6 +682,14 @@ void json_log::write(const log_event &event) {
   const std::string line = format(event, now_utc());
   std::lock_guard lock(mutex_);
   if (file_.is_open()) {
+    // One failed write (the disk full for a moment) left the stream failed,
+    // and every later line of the session was dropped: the ones a crash
+    // report's log tail is taken from too (review, 2026-11-13). Cleared, and
+    // what may be half a line is ended first.
+    if (!file_.good()) {
+      file_.clear();
+      file_ << '\n';
+    }
     file_ << line << '\n';
     file_.flush();
   }

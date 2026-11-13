@@ -218,6 +218,7 @@ void upscale(ID3D11DeviceContext *ctx) {
   // did not run for keeps the game's own picture.
   ID3D11ShaderResourceView *source = saved.srvs[0];
   bool from_dlss = false;
+  core::mode used = chosen;
   if (chosen == core::mode::dlss) {
     ID3D11ShaderResourceView *const output = temporal::display_output();
     if (output) {
@@ -227,9 +228,19 @@ void upscale(ID3D11DeviceContext *ctx) {
       from_dlss = true;
     } else if (source_width != display_width ||
                source_height != display_height) {
-      skip_once("DLSS has not run for this frame; it needs SMAA T2x or "
-                "Filmic SMAA T2x (Graphics > Advanced) and the DLSS module");
-      return;
+      // DLSS chosen (the setting is kept for every Xerces folder) but not
+      // running: FSR 1 then, not the game's own stretch with no sharpening,
+      // which a player took for DLSS (review, 2026-11-13)
+      static bool logged_fallback = false;
+      if (!logged_fallback) {
+        logged_fallback = true;
+        xerces_runtime::log_info(
+            "xerces.upscale.dlss_fallback",
+            "Upscaler: DLSS has not run (it needs SMAA T2x or Filmic SMAA T2x "
+            "under Graphics > Advanced, and the two DLSS files next to "
+            "boiii.exe); AMD FSR 1 upscales instead");
+      }
+      used = core::mode::fsr1;
     }
   }
   core::passes passes =
@@ -328,7 +339,7 @@ void upscale(ID3D11DeviceContext *ctx) {
   }
 
   saved.restore(ctx);
-  log_active(chosen, passes, source_width, source_height, display_width,
+  log_active(used, passes, source_width, source_height, display_width,
              display_height, sharpening);
 }
 

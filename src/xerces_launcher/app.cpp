@@ -24,6 +24,7 @@
 #include <xerces_core/launcher_pacing.hpp>
 
 #include "font_engine.hpp"
+#include "link_protocol.hpp"
 #include "log.hpp"
 
 namespace xerces_launcher {
@@ -1523,6 +1524,15 @@ int app::run() {
               "start. Move the Xerces folder out of OneDrive, for example to "
               "C:\\Games\\Xerces."),
            true);
+  }
+  // xerces:// links kept starting the Xerces they were turned on from: each
+  // beta is unpacked to a new folder, and a link then opened the old one on
+  // this home (review, 2026-11-13). Discord's command is rewritten at every
+  // start the same way.
+  if (!paths.program.empty() &&
+      link_protocol::follow_this_copy(paths.program, paths.home)) {
+    log_info("launcher.link_protocol.moved",
+             "xerces:// links now start this Xerces");
   }
 
   if (!opts_.script.empty()) {

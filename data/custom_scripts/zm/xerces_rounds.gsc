@@ -1594,6 +1594,11 @@ function self_revive_offer()
 		return;
 	if (level flag::get("solo_game") && isdefined(self.lives) && self.lives > 0 && self HasPerk("specialty_quickrevive"))
 		return;
+	// One offer at a time: the stock last stand notifies player_downed again a second after the down when the player
+	// keeps perks, and a refill while down starts one too. A second offer took over the prompt's handle and the first
+	// prompt stayed on screen for the rest of the match (review, 2026-11-13).
+	if (isdefined(self.xerces_prompt))
+		return;
 	self.xerces_prompt = self lui_text("HOLD JUMP OR USE TO REVIVE YOURSELF", ALIGN_CENTER, 340, 470, 600, 26, (1, 1, 1), 1);
 	self thread end_game_if_bled_out();
 	held = 0;

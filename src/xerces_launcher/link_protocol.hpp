@@ -24,4 +24,10 @@ std::wstring command(const std::filesystem::path &program,
 bool turn_on(const std::filesystem::path &program,
              const std::filesystem::path &home, std::string *error);
 bool turn_off(std::string *error);
+
+// When the handler is on for this home but starts another Xerces.exe (each
+// beta is unpacked to a folder of its own), it is pointed at this one; true
+// when it was. A handler for another home is left alone.
+bool follow_this_copy(const std::filesystem::path &program,
+                      const std::filesystem::path &home);
 } // namespace xerces_launcher::link_protocol

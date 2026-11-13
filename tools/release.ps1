@@ -49,6 +49,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $OutDir) { $OutDir = Join-Path $root 'dist' }
+# A relative -OutDir from where the script was started: .NET resolves paths
+# against the process's own folder, and the zip's entries were cut from
+# absolute names (review, 2026-11-13)
+$OutDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutDir)
 # This PC's layout (CLAUDE.md) when nothing else is given.
 $dev = 'C:\Users\Ginld\XercesDev'
 if (-not $ToolsDir -and (Test-Path "$dev\tools")) { $ToolsDir = "$dev\tools" }

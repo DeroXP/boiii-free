@@ -943,7 +943,11 @@ int cmd_packs(const arguments &args) {
   if (action == "apply") {
     return cmd_packs_apply(args);
   }
-  return usage();
+  // Refused, as the help promises: the help and exit 0 read as done to a
+  // script (review, 2026-11-13)
+  std::cerr << "Unknown command \"packs" << (action.empty() ? "" : " ")
+            << action << "\". Try --help.\n";
+  return exit_error;
 }
 
 // Finds the game the way the launcher's first run does (DESIGN.md 4.7);
@@ -1298,7 +1302,9 @@ std::optional<fs::path> dump_file(const fs::path &given) {
 // new game build breaks shows up here before anyone starts the game.
 int cmd_sig(const arguments &args, const std::string &action) {
   if (action != "check") {
-    return usage();
+    std::cerr << "Unknown command \"sig" << (action.empty() ? "" : " ")
+              << action << "\". Try --help.\n";
+    return exit_error;
   }
   const auto given = args.get("--dump");
   if (!given) {

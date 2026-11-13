@@ -206,3 +206,25 @@ TEST_CASE("catalog: a scan's content hash does not change with streaming") {
   CHECK(!content.info.id.empty());
   fs::remove_all(dir);
 }
+
+TEST_CASE("catalog: description files over 1 MiB are not read") {
+  const fs::path dir = fresh_dir("too_big");
+  const fs::path mods = dir / "mods";
+  const std::string huge =
+      "{\"x\":\"" + std::string((std::size_t{1} << 20) + 16, 'a') + "\"}";
+  write_bytes(mods / "222" / "zone" / "core_mod.ff", std::string(64, 'z'));
+  write_bytes(mods / "222" / "zone" / "workshop.json", huge);
+  write_bytes(mods / "333" / "zone" / "core_mod.ff", std::string(64, 'y'));
+  write_bytes(mods / "333" / "xerces.mod.json", huge);
+  const catalog_scan scan = scan_mods_directory(mods);
+  CHECK(scan.listed);
+  CHECK(scan.diags.has("catalog.workshop.too_big"));
+  CHECK(scan.diags.has("catalog.manifest.too_big"));
+  // The Workshop item is still listed, as a legacy item without its details
+  bool listed = false;
+  for (const auto &content : scan.catalog) {
+    listed = listed || content.folder == "222";
+  }
+  CHECK(listed);
+  fs::remove_all(dir);
+}

@@ -1194,3 +1194,23 @@ TEST_CASE("crash outbox: a server without crash routes is sent nothing") {
         }) == service_answer::no_answer);
   fs::remove_all(home);
 }
+
+TEST_CASE(
+    "crash outbox: half-written pending files are removed after an hour") {
+  const fs::path home = fs::temp_directory_path() / "xerces_crash_tmp";
+  fs::remove_all(home);
+  const fs::path pending = home / "crash" / "pending";
+  const fs::path old_dump = pending / (std::string(32, 'c') + ".dmp.tmp");
+  const fs::path fresh_note = pending / (std::string(32, 'd') + ".json.tmp");
+  write(old_dump, "MDMP");
+  write(fresh_note, "{");
+  fs::last_write_time(old_dump,
+                      fs::file_time_type::clock::now() - std::chrono::hours(2));
+  crash_context ctx;
+  ctx.home = home;
+  ctx.now = now_seconds();
+  collect_crashes(ctx, false, std::nullopt);
+  CHECK(!fs::exists(old_dump));
+  CHECK(fs::exists(fresh_note)); // may still be being written
+  fs::remove_all(home);
+}

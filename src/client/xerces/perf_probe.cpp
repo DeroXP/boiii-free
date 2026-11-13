@@ -30,9 +30,12 @@ namespace bench = xerces_core::bench;
 namespace json = xerces_core::json;
 using bench::frame_sample;
 
-// 2^18 Presents is 18 minutes at 240 FPS; 2^17 main frames.
-constexpr unsigned frame_ring_log2 = 18;
-constexpr unsigned main_ring_log2 = 17;
+// 2^19 Presents and main frames: the launcher's ten-minute recording at up to
+// 870 FPS. The main ring held 2^17, under ten minutes above 218 FPS, and the
+// start of a run at the player's own 240 was lost (review, 2026-11-13). Set
+// aside only when recording.
+constexpr unsigned frame_ring_log2 = 19;
+constexpr unsigned main_ring_log2 = 19;
 // A map load that never reaches the level is given up after this.
 constexpr double map_load_limit_ms = 600'000;
 
@@ -143,6 +146,7 @@ struct run_state {
   std::uint64_t main_begin = 0;
   std::uint32_t focus_losses = 0;
   std::uint32_t switches_at_begin = 0;
+  std::uint32_t stalls_dropped_at_begin = 0;
   std::vector<std::pair<std::string, std::optional<std::string>>> dvars;
 };
 
@@ -152,6 +156,7 @@ struct finished_run {
   std::uint64_t frame_end = 0;
   std::uint64_t main_end = 0;
   std::uint32_t chain_switches = 0;
+  std::uint32_t stalls_dropped_end = 0;
 };
 
 struct map_load {
@@ -245,6 +250,7 @@ void write_run(const finished_run &done) {
   meta.frames_lost = frames_lost;
   meta.main_frames = main_in_run.size();
   meta.main_lost = main_lost;
+  meta.stalls_dropped = done.stalls_dropped_end - r.stalls_dropped_at_begin;
   meta.pid = GetCurrentProcessId();
   meta.present_thread = present_thread.load();
   meta.main_thread = main_thread_id();
@@ -318,7 +324,13 @@ struct stall_sample {
 std::atomic<std::int64_t> last_main_frame{0};
 std::atomic_bool sampling{false}; // a run is going (mirror of run.active)
 stall_sample *stall_samples = nullptr;         // stall_sample_max entries
-std::atomic<std::uint32_t> stall_count{0};     // written by the sampler only
+// Written by the sampler, and set back to 0 by begin_run while no run is
+// sampled and none waits to be written
+std::atomic<std::uint32_t> stall_count{0};
+// Samples a full array could not take: in the run's meta.json, so a
+// stalls.csv that stops part-way does not read as "the stutter stopped"
+std::atomic<std::uint32_t> stalls_dropped{0};
+std::atomic<int> writes_pending{0}; // end_run's writes not done yet
 
 // Unwinds into out.pc. A fault while reading the stopped thread's stack ends
 // the walk with what was found: the sampler must never take the game down.
@@ -344,6 +356,7 @@ void walk_stack(CONTEXT &context, stall_sample &out) {
 void sample_main_thread(HANDLE thread, std::int64_t now, std::int64_t age) {
   const std::uint32_t slot = stall_count.load(std::memory_order_relaxed);
   if (slot >= stall_sample_max) {
+    stalls_dropped.fetch_add(1, std::memory_order_relaxed);
     return;
   }
   stall_sample &out = stall_samples[slot];
@@ -463,6 +476,12 @@ bool begin_run(const std::string &requested, const std::string &kind) {
   }
   run = {};
   run.active = true;
+  // Each run has the whole sample array: one game's second run started with
+  // what the first had left (review, 2026-11-13)
+  if (writes_pending.load(std::memory_order_acquire) == 0) {
+    stall_count.store(0, std::memory_order_release);
+  }
+  run.stalls_dropped_at_begin = stalls_dropped.load(std::memory_order_relaxed);
   sampling.store(true, std::memory_order_relaxed);
   run.kind = kind;
   run.t0 = probe_clock();
@@ -486,7 +505,9 @@ bool begin_run(const std::string &requested, const std::string &kind) {
   return true;
 }
 
-bool end_run() {
+// write_now: written on this thread before returning (the game is closing,
+// and the async step would never run)
+bool end_run(const bool write_now = false) {
   auto *ring = frames.load(std::memory_order_acquire);
   if (!run.active || !ring) {
     return false;
@@ -502,9 +523,20 @@ bool end_run() {
   done->frame_end = ring->count();
   done->main_end = mains->count();
   done->chain_switches = chain_switches.load();
+  done->stalls_dropped_end = stalls_dropped.load(std::memory_order_relaxed);
   done->run = std::move(run);
   run = {};
-  scheduler::once([done] { write_run(*done); }, scheduler::async);
+  if (write_now) {
+    write_run(*done);
+    return true;
+  }
+  writes_pending.fetch_add(1, std::memory_order_acq_rel);
+  scheduler::once(
+      [done] {
+        write_run(*done);
+        writes_pending.fetch_sub(1, std::memory_order_acq_rel);
+      },
+      scheduler::async);
   return true;
 }
 
@@ -827,6 +859,12 @@ public:
     }
     arm();
   }
+
+  // A run going when the game closes (the player quit from inside the level)
+  // is written now: it was written only by end_run's async step, which an
+  // exit never reaches, and its samples are in memory only (review,
+  // 2026-11-13).
+  void pre_destroy() override { end_run(true); }
 };
 } // namespace xerces_perf
 

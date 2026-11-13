@@ -17,4 +17,12 @@ std::string current_map();
 // through the fatal-error dialog, past the exit hook).
 void engine_error(std::uint32_t code, std::string_view message,
                   std::string_view source = "com_error");
+
+// The handler that names an uncaught C++ exception before the game ends
+// (loader.terminate). The Microsoft runtime keeps it per thread: post_unpack
+// sets it on the main thread, and main.cpp's per-thread start calls this for
+// every thread started after that. Before, an uncaught exception on any other
+// thread (the scheduler's, the Workshop queue's, the watchdog's) ended the game
+// with nothing saying what it was (review, 2026-11-13).
+void set_terminate_handler_on_this_thread();
 } // namespace xerces_loader

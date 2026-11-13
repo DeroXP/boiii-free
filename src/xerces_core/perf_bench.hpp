@@ -121,6 +121,8 @@ struct run_meta {
   std::uint64_t frames_lost = 0; // overwritten in the ring before the copy
   std::uint64_t main_frames = 0;
   std::uint64_t main_lost = 0;
+  // Long-frame samples the sampler's full array could not take
+  std::uint64_t stalls_dropped = 0;
   std::uint32_t pid = 0;
   std::uint32_t present_thread = 0;
   std::uint32_t main_thread = 0;

@@ -24,6 +24,17 @@ std::string read_text(const std::filesystem::path &path) {
   return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
+// xerces.mod.json and workshop.json are a few KiB. One of gigabytes was read
+// whole into memory at every scan, and a failed allocation left the launcher
+// with no mods at all (review, 2026-11-13).
+constexpr std::uintmax_t max_description_bytes = std::uintmax_t{1} << 20;
+
+bool too_big(const std::filesystem::path &path) {
+  std::error_code ec;
+  const std::uintmax_t size = std::filesystem::file_size(path, ec);
+  return !ec && size > max_description_bytes;
+}
+
 std::string utf8(const std::u8string &text) {
   return {reinterpret_cast<const char *>(text.data()), text.size()};
 }
@@ -613,8 +624,17 @@ load_content(const std::filesystem::path &folder,
   }
 
   if (has_file(content.files, manifest_file_name)) {
+    const std::filesystem::path manifest =
+        folder / std::string(manifest_file_name);
+    const bool manifest_too_big = too_big(manifest);
+    if (manifest_too_big) {
+      diags.warning("catalog.manifest.too_big",
+                    content.folder + "/" + std::string(manifest_file_name),
+                    content.folder + ": " + std::string(manifest_file_name) +
+                        " is larger than 1 MiB, so Xerces did not read it.");
+    }
     manifest_result parsed =
-        parse_manifest(read_text(folder / std::string(manifest_file_name)));
+        parse_manifest(manifest_too_big ? std::string() : read_text(manifest));
     if (parsed.value.legacy) {
       // Only manifests Xerces synthesizes are legacy; a mod cannot opt out
       // of rule 3 by claiming it.
@@ -637,7 +657,13 @@ load_content(const std::filesystem::path &folder,
   input.files = content.files;
   for (const char *name : {"workshop.json", "zone/workshop.json"}) {
     if (has_file(content.files, name)) {
-      input.workshop_json = read_text(folder / name);
+      if (too_big(folder / name)) {
+        diags.warning("catalog.workshop.too_big", content.folder + "/" + name,
+                      content.folder + ": " + name +
+                          " is larger than 1 MiB, so Xerces did not read it.");
+      } else {
+        input.workshop_json = read_text(folder / name);
+      }
       break;
     }
   }
@@ -762,7 +788,11 @@ catalog_scan scan_mods_directory(const std::filesystem::path &directory,
   std::error_code ec;
   std::vector<std::filesystem::path> folders;
   for (const auto &entry : std::filesystem::directory_iterator(directory, ec)) {
-    if (entry.is_directory(ec)) {
+    // An error code of its own: a dangling junction or link left its error
+    // in `ec` when it sorted last, and the whole folder read as unreadable
+    // (review, 2026-11-13)
+    std::error_code entry_ec;
+    if (entry.is_directory(entry_ec)) {
       folders.push_back(entry.path());
     }
   }

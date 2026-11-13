@@ -82,10 +82,12 @@ bool in_level() {
              game::connstate_t::ACTIVE;
 }
 
+// sv_running and the setting are bool dvars: read as bools, not as the raw
+// first four bytes of the value, of which only one is defined (review,
+// 2026-11-13).
 bool hosting_zombies() {
-  const auto running = game::get_dvar_int("sv_running");
-  return game::com::Com_SessionMode_IsMode(game::eModes::ZOMBIES) && running &&
-         *running != 0;
+  return game::com::Com_SessionMode_IsMode(game::eModes::ZOMBIES) &&
+         game::server_running();
 }
 
 // Every weapon now loaded that still has its spread: noted and set to 0
@@ -162,8 +164,8 @@ void frame() {
   if (now < next_scan_ms) {
     return;
   }
-  const auto setting = game::get_dvar_int("xerces_zm_noHipSpread");
-  if (setting && *setting != 0 && hosting_zombies()) {
+  const auto setting = game::get_dvar_bool("xerces_zm_noHipSpread");
+  if (setting && *setting && hosting_zombies()) {
     // a weapon loaded later in the match is caught on a later scan
     next_scan_ms = now + 5000;
     apply();

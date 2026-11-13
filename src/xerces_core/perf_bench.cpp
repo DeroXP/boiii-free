@@ -279,6 +279,7 @@ std::string run_meta_json(const run_meta &meta) {
   out += ",\n  \"frames_lost\": " + std::to_string(meta.frames_lost);
   out += ",\n  \"main_frames\": " + std::to_string(meta.main_frames);
   out += ",\n  \"main_lost\": " + std::to_string(meta.main_lost);
+  out += ",\n  \"stalls_dropped\": " + std::to_string(meta.stalls_dropped);
   out += ",\n  \"present_thread\": " + std::to_string(meta.present_thread);
   out += ",\n  \"main_thread\": " + std::to_string(meta.main_thread);
   out += ",\n  \"focus_losses\": " + std::to_string(meta.focus_losses);

@@ -1671,6 +1671,29 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
   if (xerces_runtime::late_fault_is_part_of_exit()) {
     end_exit_after_late_fault(exceptioninfo);
   }
+  // A fault or a C++ throw inside this handler (the in-memory dump and zip
+  // when memory is short, the crash's very state) came back here on the same
+  // thread and began a second report, and a third: several dumps and reports
+  // for one crash, the later ones blaming the handler (review, 2026-11-13).
+  // What the first pass wrote stays; the second goes to the dialog, a third
+  // ends the game. Per thread: two threads can crash close together.
+  static thread_local int handler_depth = 0;
+  if (handler_depth > 0) {
+    if (handler_depth++ == 1) {
+      exception_log(true,
+                    "The crash handler faulted (0x%08lX); its first "
+                    "report stands",
+                    exceptioninfo->ExceptionRecord->ExceptionCode);
+      display_error_dialog(); // ends the process
+    }
+    TerminateProcess(GetCurrentProcess(), crash_handler_code.load()
+                                              ? crash_handler_code.load()
+                                              : 0xC0000005u);
+    for (;;) {
+      Sleep(INFINITE);
+    }
+  }
+  handler_depth = 1;
   crashed = true;
   crash_handler_code = exceptioninfo->ExceptionRecord->ExceptionCode;
   crash_handler_started_ms = GetTickCount64();
@@ -1788,7 +1811,11 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
   }
   finish_pending_report(report_id, crash_frame, frames, report);
 
-  write_minidump(exceptioninfo, stamp, local_report);
+  // The whole dump in memory and its zip: the step most likely to run out of
+  // memory, and the early dump is on disk already
+  run_guarded([exceptioninfo, &stamp, &local_report] {
+    write_minidump(exceptioninfo, stamp, local_report);
+  });
 
   // Xerces: Windows cannot resume a C++ exception (0xE06D7363) or any other
   // that it marks noncontinuable. Asked to, it raises
@@ -1802,6 +1829,7 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
     display_error_dialog(); // ends the process
   }
   crash_handler_started_ms = 0;
+  handler_depth = 0;
   exceptioninfo->ContextRecord->Rip = get_reset_state_stub();
 
   return EXCEPTION_CONTINUE_EXECUTION;

@@ -159,8 +159,7 @@
 				<div class="fr-scales">
 					<button id="fr-scale-0" class="fr-chip" data-class-on="scale == 0" data-event-click="set_scale(0)"><span class="fr-dot"></span><span>Follow Windows</span></button>
 					<button id="fr-scale-75" class="fr-chip" data-class-on="scale == 75" data-event-click="set_scale(75)"><span class="fr-dot"></span><span>75 %</span></button>
-					<button id="fr-scale-90" class="fr-chip" data-class-on="scale == 90" data-event-click="set_scale(90)"><span class="fr-dot"></span><span>90 %</span></button>
-					<button id="fr-scale-110" class="fr-chip" data-class-on="scale == 110" data-event-click="set_scale(110)"><span class="fr-dot"></span><span>110 %</span></button>
+					<button id="fr-scale-100" class="fr-chip" data-class-on="scale == 100" data-event-click="set_scale(100)"><span class="fr-dot"></span><span>100 %</span></button>
 					<button id="fr-scale-125" class="fr-chip" data-class-on="scale == 125" data-event-click="set_scale(125)"><span class="fr-dot"></span><span>125 %</span></button>
 					<button id="fr-scale-150" class="fr-chip" data-class-on="scale == 150" data-event-click="set_scale(150)"><span class="fr-dot"></span><span>150 %</span></button>
 					<button id="fr-scale-175" class="fr-chip" data-class-on="scale == 175" data-event-click="set_scale(175)"><span class="fr-dot"></span><span>175 %</span></button>

@@ -1,8 +1,12 @@
 #include "harness.hpp"
 
+#include <atomic>
+#include <filesystem>
+
 #include <string>
 #include <vector>
 
+#include <xerces_core/launcher_home.hpp>
 #include <xerces_core/workshop_get.hpp>
 
 using namespace xerces_core::workshop_get;
@@ -52,4 +56,27 @@ TEST_CASE("workshop get: ids") {
   CHECK(!parse_ids("12a").has_value());
   CHECK(!parse_ids("-5").has_value());
   CHECK(!parse_ids("1;quit").has_value());
+}
+
+TEST_CASE(
+    "workshop get: the helper starts with two handles and is waited for") {
+  // where.exe stands in for xerces_cli.exe: it takes the same command line,
+  // refuses it and ends with a code of its own. What is tested is the start
+  // (the handle list, the job, the suspended start resumed) and the wait.
+  const std::string root = xerces_core::environment_utf8(L"SystemRoot");
+  REQUIRE(!root.empty());
+  const std::filesystem::path where =
+      xerces_core::path_from_utf8(root) / "System32" / "where.exe";
+  REQUIRE(std::filesystem::exists(where));
+  std::atomic<void *> process{nullptr};
+  std::string error;
+  int lines = 0;
+  const int code = xerces_core::workshop_get::run_helper(
+      where, std::filesystem::temp_directory_path() / "xerces_no_game",
+      {311210}, [&](const xerces_core::workshop_get::progress &) { ++lines; },
+      &process, &error);
+  CHECK(code > 0);
+  CHECK(error.empty());
+  CHECK(lines == 0);
+  CHECK(process.load() == nullptr);
 }

@@ -113,7 +113,11 @@ services::services(launcher_paths paths, poster post, bool dry_launch)
   // A test launch that ended while the launcher was closed: the journal
   // says how it went. One still running (the player reopened Xerces
   // mid-test) is settled by poll() once it is gone.
-  if (culprit_ && !culprit_->testing.empty() && !game_running()) {
+  // A game started seconds ago has no run entry yet and its journal still
+  // says "launching": a crash to the journal. A client process means it is
+  // starting (review, 2026-11-13).
+  if (culprit_ && !culprit_->testing.empty() && !game_running() &&
+      (dry_launch_ || !xerces_core::game_process_running(paths_.client))) {
     settle_culprit_from_journal();
   }
 }
@@ -677,7 +681,17 @@ xerces_core::safe_mode_decision services::safe_mode() const {
   if (game_running()) {
     return {};
   }
-  return xerces_core::decide_safe_mode(last_journal());
+  xerces_core::safe_mode_decision decision =
+      xerces_core::decide_safe_mode(last_journal());
+  // A game that started seconds ago has no run entry yet, and its journal's
+  // "launching" read as a crash: the safe-mode box, and a culprit search for
+  // a crash that never happened (review, 2026-11-13). Asked only when the
+  // journal says crash, so the process list is not read at every look.
+  if (decision.safe_mode && !dry_launch_ &&
+      xerces_core::game_process_running(paths_.client)) {
+    return {};
+  }
+  return decision;
 }
 
 // -------------------------------------------------------------- diagnostics

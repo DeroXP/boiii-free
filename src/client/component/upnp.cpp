@@ -56,6 +56,42 @@ bool create_nat(CComPtr<IUPnPNAT> &nat,
   return SUCCEEDED(nat->get_StaticPortMappingCollection(&mappings)) && mappings;
 }
 
+constexpr const wchar_t *older_description = L"Xerces lobby (Black Ops III)";
+
+// "Xerces lobby (Black Ops III) on <this PC's name>": another Xerces PC on the
+// same network has a mapping with the same description and, by default, the
+// same port, and it was replaced and removed as if it were this PC's own
+// (review, 2026-11-13).
+std::wstring our_description() {
+  wchar_t name[MAX_COMPUTERNAME_LENGTH + 1]{};
+  DWORD size = MAX_COMPUTERNAME_LENGTH + 1;
+  if (!GetComputerNameW(name, &size) || size == 0) {
+    return older_description;
+  }
+  return std::wstring(older_description) + L" on " + std::wstring(name, size);
+}
+
+// The router's mapping on this port is this PC's: our description, or the one
+// an older Xerces wrote (without the name) for this PC's address. A mapping
+// the router will not show counts as ours when `unreadable_is_ours`.
+bool mapping_is_ours(IStaticPortMappingCollection *mappings,
+                     const uint16_t port, const CComBSTR &protocol,
+                     const std::wstring &local, const bool unreadable_is_ours) {
+  CComPtr<IStaticPortMapping> existing;
+  CComBSTR description;
+  if (FAILED(mappings->get_Item(port, protocol, &existing)) || !existing ||
+      FAILED(existing->get_Description(&description)) || !description) {
+    return unreadable_is_ours;
+  }
+  if (our_description() == static_cast<const wchar_t *>(description)) {
+    return true;
+  }
+  CComBSTR client;
+  return wcscmp(description, older_description) == 0 && !local.empty() &&
+         SUCCEEDED(existing->get_InternalClient(&client)) && client &&
+         local == static_cast<const wchar_t *>(client);
+}
+
 void unmap_port(const uint16_t port) {
   const auto initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
   const bool uninitialize = SUCCEEDED(initialized);
@@ -64,7 +100,8 @@ void unmap_port(const uint16_t port) {
     CComPtr<IStaticPortMappingCollection> mappings;
     if (create_nat(nat, mappings)) {
       const CComBSTR protocol(L"UDP");
-      mappings->Remove(port, protocol);
+      if (mapping_is_ours(mappings, port, protocol, widen(local_ipv4()), true))
+        mappings->Remove(port, protocol);
     }
   }
   if (uninitialize)
@@ -82,23 +119,16 @@ void map_port(const uint16_t port, const callback &done) {
     if (!local.empty() && create_nat(nat, mappings)) {
       const CComBSTR protocol(L"UDP");
       const CComBSTR client(widen(local).c_str());
-      constexpr const wchar_t *ours = L"Xerces lobby (Black Ops III)";
-      const CComBSTR description(ours);
+      const CComBSTR description(our_description().c_str());
       CComPtr<IStaticPortMapping> mapping;
       auto added = mappings->Add(port, protocol, port, client, VARIANT_TRUE,
                                  description, &mapping);
       if (FAILED(added) || !mapping) {
         // A game that crashed with its lobby open left its mapping behind
-        // (static, no lease). When the router still holds one of ours on
-        // this port (say, for this PC's previous address), it is replaced;
-        // a mapping anything else made is left alone.
-        CComPtr<IStaticPortMapping> existing;
-        CComBSTR existing_description;
-        if (SUCCEEDED(mappings->get_Item(port, protocol, &existing)) &&
-            existing &&
-            SUCCEEDED(existing->get_Description(&existing_description)) &&
-            existing_description && wcscmp(existing_description, ours) == 0) {
-          existing.Release();
+        // (static, no lease). When the router still holds this PC's on this
+        // port (say, for its previous address), it is replaced; another
+        // PC's, or one anything else made, is left alone.
+        if (mapping_is_ours(mappings, port, protocol, widen(local), false)) {
           mapping.Release();
           if (SUCCEEDED(mappings->Remove(port, protocol)))
             added = mappings->Add(port, protocol, port, client, VARIANT_TRUE,

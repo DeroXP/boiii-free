@@ -84,6 +84,29 @@ bool turn_on(const std::filesystem::path &program,
   return ok;
 }
 
+bool follow_this_copy(const std::filesystem::path &program,
+                      const std::filesystem::path &home) {
+  wchar_t value[2048]{};
+  DWORD size = sizeof(value);
+  if (RegGetValueW(HKEY_CURRENT_USER, command_path, nullptr, RRF_RT_REG_SZ,
+                   nullptr, value, &size) != ERROR_SUCCESS) {
+    return false;
+  }
+  const std::wstring registered(value);
+  if (_wcsicmp(registered.c_str(), command(program, home).c_str()) == 0) {
+    return false;
+  }
+  const std::wstring tail =
+      L"\" --home \"" + home.wstring() + L"\" --join-link \"%1\"";
+  if (registered.size() < tail.size() ||
+      _wcsicmp(registered.c_str() + registered.size() - tail.size(),
+               tail.c_str()) != 0) {
+    return false;
+  }
+  std::string error;
+  return turn_on(program, home, &error);
+}
+
 bool turn_off(std::string *error) {
   const LSTATUS status = RegDeleteTreeW(HKEY_CURRENT_USER, key_path);
   if (status != ERROR_SUCCESS && status != ERROR_FILE_NOT_FOUND) {

@@ -508,3 +508,6 @@ if ($script:failures.Count) {
   throw "CLI smoke test (home commands): $($script:failures.Count) failed"
 }
 Write-Host 'CLI smoke test (home commands): ok'
+# The last native command above is an expected failure: its exit code made the
+# CI step (pwsh exits with $LASTEXITCODE) fail after "ok" (review, 2026-11-13)
+$global:LASTEXITCODE = 0

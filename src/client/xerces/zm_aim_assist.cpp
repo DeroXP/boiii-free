@@ -147,6 +147,26 @@ struct pad_state {
   bool active = false; // any input at all
 };
 
+// The game's own stick dead zone (gpad_stick_deadzone_min, which the player
+// can change; XInput's when the game has none): a stick at rest reports
+// offsets of that order and the game ignores them. The raw values were
+// compared with AIM_MIN (5%) and STRAFE_MIN, so a pad whose right stick rests
+// a little off centre counted as aiming on every frame, and the view followed
+// targets with no stick input (review, 2026-11-13).
+float stick_dead_zone() {
+  constexpr float xinput = XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE / 32767.0f;
+  const float value =
+      game::get_dvar_float("gpad_stick_deadzone_min").value_or(xinput);
+  return std::isfinite(value) && value >= 0.0f && value <= 0.5f ? value
+                                                                : xinput;
+}
+
+// How far past the dead zone, 0 to 1
+float past_dead_zone(const float amount, const float dead) {
+  return amount <= dead ? 0.0f
+                        : std::min(1.0f, (amount - dead) / (1.0f - dead));
+}
+
 pad_state read_pad() {
   pad_state out;
   if (test_pad) {
@@ -192,8 +212,9 @@ pad_state read_pad() {
     const float ry = static_cast<float>(pad.sThumbRY) / 32767.0f;
     const float aim = std::min(1.0f, std::sqrt(rx * rx + ry * ry));
     const float ly = std::abs(static_cast<float>(pad.sThumbLY)) / 32767.0f;
-    out.strafe = std::max(out.strafe, std::min(1.0f, strafe));
-    out.aim = std::max(out.aim, aim);
+    const float dead = stick_dead_zone();
+    out.strafe = std::max(out.strafe, past_dead_zone(strafe, dead));
+    out.aim = std::max(out.aim, past_dead_zone(aim, dead));
     out.active = out.active || strafe > 0.2f || ly > 0.2f || aim > 0.2f ||
                  pad.bLeftTrigger > 40 || pad.bRightTrigger > 40 ||
                  pad.wButtons != 0;

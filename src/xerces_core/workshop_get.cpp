@@ -342,24 +342,72 @@ int run_helper(const std::filesystem::path &cli,
   SetHandleInformation(read_end, HANDLE_FLAG_INHERIT, 0);
   HANDLE nul = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_WRITE, &inherit,
                            OPEN_EXISTING, 0, nullptr);
-  STARTUPINFOW startup{};
-  startup.cb = sizeof(startup);
-  startup.dwFlags = STARTF_USESTDHANDLES;
-  startup.hStdOutput = write_end;
-  startup.hStdError = nul;
+  STARTUPINFOEXW startup{};
+  startup.StartupInfo.cb = sizeof(startup);
+  startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+  startup.StartupInfo.hStdOutput = write_end;
+  startup.StartupInfo.hStdError = nul;
+  // Only these two handles are inherited. With plain inheritance the helper
+  // took every inheritable handle of the program that started it (the game's
+  // UDP socket, a file open at that moment) and kept them for as long as Steam
+  // downloaded, past the game's own end (review, 2026-11-13).
+  HANDLE inherited[2] = {write_end, nul};
+  const DWORD inherited_count = nul != INVALID_HANDLE_VALUE ? 2 : 1;
+  SIZE_T attributes_size = 0;
+  InitializeProcThreadAttributeList(nullptr, 1, 0, &attributes_size);
+  std::vector<unsigned char> attributes_buffer(attributes_size);
+  auto *attributes =
+      reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributes_buffer.data());
+  bool have_list =
+      attributes_size > 0 &&
+      InitializeProcThreadAttributeList(attributes, 1, 0, &attributes_size);
+  if (have_list &&
+      !UpdateProcThreadAttribute(
+          attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
+          inherited_count * sizeof(HANDLE), nullptr, nullptr)) {
+    DeleteProcThreadAttributeList(attributes);
+    have_list = false;
+  }
+  startup.lpAttributeList = have_list ? attributes : nullptr;
+  // And it ends with the program that started it: the download goes on in
+  // Steam, but nobody reads the helper's lines any more.
+  HANDLE job = CreateJobObjectW(nullptr, nullptr);
+  if (job) {
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags =
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                                 &limits, sizeof(limits))) {
+      CloseHandle(job);
+      job = nullptr;
+    }
+  }
   PROCESS_INFORMATION info{};
   const bool started =
       CreateProcessW(nullptr, command.data(), nullptr, nullptr, TRUE,
-                     CREATE_NO_WINDOW, nullptr, nullptr, &startup, &info);
+                     CREATE_NO_WINDOW | CREATE_SUSPENDED |
+                         (have_list ? EXTENDED_STARTUPINFO_PRESENT : 0),
+                     nullptr, nullptr, &startup.StartupInfo, &info);
+  if (have_list) {
+    DeleteProcThreadAttributeList(attributes);
+  }
   CloseHandle(write_end);
   if (nul != INVALID_HANDLE_VALUE) {
     CloseHandle(nul);
   }
   if (!started) {
     CloseHandle(read_end);
+    if (job) {
+      CloseHandle(job);
+    }
     *error = "xerces_cli.exe could not be started.";
     return -1;
   }
+  if (job && !AssignProcessToJobObject(job, info.hProcess)) {
+    CloseHandle(job);
+    job = nullptr;
+  }
+  ResumeThread(info.hThread);
   CloseHandle(info.hThread);
   if (process) {
     process->store(info.hProcess);
@@ -389,6 +437,9 @@ int run_helper(const std::filesystem::path &cli,
     process->store(nullptr);
   }
   CloseHandle(info.hProcess);
+  if (job) {
+    CloseHandle(job);
+  }
   return static_cast<int>(code);
 }
 } // namespace xerces_core::workshop_get

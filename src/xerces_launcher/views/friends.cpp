@@ -492,7 +492,10 @@ private:
       }
       if (now >= join_->next_scan && !svc.catalog().scanning) {
         join_->next_scan = now + rescan_every;
-        svc.start_scan();
+        // Not while a game runs: the launcher should cost nothing then
+        if (!svc.game_running()) {
+          svc.start_scan();
+        }
       }
     } else if (join_->stage == join_stage::restarting) {
       if (!svc.game_running()) {
@@ -1143,6 +1146,13 @@ private:
                      "you sign in again.",
                      {"Sign out", "Cancel"}, [this](int choice) {
                        if (choice == 0) {
+                         // A join waiting for mods ends too: its panel and
+                         // Cancel are hidden while signed out, and it went
+                         // on rescanning until Xerces closed (review,
+                         // 2026-11-13)
+                         if (join_) {
+                           cancel_join();
+                         }
                          service_->sign_out();
                          owner_->notify(owner_->tr("Signed out."));
                        }
@@ -1309,13 +1319,17 @@ private:
       const std::string id = r->id;
       const std::string name = r->name;
       const bool block = action == "block";
+      // Named: the list re-sorts while the dialog is open (review, 2026-11-13)
       owner_->dialog(
           block ? "Block this player?" : "Remove this friend?",
-          block ? "They stop being your friend, cannot see you online, and "
-                  "cannot send you requests or invites. You can unblock them "
-                  "later under Blocked."
-                : "You stop seeing each other online and cannot invite each "
-                  "other until one of you sends a new request.",
+          name + ": " +
+              owner_->tr(block ? "They stop being your friend, cannot see you "
+                                 "online, and cannot send you requests or "
+                                 "invites. You can unblock them later under "
+                                 "Blocked."
+                               : "You stop seeing each other online and cannot "
+                                 "invite each other until one of you sends a "
+                                 "new request."),
           {block ? "Block" : "Remove", "Cancel"},
           [this, id, name, block](int choice) {
             if (choice != 0) {

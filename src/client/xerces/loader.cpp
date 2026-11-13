@@ -117,6 +117,8 @@ bool wrap_quit_command() {
   std::abort();
 }
 
+std::atomic<bool> terminate_handler_on{false};
+
 // In a level, is the local client playing it yet, or still loading it?
 launch_phase level_phase() {
   const auto state = game::cg::clientUIActives->actives[0].connectionState;
@@ -169,6 +171,12 @@ void verify_plan(const std::string &id) {
 }
 } // namespace
 
+void set_terminate_handler_on_this_thread() {
+  if (terminate_handler_on.load(std::memory_order_acquire)) {
+    std::set_terminate(log_terminate);
+  }
+}
+
 std::string current_map() {
   for (const char *name : {"mapname", "ui_mapname"}) {
     if (auto value = game::get_dvar_string(name); value && !value->empty()) {
@@ -192,6 +200,7 @@ public:
     static const std::terminate_handler previous =
         std::set_terminate(log_terminate);
     (void)previous;
+    terminate_handler_on.store(true, std::memory_order_release);
     // The signature lookup (the journal's "symbols" step) has usually run
     // already, in mod_stack's post_unpack; this makes sure it has.
     xerces_signatures::feature_enabled("multi_mod");

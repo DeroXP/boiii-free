@@ -3344,3 +3344,77 @@ In the game (the test homes, mods off unless said):
         tried.
 - [ ] Left open: the lower findings the review returned unchecked (listed in the
       review's journal); the Workshop item installed twice is only named, not settled.
+
+## The review's unchecked findings (2026-11-13, after beta.24)
+
+The client review's 25 findings that no sceptic had checked, each read against the code
+(beta.24 is a72ffb7e; these are after it, on launcher/upscale only).
+
+Fixed:
+
+- [x] The terminate handler that names an uncaught C++ exception was set on the main
+      thread only (the runtime keeps it per thread): every thread started after the
+      loader's post_unpack sets it too (main.cpp's per-thread start).
+- [x] The crash handler ran again on the same thread when it faulted or threw itself
+      (several dumps and reports for one crash): a second entry goes to the dialog, a third
+      ends the game; the in-memory dump and zip run guarded.
+- [x] The Workshop helper inherited every inheritable handle of the game (its UDP socket)
+      and outlived it: only its two handles are inherited (a handle list), and it is in a
+      job that ends with the program that started it. Unit test: the helper started that
+      way (where.exe standing in), waited for, its code read.
+- [x] One failed log write silenced the log for the rest of the session: the stream is
+      cleared and a half line ended.
+- [x] crash\pending's half-written `.tmp` files were never removed: removed after an hour
+      (unit test: an old one goes, a fresh one stays).
+- [x] Zone memory's pool list ran a VirtualQuery per pool on the main loop at every phase
+      change: the two values are read with a fault caught (safe_memory.hpp).
+- [x] No Hip-Fire Spread read two bool dvars as raw integers: read as bools.
+- [x] Self-revive: a second player_downed for one down opened a second prompt that stayed
+      on screen: one offer at a time.
+- [x] Aim assist compared raw stick values with its 5% and 15% thresholds, so a stick
+      resting off centre counted as input: the game's own dead zone
+      (`gpad_stick_deadzone_min`, XInput's without it) comes off first.
+- [x] Frame-time recording: the main ring held under ten minutes above 218 FPS (both rings
+      are 2^19 now); the stall samples were never reset between runs and dropped silently
+      (reset per run; `stalls_dropped` in meta.json); a run going when the game closed was
+      lost (written from pre_destroy).
+- [x] DLSS chosen but not running (no DLSS files next to boiii.exe, AA not T2x): FSR 1
+      upscales instead of the game's own stretch, with one log line saying why.
+- [x] UPnP: a second Xerces PC on the same router had its mapping replaced and removed as
+      this PC's: the description names this PC, and only this PC's mapping (or an older
+      one to this PC's address) is replaced or removed.
+- [x] A dangling junction sorted last made a whole mods folder read as unreadable; the
+      manifest and workshop.json were read whole whatever their size (over 1 MiB now: a
+      warning and not read; unit test).
+- [x] A launcher opened in a game's first seconds read that launch as a crash (safe-mode
+      box, a culprit search): a client process counts as a game starting.
+- [x] The xerces:// handler kept starting the folder it was turned on from: at start it is
+      pointed at this Xerces when it is on for this home. (On this PC it still named
+      `C:\Games\xerces-0.1.0-beta.10`.)
+- [x] Friends: a join waiting for mods went on after sign-out, rescanning every 8 s (also
+      while a game ran): sign-out cancels it, and no rescan while a game runs. Remove and
+      Block name the friend.
+- [x] First run's UI scale choices are Settings' (75, 100, 125, ... %).
+- [x] `xerces_cli packs <unknown>` and `sig <unknown>` printed the help and exit 0: "Unknown
+      command", exit 1 (both tried). The CLI smoke test leaves `$LASTEXITCODE` 0 after
+      "ok" (tried: 0), so CI's pwsh step no longer fails on it. release.ps1 resolves a
+      relative -OutDir.
+
+Checked and left:
+
+- [ ] The host's map-first rule after a join is reset only by the console's `map`: whether
+      it matters depends on whether `sv_running` is false while a locally started level
+      links its zones, which the code does not settle. For the two-PC test: after leaving
+      H's match, J starts SANCTUM OBITUS with DS4C from the lobby menu; map-first must hold.
+- [ ] Nothing prunes `%LOCALAPPDATA%\boiii\minidumps` (about 22 MB a crash): deleting the
+      player's crash files is theirs to decide.
+- [ ] A lost Direct3D device in the launcher is not noticed (frozen window): rebuilding
+      the device is more than a fix in passing, and it cannot be brought about here.
+- [ ] Other mistyped CLI commands (mods, plan, logs) still say "Xerces is not running".
+- [ ] Judged real but not fixed by the review's sceptics: the stall sampler's suspend of the
+      main thread, false "is a dependency of it" errors, the map-or-mod rule, Discord
+      callbacks during close, `plan apply --vanilla` rewriting installed.json.
+
+Tried: 617 unit tests pass; the launcher's First run, Friends, Settings and Home in dry
+runs, 0 warnings or errors; the CLI checks above. Not tried in the game yet: every
+client change above.

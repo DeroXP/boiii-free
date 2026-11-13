@@ -595,6 +595,26 @@ collect_result collect_crashes(const crash_context &ctx, bool send_enabled,
     return false;
   });
 
+  // Half-written files of a handler that was ended mid-write (<id>.dmp.tmp,
+  // <id>.json.tmp): list_pending skips them, and nothing removed them
+  // (review, 2026-11-13). An hour old: the game writes them in seconds.
+  {
+    std::vector<fs::path> stale;
+    std::error_code ec;
+    for (fs::directory_iterator it(pending_dir(crash_dir), ec), end;
+         !ec && it != end; it.increment(ec)) {
+      std::error_code item;
+      const auto time = it->last_write_time(item);
+      if (it->path().extension() == ".tmp" && !item &&
+          ctx.now - unix_time(time) > 3600) {
+        stale.push_back(it->path());
+      }
+    }
+    for (const fs::path &file : stale) {
+      remove_file(file);
+    }
+  }
+
   if (!send_enabled) {
     // Off: nothing waits to be sent, so turning it on later never sends a
     // crash from this time.

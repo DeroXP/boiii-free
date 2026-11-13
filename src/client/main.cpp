@@ -16,6 +16,7 @@
 #include "component/updater.hpp"
 #include "launcher/html/html_window.hpp"
 #include "launcher/launcher.hpp"
+#include "xerces/loader.hpp"
 #include "xerces/runtime.hpp"
 
 #include <shlobj.h>
@@ -149,7 +150,12 @@ void run_tls_callbacks(const uint32_t reason) {
 }
 
 [[maybe_unused]] thread_local struct tls_runner {
-  tls_runner() { run_tls_callbacks(DLL_THREAD_ATTACH); }
+  tls_runner() {
+    // A thread started after the loader's post_unpack names an uncaught C++
+    // exception as the main thread does (the handler is kept per thread)
+    xerces_loader::set_terminate_handler_on_this_thread();
+    run_tls_callbacks(DLL_THREAD_ATTACH);
+  }
 
   ~tls_runner() { run_tls_callbacks(DLL_THREAD_DETACH); }
 } tls_runner;

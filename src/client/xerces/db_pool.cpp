@@ -35,6 +35,7 @@
 
 #include "db_pool.hpp"
 #include "runtime.hpp"
+#include "safe_memory.hpp"
 #include "signatures.hpp"
 
 namespace xerces_db_pool {
@@ -260,19 +261,27 @@ std::vector<pool_state> pools() {
     if (!pool_calls[i].done.load(std::memory_order_acquire)) {
       break;
     }
+    // Read with a fault caught, not after a VirtualQuery per pool: this runs
+    // on the main loop at every phase change (watch_usage), and VirtualQuery
+    // on the game's memory took 5 to 20 ms a call (safe_memory.hpp; review,
+    // 2026-11-13).
     const std::uintptr_t region = pool_calls[i].region;
+    std::uint64_t size = 0;
+    std::uint32_t pages = 0;
     if (region == 0 ||
-        !readable(reinterpret_cast<const void *>(region), pages_offset + 4)) {
+        !xerces_safe::read(reinterpret_cast<const void *>(region + size_offset),
+                           &size, sizeof(size)) ||
+        !xerces_safe::read(
+            reinterpret_cast<const void *>(region + pages_offset), &pages,
+            sizeof(pages))) {
       continue;
     }
     pool_state state;
     state.index = i;
     state.name = std::string(pool_calls[i].call.name.view());
     state.flags = pool_calls[i].call.flags;
-    state.size =
-        *reinterpret_cast<const volatile std::uint64_t *>(region + size_offset);
-    state.pages = *reinterpret_cast<const volatile std::uint32_t *>(
-        region + pages_offset);
+    state.size = size;
+    state.pages = pages;
     out.push_back(std::move(state));
   }
   return out;
