@@ -3448,8 +3448,16 @@ In the game (the user approved the runs; the friends build, test homes):
       of its own", and the game ended. Before, only the main thread had the handler.
 - [x] The "Original Characters" tab (E from DS4C's): no portrait on any row. The game's own
       list carries none; the game's own group now takes the game's portraits by character
-      index (BASE_ROSTER), a mod's group never. NOT seen in the game: the run after the fix
-      captured another program in front (the user was using the PC), so the tests stopped.
+      index (BASE_ROSTER), a mod's group never. The run after the fix captured another
+      program in front (the user was using the PC), so the tests stopped; run again once the
+      user was done: Dempsey's portrait on DEMPSEY 2, Takeo's on TAKEO 2, DS4C's tab as
+      before, no warning or error (`bench\20261112-crash\left-orig2-row2.png`,
+      `left-orig2-row8.png`).
+- [ ] Seen in that run: on the "Original Characters" tab the live character stood at the
+      bottom edge of the frame (only the head and shoulders showed), while ZM_BEAST on
+      DS4C's tab filled the view and the run before framed Nikolai 3 well. The camera's
+      code did not change; its framing seems to vary with where the player stands. Not
+      looked into.
 - [ ] Not tried in the game: the crash handler's re-entry, a second player_downed for one
       down, aim assist with a real controller, UPnP with two PCs, the Workshop helper from
       the in-game menu.
