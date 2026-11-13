@@ -154,7 +154,9 @@ hash, sent with the link, shows that the zip is the one we made.
   dumps, and Xerces sends a crash report for it. If it is still frozen 60
   seconds after its last frame (3 minutes while a map loads), it closes itself;
   you do not have to end it in Task Manager. If it comes back on its own, the
-  report is taken back.
+  report is taken back. A message box waiting for your answer (a mod's unsafe-Lua
+  question, the error dialog) is not a freeze, and neither is the time the PC
+  slept (since beta.24).
 - **Every crash, freeze and fatal error leaves a report you can read** (since
   beta.22): `crash-<time>.txt`, `freeze-<time>.txt` or `fatal-<time>.txt` in
   `%LOCALAPPDATA%\boiii\minidumps`, next to the dump. It starts with what

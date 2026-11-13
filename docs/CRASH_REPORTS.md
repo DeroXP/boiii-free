@@ -60,8 +60,12 @@ its console lines already show them as `<player>`. The dump is masked as above.
 The server checks again that no `C:\Users\<name>` path survives.
 
 Never sent: usage data or analytics, Steam ids or the game identity (XUID), full
-crash dumps, settings, packs or files. The full dumps stay in
-`%LOCALAPPDATA%\boiii\minidumps` for local use.
+crash dumps, or files. The full dumps stay in `%LOCALAPPDATA%\boiii\minidumps`
+for local use. (The game's text report carries the Xerces and display settings,
+and a Xerces account sends what DESIGN.md 10 says; the old "settings, packs" in
+this line predated both.) A Steam id in hex is hidden with its leading zero or
+without; the `status` table's xuid column stays in the console and out of the
+console lines a report carries (since beta.24).
 
 Reports are tied to an install id: 32 random hex digits from the system's random
 source in `<home>\config\install_id`, made when the first report is about to go
@@ -192,12 +196,25 @@ and no `clean_exit`.
    report is sent when the game closes (the launcher is open) or when Xerces
    opens next; with the setting off it points to GitHub and the bundle. A freeze
    (no frame for 30 s, a watchdog thread in the client) is reported the same
-   way, kind `unknown_exit`: a dump of every thread as it stands, the main
-   thread's frames, every thread's stack in the text report, and a last console
-   line "[Freeze] ..." that says where the main and server threads are. The same
-   dump and text report go to the minidumps folder whatever the setting. If frames come back, the pending report is removed; if not, the game
-   ends itself with exit code 0xC0000194 (STATUS_POSSIBLE_DEADLOCK) 60 s after
-   its last frame, 180 s while the journal says it is loading (2026-11-08).
+   way, kind `unknown_exit`: the main thread's frames, every thread's stack in
+   the text report, a last console line "[Freeze] ..." that says where the main
+   and server threads are, and a dump of every thread as it stands. The same
+   text report and dump go to the minidumps folder whatever the setting. If
+   frames come back, the pending report is removed; if not, the game ends itself
+   with exit code 0xC0000194 (STATUS_POSSIBLE_DEADLOCK) 60 s after its last
+   frame, 180 s while the journal says it is loading (2026-11-08). Since beta.24:
+   - the text report is written at 30 s and the dump only 10 s before the close
+     (at 50 s, or 170 s while loading): the dump stops every thread and never
+     comes back if one holds the heap's or the loader's lock, which at 30 s could
+     turn a long load into a freeze; a stall that ends earlier has no dump;
+   - a box that waits for the player (the unsafe-Lua question, the fatal-error
+     dialog, the out-of-memory box) counts as progress, so the game is no longer
+     closed under it;
+   - a gap of more than 10 s between two of the watchdog's one-second looks (the
+     PC slept, the process was suspended) is not counted as a stall;
+   - a game that does not own the journal (restarted from the crash dialog,
+     started without the launcher) knows its phase too, so its freezes close
+     after 60 s in a match or the menus, not 180 s.
 2. When the game the launcher started exits, the launcher counts it as a crash
    when the client wrote a dump, or the exit code is not 0 and the journal does
    not end in `clean_exit` (`xerces_core::exit_is_crash`). Each pending crash

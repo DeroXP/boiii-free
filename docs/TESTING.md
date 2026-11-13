@@ -3268,3 +3268,67 @@ exit ends the launch as that exit.
       in none of four after; the forced one stands in for it).
 - [ ] Not in a package: beta.23's zip was built before this. The fix is on
       `launcher/upscale` only.
+
+## A review of the whole client, and beta.24 (2026-11-13)
+
+Before beta.24 the whole client was read subsystem by subsystem: ten readers (the game
+client's start and exit, the mod stack and memory pools, crash and freeze handling,
+graphics and performance tools, Zombies features, joining, the planner and mods, the
+launcher program, its screens, the CLI and release tooling), each finding traced through
+the code, and a sceptic sent to refute the most serious ones (eight of those sceptics did
+not run; their findings were checked by reading the code before anything was changed).
+54 findings; about 20 were confirmed as worth fixing now.
+
+Fixed (four commits, 29a4d02e, f3bf47dd, 64d0d287, 87644472):
+
+- [x] Freeze watchdog: a box waiting for the player counts as progress; a gap of more than
+      10 s between its looks (sleep) is no stall; the freeze's dump is written 10 s before
+      the close, not at 30 s.
+- [x] Console window closed before the quit could run: the launch ends clean.
+- [x] A game that does not own the journal tracks its phase in memory; the journal's
+      rename is retried and a lost write tried again.
+- [x] Join password and invite-only: nobody is remembered in the front end without a
+      lock; challenges only in a match or an open lobby.
+- [x] Self-revive refilled while down: the offer starts. Saved character pick: the id is
+      always saved and kept across matches without its mod. No Hip-Fire Spread: saved
+      values kept by weapon, not by name.
+- [x] A removed top mod's entry script no longer runs on.
+- [x] Crash reports: Steam ids in hex hidden in both forms; the status table's xuid
+      column kept out of reports (unit test for both forms).
+- [x] Launcher: steady clock for the loop (a clock set back froze the window); Home says
+      "Reading your mods..." during the first scan; dialogs that open by themselves wait
+      their turn instead of cancelling the open one; a Friends join launch minimises
+      instead of closing, so its hole punch is still asked for; invites use UPnP's address
+      only when it is public; the joiner's password texts name invite-only; the privacy
+      and Friends texts say what an account and a crash report send.
+- [x] Release: the version resource of Xerces.exe and xerces_cli.exe was the first build's
+      (0.1.0-beta.1 in beta.23); the resource edges name the version header, and the
+      release script checks the three programs' versions.
+
+In the game (the test homes, mods off unless said):
+
+- [x] `m1-check.ps1 -Live`, all nine cases: 60 pass, none fails.
+- [x] `xerces_crash_test freeze`: text report at 30 s (14:17:00), dump at 50 s
+      (14:17:20), the game closed at 61 s with 0xC0000194, the note and its dump for the
+      launcher.
+- [x] `xerces_crash_test stall` (40 s): the text report at 30 s, no dump, the note taken
+      back, the game plays on.
+- [x] `xerces_crash_test fatal` without `-quiet-crash`: the dialog ("The game hit an error
+      and has to close.") still open 75 s later, no freeze file (the game used to be
+      closed at 60 s), the fatal-error text report and dump as before
+      (`bench\20261112-crash\fatal-dialog-b24.png`).
+- [x] The console closed 11 s into a start from `xerces_cli plan apply`, before the first
+      frame: phases symbols, launching, clean_exit; the journal says `clean_exit` (a
+      forced kill at the same point leaves `launching`).
+- [x] Launcher screens (dry runs): Home, First run and Settings, English and the
+      pseudo-locale, 0 warnings or errors; Home shows the new Friends note.
+- [x] Unit tests: 613 pass (the Steam-id forms, the invite-only texts).
+
+- [ ] Not tried in the game: the unsafe-Lua question and the out-of-memory box over 60 s
+      (the same counter as the dialog), a PC sleep, the join-password change with a
+      second PC, the self-revive refill in co-op, the character pick under another
+      stack, the hip-spread restore with a mod that replaces a weapon, the Friends
+      dialogs and close-on-launch join, a top mod removed in a session.
+- [ ] Left open (KNOWN_ISSUES.md): a Workshop item installed twice, the CLI's non-ASCII
+      arguments, the split-screen upscaler, and the lower findings the review returned
+      unchecked (listed in the review's journal).

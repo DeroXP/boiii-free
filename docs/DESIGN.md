@@ -3217,7 +3217,14 @@ since 2026-11-05); 11.3 and 11.4 still apply later. The two-PC test is
     `auth.cpp`'s handler, which is not touched; no engine address is used). An
     address that passed is let in, and so is every address that sent a lobby
     join or a connect while the host had no password (whether or not it got in),
-    so setting or changing the password does not lock those out. Nothing is
+    so setting or changing the password does not lock those out. Only while this
+    game hosts a match or has its lobby open to direct connect (since beta.24):
+    the front end runs as a local server too, and remembering every sender from
+    the start of the game let in whoever sent one packet before the password was
+    set or invite-only came from the launcher. In the front end with no lock a
+    connect goes on and nobody is remembered; with a lock an unknown sender is
+    refused there as in a match, and a challenge is answered only in a match or
+    an open lobby. Nothing is
     forgotten until the game quits (past 128, the oldest goes). Without the
     check, too: the engine's own local players (loopback) and bots, and this
     game's own socket (an address of this PC on the game's port, which nothing
@@ -4284,7 +4291,7 @@ release from v1.0.
 
 Beta packages for testers (2026-11-05) come first, as a zip by private link:
 
-- `VERSION` is the one place the version is set (`0.1.0-beta.23`). premake
+- `VERSION` is the one place the version is set (`0.1.0-beta.24`). premake
   writes it, the commit and whether the tree had changes into
   `build\src\xerces_version.h`; all three programs show "Xerces <version>
   (<commit>)" (About, the menu watermark, the console title, the crash report)
