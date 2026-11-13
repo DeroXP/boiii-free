@@ -167,11 +167,17 @@ core::own_addresses own_addresses() {
   return own;
 }
 
+// A match this game runs. Not the front end, which runs as a local server
+// too (punch.cpp, 2026-11-07): server_running() alone is true at the main
+// menu.
+bool hosts_match() {
+  return game::server_running() &&
+         (game::is_server() || !game::com::Com_IsRunningUILevel());
+}
+
 // Whether this game can be joined now: a match runs here, or the lobby is
 // open to direct connect. Nothing else answers a challenge.
-bool joinable() {
-  return game::server_running() || !nat::joinable_lobby().empty();
-}
+bool joinable() { return hosts_match() || !nat::joinable_lobby().empty(); }
 
 void receive_challenge(const game::net::netadr_t &sender,
                        const network::data_view &data, game::LocalClientNum_t) {
@@ -617,7 +623,18 @@ public:
     // A connect into the match this game runs (auth.cpp's handler comes
     // after); a game that runs no match passes it on unchanged.
     network::guard("connect", [](const game::net::netadr_t &sender) {
-      if (!game::server_running() || admits(sender)) {
+      if (!game::server_running()) {
+        return true;
+      }
+      // The front end runs as a local server too. Unlocked there, the packet
+      // goes on and nobody is remembered: remembering every sender from the
+      // start of the game let in whoever sent one packet before a password
+      // was set or invite-only came from the launcher (review, 2026-11-13).
+      // Locked, an unknown sender is refused there as in a match.
+      if (!hosts_match() && !locked()) {
+        return true;
+      }
+      if (admits(sender)) {
         return true;
       }
       if (network::is_ip_address(sender)) {

@@ -1830,6 +1830,12 @@ constexpr std::chrono::seconds FREEZE_TIME = 30s;
 // from the list of modules the watchdog keeps while the game runs well.
 constexpr std::chrono::seconds FREEZE_CLOSE_TIME = 60s;
 constexpr std::chrono::seconds FREEZE_CLOSE_LOADING = 180s;
+// How long before the close the freeze's dump is written (write_freeze_files)
+constexpr std::chrono::seconds FREEZE_DUMP_BEFORE_CLOSE = 10s;
+// A gap this long between two of the watchdog's one-second looks means it
+// did not run either: the PC slept or the process was suspended. That time is
+// no stall.
+constexpr std::chrono::seconds WATCHDOG_GAP = 10s;
 // STATUS_POSSIBLE_DEADLOCK: the launcher reads any exit that is not clean as
 // a crash and sends the report the game left.
 constexpr UINT FREEZE_EXIT_CODE = 0xC0000194;
@@ -1846,6 +1852,11 @@ std::atomic<bool> loading_noted{false};
 // Frames came back while the report was still being written, after this many
 // seconds: the report takes itself back when it is done. -1: they did not.
 std::atomic<long long> freeze_withdraw{-1};
+// The watchdog's word to the report's thread that the game is about to be
+// closed, so the full dump is wanted now (see write_freeze_files)
+std::atomic<bool> freeze_dump_wanted{false};
+// Boxes waiting for the player (exception::modal_box)
+std::atomic<int> modal_boxes{0};
 // The id of the freeze's crash report; under freeze_mutex, which the
 // watchdog takes only once frames have come back.
 std::mutex freeze_mutex;
@@ -2392,13 +2403,6 @@ freeze_files write_freeze_files() {
   out.id = new_freeze_report();
   write_freeze_note(out.id, main_frames(), first);
 
-  // Then the dump, which stops every thread but this one and the watchdog.
-  freeze_dump = minidumps / ("freeze-" + stamp + ".dmp");
-  if (!write_dump_file(freeze_dump)) {
-    freeze_dump.clear();
-  }
-  attach_freeze_dump(out.id);
-
   // Then the names (functions, source lines), the scripts running and what
   // the game was doing: the same file and the same note again with them.
   for (seen_thread &thread : threads) {
@@ -2407,12 +2411,31 @@ freeze_files write_freeze_files() {
     }
   }
   freeze_text_result full = freeze_text(threads, true);
-  if (const int stops = dump_watchdog_stops.load(); stops > 0) {
-    full.core += std::format("The dump stopped the watchdog ({}).\r\n", stops);
-  }
   out.summary = full.summary;
   write_report_file(out.text_file, full.core + console_text());
   write_freeze_note(out.id, main_frames(), full);
+
+  // The dump last, and only when the game is about to be closed: it stops
+  // every thread but this one and the watchdog, and if a stopped thread
+  // holds the heap's or the loader's lock it never comes back (see
+  // mini_dump_write_dump_stub). Written at 30 s it could turn a long load
+  // that would have ended by itself into a freeze; a stall that ends before
+  // the close now has none. The watchdog asks for it shortly before the
+  // close (FREEZE_DUMP_BEFORE_CLOSE).
+  while (!freeze_dump_wanted.load() && freeze_withdraw.load() < 0) {
+    Sleep(250);
+  }
+  if (!freeze_dump_wanted.load()) {
+    return out; // frames came back: no dump
+  }
+  freeze_dump = minidumps / ("freeze-" + stamp + ".dmp");
+  if (!write_dump_file(freeze_dump)) {
+    freeze_dump.clear();
+  }
+  attach_freeze_dump(out.id);
+  if (const int stops = dump_watchdog_stops.load(); stops > 0) {
+    exception_log(false, "[Freeze] The dump stopped the watchdog (%d)", stops);
+  }
   return out;
 }
 
@@ -2464,6 +2487,7 @@ void start_freeze_report() {
     return; // an earlier freeze's report is still being written
   }
   freeze_withdraw = -1;
+  freeze_dump_wanted = false;
   SetEvent(freeze_report_event);
 }
 
@@ -2521,10 +2545,19 @@ void watch_for_freezes() {
       GetModuleHandleW(L"kernel32.dll"), "GetThreadDescription"));
   uint32_t last_frame = 0;
   auto last_progress = std::chrono::steady_clock::now();
+  auto last_look = last_progress;
   bool reported = false;
   uint32_t ticks = 0;
   for (;;) {
     std::this_thread::sleep_for(1s);
+    // steady_clock goes on while the PC sleeps: after a sleep of hours the
+    // game would otherwise get a freeze report at once and be closed a
+    // second later, before it had drawn its first frame back
+    const auto look = std::chrono::steady_clock::now();
+    if (const auto gap = look - last_look; gap > WATCHDOG_GAP) {
+      last_progress += gap - 1s;
+    }
+    last_look = look;
     release_walked_thread();
     if (const uint64_t started = crash_handler_started_ms.load();
         started != 0 && GetTickCount64() - started > CRASH_HANDLER_LIMIT_MS) {
@@ -2533,7 +2566,8 @@ void watch_for_freezes() {
       TerminateProcess(GetCurrentProcess(), crash_handler_code.load());
     }
     const uint32_t frame = frame_count.load();
-    if (frame != last_frame || frame == 0) {
+    // A box waiting for the player counts as progress (exception::modal_box)
+    if (frame != last_frame || frame == 0 || modal_boxes.load() > 0) {
       if (reported) {
         frames_came_back(std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::steady_clock::now() - last_progress));
@@ -2549,13 +2583,15 @@ void watch_for_freezes() {
     } else if (!crashed) {
       const auto stalled = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - last_progress);
+      const auto close_at =
+          loading_noted.load() ? FREEZE_CLOSE_LOADING : FREEZE_CLOSE_TIME;
       if (!reported && stalled >= FREEZE_TIME) {
         reported = true;
         start_freeze_report();
-      } else if (reported &&
-                 stalled >= (loading_noted.load() ? FREEZE_CLOSE_LOADING
-                                                  : FREEZE_CLOSE_TIME)) {
+      } else if (reported && stalled >= close_at) {
         close_frozen_game(stalled);
+      } else if (reported && stalled >= close_at - FREEZE_DUMP_BEFORE_CLOSE) {
+        freeze_dump_wanted = true;
       }
     }
   }
@@ -2578,6 +2614,9 @@ void WINAPI set_unhandled_exception_filter_stub(LPTOP_LEVEL_EXCEPTION_FILTER) {
   TerminateProcess(GetCurrentProcess(), exception_data.code);
   __assume(false);
 }
+
+modal_box::modal_box() noexcept { ++modal_boxes; }
+modal_box::~modal_box() { --modal_boxes; }
 
 void show_fatal_error(const std::string &message) {
   // Xerces: before the other threads are suspended, while their locks can
@@ -2613,6 +2652,8 @@ void show_fatal_error(const std::string &message) {
   if (!game::quiet_crash() && !game::is_headless()) {
     utils::thread::suspend_other_threads();
     show_mouse_cursor();
+    // The dialog waits for the player, however long: no freeze meanwhile
+    const modal_box waiting;
     if (ask_restart(error_help::strip_colors(message) + "\n\n" +
                         crash_report_note(false),
                     L"The game hit an error and has to close.")) {

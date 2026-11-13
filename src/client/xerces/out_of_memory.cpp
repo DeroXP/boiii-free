@@ -23,6 +23,7 @@
 // destructor runs under the main thread. The exit code stays 0xFFFFFFFF, the
 // engine's exit(-1).
 
+#include <component/exception.hpp>
 #include <intrin.h>
 
 #include <component/mod_stack.hpp>
@@ -319,6 +320,8 @@ xerces_core::out_of_memory_message report(const void *return_address) {
   } else {
     while (ShowCursor(TRUE) < 0) {
     }
+    // The box waits for the player; no freeze meanwhile
+    const exception::modal_box waiting;
     if (title.empty() || body.empty()) {
       MessageBoxA(nullptr, short_body, short_title,
                   MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST);

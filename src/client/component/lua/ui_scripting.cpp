@@ -1,5 +1,6 @@
 #include <std_include.hpp>
 
+#include <component/exception.hpp>
 #include <loader/component_loader.hpp>
 
 #include <game/utils.hpp>
@@ -64,6 +65,8 @@ bool show_unsafe_lua_dialog() {
     return unsafe_lua_approved_for_session.load(std::memory_order_acquire);
   }
 
+  // Xerces: the question waits for the player; no freeze meanwhile
+  const exception::modal_box waiting;
   const int32_t result = MessageBoxA(
       nullptr,
       "The map/mod you are playing tried to run code that can be "

@@ -1566,6 +1566,10 @@ function refill_self_revives()
 		player.xerces_revive_used_round = undefined;
 		player update_revives_row();
 		player notice_player("SELF-REVIVE BACK", 6);
+		// Down already: the offer started when they went down ended at once (they had none). Started now, or the
+		// revive shown could not be used and someone_can_self_revive() would keep a match with nobody up going.
+		if (player laststand::player_is_in_laststand())
+			player thread self_revive_offer();
 	}
 }
 

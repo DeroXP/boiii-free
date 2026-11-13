@@ -225,11 +225,11 @@ public:
 
     // Loading a level, playing it, or back in the menus, checked once a
     // second.
+    // Also for a game that does not write the journal (restarted from the
+    // crash dialog, started without the launcher): its logs, crash notes and
+    // freeze watchdog go by the phase (xerces/runtime.cpp).
     scheduler::loop(
         [] {
-          if (!xerces_runtime::journal_active()) {
-            return;
-          }
           const bool in_level =
               game::com::Com_IsInGame() && !game::com::Com_IsRunningUILevel();
           const launch_phase now = xerces_runtime::journal_phase();

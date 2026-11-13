@@ -309,8 +309,9 @@ local function choose(look, inUse)
   return function(self, element, controller, param, menu)
     local pick = look.index .. ":" .. look.style
     pcall(Engine.SetDvar, "xerces_char_saved", tostring(look.index * 16 + look.style + 1))
-    -- a character of the list in use is its slot; another mod's is found again by what it is
-    pcall(Engine.SetDvar, "xerces_char_saved_look", inUse and "0" or tostring(look.id))
+    -- found again by what it is, whichever mods are loaded next time: a slot alone lands on another character
+    -- under another stack (review, 2026-11-13)
+    pcall(Engine.SetDvar, "xerces_char_saved_look", tostring(look.id or "0"))
     picked[controller] = pick
     send(controller, "xerces_char:" .. pick)
     closeAll(controller, menu)

@@ -703,24 +703,29 @@ bool build(const uint8_t *in_use) {
   return true;
 }
 
-// The saved pick names a look by its id: its slot depends on the mods loaded
+// The saved pick names a look by its id: its slot depends on the mods loaded.
+// A look that is not loaded now gets slot 0 (nothing is put on) and keeps its
+// id, so it is found again when its mod is back: clearing the id made one
+// match without that mod, a joined one too, forget the pick for good
+// (review, 2026-11-13).
 void fix_saved() {
   const int id = game::get_dvar_int("xerces_char_saved_look").value_or(0);
   if (id <= 0) {
     return;
   }
+  const int current = game::get_dvar_int("xerces_char_saved").value_or(0);
   int slot = 0;
   for (const look &one : looks) {
-    if (one.id == static_cast<uint32_t>(id)) {
-      slot = static_cast<int>(one.body * 16 + one.style + 1);
-      break;
+    if (one.id != static_cast<uint32_t>(id)) {
+      continue;
+    }
+    const int this_slot = static_cast<int>(one.body * 16 + one.style + 1);
+    if (slot == 0 || this_slot == current) {
+      slot = this_slot; // two looks with one id: the one already saved wins
     }
   }
-  if (game::get_dvar_int("xerces_char_saved").value_or(0) != slot) {
+  if (current != slot) {
     set_dvar("xerces_char_saved", slot);
-  }
-  if (slot == 0) {
-    set_dvar("xerces_char_saved_look", 0);
   }
 }
 
@@ -900,9 +905,9 @@ public:
         "a pick.");
     game::register_dvar_int(
         "xerces_char_saved_look", 0, 0, INT32_MAX, saved,
-        "Xerces' Zombies character slots: which mod's character the saved "
-        "pick is (0: one of the table in use), so it is found again when the "
-        "mods loaded change.");
+        "Xerces' Zombies character slots: which character the saved pick is "
+        "(0: a slot of the table in use, saved before beta.24), so it is "
+        "found again when the mods loaded change.");
     using namespace game::scr::builtin::table;
     set_body_type_orig = player_methods->SetCharacterBodyType.actionFunc;
     player_methods->SetCharacterBodyType.actionFunc = SetCharacterBodyType;

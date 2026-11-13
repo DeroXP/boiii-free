@@ -66,8 +66,11 @@ std::string flag_value(std::string_view flag);
 bool journal_active();
 xerces_core::launch_phase journal_phase();
 void set_journal_phase(xerces_core::launch_phase phase);
-// The phase for the crash report: empty when this process does not own the
-// journal or its lock stays held (a crash inside a journal write).
+// journal_phase() is the phase the client is in, whether or not it owns the
+// journal (a game restarted from the crash dialog walks the phases too, and
+// writes none of them).
+// The phase for the crash report: empty when this process walks no phases
+// (not the client) or the lock stays held (a crash inside a journal write).
 std::string journal_phase_for_crash();
 
 // The signature lookup (DESIGN.md 3.3) is the journal's "symbols" step. The
@@ -99,13 +102,21 @@ void journal_joined(const std::vector<std::string> &host_stack);
 // (the console's close forces it after 3 s, code 1).
 void note_quit_requested();
 bool quit_requested();
+// The player closed the console window (console.cpp): it queues "quit" and
+// forces the exit 3 s later. The quit may not have run by then (the first
+// seconds of start-up, before the first frame, or a load that holds the main
+// thread), and the forced exit still ends a launch the player chose to end.
+// Only journal_quit_forced reads it; the shutdown's and the crash handler's
+// rules go by the quit that ran.
+void note_close_requested();
 // The crash handler ran (exception.cpp): no exit after it counts as clean,
 // even one that follows a quit (a crash while the game shuts down).
 void note_crash();
 bool crash_seen();
 // The console's close forces the exit 3 s after it runs "quit" (console.cpp),
 // before any shutdown code: the journal gets clean_exit there, when a quit
-// ran and no crash did. A normal exit writes it in the loader's shutdown.
+// ran or the console was closed, and no crash did. A normal exit writes it in
+// the loader's shutdown.
 void journal_quit_forced();
 // main.cpp's exit hook passes the code the game gave ExitProcess, just before
 // the components' shutdown runs; nullopt when the process ends another way.

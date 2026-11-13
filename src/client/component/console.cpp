@@ -1247,6 +1247,9 @@ LRESULT con_wnd_proc(const HWND hwnd, const UINT msg, const WPARAM wparam,
   case WM_CLOSE:
     if (!close_requested.exchange(true)) {
       ShowWindow(hwnd, SW_HIDE);
+      // Xerces: the player chose to end the game, whether or not the quit
+      // below runs before the forced exit (xerces/runtime.hpp)
+      xerces_runtime::note_close_requested();
       force_exit_after(3000);
       game::cbuf::Cbuf_AddText(game::LOCAL_CLIENT_0, "quit\n");
     }

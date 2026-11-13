@@ -59,10 +59,18 @@ bool all_zero(const values &v) {
   return std::ranges::all_of(v, [](float f) { return f == 0.0f; });
 }
 
-// What each changed weapon had, by the name of the variant it was found
-// under. Kept until it is put back, across matches: a weapon's zone may stay
-// loaded from one match into the next level.
-std::unordered_map<std::string, values> saved;
+// What each changed weapon had. Kept by the weapon itself and the name of the
+// variant it was found under: a mod that replaces a weapon by name leaves two
+// weapons of that name loaded (both are enumerated, with their overrides), and
+// keyed by the name alone one's spread went back into the other (review,
+// 2026-11-13). The name guards against another weapon loaded at the same
+// address since. Kept until it is put back, across matches: a weapon's zone
+// may stay loaded from one match into the next level.
+struct changed_weapon {
+  std::string name;
+  values had{};
+};
+std::unordered_map<WeaponDef *, changed_weapon> saved;
 // One scan's own: a weapon is shared by several variants
 std::unordered_set<WeaponDef *> scanned;
 int scan_count = 0;
@@ -103,7 +111,7 @@ void apply() {
             })) {
           return;
         }
-        saved[variant->szInternalName] = now;
+        saved[variant->weapDef] = {variant->szInternalName, now};
         write(variant->weapDef, values{});
         ++scan_count;
       },
@@ -127,13 +135,14 @@ void restore() {
         if (!variant || !variant->weapDef || !variant->szInternalName) {
           return;
         }
-        const auto found = saved.find(variant->szInternalName);
+        const auto found = saved.find(variant->weapDef);
         if (found == saved.end() ||
+            found->second.name != variant->szInternalName ||
             !scanned.insert(variant->weapDef).second ||
             !all_zero(read(variant->weapDef))) {
           return;
         }
-        write(variant->weapDef, found->second);
+        write(variant->weapDef, found->second.had);
         ++scan_count;
       },
       nullptr, true);

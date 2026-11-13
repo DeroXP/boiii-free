@@ -126,7 +126,18 @@ bool write_file(const std::filesystem::path &path, std::string_view text) {
       return false;
     }
   }
-  std::filesystem::rename(temporary, path, ec);
+  // A reader that does not share deletion (the launcher's Friends screen
+  // reads the journal once a second, an antivirus scan) makes the rename
+  // fail for a moment: tried again, as the launcher's own writer does
+  // (xerces_core::write_text_file), about 0.3 s at most in all.
+  for (int attempt = 0;; ++attempt) {
+    ec.clear();
+    std::filesystem::rename(temporary, path, ec);
+    if (!ec || attempt >= 5) {
+      break;
+    }
+    Sleep(10 << attempt);
+  }
   return !ec;
 }
 
@@ -159,6 +170,15 @@ namespace {
 std::mutex journal_mutex;
 bool journal_decided = false; // the first call looked at the launch id
 bool journal_owned = false;
+// The client walks through the phases whether or not it owns the journal (a
+// game restarted from the crash dialog, or started without the launcher):
+// its logs, its crash notes and the freeze watchdog go by them.
+bool journal_tracked = false;
+// The phase last written to the file (journal_current is the one the game is
+// in). A write that failed is tried again by the next call for that phase.
+xerces_core::launch_phase journal_written =
+    xerces_core::launch_phase::launching;
+int journal_write_failures = 0;
 xerces_core::launch_phase journal_current =
     xerces_core::launch_phase::launching;
 
@@ -227,10 +247,32 @@ void decide_journal() {
       write_file(journal_path(), xerces_core::journal_to_json(*journal));
 }
 
+// The journal's text, or nothing when the file could not be opened for a
+// moment (tried a few times): a file that cannot be opened is not a journal
+// that is closed or someone else's.
+std::optional<std::string> read_journal_text() {
+  for (int attempt = 0;; ++attempt) {
+    std::ifstream in(journal_path(), std::ios::binary);
+    if (in) {
+      return std::string{std::istreambuf_iterator<char>(in),
+                         std::istreambuf_iterator<char>()};
+    }
+    std::error_code ec;
+    if (!std::filesystem::exists(journal_path(), ec) || attempt >= 4) {
+      return std::nullopt;
+    }
+    Sleep(10 << attempt);
+  }
+}
+
 // With journal_mutex held.
 void write_phase(xerces_core::launch_phase phase) {
   decide_journal();
-  if (!journal_owned || phase == journal_current) {
+  if (game::is_client() && game::is_new_client()) {
+    journal_tracked = true;
+    journal_current = phase;
+  }
+  if (!journal_owned || phase == journal_written) {
     return;
   }
   std::string plan_id;
@@ -238,18 +280,40 @@ void write_phase(xerces_core::launch_phase phase) {
     // Read, parse and write on the caller's thread, timed for perf.io. The
     // loader.phase line below is left out: its flushed write is log.cpp's.
     xerces_perf::timed timing(xerces_perf::step_kind::io, "journal");
-    auto journal = xerces_core::parse_journal(read_file(journal_path()));
+    const std::optional<std::string> was = read_journal_text();
+    if (!was) {
+      // Could not be opened just now: the next call for a phase tries again
+      log_warn("loader.journal.unreadable",
+               "The journal could not be read; the phase " +
+                   std::string(xerces_core::to_string(phase)) +
+                   " is written later");
+      return;
+    }
+    auto journal = xerces_core::parse_journal(*was);
     if (!journal || journal->phase == xerces_core::launch_phase::clean_exit ||
         !journal->launch_id.empty()) {
       // Closed already, or the launcher recorded a newer launch: leave it.
       journal_owned = false;
       return;
     }
-    journal_current = phase;
     journal->phase = phase;
     journal->updated = xerces_core::json_log::now_utc();
     const std::string text = xerces_core::journal_to_json(*journal);
-    write_file(journal_path(), text);
+    if (!write_file(journal_path(), text)) {
+      // Tried again by the next call for this phase (the clean_exit of a
+      // quit has three: the shutdown, the console's forced exit, a late
+      // fault). One that keeps failing stops being tried: each try can hold
+      // the caller a third of a second.
+      if (++journal_write_failures >= 3) {
+        journal_owned = false;
+      }
+      log_warn("loader.journal.write_failed",
+               "The journal could not be written (phase " +
+                   std::string(xerces_core::to_string(phase)) + ")");
+      return;
+    }
+    journal_write_failures = 0;
+    journal_written = phase;
     timing.set_bytes(text.size());
     plan_id = std::move(journal->plan_id);
   }
@@ -282,7 +346,7 @@ std::string journal_phase_for_crash() {
   for (int attempt = 0; attempt < 50 && !lock.try_lock(); ++attempt) {
     Sleep(2);
   }
-  if (!lock.owns_lock() || !journal_owned) {
+  if (!lock.owns_lock() || !(journal_owned || journal_tracked)) {
     return {};
   }
   return xerces_core::to_string(journal_current);
@@ -346,6 +410,7 @@ void journal_joined(const std::vector<std::string> &host_stack) {
 namespace {
 // Plain values: read during shutdown, after other statics may be gone.
 std::atomic_bool quit_seen{false};
+std::atomic_bool close_seen{false};
 std::atomic_bool crashed{false};
 std::atomic_bool exit_code_claimed{false};
 std::atomic_bool exit_code_known{false};
@@ -378,12 +443,13 @@ std::string without_colour_codes(std::string_view text) {
 } // namespace
 
 void note_quit_requested() { quit_seen = true; }
+void note_close_requested() { close_seen = true; }
 bool quit_requested() { return quit_seen; }
 void note_crash() { crashed = true; }
 bool crash_seen() { return crashed; }
 
 void journal_quit_forced() {
-  if (quit_seen && !crashed) {
+  if ((quit_seen || close_seen) && !crashed) {
     set_journal_phase(xerces_core::launch_phase::clean_exit);
   }
 }
