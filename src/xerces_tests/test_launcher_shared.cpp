@@ -33,6 +33,7 @@
 #include <xerces_core/launcher_state.hpp>
 #include <xerces_core/log.hpp>
 #include <xerces_core/log_tail.hpp>
+#include <xerces_core/mods_edit.hpp>
 #include <xerces_core/mods_info.hpp>
 #include <xerces_core/pack_apply.hpp>
 
@@ -1215,4 +1216,60 @@ TEST_CASE("install: a development build passes the repository's data") {
   CHECK(paths.client_data.has_value());
   std::error_code ec;
   fs::remove_all(repo, ec);
+}
+
+TEST_CASE("catalog: a Workshop item also kept as a manual copy is named on "
+          "both rows") {
+  const fs::path root = fresh("dup-workshop");
+  const fs::path game_dir = root / "steamapps" / "common" / "game";
+  write(game_dir / "BlackOps3.exe", "MZ");
+  const std::string workshop_json =
+      R"({"PublisherID":"3171632315","Title":"Dup","Type":"mod",)"
+      R"("FolderName":"dup"})";
+  // Through Steam, and the same item copied by hand into the game's mods
+  const fs::path steam_copy = root / "steamapps" / "workshop" / "content" /
+                              "311210" / "3171632315";
+  write(steam_copy / "workshop.json", workshop_json);
+  write(steam_copy / "zone" / "core_mod.ff", "steam copy");
+  const fs::path manual_copy = game_dir / "mods" / "dup";
+  write(manual_copy / "zone" / "workshop.json", workshop_json);
+  write(manual_copy / "zone" / "core_mod.ff", "manual copy");
+  // And a different item, which must not be named
+  const fs::path other = root / "steamapps" / "workshop" / "content" /
+                         "311210" / "1404915347";
+  write(other / "workshop.json",
+        R"({"PublisherID":"1404915347","Title":"Other","Type":"mod"})");
+  write(other / "zone" / "core_mod.ff", "other");
+
+  const game_state game = detect_game_state(path_utf8(game_dir), root);
+  const catalog_state catalog = scan_catalog(game, root / "hashes.txt");
+  std::size_t copies = 0;
+  for (const auto &item : catalog.items) {
+    copies += item.info.id == "ws.3171632315" ? 1 : 0;
+  }
+  REQUIRE(copies == 2);
+  std::size_t duplicates = 0;
+  for (const diagnostic &d : catalog.diags.items()) {
+    if (d.code == "catalog.duplicate") {
+      ++duplicates;
+      CHECK(d.level == severity::warning);
+      CHECK(d.message.find("ws.3171632315") != std::string::npos);
+      CHECK(d.message.find("1404915347") == std::string::npos);
+    }
+  }
+  CHECK(duplicates == 2);
+  // Mods shows it on both rows, and not on the other item's
+  const auto steam_notes = mods_folder_notes(catalog.diags, "3171632315");
+  const auto manual_notes = mods_folder_notes(catalog.diags, "dup");
+  const auto other_notes = mods_folder_notes(catalog.diags, "1404915347");
+  const auto has_duplicate = [](const std::vector<mods_note> &notes) {
+    return std::ranges::any_of(notes, [](const mods_note &note) {
+      return note.code == "catalog.duplicate";
+    });
+  };
+  CHECK(has_duplicate(steam_notes));
+  CHECK(has_duplicate(manual_notes));
+  CHECK(!has_duplicate(other_notes));
+  std::error_code ec;
+  fs::remove_all(root, ec);
 }

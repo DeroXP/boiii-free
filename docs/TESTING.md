@@ -3329,6 +3329,18 @@ In the game (the test homes, mods off unless said):
       second PC, the self-revive refill in co-op, the character pick under another
       stack, the hip-spread restore with a mod that replaces a weapon, the Friends
       dialogs and close-on-launch join, a top mod removed in a session.
-- [ ] Left open (KNOWN_ISSUES.md): a Workshop item installed twice, the CLI's non-ASCII
-      arguments, the split-screen upscaler, and the lower findings the review returned
-      unchecked (listed in the review's journal).
+- [x] Closed after the first build of beta.24, the same day:
+      - A Workshop item installed twice: a `catalog.duplicate` warning on both rows in
+        Mods, naming both folders (unit test: a Steam copy and a manual copy in `mods`
+        are both named, another item is not; 614 pass).
+      - `xerces_cli` reads its arguments as UTF-8 (CommandLineToArgvW) and makes every
+        path from them as UTF-8: `mod new utf8test --dir "...\\Тест модов" --name "Мод —
+        テスト"` wrote `xerces.mod.json` with that name into that folder, and `mods
+        list` read it back the same.
+      - The upscaler and DLSS keep the game's own picture in a frame with more than one
+        view (split screen). In a `zm_zod` match, mods off, at 70%: "AMD FSR 1 upscales
+        2688x1512 to 3840x2160", then "DLSS: Quality, 2688x1512 to 3840x2160", no skip
+        line (`bench\20261112-crash\upscale-dlss-b24.png`). Split screen itself was not
+        tried.
+- [ ] Left open: the lower findings the review returned unchecked (listed in the
+      review's journal); the Workshop item installed twice is only named, not settled.

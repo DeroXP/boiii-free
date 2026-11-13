@@ -71,7 +71,8 @@ files({
 })
 headless_includes()
 resincludedirs({ "%{wks.location}/src" })
-links({ "xerces_core", "zstd", "zlib", "advapi32" })
+-- shell32: CommandLineToArgvW, for the arguments as UTF-8
+links({ "xerces_core", "zstd", "zlib", "advapi32", "shell32" })
 
 group("")
 

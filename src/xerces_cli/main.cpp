@@ -5,6 +5,13 @@
 // report) are in home_commands.cpp; the offline benchmark (bench) is in
 // bench_commands.cpp.
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+#include <shellapi.h>
+
 #include <algorithm>
 #include <charconv>
 #include <cstdio>
@@ -349,7 +356,7 @@ plan_request request_from(const arguments &args) {
   // the client's own defaults without --game-dir (or without the file).
   if (const auto game_dir = args.get("--game-dir")) {
     request.launcher_settings =
-        read_text(fs::path(*game_dir) / "boiii_players" / "user" /
+        read_text(xerces_core::path_from_utf8(*game_dir) / "boiii_players" / "user" /
                   "launcher_settings.json");
   }
   request.zone_budget =
@@ -367,8 +374,8 @@ std::optional<catalog_scan> scan_from(const arguments &args) {
     return std::nullopt;
   }
   scan_options options;
-  options.layout = layout_of_directory(fs::path(*dir));
-  catalog_scan scan = scan_mods_directory(fs::path(*dir), options);
+  options.layout = layout_of_directory(xerces_core::path_from_utf8(*dir));
+  catalog_scan scan = scan_mods_directory(xerces_core::path_from_utf8(*dir), options);
   if (scan.diags.has_errors() && !args.has("--json")) {
     print_diagnostics(scan.diags);
   }
@@ -470,7 +477,7 @@ int cmd_mod_new(const arguments &args) {
     std::cerr << "Modes are zm, mp and cp.\n";
     return exit_error;
   }
-  const fs::path folder = fs::path(args.get("--dir").value_or(".")) / id;
+  const fs::path folder = xerces_core::path_from_utf8(args.get("--dir").value_or(".")) / id;
   if (fs::exists(folder)) {
     std::cerr << utf8(folder) << " already exists.\n";
     return exit_error;
@@ -801,7 +808,7 @@ checked check(const catalog_scan &scan, const plan_request &request,
   inputs.manifests = manifests;
   if (stock) {
     inputs.stock =
-        index_loose_folder(std::string(stock_owner), fs::path(*stock));
+        index_loose_folder(std::string(stock_owner), xerces_core::path_from_utf8(*stock));
   }
   if (decisions != nullptr) {
     inputs.allow_undeclared = decisions->allow_overrides;
@@ -883,7 +890,7 @@ int cmd_packs(const arguments &args) {
     out.requires_xerces = ">=1.0";
     const std::string text = pack_to_json(out);
     if (const auto file = args.get("--out")) {
-      if (!write_or_report(fs::path(*file), text + "\n")) {
+      if (!write_or_report(xerces_core::path_from_utf8(*file), text + "\n")) {
         return exit_error;
       }
       std::cout << "Wrote " << *file << "\n";
@@ -944,7 +951,7 @@ int cmd_packs(const arguments &args) {
 int cmd_game_detect(const arguments &args) {
   std::optional<fs::path> saved;
   if (const auto path = args.get("--saved")) {
-    saved = fs::path(*path);
+    saved = xerces_core::path_from_utf8(*path);
   }
   const detection result =
       detect_game(saved, steam_roots_from_registry(), real_filesystem());
@@ -987,7 +994,7 @@ int cmd_workshop_get(const arguments &args) {
   }
   fs::path game_dir;
   if (const auto given = args.get("--game-dir")) {
-    game_dir = fs::path(*given);
+    game_dir = xerces_core::path_from_utf8(*given);
   } else {
     const detection found = detect_game(
         std::nullopt, steam_roots_from_registry(), real_filesystem());
@@ -1012,7 +1019,7 @@ int cmd_workshop_get(const arguments &args) {
 int cmd_game_check(const arguments &args) {
   fs::path game_dir;
   if (const auto given = args.get("--game-dir")) {
-    game_dir = fs::path(*given);
+    game_dir = xerces_core::path_from_utf8(*given);
   } else {
     const detection found = detect_game(
         std::nullopt, steam_roots_from_registry(), real_filesystem());
@@ -1092,7 +1099,7 @@ int not_running(const std::string &command) {
 fs::path xerces_home(const arguments &args) {
   std::optional<fs::path> given;
   if (const auto home = args.get("--home")) {
-    given = fs::path(*home);
+    given = xerces_core::path_from_utf8(*home);
   }
   return find_home(given);
 }
@@ -1102,7 +1109,7 @@ int cmd_diag_bundle(const arguments &args) {
   const fs::path home = xerces_home(args);
   fs::path out;
   if (const auto given = args.get("--out")) {
-    out = fs::path(*given);
+    out = xerces_core::path_from_utf8(*given);
   } else {
     std::string stamp = json_log::now_utc().substr(0, 19);
     std::ranges::replace(stamp, ':', '-');
@@ -1297,7 +1304,7 @@ int cmd_sig(const arguments &args, const std::string &action) {
   if (!given) {
     return cmd_sig_report(args);
   }
-  const auto dump = dump_file(fs::path(*given));
+  const auto dump = dump_file(xerces_core::path_from_utf8(*given));
   if (!dump) {
     std::cerr << *given << " is not a dump file or a folder with one.\n";
     return exit_error;
@@ -1456,6 +1463,29 @@ private:
 using namespace xerces_cli;
 
 int main(int argc, char **argv) {
+  // The arguments as UTF-8, as every path and name in the CLI is: argv comes
+  // in the ANSI code page, so a game folder, a mod name or a pack name with a
+  // character outside it arrived as '?' (review, 2026-11-13)
+  std::vector<std::string> utf8_args;
+  std::vector<char *> utf8_argv;
+  {
+    int count = 0;
+    if (LPWSTR *wide = CommandLineToArgvW(GetCommandLineW(), &count)) {
+      for (int i = 0; i < count; ++i) {
+        utf8_args.push_back(
+            xerces_core::path_utf8(std::filesystem::path(std::wstring(wide[i]))));
+      }
+      LocalFree(wide);
+    }
+  }
+  if (!utf8_args.empty()) {
+    for (std::string &arg : utf8_args) {
+      utf8_argv.push_back(arg.data());
+    }
+    utf8_argv.push_back(nullptr);
+    argc = static_cast<int>(utf8_args.size());
+    argv = utf8_argv.data();
+  }
   const arguments args = parse_arguments(argc, argv);
   safe_output safe_errors(std::cerr);
   std::optional<safe_output> safe_text;

@@ -148,6 +148,30 @@ catalog_state scan_catalog(const game_state &game, hash_cache &cache,
       // Workshop titles carry the game's colour codes; the launcher shows
       // plain text (ids and hashes are untouched, so plans do not change).
       item.info.name = strip_color_codes(item.info.name);
+      // The same id from another folder: a Workshop item also kept as an old
+      // manual copy in the game's mods or usermaps folder (both carry its
+      // PublisherID), or mods\foo and usermaps\foo. Which copy loads is then
+      // not settled (the planner takes one, the game the other), so both rows
+      // in Mods say so (review, 2026-11-13).
+      for (std::size_t i = 0; i < result.items.size(); ++i) {
+        const installed_content &other = result.items[i];
+        if (other.info.id != item.info.id || result.sources[i] == from.name) {
+          continue;
+        }
+        const std::string message =
+            "Two copies of " + item.info.id + " are installed: " +
+            path_utf8(other.path) + " and " + path_utf8(item.path) +
+            ". Which one loads is not settled: delete the one you do not "
+            "want (the copy in the game's mods or usermaps folder is "
+            "usually an old manual one) and scan again.";
+        result.diags.add(severity::warning, "catalog.duplicate", other.folder,
+                         message);
+        if (item.folder != other.folder) {
+          result.diags.add(severity::warning, "catalog.duplicate",
+                           item.folder, message);
+        }
+        break;
+      }
       result.items.push_back(std::move(item));
       result.sources.push_back(from.name);
     }

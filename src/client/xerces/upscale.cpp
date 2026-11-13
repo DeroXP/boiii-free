@@ -189,6 +189,25 @@ void upscale(ID3D11DeviceContext *ctx) {
     skip_once("the composite did not draw into the back buffer");
     return;
   }
+  // One view per frame: in split screen every view's composite comes here,
+  // and each was drawn over the whole screen. The game's own picture then,
+  // from the frame in which a second view shows up until one frame after the
+  // last (review, 2026-11-13). Render thread only.
+  {
+    static std::uint32_t counted_present = 0;
+    static int views = 0;
+    static bool several = false;
+    const std::uint32_t now = presents.load(std::memory_order_acquire);
+    if (now != counted_present) {
+      several = views > 1;
+      views = 0;
+      counted_present = now;
+    }
+    if (++views > 1 || several) {
+      skip_once("more than one view is drawn in a frame (split screen)");
+      return;
+    }
+  }
   if (!saved.ps ||
       !gpu::view_size(saved.srvs[0], source_width, source_height)) {
     skip_once("no scene texture is bound");

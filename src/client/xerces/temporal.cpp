@@ -325,6 +325,25 @@ ID3D11ShaderResourceView *slot(ID3D11DeviceContext *ctx, const UINT index) {
 }
 
 void run(ID3D11DeviceContext *ctx) {
+  // One view per frame: two views' resolves (split screen) would share one
+  // DLSS history and one output (review, 2026-11-13). Off from the frame in
+  // which a second view shows up until one frame after the last.
+  {
+    static std::uint32_t counted_present = 0;
+    static int views = 0;
+    static bool several = false;
+    const std::uint32_t now = present_count();
+    if (now != counted_present) {
+      several = views > 1;
+      views = 0;
+      counted_present = now;
+    }
+    if (++views > 1 || several) {
+      skip_once("more than one view is drawn in a frame (split screen)");
+      jitter_on.store(false, std::memory_order_release);
+      return;
+    }
+  }
   const auto [display_width, display_height] = display_size();
   gpu::saved_state saved;
   saved.capture(ctx);

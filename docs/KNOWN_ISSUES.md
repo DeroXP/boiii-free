@@ -172,12 +172,10 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## The game and Xerces
 
-- **Found by the beta.24 review and not fixed yet.** A Workshop mod installed both
-  through Steam and as an old manual copy in the game's `mods` or `usermaps`
-  folder: which copy loads is not settled. `xerces_cli` given a folder or name
-  with characters outside the Windows code page reads them as `?`. In split
-  screen the upscaler draws each view over the whole screen. Delete the manual
-  copy, keep folder names plain, and leave the upscaler off in split screen.
+- **A Workshop mod installed twice** (through Steam and as an old manual copy in
+  the game's `mods` or `usermaps` folder): which copy loads is not settled. Since
+  beta.24 Mods says so on both rows; delete the copy you do not want and scan
+  again.
 
 - **Tested on one PC only.** This zip ran in the game on 2026-11-06 on one PC
   (Windows 11, RTX 5070 Ti): without mods and with three Workshop mods, on a

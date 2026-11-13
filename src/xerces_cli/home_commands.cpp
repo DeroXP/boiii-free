@@ -105,7 +105,7 @@ private:
 // ------------------------------------------------------------------ home
 std::optional<fs::path> home_override(const arguments &args) {
   if (const auto given = args.get("--home")) {
-    return fs::path(*given);
+    return xerces_core::path_from_utf8(*given);
   }
   return std::nullopt;
 }
@@ -896,8 +896,8 @@ found_pack find_pack(const std::string &source, const launcher_paths &paths) {
     return {decode_share_code(source), false};
   }
   std::error_code ec;
-  if (fs::is_regular_file(fs::path(source), ec)) {
-    return {read_pack_file(fs::path(source)), false};
+  if (fs::is_regular_file(xerces_core::path_from_utf8(source), ec)) {
+    return {read_pack_file(xerces_core::path_from_utf8(source)), false};
   }
   const fs::path folder = paths.config / "packs";
   const pack_library library = read_pack_library(folder);
