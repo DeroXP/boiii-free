@@ -1782,9 +1782,27 @@ int app::run() {
       const bool first = pacer.first_frame();
       pacer.presented(now());
       window_.begin_frame();
-      context_->Render();
+      if (window_.frame_open()) {
+        context_->Render();
+      }
       const bool capturing = window_.capture_pending();
       window_.present();
+      // The window stayed frozen on its last frame for good, while clicks and
+      // the controller acted on screens nobody could see (review, 2026-11-13)
+      if (window_.device_lost()) {
+        static bool told = false;
+        if (!told) {
+          told = true;
+          log_error("launcher.gpu.lost",
+                    "The graphics device was removed or reset; Xerces closes");
+          const std::wstring text = widen(
+              tr("The graphics driver was reset, and Xerces cannot draw its "
+                 "window any more. Open Xerces again."));
+          MessageBoxW(static_cast<HWND>(window_.native_handle()), text.c_str(),
+                      L"Xerces", MB_OK | MB_ICONWARNING);
+          window_.request_close();
+        }
+      }
       if (capturing && !window_.capture_pending()) {
         if (window_.last_capture_error().empty()) {
           log_info("launcher.check.captured", current_);

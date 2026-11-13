@@ -3408,8 +3408,12 @@ Checked and left:
       H's match, J starts SANCTUM OBITUS with DS4C from the lobby menu; map-first must hold.
 - [ ] Nothing prunes `%LOCALAPPDATA%\boiii\minidumps` (about 22 MB a crash): deleting the
       player's crash files is theirs to decide.
-- [ ] A lost Direct3D device in the launcher is not noticed (frozen window): rebuilding
-      the device is more than a fix in passing, and it cannot be brought about here.
+- [x] A lost Direct3D device in the launcher was not noticed: the window stayed frozen
+      while clicks acted on screens nobody saw, and a resize then drew into a null render
+      target. Now no frame is drawn without a target, and a removed or reset device is
+      logged (`launcher.gpu.lost`), told in a message box, and the launcher closes.
+      Rebuilding the device in place is not built. The ten screens in dry runs, 0 warnings
+      or errors (the new frame check); a device loss itself was not brought about.
 - [ ] Other mistyped CLI commands (mods, plan, logs) still say "Xerces is not running".
 - [ ] Judged real but not fixed by the review's sceptics: the stall sampler's suspend of the
       main thread, false "is a dependency of it" errors, the map-or-mod rule, Discord

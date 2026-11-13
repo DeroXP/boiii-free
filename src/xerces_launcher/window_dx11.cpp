@@ -86,6 +86,8 @@ struct state {
 
   bool context_dimensions_dirty = true;
   bool buffer_dimensions_dirty = true;
+  bool frame_open = false;
+  bool device_lost = false;
   Rml::Vector2i dimensions{1, 1};
   bool running = true;
   Rml::Context *context = nullptr;
@@ -602,31 +604,55 @@ bool window::process_events(Rml::Context *context, int max_wait_ms,
   return running;
 }
 
+namespace {
+bool lost(const HRESULT result) {
+  return result == DXGI_ERROR_DEVICE_REMOVED ||
+         result == DXGI_ERROR_DEVICE_RESET;
+}
+} // namespace
+
 void window::begin_frame() {
   ensure_gpu();
-  if (!s->render_interface || !s->gpu.swap_chain) {
+  s->frame_open = false;
+  if (!s->render_interface || !s->gpu.swap_chain || s->device_lost) {
     return;
   }
   if (s->buffer_dimensions_dirty) {
     s->buffer_dimensions_dirty = false;
     release_render_target();
-    s->gpu.swap_chain->ResizeBuffers(0, s->dimensions.x, s->dimensions.y,
-                                     DXGI_FORMAT_UNKNOWN, 0);
+    if (lost(s->gpu.swap_chain->ResizeBuffers(
+            0, s->dimensions.x, s->dimensions.y, DXGI_FORMAT_UNKNOWN, 0))) {
+      s->device_lost = true;
+      return;
+    }
     create_render_target();
+  }
+  // No render target view (it could not be made): the frame was cleared and
+  // drawn into a null view, which d3d11 does not survive
+  if (!s->gpu.target) {
+    return;
   }
   s->render_interface->Clear(s->gpu.target);
   s->render_interface->BeginFrame();
+  s->frame_open = true;
 }
 
+bool window::frame_open() const { return s && s->frame_open; }
+
+bool window::device_lost() const { return s && s->device_lost; }
+
 void window::present() {
-  if (!s->render_interface || !s->gpu.swap_chain) {
+  if (!s->frame_open) {
     return;
   }
+  s->frame_open = false;
   s->render_interface->EndFrame(s->gpu.target);
   if (s->capture_requested.exchange(false)) {
     capture_back_buffer();
   }
-  s->gpu.swap_chain->Present(1, 0);
+  if (lost(s->gpu.swap_chain->Present(1, 0))) {
+    s->device_lost = true;
+  }
 }
 
 void window::minimize() { ShowWindow(s->handle, SW_MINIMIZE); }

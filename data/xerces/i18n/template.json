@@ -774,6 +774,7 @@
   "The game's file was not changed.": "",
   "The game's setting": "",
   "The game, like BOIII, asks Ezz's public master servers (master.ezz.lol) for the server list whenever its main menu loads or its server browser opens, then contacts each server on the list for its players and ping. It asks Steam's web API about the Workshop items it shows. Servers you join, and players who join you, see your IP address.": "",
+  "The graphics driver was reset, and Xerces cannot draw its window any more. Open Xerces again.": "",
   "The host cannot start with a dot or a dash.": "",
   "The host decides which mods load: when you join, the game switches to the host's mods if you have them. Join modded only starts the game with yours first.": "",
   "The host's mod list could not be fetched. Joining with your own mods.": "",

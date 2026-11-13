@@ -73,7 +73,13 @@ public:
   bool process_events(Rml::Context *context, int max_wait_ms,
                       bool *pumped = nullptr);
   void begin_frame();
+  // Whether begin_frame opened a frame: the context is drawn only then
+  bool frame_open() const;
   void present();
+  // The graphics device was removed or reset (a driver update or a GPU
+  // fault). Nothing is drawn after it: the device and the renderer are made
+  // once, so the app tells the player and closes (review, 2026-11-13).
+  bool device_lost() const;
 
   void minimize();
   void toggle_maximize();
