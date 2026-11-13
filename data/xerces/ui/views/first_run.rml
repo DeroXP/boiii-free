@@ -191,7 +191,7 @@
 							<span class="fr-point-n">02</span>
 							<div class="fr-point-text">
 								<div class="fr-point-title">Never sent</div>
-								<div class="fr-point-body">No usage data or analytics, no Steam id or game identity, no full crash dumps, settings, packs or files. Full dumps stay on this PC in the game client's minidumps folder, the rest in your Xerces folder.</div>
+								<div class="fr-point-body">No usage data or analytics, no Steam id or game identity, no full crash dumps or files. Full dumps stay on this PC in the game client's minidumps folder, the rest in your Xerces folder.</div>
 								<div class="fr-point-path">{{home_path}}</div>
 							</div>
 						</div>
@@ -208,7 +208,7 @@
 						<span class="fr-switch"><span class="fr-knob"></span></span>
 					</button>
 					<div class="fr-help">Settings &gt; Privacy has the same switch and deletes the reports this PC sent.</div>
-					<div class="fr-help">Like BOIII, the game gets its server list from Ezz's master servers at each main menu and contacts the servers on it, and asks Steam about Workshop items. Servers and players you play with see your IP address. Xerces accounts come later, optional.</div>
+					<div class="fr-help">Like BOIII, the game gets its server list from Ezz's master servers at each main menu and contacts the servers on it, and asks Steam about Workshop items. Servers and players you play with see your IP address. A Xerces account is optional.</div>
 				</div>
 			</div>
 		</div>

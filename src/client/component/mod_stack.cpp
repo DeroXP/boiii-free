@@ -299,6 +299,16 @@ int32_t prepare_zones_stub(XZoneInfo *zones, const int32_t count, char *,
 
   {
     std::scoped_lock lock(mutex);
+    // Xerces: an entry script kept from a zone that is loaded again now is
+    // dropped; the zone gives its own again as it links. The top mod's zone
+    // name (zm_mod, core_mod) is the next top mod's too, so a mod taken off
+    // the stack kept its entry script running until the game was restarted
+    // (review, 2026-11-13).
+    std::erase_if(script_copies_, [&](const script_copy &copy) {
+      return std::ranges::any_of(plan, [&](const XZoneInfo &zone) {
+        return zone.name && copy.zone == zone.name;
+      });
+    });
     for (auto &[cache, sources] : precaches) {
       std::erase_if(sources, [&](const auto &source) {
         return std::ranges::any_of(plan, [&](const XZoneInfo &zone) {

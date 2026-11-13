@@ -309,19 +309,20 @@
 		<div class="set-head">
 			<div class="set-num">06</div>
 			<div class="set-title">Privacy</div>
-			<div class="set-desc">What Xerces sends: crash reports while they are on, and what the game sends online.</div>
+			<div class="set-desc">What Xerces sends: crash reports while they are on, what a Xerces account sends once you sign in, and what the game sends online.</div>
 		</div>
 		<div class="set-body">
 			<div class="field">
 				<div class="field-text">
 					<div class="field-name">Send crash reports</div>
-					<div class="field-help">When the game crashes, Xerces sends a report to the Xerces server, where the developer studies it to fix the crash. In this beta the server does not take reports yet, so they wait on this PC for up to 7 days. Off: no report is sent, and reports still waiting are removed.</div>
+					<div class="field-help">When the game crashes, Xerces sends a report to the Xerces server, where the developer studies it to fix the crash. A report the server cannot take right away waits on this PC for up to 7 days. Off: no report is sent, and reports still waiting are removed.</div>
 				</div>
 				<button id="send-crash-reports" class="toggle" data-class-on="send_crash_reports" data-event-click="toggle('crash')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="send_crash_reports">On</span><span class="toggle-state" data-if="!send_crash_reports">Off</span></button>
 			</div>
 			<div class="statement">
-				<p>A crash report holds the crash's code, the game mode, map and mods, the Xerces and game versions, this PC's Windows version, CPU, graphics card and driver, RAM and display, the last lines of the game's and Xerces' logs (without chat), and a small dump of the threads' stacks. The logs lose your Windows user name, player names and server addresses, and your user folder reads %USERPROFILE%; other folder paths stay. In the dump only the user name and player names are masked: the rest of its stack memory is raw and can hold bits of what the game was doing. A report is tied to a random id kept in your Xerces folder, never to your name or your hardware, and the server deletes it after 90 days.</p>
-				<p>Never sent: usage data or analytics, your Steam id or game identity, full crash dumps, your settings, packs or files.</p>
+				<p>A crash report holds the crash's code, the game mode, map and mods, the Xerces and game versions, this PC's Windows version, CPU, graphics card and driver, RAM and display, the last lines of the game's and Xerces' logs (without chat), the game's own text report about the crash (what happened, the threads' stacks, the scripts running, memory and the Xerces and display settings), and a small dump of the threads' stacks. The logs lose your Windows user name, player names and server addresses, and your user folder reads %USERPROFILE%; other folder paths stay. In the dump only the user name and player names are masked: the rest of its stack memory is raw and can hold bits of what the game was doing. A report is tied to a random id kept in your Xerces folder, never to your name or your hardware, and the server deletes it after 90 days.</p>
+				<p>Never sent: usage data or analytics, your Steam id or game identity, full crash dumps, or your files.</p>
+				<p>With a Xerces account (the Friends tab; nothing is sent before you sign in) the Xerces server gets your username and sign-in, whether you are online or in a game, its mode and whether your lobby is open, your friends, blocks and privacy choices, and with each invite your lobby's internet address and port and the list of mods the game runs.</p>
 				<p>The game, like BOIII, asks Ezz's public master servers (master.ezz.lol) for the server list whenever its main menu loads or its server browser opens, then contacts each server on the list for its players and ping. It asks Steam's web API about the Workshop items it shows. Servers you join, and players who join you, see your IP address.</p>
 				<p>Voice chat in the game reaches the other players. Xerces starts a new game profile on push-to-talk (talk key B unless you rebind it) and leaves a profile you already have as it is. Not yet checked in the game.</p>
 			</div>

@@ -114,9 +114,8 @@
 		<div>
 			<div class="panel-head">
 				<span class="panel-title">Friends</span>
-				<span class="panel-count">Coming with accounts</span>
 			</div>
-			<div class="empty-note">Friends, presence and invites arrive with Xerces accounts. Until then nothing about you is sent for them.</div>
+			<div class="empty-note">Friends, presence and invites are on the Friends tab. Nothing about you is sent for them until you sign in there.</div>
 		</div>
 
 		<div>
