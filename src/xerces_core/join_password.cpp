@@ -614,16 +614,26 @@ void host_guard::admit(std::string_view peer) {
 }
 
 // ------------------------------------------------------------ the words
+// A host that takes invited players only says so the same way as a host with
+// a password (getinfo has one flag for both): named here, or a joiner was sent
+// for a password the host does not have (review, 2026-11-13).
+constexpr std::string_view invite_only_hint =
+    " If the host set no password, its lobby takes invited players only: ask "
+    "the host to invite you from Friends in Xerces, or to set Who can join to "
+    "Anyone there.";
+
 std::string needed_message() {
   return "This game needs a password. Ask the host for it, type set "
          "net_password followed by the password in the game's console, then "
-         "join again.";
+         "join again." +
+         std::string(invite_only_hint);
 }
 
 std::string wrong_message() {
   return "Wrong password. The password in net_password is not the host's. "
          "Ask the host for it, type set net_password followed by the password "
-         "in the game's console, then join again.";
+         "in the game's console, then join again." +
+         std::string(invite_only_hint);
 }
 
 std::string wait_message(const std::uint32_t seconds) {

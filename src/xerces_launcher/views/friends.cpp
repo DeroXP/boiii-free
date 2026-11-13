@@ -636,8 +636,12 @@ private:
     service_->watch_join(join_->plan);
     owner_->notify(owner_->tr("Starting the game to join your friend."));
     finish_join();
+    // "Close Xerces on launch" only minimises here: the hole punch for this
+    // join is asked for by the friends worker once the game reaches its
+    // menu, tens of seconds from now, and a closed launcher never asked
+    // (review, 2026-11-13)
     if (outcome.started && svc.config().close_on_launch) {
-      owner_->win().request_close();
+      owner_->win().minimize();
     }
   }
 

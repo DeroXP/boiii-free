@@ -645,6 +645,10 @@ TEST_CASE("join password: the words the player looks for") {
   CHECK(wrong_message().starts_with("Wrong password."));
   CHECK(contains(needed_message(), "set net_password"));
   CHECK(contains(wrong_message(), "set net_password"));
+  // An invite-only host looks like a password host to the joiner: both texts
+  // name it
+  CHECK(contains(needed_message(), "invited players only"));
+  CHECK(contains(wrong_message(), "invited players only"));
   CHECK(contains(wait_message(30), "30 seconds"));
   CHECK(contains(wait_message(1), "1 second."));
   CHECK(contains(wait_message(0), "1 second."));

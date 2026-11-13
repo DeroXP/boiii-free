@@ -207,6 +207,16 @@ private:
   Rml::ElementDocument *dialog_doc_ = nullptr;
   bool dialog_open_ = false;
   std::function<void(int)> dialog_done_;
+  // Dialogs asked for while one is open, shown in turn. Replacing the open
+  // one answered it with Cancel: a second friend's Discord Ask to Join turned
+  // the first one down unseen (review, 2026-11-13).
+  struct queued_dialog {
+    std::string title;
+    std::string body;
+    std::vector<std::string> buttons;
+    std::function<void(int)> done;
+  };
+  std::deque<queued_dialog> dialog_queue_;
   std::vector<std::unique_ptr<Rml::EventListener>> listeners_;
 
   std::string language_ = "en";

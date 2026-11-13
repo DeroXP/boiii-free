@@ -441,6 +441,7 @@ void app::shutdown() {
   }
   context_ = nullptr;
   dialog_doc_ = nullptr;
+  dialog_queue_.clear(); // their callbacks hold the screens' pointers
   for (auto &e : views_) {
     e.screen.reset();
   }
@@ -895,7 +896,9 @@ void app::dialog(const std::string &title, const std::string &body,
     return;
   }
   if (dialog_open_) {
-    close_dialog(-1);
+    dialog_queue_.push_back(
+        {title, body, std::move(buttons), std::move(done)});
+    return;
   }
   dialog_doc_->GetElementById("dialog-title")->SetInnerRML(escape(tr(title)));
   dialog_doc_->GetElementById("dialog-body")->SetInnerRML(escape(tr(body)));
@@ -935,6 +938,13 @@ void app::close_dialog(int choice) {
   log_info("launcher.dialog.closed", std::to_string(choice));
   if (done) {
     done(choice);
+  }
+  // The next one asked for meanwhile (one opened by `done` comes first)
+  if (!dialog_open_ && !dialog_queue_.empty()) {
+    queued_dialog next = std::move(dialog_queue_.front());
+    dialog_queue_.pop_front();
+    dialog(next.title, next.body, std::move(next.buttons),
+           std::move(next.done));
   }
 }
 

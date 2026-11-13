@@ -5,6 +5,8 @@
 #include <future>
 
 #include <xerces_core/ipc.hpp>
+#include <xerces_core/join_check.hpp>
+#include <xerces_core/join_password.hpp>
 #include <xerces_core/json.hpp>
 #include <xerces_core/launch.hpp>
 
@@ -775,6 +777,15 @@ friends_service::send_game_invite(const std::string &user_id,
                   "in the lobby's menu.");
   }
   std::string address = host.mapped;
+  // A router that is behind another one, or behind the provider's shared
+  // address, or did not say its address, answers UPnP with an address no
+  // friend can dial: the address the backend sees and the hole punch then
+  // (review, 2026-11-13)
+  if (xerces_core::classify_ipv4(
+          xerces_core::join_password::endpoint_ip(address)) !=
+      xerces_core::ipv4_scope::public_net) {
+    address.clear();
+  }
   if (address.empty()) {
     // No UPnP answer: the address the backend sees, and the game's port.
     // The hole punch opens the router for the one joining (most routers
