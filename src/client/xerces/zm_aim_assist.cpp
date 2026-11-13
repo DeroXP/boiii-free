@@ -16,8 +16,9 @@
 //   any direction;
 // - both need a clear line of sight and fade with distance.
 //
-// There is no pull toward a target and no snap when aiming down sights: those
-// games have neither. Only zombies (actors) count. It is off in multiplayer
+// There is no pull sideways toward a target and no snap when aiming down
+// sights: those games have neither. Only zombies (actors) count, and only
+// live ones the player can see (below). It is off in multiplayer
 // and campaign, in menus and the console, while the window is not in front,
 // and without a controller (it reads the sticks itself, so a mouse never gets
 // it). xerces_zm_aimAssist: 0 the game's own only, 1 "Modern", 2 "Modern,
@@ -31,6 +32,29 @@
 // 60% slowdown (95% and 75% for "Stronger"), all of it from 1.5 m (rotation)
 // and 1 m (slowdown), 0.85 of the slowdown from the hip, a bubble a third
 // larger, and the left stick counts from 15% sideways.
+//
+// The user played that (beta.24, 2026-11-13, with a controller) and found
+// "Modern" too strong, not "Stronger": the request for more had been made
+// with the setting off. So "Modern" is under those games' own numbers now
+// (50% rotation, 40% slowdown, 0.65 of it from the hip, their bubble, all of
+// it only from 3 m and 2 m), about half of what it was at 1 to 3 m; "Stronger"
+// is what it was. From the same playtest:
+// - a dying zombie is no target. Measured in the game (xerces_aim_actors): a
+//   live zombie's state flags are 0x01; the frame it dies they are 0x10, a
+//   quarter of a second later it is a ragdoll, a second later a corpse entity.
+//   The view used to follow the body to the floor.
+// - a zombie the player cannot see is no target. The sight check's "head" was
+//   12 units above a zombie's real head (the box is 10 under the feet to 90
+//   over them; a zombie is about 70 tall), so one wholly behind a low wall
+//   or a car counted as seen. The points are the neck and the middle of the
+//   head now, foliage and no-sight brushes block as walls do, and the nearest
+//   zombie that is seen is taken, not the nearest whatever is in front of it.
+// - the view settles on the neck, with leeway: between the middle of the
+//   torso and the top of the head nothing moves the view up or down but the
+//   player (head and torso are both theirs to choose); below or above that,
+//   with a zombie in the bubble and the stick in use, the view drifts back to
+//   the nearer edge. That much is a pull, up and down only, because the user
+//   asked for it.
 //
 // Where the game keeps things was measured in the running game on 2026-11-11
 // (xerces_aim_debug), because Xerces' layouts of this data are not exact:
@@ -65,41 +89,88 @@ namespace {
 using game::vec3_t;
 
 // ------------------------------------------------------------------ rules
-struct rules {
-  float rotation; // share of the target's motion across the view followed
-  float slowdown; // share of your own look speed taken away in the bubble
-};
-// Those games' own are 0.60 and 0.50; see the top for why these are more
-constexpr rules GAME_STRENGTH{0.75f, 0.60f};
-constexpr rules STRONGER{0.95f, 0.75f};
-
-constexpr float HIP_SLOWDOWN = 0.85f;   // slowdown from the hip, of the above
-constexpr float ROTATION_PITCH = 0.85f; // the vertical share of rotation
-constexpr float STRAFE_MIN = 0.15f;     // left stick sideways that counts
-constexpr float AIM_MIN = 0.05f;        // right stick that counts
-// The bubble: half its width and height in screen units (-1 to 1), all of the
-// assist inside ZONE_FULL of it and none at its edge (those games': 0.14 by
-// 0.19)
-constexpr float BUBBLE_X = 0.19f;
-constexpr float BUBBLE_Y = 0.25f;
-constexpr float ZONE_FULL = 0.75f;
-constexpr float UNITS_PER_METRE = 39.37f;
-// The sights count as up when the view is this much narrower than from the hip
-constexpr float SIGHTS_UP_FOV = 0.93f;
-
 struct ramp_point {
   float metres;
   float gain;
 };
-// Those games': slowdown from nothing at 0 m to full at 3 m; rotation from
-// nothing at 0 m to full at 6 m, 0.3 at 50 m and 0.05 at 70 m
-constexpr ramp_point RANGE_SLOWDOWN[] = {
+struct rules {
+  float rotation; // share of the target's motion across the view followed
+  float slowdown; // share of your own look speed taken away in the bubble
+  float hip;      // slowdown from the hip, of the above
+  // The bubble: half its width and height in screen units (-1 to 1), all of
+  // the assist inside ZONE_FULL of it and none at its edge
+  float bubble_x;
+  float bubble_y;
+  // How much of each is left by distance
+  const ramp_point *range_rotation;
+  size_t range_rotation_count;
+  const ramp_point *range_slowdown;
+  size_t range_slowdown_count;
+};
+// Those games' own: slowdown from nothing at 0 m to full at 3 m; rotation
+// from nothing at 0 m to full at 6 m, 0.3 at 50 m and 0.05 at 70 m.
+// "Modern": a little of each up close, all of it from 2 m and 3 m.
+constexpr ramp_point MODERN_SLOWDOWN[] = {
+    {0.0f, 0.35f}, {2.0f, 1.0f}, {50.0f, 1.0f}, {100.0f, 0.0f}};
+constexpr ramp_point MODERN_ROTATION[] = {{0.0f, 0.2f},   {3.0f, 1.0f},
+                                          {35.0f, 1.0f},  {50.0f, 0.5f},
+                                          {70.0f, 0.15f}, {95.0f, 0.0f}};
+// "Stronger": what "Modern" was until 2026-11-13
+constexpr ramp_point STRONGER_SLOWDOWN[] = {
     {0.0f, 0.5f}, {1.0f, 1.0f}, {50.0f, 1.0f}, {100.0f, 0.0f}};
-constexpr ramp_point RANGE_ROTATION[] = {{0.0f, 0.35f},  {1.5f, 1.0f},
-                                         {35.0f, 1.0f},  {50.0f, 0.5f},
-                                         {70.0f, 0.15f}, {95.0f, 0.0f}};
+constexpr ramp_point STRONGER_ROTATION[] = {{0.0f, 0.35f},  {1.5f, 1.0f},
+                                            {35.0f, 1.0f},  {50.0f, 0.5f},
+                                            {70.0f, 0.15f}, {95.0f, 0.0f}};
+// Those games' own are 0.60 rotation, 0.50 slowdown, 0.6 from the hip and a
+// bubble of 0.14 by 0.19; see the top for these
+constexpr rules GAME_STRENGTH{0.50f,
+                              0.40f,
+                              0.65f,
+                              0.15f,
+                              0.20f,
+                              MODERN_ROTATION,
+                              std::size(MODERN_ROTATION),
+                              MODERN_SLOWDOWN,
+                              std::size(MODERN_SLOWDOWN)};
+constexpr rules STRONGER{0.95f,
+                         0.75f,
+                         0.85f,
+                         0.19f,
+                         0.25f,
+                         STRONGER_ROTATION,
+                         std::size(STRONGER_ROTATION),
+                         STRONGER_SLOWDOWN,
+                         std::size(STRONGER_SLOWDOWN)};
 
-template <size_t N> float ramp(float x, const ramp_point (&points)[N]) {
+constexpr float ROTATION_PITCH = 0.85f; // the vertical share of rotation
+constexpr float STRAFE_MIN = 0.15f;     // left stick sideways that counts
+constexpr float AIM_MIN = 0.05f;        // right stick that counts
+constexpr float ZONE_FULL = 0.75f;
+
+// A zombie, as shares of its box's height from the box's bottom. The box is
+// 100 high, from 10 under the feet (measured, 2026-11-13); in units over the
+// feet these are 6, 40, 57, 64, 68 and 70.
+constexpr float BODY_BOTTOM = 0.16f; // the bubble's lower edge on it
+constexpr float BODY_TORSO =
+    0.50f; // the middle of the torso: the leeway's lower edge
+constexpr float BODY_NECK = 0.67f;  // what the rotation follows
+constexpr float BODY_HEAD = 0.74f;  // the middle of the head
+constexpr float BODY_CROWN = 0.78f; // the leeway's upper edge
+constexpr float BODY_TOP = 0.80f;   // the bubble's upper edge on it
+// Outside the leeway the view drifts back to its nearer edge: this share of
+// what is left a second, and never more than SETTLE_MAX degrees a second
+constexpr float SETTLE_GAIN = 4.0f;
+constexpr float SETTLE_MAX = 20.0f;
+// A dead actor's state flags (lerp.eFlags), from the frame it dies
+constexpr int32_t ACTOR_DEAD = 0x10;
+// What blocks the player's sight: solid, foliage, and the brushes that stop
+// AI seeing and bullets passing (1, 2, 0x1000, 0x2000)
+constexpr uint32_t SIGHT_MASK = 0x3003;
+constexpr float UNITS_PER_METRE = 39.37f;
+// The sights count as up when the view is this much narrower than from the hip
+constexpr float SIGHTS_UP_FOV = 0.93f;
+
+float ramp(float x, const ramp_point *points, const size_t N) {
   if (x <= points[0].metres) {
     return points[0].gain;
   }
@@ -120,8 +191,9 @@ float zone(float e) {
 
 // Test only: XERCES_AIM_TEST=1 acts as a controller with the left stick held
 // sideways (and the game's window need not be in front), and logs what the
-// assist did each second
+// assist did each second (XERCES_AIM_TEST=4: four times a second)
 bool test_pad = false;
+int64_t log_every_ms = 1000;
 
 // ------------------------------------------------------------- controller
 using xinput_get_state_t = DWORD(WINAPI *)(DWORD, XINPUT_STATE *);
@@ -330,12 +402,13 @@ bool in_zombies_level() {
          game::cg::cgArray[0].snap && game::cg::cgArray[0].nextSnap;
 }
 
-bool visible(int self, const vec3_t &eye, const vec3_t &point) {
+bool visible(int self, const vec3_t &eye, const vec3_t &point,
+             const uint32_t mask = SIGHT_MASK) {
   game::cm::trace_t trace{};
   trace.fraction = 1.0f;
   int hit = self;
-  constexpr game::contents_t SOLID = 1;
-  game::cg::CG_SightTracePoint(&hit, &eye, &point, SOLID, &trace);
+  game::cg::CG_SightTracePoint(&hit, &eye, &point,
+                               static_cast<game::contents_t>(mask), &trace);
   return trace.fraction >= 0.97f;
 }
 
@@ -366,6 +439,7 @@ struct state {
   float target_metres = 0.0f;
   float strength = 0.0f;
   float slow = 0.0f;
+  float settle = 0.0f; // degrees outside the leeway: up positive
   bool sights_up = false;
   // sums since the last test log line
   double sum_motion = 0.0;   // degrees the target moved across the view
@@ -412,14 +486,26 @@ struct candidate {
   bool had_previous = false;
   float previous_yaw = 0.0f;
   float previous_pitch = 0.0f;
-  vec3_t chest{};
+  vec3_t neck{};
   vec3_t head{};
+  // the leeway, as elevations from the eye in degrees: the middle of the
+  // torso and the top of the head
+  float leeway_low = 0.0f;
+  float leeway_high = 0.0f;
 };
 
-// The zombie nearest the middle of the bubble (up to half as far again out as
-// its edge), and every zombie's place this frame noted for the next
-candidate find_target(const camera &cam) {
-  candidate best;
+// How many of the nearest are tried for one the player sees
+constexpr int CANDIDATES = 3;
+struct candidates {
+  candidate list[CANDIDATES];
+  int count = 0;
+};
+
+// The live zombies nearest the middle of the bubble (up to half as far again
+// out as its edge), nearest first, and every zombie's place this frame noted
+// for the next
+candidates find_targets(const camera &cam, const rules &r) {
+  candidates found;
   const float view_elevation = -cam.pitch;
   const float cos_pitch = std::cos(cam.pitch / RAD);
   auto &entities = game::cg::cg_entitiesArray[0].entities;
@@ -427,6 +513,12 @@ candidate find_target(const camera &cam) {
     const auto &cent = entities[i];
     if (!cent.nextValid ||
         static_cast<uint8_t>(cent.pose.eType) != 0x12 /* ET_ACTOR */) {
+      continue;
+    }
+    // dying or dead: no target, and no motion of its body is followed
+    if ((cent.nextState.lerp.eFlags & ACTOR_DEAD) != 0 || cent.pose.isRagdoll ||
+        cent.pose.ragdollHandle != 0) {
+      st.tracks[i].frame = 0;
       continue;
     }
     const vec3_t &origin = cent.pose.origin;
@@ -442,8 +534,8 @@ candidate find_target(const camera &cam) {
     const float dx = origin.x - cam.eye.x;
     const float dy = origin.y - cam.eye.y;
     const float flat = std::sqrt(dx * dx + dy * dy);
-    const float chest_z = bottom + height * 0.67f;
-    const float dz = chest_z - cam.eye.z;
+    const float neck_z = bottom + height * BODY_NECK;
+    const float dz = neck_z - cam.eye.z;
     const float dist = std::sqrt(flat * flat + dz * dz);
     if (dist < 2.0f || dist > 100.0f * UNITS_PER_METRE) {
       continue;
@@ -457,10 +549,13 @@ candidate find_target(const camera &cam) {
     track = {st.frame, yaw, pitch};
 
     // where it is on screen from the crosshair: sideways to its middle line,
-    // and up and down nothing anywhere between its feet and the top of its head
+    // and up and down nothing anywhere between its shins and the top of its
+    // head (the box itself goes on 20 units over the head)
     const float ex = std::abs(normalize(yaw - cam.yaw)) * cos_pitch;
-    const float low = std::atan2(bottom + 10.0f - cam.eye.z, flat) * RAD;
-    const float high = std::atan2(bottom + height - cam.eye.z, flat) * RAD;
+    const float low =
+        std::atan2(bottom + height * BODY_BOTTOM - cam.eye.z, flat) * RAD;
+    const float high =
+        std::atan2(bottom + height * BODY_TOP - cam.eye.z, flat) * RAD;
     const float ev = view_elevation >= low && view_elevation <= high
                          ? 0.0f
                          : std::min(std::abs(view_elevation - low),
@@ -468,40 +563,59 @@ candidate find_target(const camera &cam) {
     if (ex > 60.0f || ev > 60.0f) {
       continue;
     }
-    const float sx = std::tan(ex / RAD) / cam.tan_x / BUBBLE_X;
-    const float sy = std::tan(ev / RAD) / cam.tan_y / BUBBLE_Y;
+    const float sx = std::tan(ex / RAD) / cam.tan_x / r.bubble_x;
+    const float sy = std::tan(ev / RAD) / cam.tan_y / r.bubble_y;
     const float e = std::sqrt(sx * sx + sy * sy);
-    if (e > 1.5f || (best.index >= 0 && e >= best.e)) {
+    if (e > 1.5f) {
       continue;
     }
-    best.index = i;
-    best.e = e;
-    best.dist = dist;
-    best.yaw = yaw;
-    best.pitch = pitch;
-    best.had_previous = had_previous;
-    best.previous_yaw = previous_yaw;
-    best.previous_pitch = previous_pitch;
-    best.chest = origin;
-    best.chest.z = chest_z;
-    best.head = origin;
-    best.head.z = bottom + height * 0.92f;
+    // kept in order, nearest the middle first
+    int place = found.count;
+    while (place > 0 && found.list[place - 1].e > e) {
+      --place;
+    }
+    if (place >= CANDIDATES) {
+      continue;
+    }
+    for (int k = std::min(found.count, CANDIDATES - 1); k > place; --k) {
+      found.list[k] = found.list[k - 1];
+    }
+    found.count = std::min(found.count + 1, CANDIDATES);
+    candidate &c = found.list[place];
+    c.index = i;
+    c.e = e;
+    c.dist = dist;
+    c.yaw = yaw;
+    c.pitch = pitch;
+    c.had_previous = had_previous;
+    c.previous_yaw = previous_yaw;
+    c.previous_pitch = previous_pitch;
+    c.neck = origin;
+    c.neck.z = neck_z;
+    c.head = origin;
+    c.head.z = bottom + height * BODY_HEAD;
+    c.leeway_low =
+        std::atan2(bottom + height * BODY_TORSO - cam.eye.z, flat) * RAD;
+    c.leeway_high =
+        std::atan2(bottom + height * BODY_CROWN - cam.eye.z, flat) * RAD;
   }
-  return best;
+  return found;
 }
 
 void test_log() {
-  if (!test_pad || now_ms() - st.last_log_ms < 1000) {
+  if (!test_pad || now_ms() - st.last_log_ms < log_every_ms) {
     return;
   }
   st.last_log_ms = now_ms();
   char text[256];
   std::snprintf(text, sizeof(text),
-                "target %d at %.1f m, e %.2f, rotation %.2f, slowdown %.2f; "
-                "last second: %d frames in the bubble, target moved %.2f deg, "
-                "view followed %.2f deg",
+                "target %d at %.1f m, e %.2f, rotation %.2f, slowdown %.2f, "
+                "%.1f deg outside the leeway, pitch %.2f; "
+                "since the last line: %d frames in the bubble, target moved "
+                "%.2f deg, view followed %.2f deg",
                 st.target, st.target_metres, st.target_e, st.strength, st.slow,
-                st.frames_in_bubble, st.sum_motion, st.sum_rotation);
+                st.settle, st.client_pitch, st.frames_in_bubble, st.sum_motion,
+                st.sum_rotation);
   xerces_runtime::log_info("xerces.aim_assist.test", text);
   st.sum_motion = st.sum_rotation = 0.0;
   st.frames_in_bubble = 0;
@@ -581,19 +695,36 @@ void frame() {
   st.target = -1;
   st.strength = 0.0f;
   st.slow = 0.0f;
-  const candidate found = find_target(cam);
-  if (found.index >= 0 && dt > 0.0f && dt < 0.25f &&
-      (visible(client, cam.eye, found.chest) ||
-       visible(client, cam.eye, found.head))) {
+  st.settle = 0.0f;
+  // The nearest to the middle that the player sees (its neck or its head):
+  // one behind a wall is no target, whatever stands nearer the crosshair
+  candidate found;
+  if (dt > 0.0f && dt < 0.25f) {
+    const candidates closest = find_targets(cam, r);
+    for (int k = 0; k < closest.count; ++k) {
+      const candidate &c = closest.list[k];
+      if (visible(client, cam.eye, c.neck) ||
+          visible(client, cam.eye, c.head)) {
+        found = c;
+        break;
+      }
+    }
+  } else {
+    find_targets(cam, r); // the zombies' places, for the next frame
+  }
+  if (found.index >= 0) {
     const float metres = found.dist / UNITS_PER_METRE;
     const float in_zone = zone(found.e);
-    float slow = r.slowdown * in_zone * ramp(metres, RANGE_SLOWDOWN);
+    float slow = r.slowdown * in_zone *
+                 ramp(metres, r.range_slowdown, r.range_slowdown_count);
     if (!st.sights_up) {
-      slow *= HIP_SLOWDOWN;
+      slow *= r.hip;
     }
     const bool input = pad.strafe >= STRAFE_MIN || pad.aim >= AIM_MIN;
     const float strength =
-        input ? r.rotation * in_zone * ramp(metres, RANGE_ROTATION) : 0.0f;
+        input ? r.rotation * in_zone *
+                    ramp(metres, r.range_rotation, r.range_rotation_count)
+              : 0.0f;
 
     // how far the target moved across the view this frame; a jump of more
     // than 500 degrees a second is a respawn, not a move
@@ -609,6 +740,23 @@ void frame() {
     }
     add_yaw += strength * moved_yaw;
     add_pitch += strength * moved_pitch * ROTATION_PITCH;
+    // The neck, with leeway: between the middle of the torso and the top of
+    // the head the height is the player's own. Outside it, in the bubble and
+    // with the stick in use, the view drifts to the nearer edge (the game's
+    // pitch: down is positive).
+    if (input && in_zone > 0.0f) {
+      const float elevation = -cam.pitch;
+      float off = 0.0f; // degrees to go: up positive
+      if (elevation < found.leeway_low) {
+        off = found.leeway_low - elevation;
+      } else if (elevation > found.leeway_high) {
+        off = found.leeway_high - elevation;
+      }
+      const float step =
+          std::clamp(off * SETTLE_GAIN, -SETTLE_MAX, SETTLE_MAX) * dt * in_zone;
+      add_pitch -= std::abs(step) > std::abs(off) ? off : step;
+      st.settle = off;
+    }
     // slowdown acts on what the right stick turned, not on recoil
     if (pad.aim >= AIM_MIN && slow > 0.0f) {
       add_yaw -= own_yaw * slow;
@@ -657,19 +805,83 @@ void debug() {
     const bool camera_ok = read_camera(cam, client);
     float angles[2] = {0.0f, 0.0f};
     const float *view = client_angles(angles);
-    std::snprintf(line, sizeof(line),
-                  "\ncamera %s: eye %.1f %.1f %.1f, pitch %.2f, yaw %.2f, "
-                  "tangents %.3f %.3f, sights %s\nclient angles %s: %.2f %.2f"
-                  "\ntarget %d at %.1f m, e %.2f, rotation %.2f, slowdown %.2f",
-                  camera_ok ? "ok" : "NOT ok", cam.eye.x, cam.eye.y, cam.eye.z,
-                  cam.pitch, cam.yaw, cam.tan_x, cam.tan_y,
-                  st.sights_up ? "up" : "down", view ? "ok" : "NOT ok",
-                  angles[0], angles[1], st.target,
-                  st.target_metres, st.target_e, st.strength, st.slow);
+    std::snprintf(
+        line, sizeof(line),
+        "\ncamera %s: eye %.1f %.1f %.1f, pitch %.2f, yaw %.2f, "
+        "tangents %.3f %.3f, sights %s\nclient angles %s: %.2f %.2f"
+        "\ntarget %d at %.1f m, e %.2f, rotation %.2f, slowdown %.2f, "
+        "%.1f deg outside the leeway",
+        camera_ok ? "ok" : "NOT ok", cam.eye.x, cam.eye.y, cam.eye.z, cam.pitch,
+        cam.yaw, cam.tan_x, cam.tan_y, st.sights_up ? "up" : "down",
+        view ? "ok" : "NOT ok", angles[0], angles[1], st.target,
+        st.target_metres, st.target_e, st.strength, st.slow, st.settle);
     text += line;
   }
   xerces_runtime::log_info("xerces.aim_assist.debug", text);
   printf("%s\n", text.c_str());
+}
+// Every actor within 40 m as the game has it right now, to the log: what tells
+// a live zombie from a dying or dead one and a seen one from a hidden one was
+// measured with this (2026-11-13). xerces_aim_actors [times]: that many
+// lists, a quarter of a second apart.
+void list_actors() {
+  if (!in_zombies_level()) {
+    xerces_runtime::log_info("xerces.aim_assist.actors", "not in a level");
+    return;
+  }
+  camera cam;
+  int client = 0;
+  if (!read_camera(cam, client)) {
+    xerces_runtime::log_info("xerces.aim_assist.actors", "no camera");
+    return;
+  }
+  std::string text;
+  int listed = 0;
+  auto &entities = game::cg::cg_entitiesArray[0].entities;
+  for (int i = 0; i < ENTITIES && listed < 24; ++i) {
+    const auto &cent = entities[i];
+    const auto type = static_cast<uint8_t>(cent.pose.eType);
+    if (type < 0x12 || type > 0x14) {
+      continue;
+    }
+    const vec3_t &origin = cent.pose.origin;
+    const float dx = origin.x - cam.eye.x;
+    const float dy = origin.y - cam.eye.y;
+    const float dz = origin.z - cam.eye.z;
+    const float metres =
+        std::sqrt(dx * dx + dy * dy + dz * dz) / UNITS_PER_METRE;
+    if (metres > 40.0f) {
+      continue;
+    }
+    vec3_t chest = origin;
+    chest.z += 57.0f; // the neck
+    char line[320];
+    std::snprintf(
+        line, sizeof(line),
+        "\n#%d type %02X valid %d %.1fm box %.0f..%.0f (%.0f wide) eye %.0f "
+        "flags %08X %08X prev %08X "
+        "solid %08X team %d ragdoll %d/%d bits %08X %08X %08X aimvis %d "
+        "hidden %d rendered %d sight %d",
+        i, type, cent.nextValid ? 1 : 0, metres, cent.pose.absmin.z - origin.z,
+        cent.pose.absmax.z - origin.z, cent.pose.absmax.x - cent.pose.absmin.x,
+        cam.eye.z - origin.z, static_cast<uint32_t>(cent.nextState.lerp.eFlags),
+        static_cast<uint32_t>(cent.nextState.lerp.eFlags2),
+        static_cast<uint32_t>(cent.prevState.eFlags),
+        static_cast<uint32_t>(cent.nextState.solid),
+        static_cast<int>(cent.nextState.team), cent.pose.isRagdoll ? 1 : 0,
+        cent.pose.ragdollHandle != 0 ? 1 : 0, cent.packed_bits[0],
+        cent.packed_bits[1], cent.packed_bits[2],
+        cent.bAimTargetVisible ? 1 : 0, cent.bIsHiddenOnClient ? 1 : 0,
+        cent.bRenderedLastFrame ? 1 : 0,
+        visible(client, cam.eye, chest) ? 1 : 0);
+    text += line;
+    // the same with only solid blocking, as before 2026-11-13
+    text += visible(client, cam.eye, chest, 1) ? " (solid only 1)"
+                                               : " (solid only 0)";
+    ++listed;
+  }
+  xerces_runtime::log_info("xerces.aim_assist.actors",
+                           std::to_string(listed) + " actors" + text);
 }
 } // namespace
 
@@ -690,10 +902,22 @@ public:
     load_xinput();
     wchar_t buffer[4];
     test_pad = GetEnvironmentVariableW(L"XERCES_AIM_TEST", buffer, 4) > 0 &&
-               buffer[0] == L'1';
+               (buffer[0] == L'1' || buffer[0] == L'4');
+    log_every_ms = test_pad && buffer[0] == L'4' ? 250 : 1000;
     hunk_alloc_hook.create(game::hunk::Hunk_UserAlloc.get(), hunk_alloc_stub);
     scheduler::loop(frame, scheduler::main);
     command::add("xerces_aim_debug", [] { debug(); });
+    command::add("xerces_aim_actors", [](const command::params &params) {
+      const int times =
+          params.size() > 1 ? std::clamp(std::atoi(params.get(1)), 1, 80) : 1;
+      const int every = params.size() > 2
+                            ? std::clamp(std::atoi(params.get(2)), 20, 2000)
+                            : 250;
+      for (int i = 0; i < times; ++i) {
+        scheduler::once(list_actors, scheduler::main,
+                        std::chrono::milliseconds(every * i));
+      }
+    });
   }
 };
 } // namespace xerces_zm_aim_assist

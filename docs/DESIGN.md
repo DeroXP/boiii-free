@@ -2037,6 +2037,41 @@ the rotation at 50 m and 15% at 70 m. Measured with the simulated stick: the vie
 followed 75% of a zombie's motion from 4 m to 26 m (95% with "Stronger"), 0.53 at
 0.8 m, slowdown 0.51 from the hip.
 
+After the user's controller playtest of beta.24 (2026-11-13: "Modern" too strong,
+not "Stronger"; it went onto dead zombies and ones out of sight; it should line up
+around the neck with leeway to the head and the torso):
+
+- "Modern" is 50% rotation and 40% slowdown, 0.65 of the slowdown from the hip,
+  a bubble of 0.15 by 0.20, rotation full from 3 m (0.2 of it at 0 m) and slowdown
+  from 2 m (0.35 at 0 m): about half of what it was at 1 to 3 m, and a little
+  under those games' own. "Stronger" keeps 95% and 75% and the rest as it was.
+  Measured with the simulated stick: rotation 0.50 and slowdown 0.26 from 3 m,
+  0.21 and 0.16 at 0.8 m; "Stronger" 0.95 and 0.64.
+- A dying zombie is no target. Measured (`xerces_aim_actors`, which lists every
+  actor near the player as the game has it): a live zombie's state flags
+  (`lerp.eFlags`) are 0x01; the frame it dies they are 0x10, a quarter of a second
+  later it is a ragdoll, a second later a corpse entity (`ET_ACTOR_CORPSE`, a new
+  slot). The view used to follow the body down. Seen: every zombie killed at once,
+  no target from that frame, the view still.
+- Out of sight is no target. A zombie's box is 100 high, from 10 under its feet,
+  and the sight check's "head" was at 0.92 of it: 12 units over a real head, in
+  the open above a low wall or a car with the zombie wholly behind it. The check
+  points are the neck (0.67, 57 over the feet) and the middle of the head (0.74)
+  now; foliage and the brushes that stop AI sight and bullets block as solid does
+  (mask 0x3003; the same answers as solid alone for the zombies listed in the
+  test); and of the three zombies nearest the middle of the bubble the first that
+  is seen is taken, where the nearest used to be taken and dropped if hidden.
+- The neck, with leeway: between the middle of the torso (0.50) and the top of the
+  head (0.78) the height is the player's. With the crosshair under or over that,
+  a zombie in the bubble and the stick in use, the view drifts to the nearer edge,
+  four times what is left a second and never more than 20 degrees a second. Seen:
+  from a zombie's shins at 0.8 m the view rose 22 degrees to the torso and
+  stopped; on the neck it did not move; from over the head at 6 m it came down
+  3.9 degrees. This is a pull, up and down only, which those games do not have:
+  the user asked for it.
+- The bubble's height on a zombie is its shins to the top of its head (0.16 to
+  0.80 of the box), not the whole box, which goes on 20 units over the head.
+
 It reads the controller itself (XInput), so a mouse never gets it, and it is off in
 menus, in the console and while the window is not in front. Zombies are the game's
 actors (`ET_ACTOR`) in the client's entities; their place is their bounds.

@@ -131,9 +131,11 @@ hash, sent with the link, shows that the zip is the one we made.
   SETTINGS > CONTROLLER > Aim Assist (Zombies): Game's Own, Modern (MW3) or Modern,
   Stronger. It is on Game's Own until you change it. Modern slows your look speed
   while a zombie is near the crosshair and turns the view with a zombie as it moves
-  or you strafe; like those games it needs stick input and has no snap. Since
-  beta.21 it is stronger than those games' own and at full strength from arm's
-  length and from the hip, where zombies are fought. It needs an Xbox-style
+  or you strafe; like those games it needs stick input and has no snap. Modern
+  is a little under those games' own strength (after beta.24: beta.21 to beta.24
+  had it much stronger, which is what Stronger still is). It takes only live
+  zombies you can see, and it settles the view between a zombie's torso and head,
+  around the neck, leaving the height inside that to you. It needs an Xbox-style
   (XInput) controller, works in Zombies only and never with a mouse. In a match the
   console command `xerces_aim_debug` says whether it sees your controller.
 - **No Hip-Fire Spread (Zombies).** XERCES SETTINGS > ZOMBIES, when you host: shots

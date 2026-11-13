@@ -199,7 +199,7 @@ local CONTROLLER = {
       end
       return "Game's Own"
     end,
-    description = "Controller aim assist in Zombies that works like the newer Call of Duty games' (Modern Warfare III): your look speed is slowed while a zombie is near the crosshair, and the view turns with a zombie as it moves or you strafe. As in those games it needs stick input (the left stick sideways, or the right stick), has no snap to targets, and fades far away. It is tuned up for Zombies: full strength from arm's length and from the hip. Stronger keeps the same rules with more of each. Zombies you can see only; never with a mouse, never in multiplayer.",
+    description = "Controller aim assist in Zombies that works like the newer Call of Duty games' (Modern Warfare III): your look speed is slowed while a zombie is near the crosshair, and the view turns with a zombie as it moves or you strafe. As in those games it needs stick input (the left stick sideways, or the right stick), has no snap to targets, and fades far away. Modern is a little under those games' own strength; Stronger keeps the same rules with much more of each, from arm's length and from the hip. The view settles between a zombie's torso and head, around the neck, and leaves the height inside that to you. Live zombies you can see only; never with a mouse, never in multiplayer.",
   },
 }
 

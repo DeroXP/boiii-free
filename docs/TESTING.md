@@ -3461,9 +3461,53 @@ In the game (the user approved the runs; the friends build, test homes):
       scripted camera in front: in that run the camera most likely did not come on, while
       the third-person state did. A guess at why: camera_start aims at its target entity
       0.1 s after making it, and if the player's game did not know the entity yet the camera
-      is not followed (DESIGN.md 7.13 saw the same with a script_origin). camera_start now
-      sets the same camera once more 0.5 s later. Not seen in the game yet: it needs runs
-      that bring the miss about.
+      is not followed (DESIGN.md 7.13 saw the same with a script_origin). camera_start
+      set the same camera once more 0.5 s later: of three map loads, two were right and in
+      the third the camera was on and nobody stood in front of it (the third-person state
+      had not come on, so the player's own body was not drawn). Either of the two can be
+      lost, so both are held now: set again every 0.5 s while the preview is on.
+- [x] With both held: four map loads with DS4C. In the first the test's keys did not open
+      the screen; in the other three the character stood in front of the camera on DEFAULT
+      and on DEMPSEY 2, with Dempsey's portrait
+      (`bench\20261113-left\camera-grid2.png`).
 - [ ] Not tried in the game: the crash handler's re-entry, a second player_downed for one
       down, aim assist with a real controller, UPnP with two PCs, the Workshop helper from
       the in-game menu.
+
+## Aim assist after the user's beta.24 playtest (2026-11-13)
+
+The user played beta.24 with a controller: "Modern" too strong (not "Stronger"), the
+assist went onto dead zombies and ones out of sight, and it should line up around the
+neck with leeway to the head and the torso (DESIGN.md 7.11 has the numbers).
+
+Measured first, mods off on `zm_zod`, with `xerces_aim_actors` (new: every actor near the
+player as the game has it) and a test-only script hook that makes the player safe, kills
+every zombie and turns the player's view (`bench\20261113-left\test_kill_hook.gsc.txt`;
+not in the scripts that ship):
+
+- [x] A live zombie: actor (0x12), state flags 0x01, no ragdoll, a box from 10 under the
+      feet to 90 over them, 72 wide; the player's eye 57 to 61 over a zombie's feet on the
+      same floor.
+- [x] Killed: flags 0x10 in the first listing after (60 ms steps), still an actor and no
+      ragdoll; a ragdoll a quarter of a second later; about a second later a corpse
+      (0x14) in a new slot (`bench\20261113-left\actors.txt`).
+- [x] `bAimTargetVisible` and `bRenderedLastFrame` say nothing usable (0 for zombies in
+      plain sight).
+
+Then, with the simulated stick (`XERCES_AIM_TEST`), `bench\20261113-left\aim.ps1`:
+
+- [x] "Modern": rotation 0.50 and slowdown 0.26 from 3 m to 15 m, 0.21 and 0.16 at 0.8 m
+      (beta.24: 0.75 and 0.51, 0.53 at 0.8 m). "Stronger": 0.95 and 0.64, as before.
+- [x] The view put on the shins of a zombie at 0.8 m: 22.4 degrees under the leeway, the
+      view rose at 20 degrees a second and stopped at the torso
+      (`bench\20261112-crash\aim1-shins.png`). Put on its neck: 0.0 outside, the view
+      did not move in 2.5 s. Over the head of one at 6 m ("Stronger" run): 3.9 degrees
+      over, down to 0.4 in half a second.
+- [x] Every zombie killed: no target from the next log line (a quarter of a second) and
+      the view still, where it used to follow the bodies down.
+- [x] The sight check with foliage and the no-sight and bullet brushes blocking gave the
+      same answers as solid alone for the six zombies listed (two in plain sight seen, four
+      behind walls not).
+- [ ] Not tried: a real controller (the user's next playtest), a zombie behind a low wall
+      or a car with only the air over its head in sight (what the old check let through),
+      crawlers (their box may differ), split screen.

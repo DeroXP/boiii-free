@@ -120,18 +120,22 @@ to report these again, but tell us if you see them somewhere else or worse.
 - **The modern aim assist is off until you turn it on.** XERCES SETTINGS >
   CONTROLLER > Aim Assist (Zombies) starts on Game's Own, which is the game's own
   assist and nothing of Xerces'.
-- **Its feel is still tuned by numbers, not by play.** Its rules were checked in a
-  match with a simulated stick (beta.21: the view followed 75% of a zombie's motion,
-  95% on Stronger). Say what feels off: strength and ranges are single numbers.
+- **Its feel was tuned by play once.** After a controller playtest of beta.24,
+  Modern was cut to about half of what it was at 1 to 3 m (50% rotation, 40%
+  slowdown, all of it only from 3 m), dying and hidden zombies stopped being
+  targets, and the view settles around the neck. Stronger is what Modern was
+  plus more (95% and 75%). Say what feels off: strength and ranges are single
+  numbers.
 - **It needs an XInput controller.** A controller in another mode (DualShock or
   Switch mode without a wrapper) is not seen; `xerces_aim_debug` in a match says
   "controller NOT found". It is tied to this build of the game: after a game update
   it turns itself off and writes `xerces.aim_assist.off` to the log.
 - **The game's own aim assist still runs under it.** Game's Own leaves only that.
-- **It is no longer Modern Warfare III's numbers.** Those faded to nothing at
-  point blank and were lower from the hip; since beta.21 it is full from 1.5 m and
-  nearly full from the hip. Inside arm's length it still eases off, so a zombie on
-  top of you does not swing the view.
+- **It is not exactly Modern Warfare III's numbers.** Modern is a little under
+  them and keeps some of the assist at point blank, where theirs fades to nothing;
+  Stronger is full from 1.5 m and nearly full from the hip. Unlike those games it
+  moves the view up or down toward a zombie's torso-to-head band when you aim
+  under or over it (never sideways).
 - **No Hip-Fire Spread is the host's setting.** It does nothing in a match you
   joined, and the crosshair of players who joined still shows their own spread.
 

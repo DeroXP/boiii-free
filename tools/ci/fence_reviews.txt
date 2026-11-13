@@ -4,3 +4,4 @@
 62e28935 src/client/main.cpp: only launch_beta_server_if_needed changed; patch_steam_import, patch_imports, restart_app_if_necessary_stub and handle_process_runner are unchanged (hashes equal).
 128a7ac2 premake5.lua: only the --with-upstream-plugins option and its define were added, next to the D14/D15 switches; the --dev-build and --no-check lines are unchanged (hashes equal).
 fc9b13d9 premake5.lua: only the --with-nvidia-dlss-sdk option and the include of premake/xerces_dlss.lua were added, next to the D14/D15 switches and the xerces_projects.lua include; the --dev-build and --no-check lines are unchanged (hashes equal).
+f776673c src/client/main.cpp: only the per-thread start (tls_runner) calls xerces_loader::set_terminate_handler_on_this_thread, and one include was added; patch_steam_import, patch_imports, restart_app_if_necessary_stub and handle_process_runner are unchanged (hashes equal).
