@@ -4,6 +4,8 @@
 
 #include <utils/hook.hpp>
 
+#include <xerces/runtime.hpp>
+
 namespace status {
 namespace {
 thread_local game::ClientNum_t g_client_num{0};
@@ -23,6 +25,10 @@ void print_client_xuid(const game::consoleChannel_e channel,
     return;
   }
 
+  // Xerces: shown in the console, kept out of the console lines a crash
+  // report carries: the xuid is a player's lasting game identity
+  // (docs/CRASH_REPORTS.md, "Never sent").
+  const xerces_runtime::console_private_line not_in_reports;
   game::com::Com_Printf(channel, label, "%12llx ", xuid);
 }
 } // namespace

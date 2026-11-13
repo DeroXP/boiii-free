@@ -451,7 +451,11 @@ void app::shutdown() {
   window_.close();
 }
 
-double app::now() const { return ms_since_process_start() / 1000.0 - started_; }
+double app::now() const {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                       started_)
+      .count();
+}
 
 unsigned app::read_pad(double now) {
   // Asking an empty XInput slot is slow (the driver is asked every time), so
@@ -1343,7 +1347,7 @@ int app::run() {
   }
   // From here, not from the process start: script steps and --seconds count
   // from when this launcher really starts, after any wait above.
-  started_ = ms_since_process_start() / 1000.0;
+  started_ = std::chrono::steady_clock::now();
   open_log(generic(paths.logs));
   // client_data: the game's data folder, passed to it as XERCES_DATA_PATH
   // (null when neither a package nor the checkout has one).
@@ -1750,8 +1754,10 @@ int app::run() {
       // the loop. Input that arrives meanwhile is handled in the next pass.
       const double start = pacer.frame_at(now(), window_.refresh_interval(),
                                           takes_pad, window_.precise_waits());
+      // A frame's wait is at most a refresh or so: never longer, whatever
+      // the clock says, so the window keeps answering
       if (const double gap = start - now(); gap > 0) {
-        window_.sleep(gap);
+        window_.sleep(std::min(gap, 0.05));
       }
       const bool first = pacer.first_frame();
       pacer.presented(now());

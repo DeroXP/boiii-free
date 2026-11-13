@@ -192,6 +192,12 @@ try {
 
   Step 'Building Xerces.exe and boiii.exe'
   Invoke-Checked 'building the programs' { ninja -C build bin/x64/Release/Xerces.exe bin/x64/Release/boiii.exe bin/x64/Release/xerces_cli.exe }
+  # What Windows shows (Properties, dumps) comes from each program's version
+  # resource, which the header check above cannot see
+  foreach ($exe in 'Xerces.exe', 'boiii.exe', 'xerces_cli.exe') {
+    $built = "$((Get-Item -LiteralPath (Join-Path $root "build\bin\x64\Release\$exe")).VersionInfo.ProductVersion)".Trim()
+    if ($built -ne $version) { throw "$exe carries version '$built' in its version resource, not $version." }
+  }
 
   Step "Staging dist\$name"
   $bin = Join-Path $root 'build\bin\x64\Release'

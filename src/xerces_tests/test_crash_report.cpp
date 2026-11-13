@@ -332,6 +332,7 @@ TEST_CASE("crash report: no user name, path, player or address survives") {
       R"({"msg":"joined 203.0.113.7:27017 as DeroXP","data":{"server":"Dave's house"}})",
       R"({"msg":"D:\\Users\\SomeoneElse\\BO3\\BlackOps3.exe"})",
       R"({"msg":"steam 76561198012345678 xuid 0x11000010abcdef1 id 0110000100abcdef"})",
+      R"({"msg":"steam64 hex 011000011abcdef0 short 1100001fedcba98"})",
   };
   in.launcher_log = {
       R"({"msg":"dave.example.org without a port; user Ginld"})"};
@@ -341,7 +342,8 @@ TEST_CASE("crash report: no user name, path, player or address survives") {
   for (const char *secret :
        {"Ginld", "ginld", "SomeoneElse", "DeroXP", "203.0.113.7",
         "198.51.100.20", "Dave's house", "dave.example.org",
-        "76561198012345678", "11000010abcdef1", "0110000100abcdef"}) {
+        "76561198012345678", "11000010abcdef1", "0110000100abcdef",
+        "011000011abcdef0", "1100001fedcba98"}) {
     CHECK(body.find(secret) == std::string::npos);
   }
   CHECK(body.find("%USERPROFILE%") != std::string::npos);

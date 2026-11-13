@@ -216,7 +216,12 @@ private:
   // context's root, which every document inherits.
   xerces_core::text_language text_language_;
 
-  double started_ = 0;
+  // now() counts from here, on steady_clock: the wall clock (what
+  // ms_since_process_start reads) jumps back when the PC's time is set back,
+  // and the frame pacer then slept for the size of the jump with the window
+  // frozen (review, 2026-11-13)
+  std::chrono::steady_clock::time_point started_ =
+      std::chrono::steady_clock::now();
   float applied_scale_ = 0.f;
   std::string applied_look_;
 

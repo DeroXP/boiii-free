@@ -184,18 +184,25 @@ private:
     const std::size_t warnings =
         plan.diags.count(xerces_core::severity::warning);
     const std::size_t errors = plan.diags.count(xerces_core::severity::error);
-    stats_ = {{two_digits(plan.stack.size()), owner_->tr("mods")},
-              {two_digits(plan.zones_added), owner_->tr("zones added")},
-              {two_digits(errors), owner_->tr("problems")},
-              {two_digits(warnings), owner_->tr("warnings")}};
-
     const std::size_t requested =
         config.profiles.contains(mode_) ? config.profiles.at(mode_).mods.size()
                                         : 0;
+    // The first scan of the mods has not ended: the plan of an empty catalog
+    // calls every enabled mod missing, which is not so (Mods, Servers and
+    // Packs wait for the scan too)
+    const bool reading = requested > 0 && !catalog.scanned && catalog.scanning;
+    const auto count = [&reading](std::size_t n) {
+      return reading ? std::string("--") : two_digits(n);
+    };
+    stats_ = {{count(plan.stack.size()), owner_->tr("mods")},
+              {count(plan.zones_added), owner_->tr("zones added")},
+              {count(errors), owner_->tr("problems")},
+              {count(warnings), owner_->tr("warnings")}};
+
     if (requested == 0) {
       meta_ = owner_->tr("No mods enabled. Pick some in Mods, or launch vanilla.");
       empty_text_ = owner_->tr("Nothing to load: this mode runs vanilla.");
-    } else if (!catalog.scanned && catalog.scanning) {
+    } else if (reading) {
       meta_ = owner_->tr("Reading your mods...");
       empty_text_ = owner_->tr("Reading your mods...");
     } else {
@@ -214,6 +221,8 @@ private:
       sub_ = owner_->tr("Black Ops III was not found");
     } else if (!game.can_launch()) {
       sub_ = owner_->tr("This game build is not supported");
+    } else if (reading) {
+      sub_ = owner_->tr("Reading your mods...");
     } else if (plan.stack.empty()) {
       sub_ = owner_->tr("No mods enabled for this mode");
     } else if (!plan.ok()) {

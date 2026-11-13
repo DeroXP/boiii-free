@@ -157,7 +157,12 @@ std::string redact_ids(std::string_view text) {
       while (end < text.size() && hex_digit(text[end])) {
         ++end;
       }
-      if (end - start == 16 && equal_at(text, start, "011000010") &&
+      // A Steam id in hex: 0x01100001 and the account's 8 digits, printed
+      // with its leading zero or without. (The first rule needed 011000010,
+      // which let every account id from 0x10000000 up through.)
+      const std::size_t digits = end - start;
+      if (((digits == 16 && equal_at(text, start, "01100001")) ||
+           (digits == 15 && equal_at(text, start, "1100001"))) &&
           (end == text.size() || !word_char(text[end]))) {
         out += "<steam id>";
         i = end;

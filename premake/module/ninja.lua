@@ -198,6 +198,17 @@ if ninja ~= nil then
         implicitDeps = implicitDeps .. " " .. table.concat(cfg._dependsOnTargets, " ")
       end
 
+      -- Xerces: llvm-windres writes no depfile, so a resource that includes the
+      -- generated version header was never compiled again after VERSION or
+      -- the commit changed (Xerces.exe and xerces_cli.exe shipped with the
+      -- version of the first build in the folder). Named here.
+      if rule == "rc" then
+        if implicitDeps == "" then
+          implicitDeps = " |"
+        end
+        implicitDeps = implicitDeps .. " src/xerces_version.h"
+      end
+
       local implicitOutput = ""
       if assemblyFile then
         implicitOutput = " | " .. assemblyFile
