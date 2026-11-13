@@ -294,6 +294,15 @@ function camera_start(preview, from, look_at)
 	self CameraActivate(true);
 	// The player's own body is drawn for them in the third-person state
 	self SetClientThirdPerson(1);
+	// Once more half a second later, the same: once (2026-11-13) the camera did not come on while the third-person state
+	// did, and the game's own view showed the player from behind. Most likely the player's game did not know the target
+	// yet. Set again it is the same camera, so a camera that came on does not move.
+	wait 0.5;
+	if (IS_TRUE(preview.off) || !isdefined(preview.target))
+		return;
+	self CameraSetPosition(from, VectorToAngles(look_at - from));
+	self CameraSetLookAt(preview.target);
+	self CameraActivate(true);
 }
 
 function camera_off(preview)

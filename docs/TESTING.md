@@ -3461,8 +3461,9 @@ In the game (the user approved the runs; the friends build, test homes):
       scripted camera in front: in that run the camera most likely did not come on, while
       the third-person state did. A guess at why: camera_start aims at its target entity
       0.1 s after making it, and if the player's game did not know the entity yet the camera
-      is not followed (DESIGN.md 7.13 saw the same with a script_origin). Not fixed: it
-      needs runs that bring it about.
+      is not followed (DESIGN.md 7.13 saw the same with a script_origin). camera_start now
+      sets the same camera once more 0.5 s later. Not seen in the game yet: it needs runs
+      that bring the miss about.
 - [ ] Not tried in the game: the crash handler's re-entry, a second player_downed for one
       down, aim assist with a real controller, UPnP with two PCs, the Workshop helper from
       the in-game menu.
