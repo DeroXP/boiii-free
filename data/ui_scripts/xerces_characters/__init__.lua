@@ -474,6 +474,31 @@ LUI.createMenu[MENU] = function(controller)
   self:addElement(list)
   self.Options = list
 
+  -- the portrait of the character the list is on, as DS4C's screen shows them (the game's eight and every table's
+  -- characters have one; a mod that lists no characters gives none, and DEFAULT shows none). With the preview at the
+  -- top right, clear of the character the camera shows; without it where beta.18's screen had it (2026-11-13).
+  local portrait = LUI.UIImage.new()
+  if live then
+    portrait:setLeftRight(false, true, -216, -56)
+    portrait:setTopBottom(true, false, 120, 280)
+  else
+    portrait:setLeftRight(true, false, 500, 756)
+    portrait:setTopBottom(true, false, 230, 486)
+  end
+  portrait:setAlpha(0)
+  portrait:linkToElementModel(list, "image", true, function(model)
+    local image = Engine.GetModelValue(model)
+    if type(image) == "string" and image ~= "" then
+      local ok = pcall(function()
+        portrait:setImage(RegisterImage(image))
+      end)
+      portrait:setAlpha(ok and 1 or 0)
+    else
+      portrait:setAlpha(0)
+    end
+  end)
+  self:addElement(portrait)
+
   local source = LUI.UIText.new()
   source:setLeftRight(true, false, 64, 460)
   source:setTopBottom(true, false, 578, 598)

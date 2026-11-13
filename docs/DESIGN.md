@@ -2251,9 +2251,16 @@ controller.
   2026-11-12, a write through a near-null pointer on the main thread). The tests
   press keys instead.
 
-Not built: portraits beside the names (a mod without a table has none), the
-preview on mods' own character screens, and holding the zombies for a player who
-opens the screen in a match with other players.
+Not built: the preview on mods' own character screens, and holding the zombies
+for a player who opens the screen in a match with other players.
+
+Added after beta.24 (2026-11-13), from comparing the screen with DS4C's (a grid
+of portraits, `bench\20261113-compare\ds4c-vs-xerces-characters.png`): the
+portrait of the character the list is on, beta.18's code, at the top right with
+the preview (clear of the character) and where beta.18 had it without. The
+game's eight and every table's characters have one; a mod without a table gives
+none, and DEFAULT shows none. A grid like DS4C's is not built: the list keeps
+the names, which a mod without portraits needs.
 
 ### 7.14 The client gone over (2026-11-12, beta.22)
 
