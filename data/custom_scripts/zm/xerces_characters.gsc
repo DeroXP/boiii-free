@@ -294,15 +294,20 @@ function camera_start(preview, from, look_at)
 	self CameraActivate(true);
 	// The player's own body is drawn for them in the third-person state
 	self SetClientThirdPerson(1);
-	// Once more half a second later, the same: once (2026-11-13) the camera did not come on while the third-person state
-	// did, and the game's own view showed the player from behind. Most likely the player's game did not know the target
-	// yet. Set again it is the same camera, so a camera that came on does not move.
-	wait 0.5;
-	if (IS_TRUE(preview.off) || !isdefined(preview.target))
-		return;
-	self CameraSetPosition(from, VectorToAngles(look_at - from));
-	self CameraSetLookAt(preview.target);
-	self CameraActivate(true);
+	// Held while the preview is on: either of the two can be lost. Seen 2026-11-13, once each: the camera did not come on
+	// while the third-person state did (the game's own view of the player from behind), and the third-person state did
+	// not while the camera did (the camera in front of nobody: the player's own body is not drawn). Set again they are
+	// the same camera and state, so a view that came on does not move.
+	while (!IS_TRUE(preview.off) && isdefined(preview.target))
+	{
+		wait 0.5;
+		if (IS_TRUE(preview.off) || !isdefined(preview.target))
+			return;
+		self CameraSetPosition(from, VectorToAngles(look_at - from));
+		self CameraSetLookAt(preview.target);
+		self CameraActivate(true);
+		self SetClientThirdPerson(1);
+	}
 }
 
 function camera_off(preview)
