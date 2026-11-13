@@ -18,6 +18,9 @@
 //                                "freeze")
 //   xerces_crash_test stall      the main thread sleeps 40 s and goes on: a
 //                                freeze report that is taken back
+//   xerces_crash_test throw      a thread of its own throws a C++ exception
+//                                nobody catches: the game log must name it
+//                                (loader.terminate) before the game ends
 //   xerces_crash_test heap       the main thread takes the heap's lock and
 //                                never gives it back: no report can be
 //                                written, and the watchdog must still close
@@ -145,6 +148,17 @@ public:
             "The shutdown will fault once the game is quitting "
             "(xerces_crash_test exitfault)");
         fault_in_shutdown = true;
+        return;
+      }
+      if (kind == "throw") {
+        xerces_runtime::log_warn(
+            "xerces.crash_test",
+            "A thread of its own throws a C++ exception nobody catches "
+            "(xerces_crash_test throw)");
+        std::thread([] {
+          throw std::runtime_error(
+              "xerces_crash_test throw: uncaught on a thread of its own");
+        }).detach();
         return;
       }
       if (kind == "stall") {

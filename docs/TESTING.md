@@ -3442,7 +3442,14 @@ In the game (the user approved the runs; the friends build, test homes):
       live character (Tagger 4: DS4C's Tagger portrait; ZM_BEAST, which has none in DS4C's
       table, shows none) (`bench\20261112-crash\left-lasttab.png`); "47 characters from
       2 sources"; no warning, error or Lua error in the log or the console.
-- [ ] Not tried in the game: the terminate handler on another thread, the crash handler's
-      re-entry, a second player_downed for one down, aim assist with a real controller,
-      UPnP with two PCs, the Workshop helper from the in-game menu, the "Original
-      Characters" tab's portraits (Q on the first tab stays there).
+- [x] `xerces_crash_test throw` (new: a thread of its own throws a C++ exception nobody
+      catches), mods off, `-quiet-crash`: "loader.terminate: The game ended on an uncaught
+      C++ exception: class std::runtime_error: xerces_crash_test throw: uncaught on a thread
+      of its own", and the game ended. Before, only the main thread had the handler.
+- [x] The "Original Characters" tab (E from DS4C's): no portrait on any row. The game's own
+      list carries none; the game's own group now takes the game's portraits by character
+      index (BASE_ROSTER), a mod's group never. NOT seen in the game: the run after the fix
+      captured another program in front (the user was using the PC), so the tests stopped.
+- [ ] Not tried in the game: the crash handler's re-entry, a second player_downed for one
+      down, aim assist with a real controller, UPnP with two PCs, the Workshop helper from
+      the in-game menu.

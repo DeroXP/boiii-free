@@ -232,6 +232,22 @@ local function groups()
       end
     end
   end
+  -- the game's own characters, in the game's own group only: the game's portraits by character index (its list carries
+  -- none; seen with DS4C on 2026-11-13, the "Original Characters" tab showed no portrait). Never in a mod's group: a
+  -- mod's character in Dempsey's place is not Dempsey.
+  local baseImages = {}
+  for _, entry in ipairs(BASE_ROSTER) do
+    baseImages[entry.index] = entry.image
+  end
+  for _, group in ipairs(list) do
+    if group.id == "" then
+      for _, look in ipairs(group.looks) do
+        if look.image == nil or look.image == "" then
+          look.image = baseImages[look.index]
+        end
+      end
+    end
+  end
   for _, group in ipairs(list) do
     local hints = {}
     for _, look in ipairs(group.looks) do
