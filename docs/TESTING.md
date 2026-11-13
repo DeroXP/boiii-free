@@ -3420,5 +3420,29 @@ Checked and left:
       callbacks during close, `plan apply --vanilla` rewriting installed.json.
 
 Tried: 617 unit tests pass; the launcher's First run, Friends, Settings and Home in dry
-runs, 0 warnings or errors; the CLI checks above. Not tried in the game yet: every
-client change above.
+runs, 0 warnings or errors; the CLI checks above.
+
+In the game (the user approved the runs; the friends build, test homes):
+
+- [x] `m1-check.ps1 -Live`, all nine cases: 60 pass, none fails.
+- [x] Mods off, `zm_zod`, `r_sceneResolutionMultiplier 70`, `r_aaTechnique 0`,
+      `xerces_upscaler 2`: "DLSS has not run ...; AMD FSR 1 upscales instead", then "AMD
+      FSR 1 upscales 2688x1512 to 3840x2160, sharpness 8/10"
+      (`bench\20261112-crash\left-dlss-fallback.png`).
+- [x] `xerces_zm_noHipSpread 1` then 0 in that match: "No hip-fire spread on 94 weapons",
+      "Hip-fire spread back on 94 weapons (94 were changed)".
+- [x] DS4C alone, `-xerces-db-pool`: `xerces.db_pool.pools` at the front end (7 pools),
+      as the level loads (5) and in the level (6), read the new way.
+- [x] A frame-time run going when the game quit from inside the level: the first try
+      wrote nothing. The console's quit ends the process 3 s later with no shutdown code
+      (console.cpp, force_exit_after), so pre_destroy never ran; the quit command now ends
+      and writes the run on the main thread. Then: `quitcheck2` written at the quit, 7,898
+      frames, 36.4 s, `main_lost` 0, `stalls_dropped` 0.
+- [x] CHARACTERS with DS4C: the portrait of the row the list is on, top right, clear of the
+      live character (Tagger 4: DS4C's Tagger portrait; ZM_BEAST, which has none in DS4C's
+      table, shows none) (`bench\20261112-crash\left-lasttab.png`); "47 characters from
+      2 sources"; no warning, error or Lua error in the log or the console.
+- [ ] Not tried in the game: the terminate handler on another thread, the crash handler's
+      re-entry, a second player_downed for one down, aim assist with a real controller,
+      UPnP with two PCs, the Workshop helper from the in-game menu, the "Original
+      Characters" tab's portraits (Q on the first tab stays there).

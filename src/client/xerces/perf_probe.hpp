@@ -60,4 +60,10 @@ void probe_present(IDXGISwapChain *chain, const probe_entry &entry,
 
 // The thread that presents the game's swap chain (0 until seen).
 std::uint32_t present_thread_id();
+
+// The game is quitting: a run going is ended and written now, on the main
+// thread (the quit command, loader.cpp). The console's quit ends the process
+// 3 s later with no shutdown code (console.cpp, force_exit_after), so the
+// component's pre_destroy alone missed it (seen in the game, 2026-11-13).
+void end_run_for_quit();
 } // namespace xerces_perf

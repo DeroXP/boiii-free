@@ -845,6 +845,8 @@ void probe_present(IDXGISwapChain *chain, const probe_entry &entry,
   ring->push(sample);
 }
 
+void end_run_for_quit() { end_run(true); }
+
 std::uint32_t present_thread_id() {
   return present_thread.load(std::memory_order_relaxed);
 }

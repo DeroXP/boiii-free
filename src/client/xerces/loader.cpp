@@ -33,6 +33,7 @@
 #include <xerces_core/json.hpp>
 #include <xerces_core/launch.hpp>
 
+#include "perf_probe.hpp"
 #include "runtime.hpp"
 #include "signatures.hpp"
 
@@ -69,6 +70,8 @@ game::cmd::xcommand_t engine_quit = nullptr;
 // crash while the game shuts down still counts as a crash.
 void quit_command() {
   xerces_runtime::note_quit_requested();
+  // A frame-time run going is written before the engine shuts down
+  xerces_perf::end_run_for_quit();
   if (engine_quit) {
     engine_quit();
   }
