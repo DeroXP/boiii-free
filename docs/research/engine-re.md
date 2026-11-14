@@ -692,4 +692,6 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   its sound banks, the start's main thread waits for that zone, and no file is read. A
   lead: the sound banks' load may need something the main loop runs each frame (its sound
   update), which does not run while the start sleeps, so the three wait on each other
-  until something gives after about 3 s. Not proved.
+  until something gives after about 3 s. Not proved. The Stream thread through the same
+  pause (`pause-db-sample.ps1 -Thread Stream`): 99.8% waiting for work in its loop
+  (0x142122F40): nobody asks for the sound banks' data in those seconds.
