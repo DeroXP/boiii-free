@@ -658,4 +658,12 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   lead: the image has a `FAKE_INTRO_SECONDS` string and a `com_introPlayed` dvar (a
   minimum time for an intro the launch skips with `-nointro`?). `+set com_introPlayed 1` on
   the command line changed nothing: `symbols` to `frontend` 16.5 s against 16.4 s (unless
-  the start reads it before the command line's dvars are set).
+  the start reads it before the command line's dvars are set). The stretch lines up with the
+  game's first message to the emulated lobby server: in the online-service trace of a
+  start (`dw-trace-zod.txt`, the test build from "A map's load") the 28-byte header goes out
+  9.3 s after the launch and its 26-byte answer is read 3.0 s later, at the end of the
+  stretch. The emulator queues that answer (`lobby_server.cpp`, the header ack) within its
+  50 ms tick, and the game's `select` calls are all polls with a 0 ms timeout (a test build,
+  reverted, logged 286 of them through a start, none blocking; making a waiting emulated
+  socket wait in short steps changed nothing). So the game itself reads the answer 3 s
+  later: a timer or state of its online code, not the emulator's speed. Not found which.
