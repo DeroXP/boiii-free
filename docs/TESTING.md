@@ -1963,6 +1963,13 @@ but the first runs; a scripted player that walks, turns and, in one run, fires a
       player's own play: after a session on Town Reimagined the log's
       `xerces.stream_sort.far` lines say how often the lists were far out of order and
       what the sorts cost.
+- [x] Seen in the player's own play (read 2026-11-14 from their log, `%LOCALAPPDATA%\Xerces\
+      logs\20261113-222819-game-38320.jsonl`: beta.24, `zm_mw2rust` with their mods, about
+      eight minutes in the level, `clean_exit`): 14 `xerces.stream_sort.far` lines; the
+      loaded list was about 28,600 textures far out of order again and again, each needing
+      195 to 199 million moves of the game's insertion sort (some 290 ms a time, at the
+      measured 4 million moves to 6 ms), sorted by the merge in 1.7 to 2.3 ms. No crash or
+      freeze report from the player's play since beta.24.
 - [ ] Not tried: other maps and Multiplayer or Campaign with the merge (the code is the
       same for all), a game build other than 0x6531394, a quit from the game's menus
       (the far line written at the quit; the test runs end through the console).
