@@ -662,8 +662,12 @@ void services::watch_run_folder() {
              "a game this launcher did not start is running");
   }
   game_was_live_ = live;
-  // A culprit test that was still running when this launcher opened.
-  if (!live && culprit_ && !culprit_->testing.empty()) {
+  // A culprit test that was still running when this launcher opened. A game
+  // still starting has no run entry yet and a journal that reads "launching",
+  // a crash to the journal: its process says it is there (as the
+  // constructor's check; a review, 2026-11-14).
+  if (!live && culprit_ && !culprit_->testing.empty() &&
+      (dry_launch_ || !xerces_core::game_process_running(paths_.client))) {
     settle_culprit_from_journal();
   }
 }

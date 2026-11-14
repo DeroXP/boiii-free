@@ -1819,6 +1819,11 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
   handler_depth = 1;
   crashed = true;
   crash_handler_code = exceptioninfo->ExceptionRecord->ExceptionCode;
+  // The crash's code and address first of all: a fault of this handler
+  // before they were filled in below showed a dialog of "0x00000000 at
+  // 0000000000000000" and ended the game with code 0 (a review, 2026-11-14)
+  exception_data.code = exceptioninfo->ExceptionRecord->ExceptionCode;
+  exception_data.address = exceptioninfo->ExceptionRecord->ExceptionAddress;
   crash_handler_started_ms = GetTickCount64();
   // Xerces' journal: no exit after this counts as clean (xerces/runtime.hpp).
   xerces_runtime::note_crash();

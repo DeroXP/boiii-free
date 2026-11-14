@@ -3818,3 +3818,32 @@ messages, and what two new reviews of everything since beta.26 found:
       memory" 6 to 7 s into the load, as the planner says for them without larger zone
       memory (414 and 66 MiB over); with `-xerces-db-pool` both reached the match (loads
       of 31.8 and 27.7 s) and went back to the menu.
+
+## A review of beta.24 to beta.26 (2026-11-14 night)
+
+A second reader went through `a72ffb7e..052a6ae1` (the review fixes, the aim assist
+rework, portraits and the preview camera, the Workshop helper): nothing that crashes,
+three real defects, all fixed:
+
+- [x] A launcher opened while a culprit test's game was still starting settled the test
+      as a crash at its first poll (no run entry yet, the journal "launching"): the
+      run-folder watch now checks the client's process too, as the constructor does.
+- [x] A friend join waiting for mods did not rescan while a game ran, so a mod got some
+      other way (a Workshop page subscribed by hand, a folder copied in) left the join
+      waiting until the game was closed: it rescans every 32 s then (every 8 s without a
+      game).
+- [x] A second fault early in the crash handler showed "0x00000000 at
+      0000000000000000" and ended the game with code 0: the crash's code and address are
+      kept first of all.
+- [x] Also from it: a render target view that could not be made left the launcher's
+      window frozen with nothing said; it is made again each frame, and after about two
+      seconds of failures the window is handled as a lost device (the message, the
+      close).
+- [x] The map-or-mod change on the player's own 39 Workshop items, the beta.26 CLI and
+      this one (`mods list --json`): the same id and kind for every one.
+- [x] Checked by it and left: the Workshop helper's handles, the job and its start;
+      Zombies only and never a mouse for the aim assist and spread; no new VirtualQuery
+      or thread suspends. Not measured: the frame-time run written at a quit within the
+      3 s the console's close leaves; a router that shortens a port mapping's
+      description would keep it.
+- [x] 623 unit tests pass.

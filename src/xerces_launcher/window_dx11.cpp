@@ -88,6 +88,8 @@ struct state {
   bool buffer_dimensions_dirty = true;
   bool frame_open = false;
   bool device_lost = false;
+  // Frames in a row without a render target view (begin_frame)
+  int frames_without_target = 0;
   Rml::Vector2i dimensions{1, 1};
   bool running = true;
   Rml::Context *context = nullptr;
@@ -628,10 +630,20 @@ void window::begin_frame() {
     create_render_target();
   }
   // No render target view (it could not be made): the frame was cleared and
-  // drawn into a null view, which d3d11 does not survive
+  // drawn into a null view, which d3d11 does not survive. It is made again
+  // each frame; when that keeps failing (about two seconds) the window is
+  // handled as a lost device, which tells the player and closes, instead of
+  // a window that stays frozen with nothing said (a review, 2026-11-14).
   if (!s->gpu.target) {
-    return;
+    create_render_target();
+    if (!s->gpu.target) {
+      if (++s->frames_without_target >= 120) {
+        s->device_lost = true;
+      }
+      return;
+    }
   }
+  s->frames_without_target = 0;
   s->render_interface->Clear(s->gpu.target);
   s->render_interface->BeginFrame();
   s->frame_open = true;

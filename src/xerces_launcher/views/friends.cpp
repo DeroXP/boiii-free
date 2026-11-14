@@ -491,11 +491,14 @@ private:
         return;
       }
       if (now >= join_->next_scan && !svc.catalog().scanning) {
-        join_->next_scan = now + rescan_every;
-        // Not while a game runs: the launcher should cost nothing then
-        if (!svc.game_running()) {
-          svc.start_scan();
-        }
+        // Less often while a game runs (the scan then reads one file at a
+        // time), but still: a mod got another way than through the helper (a
+        // Workshop page subscribed by hand, a folder copied in) must end the
+        // wait, which used to last until the game was closed (a review,
+        // 2026-11-14)
+        join_->next_scan =
+            now + (svc.game_running() ? rescan_every * 4 : rescan_every);
+        svc.start_scan();
       }
     } else if (join_->stage == join_stage::restarting) {
       if (!svc.game_running()) {
