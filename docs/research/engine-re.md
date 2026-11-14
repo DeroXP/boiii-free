@@ -270,6 +270,25 @@ base 0x140000000 that upstream's symbol tables use.
   Window thread's: a wait that ends on raw input (`QS_RAWINPUT`) would take it at
   once. Not changed.
 
+## A frame, end to end
+
+What the sections above add up to, for a level (2026-11-14):
+
+1. The Input thread drains the raw mouse input every millisecond into two counters.
+2. The main thread runs the frame (the client, the server's work is on 3_Server, the
+   scripts), hands work to the job workers (two or three, at most five), and waits in
+   `Sys_WaitForSingleObject` for the render backend to be done with the frame before
+   (about a fifth of its time at the start of Shadows of Evil).
+3. The render backend (2_Backend) turns the frame into draw calls, sleeps before
+   Present when `r_vsync` is on, and sends the Window thread message 0x8043.
+4. The Window thread takes it at its next look at the queue (after up to a whole
+   `Sleep(1)`, or at once with `-xerces-present-wake`) and calls
+   `IDXGISwapChain::Present`, which blocks while the GPU's queue is full.
+
+So in a level the GPU holds, Present's blocking is the wait everything else lines up
+behind; where the processor holds it, the main thread is the limit and the Window
+thread's millisecond is on its path.
+
 ## Network timeouts (for the two-PC test)
 
 The values in the dump of 2026-11-04 (the menus), read by matching each `dvar_t`'s name
