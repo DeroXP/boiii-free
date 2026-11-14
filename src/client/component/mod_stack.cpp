@@ -112,8 +112,8 @@ bool hosts_game_lobby() {
 
 bool map_scripts_first_enabled() {
   const int rule = host_rule.load();
-  const bool remote_client = !game::is_server() && !game::server_running() &&
-                             !hosts_game_lobby();
+  const bool remote_client =
+      !game::is_server() && !game::server_running() && !hosts_game_lobby();
   if (remote_client && rule >= 0) {
     return rule == 1;
   }
