@@ -22,13 +22,16 @@ void install_crash_guard(const std::filesystem::path &crash_dir,
                          const std::string &version);
 
 // The launcher-<time>.txt files in crash_dir not seen by an earlier start
-// (their names are kept in launcher-seen.txt there), each with its "What
-// happened" line; they are marked as seen.
+// (their names are kept in <home>\cache\launcher-crashes-seen.txt), each with
+// its "What happened" line. They are marked as seen by mark_crashes_seen, once
+// the player has been told.
 struct previous_crash {
   std::string file;
   std::string what;
 };
 std::vector<previous_crash>
 take_previous_crashes(const std::filesystem::path &crash_dir);
+void mark_crashes_seen(const std::filesystem::path &crash_dir,
+                       const std::vector<previous_crash> &crashes);
 
 } // namespace xerces_launcher

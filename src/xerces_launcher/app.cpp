@@ -16,6 +16,8 @@
 #include <fstream>
 #include <iterator>
 #include <sstream>
+#include <stdexcept>
+#include <thread>
 #include <utility>
 
 #include <xerces_core/account.hpp>
@@ -1280,8 +1282,29 @@ bool app::run_script(double seconds) {
     } else if (step.verb == "quit") {
       window_.request_close();
     } else if (step.verb == "crash") {
-      // Checks only (--script): the launcher's crash guard (crash_guard.hpp)
-      log_warn("launcher.script.crash", "crashing on purpose");
+      // Checks only (--script): the launcher's crash guard (crash_guard.hpp).
+      // "crash" writes through a null pointer; "crash throw" lets a C++
+      // exception out on this thread, "crash worker" on a thread of its own,
+      // "crash overflow" runs out of stack.
+      log_warn("launcher.script.crash", "crashing on purpose: " + step.arg);
+      if (step.arg == "throw") {
+        throw std::runtime_error("crash step: uncaught on the main thread");
+      }
+      if (step.arg == "worker") {
+        std::thread([] {
+          throw std::runtime_error("crash step: uncaught on a worker thread");
+        }).join();
+      }
+      if (step.arg == "overflow") {
+        struct deep {
+          static int down(volatile int depth) {
+            volatile char room[4096];
+            room[0] = static_cast<char>(depth);
+            return down(depth + 1) + room[0];
+          }
+        };
+        deep::down(0);
+      }
       volatile int *nowhere = nullptr;
       *nowhere = 0x58455243; // "XERC"
     }
@@ -1531,6 +1554,9 @@ int app::run() {
     notify(tr("Xerces closed unexpectedly last time. Its report is in the "
               "crash folder (Diagnostics)."),
            true);
+    // Only now: a launcher that crashes again before this point says it
+    // the next time
+    mark_crashes_seen(paths.crash, previous_crashes);
   }
   // The game crashed at every start from a OneDrive folder on 2026-11-06
   // (launcher_home.hpp, onedrive_folder_of).

@@ -4033,3 +4033,20 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       (2026-11-14 night); with `-xerces-db-pool` added it loaded in 15.4 s and played.
 - [ ] Played by a person with their own mod stack, and a launch with a friend in the lobby
       (the waits must stay as they were).
+
+## The launcher's crash handler, a second read (2026-11-14 morning)
+
+- [x] A second read of the handler found real gaps, all fixed: a worker thread's uncaught
+      exception ended through `abort` with no report (the terminate handler is per thread;
+      a SIGABRT handler now catches it); a stack overflow left no stack to write with and
+      could lose even Windows' record (a writer thread made at the start writes now); a dump
+      stuck on a lock could leave the launcher hanging (the crashed thread waits 10 s at
+      most); two crashes at once; a main-thread exception lost its message; a call through
+      a null pointer had no stack; the notice could be used up before it showed; the seen
+      list sat in the crash folder. Each kind through `--script` (`bench\20261113-left\launcher-crash\kinds.ps1`):
+      `crash` 0xC0000005 ("It tried to write address 0x0"), `crash throw` 0xC0000409 ("an
+      uncaught C++ exception (crash step: uncaught on the main thread)"), `crash worker`
+      0xC0000409 ("abort (an uncaught C++ exception on a worker thread, ...)"), `crash
+      overflow` 0xC00000FD ("The thread ran out of stack."), each with its text and dump. The
+      next start logged it and showed the notice, the start after that neither; the names
+      said are in `cache\launcher-crashes-seen.txt`, the crash folder holds only reports.

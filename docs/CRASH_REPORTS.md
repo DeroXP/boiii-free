@@ -210,11 +210,17 @@ crash of `Xerces.exe` left nothing but Windows' own record. Now an unhandled exc
 any of its threads, or an uncaught C++ exception, writes `<home>\crash\launcher-<time>.txt`
 (what happened, the address by module and offset, for an access violation what it tried
 to do, Xerces' version, the stack) and `launcher-<time>.dmp` (the threads and their
-stacks). The text is built in fixed buffers and `dbghelp.dll` is loaded at the start, so
-the crash asks nothing new of the heap or the loader. Both show in Diagnostics' crash
-list. The next start logs each new one (`launcher.crash.previous`) and says "Xerces
-closed unexpectedly last time. Its report is in the crash folder (Diagnostics)." once
-(the names it has said so for are kept in `launcher-seen.txt` there). They are not sent:
+stacks). A thread made at the start writes them, in fixed buffers, with `dbghelp.dll`
+loaded at the start: it has stack enough after a stack overflow, and the crashed thread
+waits for it at most 10 s, so a dump stuck on a lock a stopped thread holds cannot keep
+the launcher hanging; a second thread that crashes meanwhile waits for that report. An
+uncaught C++ exception is reported with its message on the main thread (std::terminate),
+and on a worker thread through `abort` (the SIGABRT handler is the whole process's, the
+terminate handler a thread's); so are the C runtime's invalid-parameter and pure-call
+ends. A buffer-overrun check or heap corruption ends the process with no handler at all.
+Both files show in Diagnostics' crash list. The next start logs each new one
+(`launcher.crash.previous`) and says "Xerces closed unexpectedly last time. Its report is
+in the crash folder (Diagnostics)."; the names are marked as said (`<home>\cache\launcher-crashes-seen.txt`) only once that notice is up. They are not sent:
 the contract below is the game's, and a launcher crash would need fields of its own.
 The launcher's test scripts (`--script`) have a `crash` step.
 
