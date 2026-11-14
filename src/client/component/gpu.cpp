@@ -10,6 +10,9 @@
 
 #include <utils/string.hpp>
 
+#include <xerces/runtime.hpp>
+#include <xerces_core/crash_report.hpp>
+
 namespace gpu {
 namespace {
 constexpr auto preferences_key =
@@ -17,6 +20,10 @@ constexpr auto preferences_key =
 constexpr std::wstring_view preference_field = L"GpuPreference=";
 
 std::atomic<bool> warning_pending{false};
+// The first lost device: Present's result and Windows' reason (0: none yet)
+std::atomic<std::uint32_t> lost_result{0};
+std::atomic<std::uint32_t> lost_reason{0};
+std::atomic<bool> lost_noted{false};
 
 std::wstring exe_path() {
   wchar_t path[MAX_PATH * 4]{};
@@ -124,6 +131,32 @@ void set_preference(const int preference) {
                       MB_SETFOREGROUND) == IDOK) {
     exception::restart_game();
   }
+}
+
+void note_present_result(IDXGISwapChain *swap_chain, const HRESULT result) {
+  const auto code = static_cast<std::uint32_t>(result);
+  if (!xerces_core::device_lost_result(code) || lost_noted.exchange(true)) {
+    return;
+  }
+  std::uint32_t reason = 0;
+  ID3D11Device *device = nullptr;
+  if (swap_chain && SUCCEEDED(swap_chain->GetDevice(IID_PPV_ARGS(&device)))) {
+    reason = static_cast<std::uint32_t>(device->GetDeviceRemovedReason());
+    device->Release();
+  }
+  lost_reason = reason;
+  lost_result = code;
+  const std::string text = xerces_core::device_lost_text(code, reason);
+  xerces_runtime::log_error("gpu.device_lost", "The graphics device is " + text,
+                            std::format("{{\"present\":\"0x{:08X}\","
+                                        "\"reason\":\"0x{:08X}\"}}",
+                                        code, reason));
+}
+
+std::string device_lost_line() {
+  const std::uint32_t code = lost_result.load();
+  return code == 0 ? std::string()
+                   : xerces_core::device_lost_text(code, lost_reason.load());
 }
 
 void check_device(ID3D11Device *device) {

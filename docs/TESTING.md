@@ -3960,3 +3960,29 @@ zm_zod`, crash reports on in the test home, nothing sent
       happened" line, and the notice "Xerces closed unexpectedly last time. Its report is
       in the crash folder (Diagnostics)." at the foot of Home
       (`bench\20261113-left\launcher-crash\after-1.png`); the start after that, neither.
+
+## A lost graphics device in the reports, and the stuck-load review (2026-11-14 morning)
+
+- [x] `xerces_crash_test devicelost` (new) and then `xerces_crash_test fatal` (`bench\20261113-left\devicelost-test.ps1`): the fatal report has "Graphics device: lost
+      (Present returned DXGI_ERROR_DEVICE_HUNG, reason no reason given): the graphics card
+      took too long on its work and Windows reset it (a driver timeout, TDR) ...", and the
+      game log `gpu.device_lost` with the same words. 626 unit tests (the names and the
+      meanings of the four codes).
+- [x] A second read of the stuck-load report found real problems, all fixed: a freeze's
+      report and a load's could walk the threads at once and undo each other's release of
+      a stopped thread (now one walk at a time); a load ending just as its report finished
+      could leave the note for good (the flag goes down under the lock); the note's line
+      said "[Freeze]" and its place was the main thread's loading screen (now "[Load]"
+      and the Database thread's frames, thread `auxiliary`); a start before its first
+      frame was said to have frames coming (now "Start stuck:", the main thread from the
+      game's table); a box waiting for the player ran the clock (now it stops it); a
+      journal that did not answer once reset the clock; "taken back" was said with no
+      report written; a throw after the first note lost its id. Also a slot refused when
+      three were taken still counted (older), `loadhang` stopped the thread even with no
+      load, and the read trace kept a CreateFile's error poorly and could misplace an
+      overlapped read's entry.
+- [x] The stuck-load test again on the fixes: run A's report at 25 s, its note gone
+      when the load ended ("[Load] The load ended after 49 seconds: it was slow, not
+      stuck" in the old wording, fixed after), run B's note kept with the Database
+      thread's frames (`nvwgf2umx.dll`, the thread stopped in the driver), "[Load] The
+      game has been loading for 0 min 20 s and is not done" as its line.

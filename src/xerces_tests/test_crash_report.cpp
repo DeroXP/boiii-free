@@ -1353,10 +1353,14 @@ TEST_CASE("crash report: what a load that does not end is doing") {
   CHECK_EQ(load_wait_text({wait, sleep, loader}, {}),
            std::string("the Database thread waits in "
                        "BlackOps3.exe+0x1413EF6F0"));
-  // Working: not in a system call, wherever its stack leads
-  CHECK_EQ(load_wait_text({decode, sound_banks}, {}),
+  // Working: not in a system call and in none of the known waits; in user
+  // code inside a known wait (between its sleeps), still that wait
+  CHECK_EQ(load_wait_text({decode, loader}, {}),
            std::string("the Database thread is working, in "
                        "BlackOps3.exe+0x142BC4829"));
+  CHECK_EQ(load_wait_text({decode, sound_banks}, {}),
+           std::string("the Database thread waits for the sound banks to "
+                       "load"));
   CHECK_EQ(load_wait_text({wait, sleep, loop}, {wait, stream_wait}),
            std::string("the Database thread is idle: it has no zone left to "
                        "load; the Stream thread waits in "
@@ -1364,4 +1368,29 @@ TEST_CASE("crash report: what a load that does not end is doing") {
   CHECK_EQ(load_wait_text({}, {decode}),
            std::string("the Stream thread is working, in "
                        "BlackOps3.exe+0x142BC4829"));
+}
+
+TEST_CASE("crash report: a lost graphics device is named") {
+  CHECK(device_lost_result(0x887A0005));
+  CHECK(device_lost_result(0x887A0006));
+  CHECK(device_lost_result(0x887A0007));
+  CHECK(device_lost_result(0x887A0020));
+  // Not a lost device: occluded (a success code), a refused flag
+  CHECK(!device_lost_result(0x087A0001));
+  CHECK(!device_lost_result(0x887A0001));
+  CHECK(!device_lost_result(0));
+  // Present's code is often only "removed": the reason says why
+  CHECK_EQ(device_lost_text(0x887A0005, 0x887A0006),
+           std::string("lost (Present returned DXGI_ERROR_DEVICE_REMOVED, "
+                       "reason DXGI_ERROR_DEVICE_HUNG): the graphics card "
+                       "took too long on its work and Windows reset it (a "
+                       "driver timeout, TDR): most often its clocks, its "
+                       "driver or its heat"));
+  CHECK(device_lost_text(0x887A0007, 0)
+            .ends_with("reason no reason given): the graphics card was reset "
+                       "after a bad command: the game's or a mod's rendering, "
+                       "or the driver"));
+  CHECK(device_lost_text(0x887A0005, 0x80004005)
+            .starts_with("lost (Present returned DXGI_ERROR_DEVICE_REMOVED, "
+                         "reason 0x80004005): the graphics card was lost"));
 }

@@ -3,9 +3,10 @@
 // -xerces-io-trace (test only; docs/research/engine-re.md, "A map's load"):
 // every file the game opens and every read it makes, through its own import
 // pointers (as present_wake.cpp does for Sleep): CreateFileA/W with the file's
-// name and flags, ReadFile (with or without OVERLAPPED), ReadFileEx with its
-// completion routine wrapped, and GetOverlappedResult, which tells when an
-// overlapped ReadFile was done. `xerces_io_trace_dump` writes what was seen
+// name and flags, ReadFile (with or without OVERLAPPED; an overlapped one
+// still under way is not seen done: the game does not import
+// GetOverlappedResult) and ReadFileEx with its completion routine wrapped.
+// `xerces_io_trace_dump` writes what was seen
 // to <home>\io-trace.csv (one read a line: when it was asked for and when it
 // was done, in ms from the game's start, the thread, the file, the offset and
 // the size) and <home>\io-files.csv (each file's index, CreateFile flags and
@@ -58,8 +59,7 @@ std::mutex files_mutex;
 std::unordered_map<HANDLE, std::uint32_t> file_of;
 std::vector<file_entry> files{{"(not seen opened)", 0}};
 
-// Reads not done yet: ReadFileEx's routine, or an overlapped ReadFile waiting
-// for GetOverlappedResult
+// ReadFileEx's reads not done yet, with the game's routine
 struct pending_read {
   std::uint32_t index = 0;
   LPOVERLAPPED_COMPLETION_ROUTINE routine = nullptr;
@@ -77,13 +77,10 @@ using read_file_fn = BOOL(WINAPI *)(HANDLE, LPVOID, DWORD, LPDWORD,
                                     LPOVERLAPPED);
 using read_file_ex_fn = BOOL(WINAPI *)(HANDLE, LPVOID, DWORD, LPOVERLAPPED,
                                        LPOVERLAPPED_COMPLETION_ROUTINE);
-using overlapped_result_fn = BOOL(WINAPI *)(HANDLE, LPOVERLAPPED, LPDWORD,
-                                            BOOL);
 create_file_w_fn game_create_file_w = nullptr;
 create_file_a_fn game_create_file_a = nullptr;
 read_file_fn game_read_file = nullptr;
 read_file_ex_fn game_read_file_ex = nullptr;
-overlapped_result_fn game_overlapped_result = nullptr;
 
 std::int64_t now() {
   LARGE_INTEGER counter{};
@@ -136,6 +133,8 @@ HANDLE WINAPI create_file_w_stub(LPCWSTR name, DWORD access, DWORD share,
                                  HANDLE template_file) {
   const HANDLE handle = game_create_file_w(name, access, share, security,
                                            disposition, flags, template_file);
+  // The game reads the open's error after it: kept across the noting
+  const DWORD error = GetLastError();
   if (name) {
     const int length =
         WideCharToMultiByte(CP_UTF8, 0, name, -1, nullptr, 0, nullptr, nullptr);
@@ -147,6 +146,7 @@ HANDLE WINAPI create_file_w_stub(LPCWSTR name, DWORD access, DWORD share,
     }
     note_file(handle, std::move(text), flags);
   }
+  SetLastError(error);
   return handle;
 }
 
@@ -156,9 +156,11 @@ HANDLE WINAPI create_file_a_stub(LPCSTR name, DWORD access, DWORD share,
                                  HANDLE template_file) {
   const HANDLE handle = game_create_file_a(name, access, share, security,
                                            disposition, flags, template_file);
+  const DWORD error = GetLastError();
   if (name) {
     note_file(handle, name, flags);
   }
+  SetLastError(error);
   return handle;
 }
 
@@ -208,14 +210,11 @@ BOOL WINAPI read_file_ex_stub(HANDLE file, LPVOID buffer, DWORD size,
 
 BOOL WINAPI read_file_stub(HANDLE file, LPVOID buffer, DWORD size, LPDWORD read,
                            LPOVERLAPPED overlapped) {
+  // A read without OVERLAPPED is at the file's own position, not asked for:
+  // asking moves nothing but races another thread's read (a review,
+  // 2026-11-14), so its offset is left 0
   std::uint32_t index = 0;
-  std::uint64_t offset = offset_of(overlapped);
-  if (!overlapped) {
-    LARGE_INTEGER position{};
-    if (SetFilePointerEx(file, {}, &position, FILE_CURRENT)) {
-      offset = static_cast<std::uint64_t>(position.QuadPart);
-    }
-  }
+  const std::uint64_t offset = offset_of(overlapped);
   read_record *record =
       new_read(file, offset, size,
                overlapped ? read_kind::overlapped : read_kind::sync, index);
@@ -224,33 +223,13 @@ BOOL WINAPI read_file_stub(HANDLE file, LPVOID buffer, DWORD size, LPDWORD read,
     return ok;
   }
   const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
+  // An overlapped read still under way stays "not seen done": the game does
+  // not import GetOverlappedResult, and an entry kept for it could overwrite
+  // a ReadFileEx's on a reused OVERLAPPED (a review, 2026-11-14)
   if (ok || !overlapped || error != ERROR_IO_PENDING) {
     record->done = now();
     record->bytes = read ? *read : 0;
     record->failed = !ok;
-  } else {
-    std::lock_guard lock(pending_mutex);
-    pending[overlapped] = {index, nullptr};
-  }
-  SetLastError(error);
-  return ok;
-}
-
-BOOL WINAPI overlapped_result_stub(HANDLE file, LPOVERLAPPED overlapped,
-                                   LPDWORD bytes, BOOL wait) {
-  const BOOL ok = game_overlapped_result(file, overlapped, bytes, wait);
-  const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
-  if (ok || error != ERROR_IO_INCOMPLETE) {
-    std::lock_guard lock(pending_mutex);
-    if (const auto it = pending.find(overlapped);
-        it != pending.end() && it->second.routine == nullptr) {
-      if (it->second.index < max_reads) {
-        reads[it->second.index].done = now();
-        reads[it->second.index].bytes = bytes ? *bytes : 0;
-        reads[it->second.index].failed = !ok;
-      }
-      pending.erase(it);
-    }
   }
   SetLastError(error);
   return ok;
@@ -327,14 +306,11 @@ public:
     qpc_frequency = frequency.QuadPart > 0 ? frequency.QuadPart : 1;
     qpc_start = now();
     const std::string hooked = std::format(
-        "CreateFileW {}, CreateFileA {}, ReadFile {}, ReadFileEx {}, "
-        "GetOverlappedResult {}",
+        "CreateFileW {}, CreateFileA {}, ReadFile {}, ReadFileEx {}",
         hook_import("CreateFileW", &create_file_w_stub, game_create_file_w),
         hook_import("CreateFileA", &create_file_a_stub, game_create_file_a),
         hook_import("ReadFile", &read_file_stub, game_read_file),
-        hook_import("ReadFileEx", &read_file_ex_stub, game_read_file_ex),
-        hook_import("GetOverlappedResult", &overlapped_result_stub,
-                    game_overlapped_result));
+        hook_import("ReadFileEx", &read_file_ex_stub, game_read_file_ex));
     xerces_runtime::log_info("xerces.io_trace.on",
                              "The game's file reads are traced (" + hooked +
                                  "); xerces_io_trace_dump writes them");

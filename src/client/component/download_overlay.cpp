@@ -468,7 +468,12 @@ HRESULT __stdcall present_stub(IDXGISwapChain *swap_chain, UINT sync_interval,
   UINT present_flags = flipping ? flip.flags : flags;
 
   if (!probing && !flipping) {
-    return present_hook.invoke<HRESULT>(swap_chain, sync_interval, flags);
+    const HRESULT result =
+        present_hook.invoke<HRESULT>(swap_chain, sync_interval, flags);
+    if (FAILED(result)) {
+      gpu::note_present_result(swap_chain, result);
+    }
+    return result;
   }
   const std::int64_t before = probing ? xerces_perf::probe_clock() : 0;
   HRESULT result =
@@ -485,6 +490,9 @@ HRESULT __stdcall present_stub(IDXGISwapChain *swap_chain, UINT sync_interval,
   if (probing) {
     xerces_perf::probe_present(swap_chain, entry, before, after, result,
                                sync_interval, present_flags, drew);
+  }
+  if (FAILED(result)) {
+    gpu::note_present_result(swap_chain, result);
   }
   return result;
 }

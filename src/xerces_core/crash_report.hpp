@@ -281,6 +281,14 @@ std::string frame_wait_chain(const std::vector<report_frame> &main,
                              const std::vector<report_frame> &backend,
                              const std::vector<report_frame> &window);
 
+// Whether a Present result means the graphics device is lost (removed,
+// hung, reset, or the driver's internal error), and the line the reports
+// give it: what Present said and the reason Windows gives
+// (GetDeviceRemovedReason), each named, with what it most often means.
+bool device_lost_result(std::uint32_t present_result);
+std::string device_lost_text(std::uint32_t present_result,
+                             std::uint32_t reason);
+
 // What a load that does not end is doing, from the stacks of the Database
 // thread (zone loading) and the Stream thread (docs/research/engine-re.md,
 // "A map's load"): the Database thread waiting for the sound banks, in the

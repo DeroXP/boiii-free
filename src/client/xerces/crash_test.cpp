@@ -18,6 +18,9 @@
 //                                "freeze")
 //   xerces_crash_test stall      the main thread sleeps 40 s and goes on: a
 //                                freeze report that is taken back
+//   xerces_crash_test devicelost no crash: as if Present had said the
+//                                graphics device hung (nothing is lost), for
+//                                the reports' "Graphics device" line
 //   xerces_crash_test loadhang [delay_ms] [hold_s]
 //                                no crash: delay_ms (1500) into the next
 //                                map's load the game's Database thread (the
@@ -85,6 +88,7 @@
 //                                its dump and report, and no clean_exit
 
 #include <component/command.hpp>
+#include <component/gpu.hpp>
 #include <component/mod_stack.hpp>
 #include <component/workshop/workshop.hpp>
 #include <game/game.hpp>
@@ -528,6 +532,13 @@ public:
         }).detach();
         return;
       }
+      if (kind == "devicelost") {
+        // As if Present had said the device hung (no device is lost): the
+        // reports' "Graphics device" line and the gpu.device_lost event,
+        // seen with a crash or `fatal` next
+        gpu::note_present_result(nullptr, static_cast<HRESULT>(0x887A0006));
+        return;
+      }
       if (kind == "loadhang") {
         // From a thread of its own: once the journal says a level loads,
         // after delay ms, the Database thread is stopped, and after hold
@@ -549,6 +560,13 @@ public:
                                          xerces_core::launch_phase::loading_map;
                ++i) {
             Sleep(100);
+          }
+          if (xerces_runtime::journal_phase() !=
+              xerces_core::launch_phase::loading_map) {
+            // No load came: the thread is left alone (a review, 2026-11-14)
+            xerces_runtime::log_warn("xerces.crash_test",
+                                     "loadhang: no load within 60 s");
+            return;
           }
           Sleep(static_cast<DWORD>(delay));
           const DWORD database = database_thread_id();

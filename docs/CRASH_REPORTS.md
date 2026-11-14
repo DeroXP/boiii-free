@@ -103,7 +103,15 @@ Every text report has, in this order:
   time, which tells two builds with one version label apart), the time, Windows,
   how long the game had run, the journal's phase, the mode and map, the mods in
   load order with their Workshop titles (the main mod first), the launch flags,
-  and the ids of the main and server threads (to find them in the dump).
+  and the ids of the main and server threads (to find them in the dump). Since
+  2026-11-14 also "Graphics device" once the game's Present has said the device is
+  lost (removed, hung, reset, or the driver's internal error): what Present returned,
+  the reason Windows gives (`GetDeviceRemovedReason`), both named, and what it most
+  often means ("the graphics card took too long on its work and Windows reset it (a
+  driver timeout, TDR): most often its clocks, its driver or its heat"). The game's own
+  error that usually follows says only that DirectX failed. The game log has it as
+  `gpu.device_lost` when it happens. `xerces_crash_test devicelost` notes one as if
+  Present had said so (nothing is lost), for a look at the line with `fatal`.
 - The scripts each VM was running, innermost first, as `function (file line
   12)`.
 - The stacks. A crash: the crashing thread's (48 frames, with function names and
@@ -220,9 +228,15 @@ timeout), the same report as a freeze's is written as `load-<time>.txt`, headed
 the Database thread waiting for the sound banks to load, in the zone reader for the
 next part of a zone file, idle in its own loop with no zone left, or working, and
 where the Stream thread is. Its note for the launcher (reason `freeze`, the summary
-starting "Load stuck:") is taken back if the load ends ("[Load] The load ended after
-N seconds: it was slow, not stuck"); if the game is closed while stuck, it stays to
-be sent. The game is never closed for it. `xerces_crash_test loadhang [delay_ms]
+starting "Load stuck:", the Database thread's frames as its place, since the main
+thread only runs the loading screen) is taken back if the load ends ("[Load] The load
+ended after N seconds: it was slow, not stuck") or is left for the menus; if the game
+is closed while stuck, it stays to be sent. The game is never closed for it. A start
+that has not finished its first frame after five minutes gets the same report, "Start
+stuck:" (the main thread then found from the game's own thread table). A box waiting
+for the player stops the clock, a journal that did not answer changes nothing, and a
+freeze's report and a load's never walk the threads at the same time (a second read
+of this code, 2026-11-14). `xerces_crash_test loadhang [delay_ms]
 [hold_s]` stops the Database thread that far into the next `map`'s load, and
 `XERCES_LOAD_STUCK_SECONDS` (10 or more) shortens the five minutes for a test.
 

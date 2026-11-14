@@ -860,17 +860,81 @@ std::string frame_wait_chain(const std::vector<report_frame> &main,
   return chain + "; " + window_state(window);
 }
 
+namespace {
+// DXGI's codes for a lost device (dxgi.h)
+constexpr std::uint32_t dxgi_device_removed = 0x887A0005;
+constexpr std::uint32_t dxgi_device_hung = 0x887A0006;
+constexpr std::uint32_t dxgi_device_reset = 0x887A0007;
+constexpr std::uint32_t dxgi_driver_internal_error = 0x887A0020;
+
+std::string dxgi_name(const std::uint32_t code) {
+  switch (code) {
+  case 0:
+    return "no reason given";
+  case dxgi_device_removed:
+    return "DXGI_ERROR_DEVICE_REMOVED";
+  case dxgi_device_hung:
+    return "DXGI_ERROR_DEVICE_HUNG";
+  case dxgi_device_reset:
+    return "DXGI_ERROR_DEVICE_RESET";
+  case dxgi_driver_internal_error:
+    return "DXGI_ERROR_DRIVER_INTERNAL_ERROR";
+  default:
+    return std::format("0x{:08X}", code);
+  }
+}
+} // namespace
+
+bool device_lost_result(const std::uint32_t present_result) {
+  return present_result == dxgi_device_removed ||
+         present_result == dxgi_device_hung ||
+         present_result == dxgi_device_reset ||
+         present_result == dxgi_driver_internal_error;
+}
+
+std::string device_lost_text(const std::uint32_t present_result,
+                             const std::uint32_t reason) {
+  // The reason says why; Present's own code is often only "removed"
+  const std::uint32_t why = reason != 0 ? reason : present_result;
+  std::string meaning;
+  switch (why) {
+  case dxgi_device_hung:
+    meaning = "the graphics card took too long on its work and Windows "
+              "reset it (a driver timeout, TDR): most often its clocks, "
+              "its driver or its heat";
+    break;
+  case dxgi_device_reset:
+    meaning = "the graphics card was reset after a bad command: the game's "
+              "or a mod's rendering, or the driver";
+    break;
+  case dxgi_device_removed:
+    meaning = "the graphics card stopped answering, or its driver was "
+              "updated or crashed";
+    break;
+  case dxgi_driver_internal_error:
+    meaning = "the graphics driver hit an internal error";
+    break;
+  default:
+    meaning = "the graphics card was lost";
+    break;
+  }
+  return std::format("lost (Present returned {}, reason {}): {}",
+                     dxgi_name(present_result), dxgi_name(reason), meaning);
+}
+
 std::string load_wait_text(const std::vector<report_frame> &database,
                            const std::vector<report_frame> &stream) {
   std::string out;
   if (!database.empty()) {
-    if (!in_system_call(database)) {
-      out = "the Database thread is working, in " + innermost(database);
-    } else if (any_in(database, sound_banks_wait_begin, sound_banks_wait_end)) {
+    // The known waits first: one read between its system calls is still
+    // that wait (a review, 2026-11-14)
+    if (any_in(database, sound_banks_wait_begin, sound_banks_wait_end)) {
       out = "the Database thread waits for the sound banks to load";
     } else if (any_in(database, zone_reader_wait_begin, zone_reader_wait_end)) {
       out = "the Database thread waits in the zone reader for the next part "
             "of a zone file";
+    } else if (!in_system_call(database)) {
+      out = "the Database thread is working, in " + innermost(database);
     } else if (const auto at = first_game(database);
                at && *at >= database_loop_begin && *at < database_loop_end) {
       out = "the Database thread is idle: it has no zone left to load";
