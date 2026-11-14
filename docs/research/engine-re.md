@@ -580,7 +580,14 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   at 0 to 3.6 s (13.3 s in all against 15.5); the launch wait alone, and
   `lobbyTimerZMStartInterval` (5,000) or `lobby_clientLoadingIntoUICheck` (1) at 0,
   changed nothing. `-xerces-fast-loads` zeroes the two for a launch with no other player
-  in the lobby.
+  in the lobby. What is left of part 1 then (about 2.3 s from the command to `DISCONNECTED`)
+  is the engine swapping assets: Main sampled through it (`wait-sample.ps1 -From 0.6 -For
+  2.4 -ExtraFlags -xerces-fast-loads`, `bench\20261113-left\wait-sample-teardown`) is 38%
+  waiting for the render thread (from `CL_SetupForNewServerMap`), about 18% in the texture
+  pool's reference counting (`Gfx_TexturePool_ReleaseRef`/`AddRef` and a routine they call
+  at 0x142BC47F0, under `Image_AssignDefaultTexture` < `DB_OverrideAsset` <
+  `DB_ActivatePreloadedMap`, and under `DB_UnloadXZone` < `DB_ReleaseXAssets` for the
+  menus' zones), 3% freeing memory. Work, not a wait.
 - Streaming settings tried (each set from the console just before `map`, one load each,
   `bench\20261113-left\loadtime-dvar.ps1`; the console's answers say their ranges):
   `waitForStreamer` (0 to 2, default 1) at 0, 1 and 2: 15.5, 15.2 and 15.4 s, no change.
