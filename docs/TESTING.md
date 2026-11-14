@@ -3485,10 +3485,23 @@ In the game (the user approved the runs; the friends build, test homes):
       same with the guard switched off: "HOLD JUMP OR USE TO REVIVE YOURSELF" stays on
       screen over the standing player (`bench\20261112-crash\revive-noguard-3-up.png`),
       which is what the guard was added for.
-- [ ] Not tried in the game: UPnP with two PCs, the Workshop helper from the in-game menu
-      (it would subscribe the user's Steam account to an item). The aim assist's dead zone
-      was not looked at by itself, but the user played beta.25 with a controller and found
-      the assist good.
+- [x] The Workshop helper from inside the game (the user said to go ahead;
+      `xerces_crash_test workshopget <id>`, new, queues an item as the Workshop menu does;
+      `bench\20261113-left\workshopget.ps1`):
+      - Steam closed: the helper started, its answer came through the pipe and was logged
+        as `workshop.steam.failed` ("Steam did not start the Workshop download. Is Steam
+        open ...?") with the popup; no helper left.
+      - Steam open, an item already installed (DS4C): `workshop.steam.installed`, "Steam
+        installed 3171632315", the content reloaded.
+      - Steam open, a real download (Zombie Counter [MOD], 847539857, a few KB, not
+        subscribed before): the helper seen running 11 ms after the command, installed 3 s
+        later, its three files in the Workshop folder, "Supplemented 20 mods" where there
+        were 19, no helper left when the game closed. The user's account is subscribed to
+        that item now.
+- [ ] Not tried in the game: UPnP with two PCs; a long download ended by quitting the game
+      (the job that ends the helper with its starter). The aim assist's dead zone was not
+      looked at by itself, but the user played beta.25 with a controller and found the
+      assist good.
 
 ## Aim assist after the user's beta.24 playtest (2026-11-13)
 

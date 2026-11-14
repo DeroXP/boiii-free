@@ -27,6 +27,11 @@
 //                                the handler is entered again
 //   xerces_crash_test dumpfault  a crash, and the handler's in-memory dump
 //                                faults: caught, the report stands
+//   xerces_crash_test workshopget <id>  no crash: asks Steam for a Workshop
+//                                item as the in-game Workshop menu does (the
+//                                helper process, its lines, its end); the
+//                                game log says workshop.steam.installed or
+//                                .failed
 //   xerces_crash_test heap       the main thread takes the heap's lock and
 //                                never gives it back: no report can be
 //                                written, and the watchdog must still close
@@ -50,6 +55,7 @@
 //                                its dump and report, and no clean_exit
 
 #include <component/command.hpp>
+#include <component/workshop/workshop.hpp>
 #include <game/game.hpp>
 #include <loader/component_loader.hpp>
 
@@ -155,6 +161,16 @@ public:
             "The shutdown will fault once the game is quitting "
             "(xerces_crash_test exitfault)");
         fault_in_shutdown = true;
+        return;
+      }
+      if (kind == "workshopget") {
+        if (params.size() > 2) {
+          xerces_runtime::log_warn(
+              "xerces.crash_test",
+              std::string("Asking Steam for Workshop item ") + params.get(2) +
+                  " (xerces_crash_test workshopget)");
+          workshop::start_download(params.get(2), game::ZoneType::MOD);
+        }
         return;
       }
       if (kind == "handlerfault" || kind == "dumpfault") {
