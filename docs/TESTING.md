@@ -4269,3 +4269,13 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       were bench launches with nothing reading the exit code; Xerces.exe reports any exit
       other than 0 without a clean exit. `bench\20261113-left\exit-watch.ps1` now records the
       next boiii.exe's exit code; the rerun of the second one went through.
+
+## beta.27 (2026-11-14)
+
+- [x] Built from 86f9832c (`tools/release.ps1`): every lint, 626 unit tests and the CLI smoke
+      test pass; `dist\xerces-0.1.0-beta.27.zip`, 9.9 MB, 239 files, SHA-256
+      bbc7447009572adc6571985de840564bdfebb6965b10ea175c452d21ae99a9ea, no NVIDIA files in
+      it. Unpacked at `C:\Games\xerces-0.1.0-beta.27` with the DLSS DLLs from beta.26's
+      folder. `xerces-main` pushed to GitHub on the user's word (052a6ae1..86f9832c, no tags).
+- [ ] The packaged build itself not started: the user was at the PC. The same commit's
+      development build passed the M1 cases, the fast-loads soak and the Lua error tests.
