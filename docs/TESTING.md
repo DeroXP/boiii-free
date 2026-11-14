@@ -3766,8 +3766,9 @@ messages, and what two new reviews of everything since beta.26 found:
 - [x] The map-or-mod rule: the launcher took an item as a map only for `"Type": "map"`
       in strictly parsed JSON. Now as the client decides (`workshop/installed.cpp`):
       "Type" or "type", "map...", "usermap...", "custom map..." a map and anything with
-      "mod" a mod, workshop.json read leniently (an ANSI-saved title keeps its Workshop
-      id, its title shown as valid UTF-8), the zone files when there is no Type
+      "mod" a mod, workshop.json read leniently for the kind and the title (shown as
+      valid UTF-8; the id still from a strict read, so no saved profile loses an item
+      to a new id), the zone files when there is no Type
       (`legacy_kind`), and the game's own `usermaps` and `mods` folders decide for the
       items in them (`scan_options::folder_kind`). Unit tests for each case and a
       catalog test of the three folders.

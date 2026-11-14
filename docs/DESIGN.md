@@ -644,8 +644,10 @@ in the game's `usermaps` folder a map and in its `mods` folder a mod, whatever
 `workshop.json` says; in Steam's Workshop folder by `workshop.json`'s "Type" or
 "type" ("map", "usermap" or "custom map" at its start a map, anything with "mod" a
 mod), the file read leniently as the client reads it (one saved in the ANSI code
-page keeps its Workshop id), and without either by its zone files (`mod.ff` or
-`*_mod.ff` a mod, a `zm_`/`mp_`/`cp_` zone a map).
+page gives its kind and its title; its id still comes from a strict read, so an
+item that was `local.<folder>` stays so for the profiles that name it), and
+without either by its zone files (`mod.ff` or `*_mod.ff` a mod, a
+`zm_`/`mp_`/`cp_` zone a map).
 
 ### 5.3 Resolving a plan
 
