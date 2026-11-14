@@ -4031,6 +4031,9 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       Reimagined 11.1 s, Shadows of Evil 13.9 s, each played 45 s and back to the menu.
       Backrooms ran out of memory as it does with this stack without larger zone memory
       (2026-11-14 night); with `-xerces-db-pool` added it loaded in 15.4 s and played.
+- [x] Three map changes in one game with the flag, mods off (`fastload-soak.ps1`): Shadows of
+      Evil from the menus in 13.7 s, then Origins in 5.3 s and Shadows of Evil again in 5.9 s
+      by `map` from inside the level (no menus, no lobby launch). No error in the log.
 - [ ] Played by a person with their own mod stack, and a launch with a friend in the lobby
       (the waits must stay as they were).
 
