@@ -27,6 +27,10 @@
 //                                the handler is entered again
 //   xerces_crash_test dumpfault  a crash, and the handler's in-memory dump
 //                                faults: caught, the report stands
+//   xerces_crash_test cmdlist    no crash: every console command in the
+//                                engine's list, with its handler (the game's
+//                                address at base 0x140000000, or the module
+//                                that added it), to <home>\commands.txt
 //   xerces_crash_test joinrule0  no crash: the map-first rule a join of a host
 //                                with map scripts first off leaves (0); the
 //                                next match this game launches itself must
@@ -166,6 +170,49 @@ public:
             "The shutdown will fault once the game is quitting "
             "(xerces_crash_test exitfault)");
         fault_in_shutdown = true;
+        return;
+      }
+      if (kind == "cmdlist") {
+        const std::uintptr_t base = game::get_engine_base();
+        std::string out;
+        int count = 0;
+        for (auto *command = *game::cmd::cmd_functions; command;
+             command = command->next) {
+          if (!command->name) {
+            continue;
+          }
+          const auto handler =
+              reinterpret_cast<std::uintptr_t>(command->function);
+          char line[320];
+          HMODULE module = nullptr;
+          char path[MAX_PATH] = {};
+          if (handler >= base && handler < base + 0x1D75BC00) {
+            std::snprintf(line, sizeof(line), "%s 0x%llX\n", command->name,
+                          static_cast<unsigned long long>(handler - base +
+                                                          0x140000000ull));
+          } else if (GetModuleHandleExA(
+                         GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                             GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                         reinterpret_cast<LPCSTR>(handler), &module) &&
+                     GetModuleFileNameA(module, path, MAX_PATH) != 0) {
+            const char *name = std::strrchr(path, '\\');
+            std::snprintf(
+                line, sizeof(line), "%s %s+0x%llX\n", command->name,
+                name ? name + 1 : path,
+                static_cast<unsigned long long>(
+                    handler - reinterpret_cast<std::uintptr_t>(module)));
+          } else {
+            std::snprintf(line, sizeof(line), "%s ?\n", command->name);
+          }
+          out += line;
+          ++count;
+        }
+        const auto file = xerces_runtime::home() / "commands.txt";
+        xerces_runtime::write_file(file, out);
+        xerces_runtime::log_info("xerces.crash_test",
+                                 std::to_string(count) +
+                                     " console commands written to " +
+                                     file.string());
         return;
       }
       if (kind == "joinrule0") {

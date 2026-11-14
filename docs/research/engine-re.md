@@ -84,3 +84,49 @@ base 0x140000000 that upstream's symbol tables use.
   same function exists only in the dedicated server build, which has no such protection.
 - Changes that worked: pointers in data (the command list), and detours of functions the
   client already hooks or that the signature system resolves (DESIGN.md 4.3).
+
+## Console commands
+
+- `xerces_crash_test cmdlist` (with `-xerces-crash-test`) writes every command in the
+  engine's list with its handler to `<home>\commands.txt`; the list from the menus, mods
+  off, is in `engine-commands.txt` next to this file: 699 commands, 653 handled by the
+  game and 46 added or wrapped by the client (`quit` and `lobbyLaunchGame` among them).
+- 38 server commands share one handler, 0x1420DF880, the dispatcher into the server's
+  own command list: `map`, `devmap`, `map_restart`, `fast_restart`, `disconnect`, `kick`,
+  `status`, `vid_restart` and the rest. 34 commands a player sends to the server share
+  0x1420E0FA0, which forwards them: `god`, `noclip`, `give`, `say`, `callvote` and the
+  rest. Pointing one entry elsewhere changes that command alone; the work stays behind
+  these dispatchers.
+
+## Script built-ins
+
+- The built-ins are in tables of 32-byte entries in `.data`: the name's hash (the same
+  FNV-1a the client's `builtin::fnv1a` makes, as in `data/lookup_tables/hash_names.txt`),
+  the least and most arguments, a zero, the handler's address (as it is in memory, so a
+  dump's base has to be taken off) and a last field that is almost always 0. There are
+  several tables; three found from known names:
+  - 0x1432C1C90, 73 entries, player methods: `CameraActivate` (exactly 1 argument,
+    handler 0x1416C5E50), `CameraSetLookAt` (0 or 1, 0x1416C94C0), `SetOrigin`,
+    `SetPlayerAngles`, `SetVelocity`;
+  - 0x1432C3970, 171 entries, player methods: `SetClientThirdPerson` (1 to 3 arguments,
+    0x1418089B0), `SetLowReady`;
+  - 0x143263A50, 340 entries with handlers low in `.text` (0x140xxxxxx), most likely the
+    client scripts' (CSC) built-ins: another `CameraSetLookAt` (exactly 1 argument,
+    0x140E50ED0).
+  A scan stops at the first entry that does not look like one, so a table may go on past
+  where these counts end.
+- The handlers are protected: control flow flattened into a state machine of 32-bit
+  constants, with checks on the process block (`gs:0x30`). What `CameraActivate` and
+  `SetClientThirdPerson` change was not worked out from the code. CHARACTERS' preview
+  sets both again every half second instead (DESIGN.md 7.13), since either was seen not
+  to take once.
+
+## Zombies: a dying actor
+
+- Measured with `xerces_aim_actors` (2026-11-13): a live zombie is an actor (`eType` 0x12)
+  with state flags (`nextState.lerp.eFlags`) 0x01 and no ragdoll; the frame it is killed
+  the flags read 0x10; a quarter of a second later it is a ragdoll (`pose.isRagdoll`,
+  `ragdollHandle`); about a second later its body is a corpse entity (`eType` 0x14) in a
+  new slot. Its bounds are 100 units high, from 10 under the feet; the player's eye is 57
+  to 61 over the feet of a zombie on the same floor. `bAimTargetVisible` and
+  `bRenderedLastFrame` stayed 0 for zombies in plain sight.
