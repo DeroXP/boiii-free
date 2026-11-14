@@ -97,9 +97,23 @@ bool own_map_scripts_first() {
   return map_scripts_first_dvar ? map_scripts_first_dvar.get_bool() : true;
 }
 
+// This process hosts the match that is loading: the game lobby is its own.
+// A level this game starts links its first zones before its server runs
+// (about four seconds with sv_running off, measured 2026-11-13), so "no server
+// running" alone took it for a client of another host: the rule left by an
+// earlier join was then used, and with that host's map-first off (or a host
+// without Xerces) a custom map this game started ended in a GSC link error
+// until the game was restarted. A client of another host is in that host's
+// game lobby, never the host of one.
+bool hosts_game_lobby() {
+  return !game::is_legacy_client() &&
+         game::lobby::LobbyHost_IsHost(game::lobby::LobbyType::GAME);
+}
+
 bool map_scripts_first_enabled() {
   const int rule = host_rule.load();
-  const bool remote_client = !game::is_server() && !game::server_running();
+  const bool remote_client = !game::is_server() && !game::server_running() &&
+                             !hosts_game_lobby();
   if (remote_client && rule >= 0) {
     return rule == 1;
   }

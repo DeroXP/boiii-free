@@ -3402,10 +3402,18 @@ Fixed:
 
 Checked and left:
 
-- [ ] The host's map-first rule after a join is reset only by the console's `map`: whether
-      it matters depends on whether `sv_running` is false while a locally started level
-      links its zones, which the code does not settle. For the two-PC test: after leaving
-      H's match, J starts SANCTUM OBITUS with DS4C from the lobby menu; map-first must hold.
+- [x] The host's map-first rule after a join was reset only by the console's `map`.
+      Settled on one PC (after beta.25) with temporary instrumentation that left the rule
+      at 0, as a join of a host without map-first or without Xerces does, and kept `map`
+      from resetting it, as a start from the lobby menu does not: DS4C + SANCTUM OBITUS
+      (`zm_log_overunder`). While the level's first zones linked, `sv_running` was 0 for
+      about four seconds and the stale rule was used: no script kept by the map, "GSC LINK
+      ERROR", back in the menus. In that time the game already hosts its own lobbies
+      (`LobbyHost_IsHost`: private 1, game 1). Fixed: the host's rule applies only while
+      this game does not host the game lobby. With the same stale rule: five scripts kept
+      by the map, in the level after 34 s, no error; without a stale rule the same
+      (`bench\20261113-left\hostrule.ps1`). Still for the two-PC test: that a client of
+      another host really takes that host's rule (the lobby flag must be off there).
 - [ ] Nothing prunes `%LOCALAPPDATA%\boiii\minidumps` (about 22 MB a crash): deleting the
       player's crash files is theirs to decide.
 - [x] A lost Direct3D device in the launcher was not noticed: the window stayed frozen
