@@ -672,7 +672,9 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   start's own code then. So the start's sleep loop (0x1420EEE3F) most likely waits for
   something only that pump moves on (the lobby connection's answer would fit) and, since
   it does not pump, ends by its own timeout, about 3 s. Not proved: the loop is in the
-  protection's encrypted code; what it polls would have to be read at run time.
+  protection's encrypted code; what it polls would have to be read at run time. (Read
+  below: it waits for a zone whose sound banks wait for `SND_Frame`; the online pump is
+  likely just stopped alongside, not the cause.)
 - Read at run time (late morning): the code is encrypted again once it has run (read at the
   menus it is still noise), but read from outside while the start is inside it, 10.5 s
   after launch (`bench\20261113-left\read-code-live.py`: the game's image found by its size
@@ -699,8 +701,9 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   every thread on the way waits and none works, so the request that would move the banks
   along is not made while the start sleeps. Which code makes it: `SND_LoadSoundsWait`
   (0x142513020) loops, `Sleep(30)` a pass, while the sound system is active and the byte at
-  0x1434BF5FC is 0, calling `SND_UpdateWait` each pass; that byte is written in one place
-  only, `SNDL_Update` (0x142509260: the result of `SND_BankUpdate`), and `SNDL_Update` is
+  0x1434BF5FC is 0, calling `SND_UpdateWait` each pass; the one write to that byte a scan
+  of the readable code finds (direct `mov` to it; not the protected code, not through a
+  pointer) is in `SNDL_Update` (0x142509260: the result of `SND_BankUpdate`), and `SNDL_Update` is
   called only from `SND_Frame` (the main loop's sound update) and `SNDL_GameReset`. So the
   pause is a wait-for that nothing can answer: the main thread sleeps in the start's loop
   until a zone is loaded, the zone's load waits for its sound banks, and the banks move on
