@@ -4012,5 +4012,14 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       Shadows of Evil 12.5 s with, 14.5 s without; Town Reimagined 12.8 s with, 22.3 s
       without. Both games with the flag logged "xerces.fast_loads.launch: No other player in
       the lobby"; every load reached the level, played 45 s and went back to the menu.
+- [x] A review of the flag (nothing that breaks; the patch encodings, registers, re-entry
+      and the other callers checked against the dump): the waits are now put back 15 s after
+      a solo launch and read again before each launch, and the log no longer says the
+      loading screen draws every frame when the code check refused it. Checked: with the
+      flag the console's `map` also goes through the wrapper ("No other player in the
+      lobby"), the level started loading at 3.9 s instead of 5.9 s, and 22 s after `map`
+      `lobbyLaunch_waitForClientAckDelay` read 2000 again.
+- [x] The nine in-game M1 cases on the final build (`bench\20261113-left\m1-final`): 60
+      checks pass, none fail.
 - [ ] Played by a person with their own mod stack, and a launch with a friend in the lobby
       (the waits must stay as they were).

@@ -3748,13 +3748,16 @@ update, so the last seconds of a map's load, when the level's images stream in b
 the loading screen, go at that pace and not at the disk's (docs/research/engine-re.md,
 "A map's load"). The launch flag `-xerces-fast-loads`
 (`src/client/xerces/fast_loads.cpp`) sets both waits to 0 after checking the two
-instructions, so the loading screen draws every frame the main loop makes (still under
-`com_maxfps`). It also lets a match launched from a lobby with no other player in it
+instructions, so the loading screen draws every frame the main loop makes (under
+`com_maxfps` there; the engine's own wait loops that draw, such as the zone loader's
+draw-and-sleep, go at the renderer's pace, since a draw still needs the renderer's frame
+to be ready). It also lets a match launched from a lobby with no other player in it
 start without waiting for the others' acknowledgements: `lobbyLaunch_waitForClientAckDelay`
 (2,000 ms) and `lobbyLaunch_gameLaunchDelay` (700 ms) are 0 for that launch (set in the
 `lobbyLaunchGame` wrapper, `mod_stack.cpp`) and what they were for a launch with others
 in the lobby, whose games need that time to hear of it. Zeroing both saved about 1.9 s
-before the level started loading. Custom maps loaded much sooner with it (no mods, each load a game of its
+before the level started loading. The two are put back 15 s after such a launch (a
+later launch as a friend's guest reads one of them) and read again before each launch. Custom maps loaded much sooner with it (no mods, each load a game of its
 own, both orders): Town Reimagined 16.0 s against 22.3 s, MW2 Rust 14.8 against 27.0 s,
 Backrooms 18.1 against 21.4 s. Shadows of Evil loaded no sooner: its end is held by the
 client waiting in `CONFIRMLOADING` (docs/research/engine-re.md). Off unless the flag is

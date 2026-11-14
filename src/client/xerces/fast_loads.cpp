@@ -20,6 +20,7 @@
 
 #include "fast_loads.hpp"
 
+#include <component/scheduler.hpp>
 #include <game/game.hpp>
 #include <game/utils.hpp>
 #include <loader/component_loader.hpp>
@@ -40,9 +41,11 @@ constexpr const char *ack_delay = "lobbyLaunch_waitForClientAckDelay";
 constexpr const char *launch_delay = "lobbyLaunch_gameLaunchDelay";
 
 bool enabled = false;
-// The lobby's own values, read before the first change (main thread only)
+// The lobby's own values, read before each change of ours (main thread only)
 std::optional<std::int32_t> ack_delay_before;
 std::optional<std::int32_t> launch_delay_before;
+// Our zeros are in the dvars now (put back by restore_waits)
+bool zeroed = false;
 
 bool code_is(const std::uintptr_t address, const std::uint8_t opcode,
              const std::uint32_t value) {
@@ -52,17 +55,30 @@ bool code_is(const std::uintptr_t address, const std::uint8_t opcode,
   return code[0] == opcode && immediate == value;
 }
 
-void draw_every_frame() {
+bool draw_every_frame() {
   const std::uintptr_t loading = game::relocate(wait_loading);
   const std::uintptr_t late = game::relocate(wait_late);
   if (!code_is(loading, 0xBB, 0x10) || !code_is(late, 0xB9, 0x21)) {
     xerces_runtime::log_warn("xerces.fast_loads.screen_off",
                              "The screen update's waits are not the expected "
                              "code; left as they are");
-    return;
+    return false;
   }
   utils::hook::set<std::uint32_t>(loading + 1, 0);
   utils::hook::set<std::uint32_t>(late + 1, 0);
+  return true;
+}
+
+// The lobby's own waits back once the launch is under way: a later launch
+// as a friend's guest reads lobbyLaunch_gameLaunchDelay too (a review,
+// 2026-11-14). Main thread.
+void restore_waits() {
+  if (!zeroed || !ack_delay_before || !launch_delay_before) {
+    return;
+  }
+  game::set_dvar_int(ack_delay, *ack_delay_before, false);
+  game::set_dvar_int(launch_delay, *launch_delay_before, false);
+  zeroed = false;
 }
 } // namespace
 
@@ -70,7 +86,9 @@ void before_lobby_launch() {
   if (!enabled || game::is_legacy_client()) {
     return;
   }
-  if (!ack_delay_before) {
+  // What the lobby has now, unless our zeros are still in (a mod or the
+  // console may have changed them since)
+  if (!zeroed) {
     ack_delay_before = game::get_dvar_int(ack_delay);
     launch_delay_before = game::get_dvar_int(launch_delay);
     if (!ack_delay_before || !launch_delay_before) {
@@ -88,6 +106,12 @@ void before_lobby_launch() {
                          game::lobby::LobbyClientType::REMOTE) == 0;
   game::set_dvar_int(ack_delay, alone ? 0 : *ack_delay_before, false);
   game::set_dvar_int(launch_delay, alone ? 0 : *launch_delay_before, false);
+  zeroed = alone;
+  if (alone) {
+    // The launch reads them within its first seconds (the level starts
+    // loading about 3.6 s after the command)
+    scheduler::once(restore_waits, scheduler::main, 15s);
+  }
   xerces_runtime::log_info(
       "xerces.fast_loads.launch",
       alone ? "No other player in the lobby: the launch does not wait for "
@@ -109,11 +133,13 @@ public:
       return;
     }
     enabled = true;
-    draw_every_frame();
-    xerces_runtime::log_info("xerces.fast_loads.on",
-                             "The loading screen draws every frame and a "
-                             "launch alone does not wait for others "
-                             "(-xerces-fast-loads)");
+    xerces_runtime::log_info(
+        "xerces.fast_loads.on",
+        draw_every_frame()
+            ? "The loading screen draws every frame and a launch alone does "
+              "not wait for others (-xerces-fast-loads)"
+            : "A launch alone does not wait for others; the loading screen "
+              "is as it was (-xerces-fast-loads)");
   }
 };
 } // namespace xerces_fast_loads
