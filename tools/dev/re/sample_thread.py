@@ -4,6 +4,7 @@ is let go. Nothing is loaded into the game.
   python -I tools/dev/re/sample_thread.py <thread id> [samples] [engine start rva] [--raw <file>]
                                           [--engine-base <hex>] [--scan <bytes>] [--seconds <s>]
 --seconds stops after that long even if fewer samples were taken (a map load: give many samples).
+--keep sets how many code pointers a stack scan keeps (12 by default).
 --engine-base places the game's code for a thread that did not start in it (the main thread): the first line
 of `xerces_crash_test threads`. --scan reads that many bytes of the stack (still stopped) and keeps the first
 values that point into code, a rough call chain (a stack scan: some are stale).
@@ -81,6 +82,11 @@ def main():
     if "--scan" in args:
         at = args.index("--scan")
         scan = int(args[at + 1], 0)
+        del args[at:at + 2]
+    keep = 12
+    if "--keep" in args:
+        at = args.index("--keep")
+        keep = int(args[at + 1])
         del args[at:at + 2]
     seconds = None
     if "--seconds" in args:
@@ -181,7 +187,7 @@ def main():
                 value = struct.unpack_from("<Q", stack, i)[0]
                 if code(value):
                     chain.append(place(value))
-                    if len(chain) >= 12:
+                    if len(chain) >= keep:
                         break
             raw.append(f"{a}\t{b}" + ("\t" + " < ".join(chain) if scan else ""))
             taken += 1

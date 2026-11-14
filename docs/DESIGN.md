@@ -3756,7 +3756,12 @@ start without waiting for the others' acknowledgements: `lobbyLaunch_waitForClie
 (2,000 ms) and `lobbyLaunch_gameLaunchDelay` (700 ms) are 0 for that launch (set in the
 `lobbyLaunchGame` wrapper, `mod_stack.cpp`) and what they were for a launch with others
 in the lobby, whose games need that time to hear of it. Zeroing both saved about 1.9 s
-before the level started loading. The two are put back 15 s after such a launch (a
+before the level started loading. And the game's start, which asks WMI for BitLocker's
+namespace from a static initializer and, for a user who is not an administrator, gets
+`WBEM_E_ACCESS_DENIED` only after 5 s, gets that same answer at once while the process is
+not elevated (the game's `CoCreateInstance` import is pointed at a stub before its entry
+point; only the WMI locator is wrapped, and only that one connection is answered): the
+menus came about 5 s sooner. The two are put back 15 s after such a launch (a
 later launch as a friend's guest reads one of them) and read again before each launch. Custom maps loaded much sooner with it (no mods, each load a game of its
 own, both orders): Town Reimagined 16.0 s against 22.3 s, MW2 Rust 14.8 against 27.0 s,
 Backrooms 18.1 against 21.4 s; with both parts and a three-mod stack, Town Reimagined

@@ -17,8 +17,22 @@
 //    launch, and back to what they were for a launch with others in the
 //    lobby (they give a friend's game time to hear of the launch). About 1.9 s
 //    before the level starts loading.
+// 3. The game's start asks WMI, from a static initializer before WinMain
+//    (0x142BC15F8, with root\CIMV2 and root\wmi: a description of the PC),
+//    for BitLocker's namespace, root\CIMV2\Security\MicrosoftVolumeEncryption.
+//    A user who is not an administrator gets only "access denied", and
+//    Windows takes 5 s to say so (5,019 ms measured on this PC): the start
+//    stood still that long. While the process is not elevated, that one
+//    ConnectServer now answers WBEM_E_ACCESS_DENIED at once, the answer the
+//    game got anyway, 5 s sooner. The game's import of CoCreateInstance is
+//    pointed here before its entry point runs (post_load); every other COM
+//    object, and every other WMI call, is the real one.
 
 #include "fast_loads.hpp"
+
+#include <wbemcli.h>
+
+#include <cwctype>
 
 #include <component/scheduler.hpp>
 #include <game/game.hpp>
@@ -26,6 +40,7 @@
 #include <loader/component_loader.hpp>
 
 #include <utils/hook.hpp>
+#include <utils/nt.hpp>
 
 #include <xerces_core/launch.hpp>
 
@@ -46,6 +61,129 @@ std::optional<std::int32_t> ack_delay_before;
 std::optional<std::int32_t> launch_delay_before;
 // Our zeros are in the dvars now (put back by restore_waits)
 bool zeroed = false;
+
+// ---------------------------------------------------------------- WMI
+using co_create_fn = HRESULT(WINAPI *)(REFCLSID, LPUNKNOWN, DWORD, REFIID,
+                                       LPVOID *);
+co_create_fn game_co_create = nullptr;
+std::atomic<int> wmi_denied{0};
+bool wmi_hooked = false;
+
+bool process_elevated() {
+  HANDLE token = nullptr;
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+    return false;
+  }
+  TOKEN_ELEVATION elevation{};
+  DWORD size = 0;
+  const bool ok = GetTokenInformation(token, TokenElevation, &elevation,
+                                      sizeof(elevation), &size) != FALSE;
+  CloseHandle(token);
+  return ok && elevation.TokenIsElevated != 0;
+}
+
+bool bitlocker_namespace(const BSTR resource) {
+  if (!resource) {
+    return false;
+  }
+  std::wstring lower(resource);
+  for (wchar_t &c : lower) {
+    c = static_cast<wchar_t>(std::towlower(c));
+  }
+  return lower.find(L"microsoftvolumeencryption") != std::wstring::npos;
+}
+
+// The game's WMI locator, but for BitLocker's namespace without the rights
+// to it (see 3. above)
+class locator_proxy final : public IWbemLocator {
+public:
+  explicit locator_proxy(IWbemLocator *real) : real_(real) {}
+
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void **out) override {
+    if (!out) {
+      return E_POINTER;
+    }
+    if (IsEqualIID(iid, IID_IUnknown) ||
+        IsEqualIID(iid, __uuidof(IWbemLocator))) {
+      *out = static_cast<IWbemLocator *>(this);
+      AddRef();
+      return S_OK;
+    }
+    return real_->QueryInterface(iid, out);
+  }
+  ULONG STDMETHODCALLTYPE AddRef() override { return ++refs_; }
+  ULONG STDMETHODCALLTYPE Release() override {
+    const ULONG left = --refs_;
+    if (left == 0) {
+      real_->Release();
+      delete this;
+    }
+    return left;
+  }
+  HRESULT STDMETHODCALLTYPE ConnectServer(const BSTR resource, const BSTR user,
+                                          const BSTR password,
+                                          const BSTR locale, long flags,
+                                          const BSTR authority,
+                                          IWbemContext *context,
+                                          IWbemServices **services) override {
+    if (bitlocker_namespace(resource) && !process_elevated()) {
+      if (services) {
+        *services = nullptr;
+      }
+      ++wmi_denied;
+      return WBEM_E_ACCESS_DENIED;
+    }
+    return real_->ConnectServer(resource, user, password, locale, flags,
+                                authority, context, services);
+  }
+
+private:
+  IWbemLocator *real_;
+  std::atomic<ULONG> refs_{1};
+};
+
+// The game asks for the locator's IUnknown and then for IWbemLocator (seen
+// 2026-11-14): either way it gets the proxy, which answers both. Any other
+// interface asked for gets the real object.
+HRESULT WINAPI co_create_stub(REFCLSID clsid, LPUNKNOWN outer, DWORD context,
+                              REFIID iid, LPVOID *out) {
+  const HRESULT result = game_co_create(clsid, outer, context, iid, out);
+  if (FAILED(result) || !out || !*out || outer ||
+      !IsEqualCLSID(clsid, __uuidof(WbemLocator)) ||
+      (!IsEqualIID(iid, IID_IUnknown) &&
+       !IsEqualIID(iid, __uuidof(IWbemLocator)))) {
+    return result;
+  }
+  auto *got = static_cast<IUnknown *>(*out);
+  IWbemLocator *real = nullptr;
+  if (FAILED(got->QueryInterface(__uuidof(IWbemLocator),
+                                 reinterpret_cast<void **>(&real))) ||
+      !real) {
+    return result; // not a locator after all: left as it is
+  }
+  auto *proxy = new (std::nothrow) locator_proxy(real);
+  if (!proxy) {
+    real->Release();
+    return result;
+  }
+  got->Release();
+  *out = static_cast<IWbemLocator *>(proxy);
+  return result;
+}
+
+// Before the game's entry point: its static initializers make the call
+void hook_wmi_locator() {
+  for (const char *module :
+       {"ole32.dll", "combase.dll", "api-ms-win-core-com-l1-1-0.dll"}) {
+    if (void *entry =
+            utils::nt::library{}.get_iat_entry(module, "CoCreateInstance")) {
+      game_co_create = *static_cast<co_create_fn *>(entry);
+      utils::hook::set(entry, &co_create_stub);
+      wmi_hooked = true;
+      return;
+    }
+  }
+}
 
 bool code_is(const std::uintptr_t address, const std::uint8_t opcode,
              const std::uint32_t value) {
@@ -119,10 +257,22 @@ void before_lobby_launch() {
             : "Other players in the lobby: the launch waits for them as usual");
 }
 
+bool flag_given() {
+  const auto args = xerces_runtime::command_line_args();
+  return xerces_core::has_launch_flag(args, flag) ||
+         xerces_core::has_launch_flag(args, "-" + std::string(flag));
+}
+
 class component final : public client_component {
   DEFINE_COMPONENT_NAME("xerces_fast_loads");
 
 public:
+  void post_load() override {
+    if (flag_given()) {
+      hook_wmi_locator();
+    }
+  }
+
   void post_unpack() override {
     if (!game::is_new_client()) {
       return;
@@ -140,6 +290,14 @@ public:
               "not wait for others (-xerces-fast-loads)"
             : "A launch alone does not wait for others; the loading screen "
               "is as it was (-xerces-fast-loads)");
+    xerces_runtime::log_info(
+        "xerces.fast_loads.wmi",
+        !wmi_hooked ? "The game's import of CoCreateInstance was not found: "
+                      "its start asks WMI as it always did"
+                    : std::format("BitLocker's WMI namespace answered at once "
+                                  "{} time(s) at the start (not elevated: "
+                                  "access denied, as Windows would after 5 s)",
+                                  wmi_denied.load()));
   }
 };
 } // namespace xerces_fast_loads

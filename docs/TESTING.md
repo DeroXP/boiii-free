@@ -4055,3 +4055,15 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       said are in `cache\launcher-crashes-seen.txt`, the crash folder holds only reports.
 - [x] The nine in-game M1 cases again on the final build, after this (`bench\20261113-left\m1-final2`):
       60 checks pass, none fail.
+
+## A start without the BitLocker wait (2026-11-14 morning)
+
+- [x] The game's start waits about 4.5 s in a WMI call to BitLocker's namespace, which a user
+      who is not an administrator is refused only after 5 s (`0x80041003` after 5,045 ms from
+      PowerShell; engine-re.md, "A start"). `-xerces-fast-loads` now answers that one
+      connection with the same code at once (the game asks for the locator's `IUnknown`
+      first: the first build wrapped only `IWbemLocator` requests and answered nothing, "0
+      time(s)"). Starts to the menus, mods off, alternating (`bench\20261113-left\start-ab.ps1`):
+      24.5 and 23.9 s without, 18.9 and 19.2 s with; "BitLocker's WMI namespace answered at
+      once 1 time(s)" in each game log with the flag, and the client's first line at 2.6 s
+      instead of 7.6 s.

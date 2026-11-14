@@ -114,8 +114,10 @@ hash, sent with the link, shows that the zip is the one we made.
   disk. With the flag the loading screen draws every frame and, when nobody else is in
   your lobby, the launch also skips the 2.7 s the lobby waits for other players. Tested
   here with a three-mod stack: Town Reimagined 11 s instead of 34, MW2 Rust 10 s instead
-  of 39; the stock maps gain about 2 s. Tell us how your loads feel, and turn it off if
-  a load goes wrong.
+  of 39; the stock maps gain about 2 s. It also takes about 5 s off every start: the game
+  asks Windows about BitLocker as it starts, and Windows, unless the game runs as
+  administrator, says no only after 5 s; with the flag the game gets that same no at once.
+  Tell us how your loads feel, and turn it off if a load goes wrong.
 - **CHARACTERS (Zombies).** The pause menu of a Zombies match has a CHARACTERS
   entry: every character the game or DS4C lists (DS4C's portraits and outfits),
   and DEFAULT. Since beta.25 the character the list is on also has its portrait

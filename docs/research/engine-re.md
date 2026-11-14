@@ -509,3 +509,15 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   zone requests coming one at a time, and on the graphics driver's lock, not on the disk
   or on decoding. Shortening the 30 ms poll would save its overshoot only, about 15 ms a
   wait.
+- The 7.6 s before the client's first line: the main thread, sampled from the moment the
+  process exists (`early-sample.ps1`, a deep stack scan), waits about 4.5 s (from about 2.3
+  s to 6.9 s) in an out-of-process COM call, made from a static initializer of the game
+  (under the C runtime's start, before `WinMain`). The function at 0x142BC15F8 creates
+  the WMI locator (`CoCreateInstance` with `IUnknown`, then `IWbemLocator`) and connects to
+  `\\.\root\CIMV2`, `\\.\root\CIMV2\Security\MicrosoftVolumeEncryption` (BitLocker) and
+  `\\.\root\wmi` (with SetupAPI near: a description of the PC). For a user who is not an
+  administrator the BitLocker namespace answers only `WBEM_E_ACCESS_DENIED` (0x80041003),
+  after 5,045 ms (measured from PowerShell; root\CIMV2 takes 61 ms, root\wmi 24 ms).
+  `-xerces-fast-loads` answers that one connection with the same code at once while the
+  process is not elevated: the client's first line came at 2.6 s instead of 7.6 s, the
+  menus at 18.9 and 19.2 s instead of 24.5 and 23.9 s (`start-ab.ps1`).
