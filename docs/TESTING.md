@@ -3603,3 +3603,41 @@ of its own (`lobbyLaunchGame`, wrapped in the command list), and the lobby check
 - [ ] For the two-PC test (TWO_PC_TEST.md): a client that joined a host with map-first off
       takes that rule (the host's map with a mod that ships the same scripts loads on both
       PCs), also when the client joined from its own Zombies lobby.
+
+## The game's thread names in reports and dumps (after beta.26, 2026-11-14)
+
+The engine names its threads with an exception only a debugger reads, and keeps a
+table of 23 thread IDs (docs/research/engine-re.md). The client now passes the names
+on to Windows and names a crashing thread from the table.
+
+- [x] `xerces_crash_test threads` in the menus, mods off
+      (`bench\20261113-left\threads.ps1`): the table's 14 IDs in use are each a
+      thread that started in the game's thread start (0x14212BB10); the job system's
+      two worker records name two of the three threads that started at 0x14000B490.
+- [x] `xerces_crash_test stall`: the freeze report lists `"3_Server"`, `"Database"`,
+      `"Stream"`, `"StreamAsync"`, `"Window"`, `"Input"`, `"2_Backend"`,
+      `"Video Decode"`, `"Sound Decode"`, `"Sound Mix"`, `"Netchan"`, the main thread
+      as `"Main"`, and `2 threads at the same place (2892 "JQ Worker 1 (Processor
+      3)", 4836 "JQ Worker 2 (Processor 4)")`. Before the change the same report had
+      the game's threads without names, and before the handler (the table only) as
+      `(game's Database)`.
+- [x] `xerces_crash_test` with `-quiet-crash`: the dump has a thread-names stream
+      with 20 names (the game's and the client's); the text report says "on the
+      main thread" and `Thread ID: 17592 (main)`.
+- [x] `xerces_crash_test threads` also writes each thread's CPU time and Windows
+      name: twice 20 s apart in Shadows of Evil (`bench\20261113-left\thread-cpu.ps1`,
+      `thread-cpu.py`) gives each thread's share of a core (docs/research/engine-re.md,
+      Threads).
+- [x] The Window thread's cost from outside the game (`tools/dev/re/wakeups.py`,
+      `tools/dev/re/sample_thread.py`, `bench\20261113-left\wakeups.ps1` and
+      `sample-window.ps1`): about 840 wakes a second, 46% of a core, mostly asleep
+      between them (docs/research/engine-re.md, Threads). Both tools were tried on a
+      throwaway Python process first.
+- [x] A second reader (an agent) found that a context thread that has returned
+      leaves its ID in the table, which Windows may give to another thread: a slot
+      counts now only while its thread function is set (the game clears it when the
+      thread returns; Main never has one). Unit test for both cases.
+- [x] 619 unit tests pass (new: a thread named from the game's table).
+- [ ] A crash on one of the game's other threads (a real one): "on the game's
+      <name> thread" in what happened, and `auxiliary, game's <name>` on the
+      `Thread ID` line.

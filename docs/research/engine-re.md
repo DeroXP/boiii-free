@@ -25,6 +25,12 @@ base 0x140000000 that upstream's symbol tables use.
   a `jmp` at a function's first byte (`CL_ConnectFromLobby`, `Com_LoadLevelFastFiles`).
 - Names from the symbol tables are hints: `disasm.py` gives the nearest known name at or
   below an address, which is often a different function.
+- A running game is measured from outside it: `tools/dev/re/wakeups.py <process>` gives
+  each thread's wakes a second and CPU share and the system timer's resolution (nothing
+  stopped); `tools/dev/re/sample_thread.py <thread id>` samples where one thread is, the
+  way a profiler does (the thread stopped for microseconds per sample, from another
+  process, so it can hold none of the game's locks). `xerces_crash_test threads` writes
+  every thread's ID, name, start and CPU time (`<home>\threads.txt`).
 
 ## Lobbies: who hosts
 
@@ -130,3 +136,73 @@ base 0x140000000 that upstream's symbol tables use.
   new slot. Its bounds are 100 units high, from 10 under the feet; the player's eye is 57
   to 61 over the feet of a zombie on the same floor. `bAimTargetVisible` and
   `bRenderedLastFrame` stayed 0 for zombies in plain sight.
+
+## Threads
+
+- The game keeps one thread ID for each of 23 thread contexts in a table of
+  8-byte entries at 0x15753F660, and their names in a table of pointers at
+  0x1433B93C0: `0_Main`, `2_Backend`, `1_Worker0` to `1_Worker7`, `3_Server`,
+  `Database`, `Stream`, `StreamAsync`, `Sound Mix`, `Video Decode`, `Sound Decode`,
+  `WebM Decode`, `Netchan`, `Devhost`, `Save Profile`, `Window`, `Input` (the digit
+  in front of four of them is the game's). `Sys_IsMainThread` (0x14212AFF0)
+  compares the calling thread's ID (cached in its TLS block at +0x88) with entry
+  0, `Sys_IsServerThread` (0x14212B110) with entry 10. 0x14212AD30 returns the
+  calling thread's context (23 when it has none) and 0x14212ACA0 its name.
+- Next to it, per context: the thread's function at 0x15753F720 (cleared when it
+  returns), a value at 0x15753F7E0 handed to the naming call, a TLS record of 0x28
+  bytes at 0x15753F2C0; events and handles follow from about 0x15753F8A0
+  (0x14212B180 waits on the one at 0x15753F8D8 for a millisecond).
+- Every context thread starts in 0x14212BB10: it names itself from the names table
+  (0x14212B300), points its TLS at its record, runs a per-thread setup
+  (0x14227AEB0) and calls the context's function.
+- The job system (`[0x1435F5790]`, on the heap) has worker records of 0x68 bytes;
+  a worker starts in 0x14000B490, writes its thread ID into its record (+0x08,
+  which is +0x70 + i * 0x68 from the job system) and names itself
+  `JQ Worker %d (Processor %d)` (0x14000AEF0). 0x14212AF30 copies five of the
+  workers' IDs into the table's worker slots right after starting them, before
+  the workers have written them: the slots stay 0.
+- The names reach no one without a debugger: both naming calls raise exception
+  0x406D1388 (`THREADNAME_INFO`, with 6 as the argument count), which the game's
+  own handler takes. The client passes each name on to Windows from a vectored
+  handler (`exception.cpp`, `thread_name_handler`).
+- Measured in the menus (2026-11-14, `xerces_crash_test threads`, which writes the
+  table, the worker records and every thread with where it started): 12 contexts
+  in use (Main, Backend, Server, Database, Stream, StreamAsync, Sound Mix, Video
+  Decode, Sound Decode, Netchan, Window, Input; the worker slots, WebM Decode,
+  Devhost and Save Profile at 0), each one but Main a thread that started at
+  0x14212BB10; two job workers in the records, three threads that started at
+  0x14000B490. The third is in no record and never names itself; at both looks
+  of a stalled game it was running in the protection's code (0x15xxxxxxx). What
+  it is was not worked out.
+- Two more of the game's threads start at 0x142BD5B30 (the C runtime's thread
+  start): one waits in the device enumeration (`DEVOBJ.dll`), one at
+  0x142BBF8B0. Neither is named.
+- How many job workers: the code that starts the job system (0x1422BC380, called
+  only from the protection's section; its first bytes jump there) picks a
+  processor mask from a count of 1 to 5 (4, 0xC, 0x1C, 0x3C, 0x7C: processors 2
+  and up) and stores it at 0x14325238C. The count itself is worked out in the
+  protected part. On this PC (24 logical processors, process affinity all 24) the
+  game started three threads at the worker entry, and the mask read 0xD in a map
+  (not one of the five: something else writes it too). So the game uses at most
+  five job workers, here three, whatever the core count.
+- What each thread costs (2026-11-14, Shadows of Evil, mods off, standing at the
+  start; `xerces_crash_test threads` twice 20 s apart, CPU time per thread,
+  `bench\20261113-left\thread-cpu.ps1`), as a share of one core: Main 81%, JQ
+  Worker 1 60%, JQ Worker 2 60%, Window 40%, 2_Backend 34%, 3_Server 6%, Sound Mix
+  5%, the third worker-entry thread 4.5%, Netchan and Sound Decode 1% each,
+  Database 0.2% (it had taken 9 s of CPU while the map loaded). NVIDIA's driver:
+  one thread at 90% and 25 more at 8 to 13% each, 3.5 cores in all. The whole
+  game: 6.5 cores. The main thread and the two job workers are the ones near a
+  core's limit; more job workers is not a setting the game has. A second run, by
+  cycles (`QueryThreadCycleTime`) next to the clock-tick times, agreed within a few
+  points: Main 72%, the workers 54% each, Window 46%, 2_Backend 30%, 3_Server 5%.
+- The Window thread (0x1422BC210) is a message loop: `PeekMessageA` with
+  `PM_REMOVE | PM_NOYIELD` until the queue is empty (`WM_QUIT` ends it),
+  `TranslateMessage`, `DispatchMessageA`, then `Sleep(1)` and 0x142287510, which calls
+  `ShowCursor` until the cursor's count is where the game wants it, every time round.
+  With the timer at 0.5 ms (something on this PC had set it) it woke about 840 times a
+  second (`wakeups.py`) for about half a millisecond each. Sampled (`sample_thread.py`,
+  3000 samples): 72% asleep in `Sleep`, and most of the rest in `PeekMessage`, in
+  `ShowCursor` through the Steam overlay's hook of it (`gameoverlayrenderer64.dll`),
+  `GetProp`, and DXGI's device-state and redirection checks. Not worth a change: the
+  thread runs beside the frame, not in it, and the main thread had room left.

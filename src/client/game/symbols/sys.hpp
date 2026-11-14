@@ -12,6 +12,13 @@ WEAK symbol<void()> Sys_ShowConsole{0x1422BA250, 0x1423333C0, 0x140597E40};
 WEAK symbol<void(const char *text)> Sys_Print{0x0, 0x0, 0x1405857A0};
 WEAK symbol<bool()> Sys_IsServerThread{0x14212B110, 0x0, 0x0};
 WEAK symbol<bool()> Sys_IsMainThread{0x14212AFF0, 0x0, 0x0};
+// One thread ID for each of the game's thread contexts, in the order of
+// xerces_core::engine_thread_name (Sys_GetThreadContext, 0x14212AD30, looks a
+// thread up in it; docs/research/engine-re.md)
+WEAK symbol<uint64_t> s_threadContextIds{0x15753F660, 0x0, 0x0};
+// Each context's thread function, cleared when its thread returns (the
+// thread start at 0x14212BB10)
+WEAK symbol<uint64_t> s_threadContextFunctions{0x15753F720, 0x0, 0x0};
 
 WEAK symbol<TLSData *()> Sys_GetTLS{0x14212AD10, 0x1421837B0, 0x140525EB0};
 inline int32_t Cmd_Argc() {

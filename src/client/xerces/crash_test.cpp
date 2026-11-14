@@ -31,6 +31,12 @@
 //                                engine's list, with its handler (the game's
 //                                address at base 0x140000000, or the module
 //                                that added it), to <home>\commands.txt
+//   xerces_crash_test threads    no crash: the game's thread table, the job
+//                                system's worker records and every thread
+//                                with its name, CPU time, cycles and where it
+//                                started, to <home>\threads.txt (what names
+//                                the threads in reports; two of these some
+//                                seconds apart give each thread's CPU share)
 //   xerces_crash_test joinrule0  no crash: the map-first rule a join of a host
 //                                with map scripts first off leaves (0); the
 //                                next match this game launches itself must
@@ -68,7 +74,10 @@
 #include <game/game.hpp>
 #include <loader/component_loader.hpp>
 
+#include <xerces_core/crash_report.hpp>
 #include <xerces_core/launch.hpp>
+
+#include <tlhelp32.h>
 
 #include "character_slots.hpp"
 #include "runtime.hpp"
@@ -212,6 +221,169 @@ public:
         xerces_runtime::log_info("xerces.crash_test",
                                  std::to_string(count) +
                                      " console commands written to " +
+                                     file.string());
+        return;
+      }
+      if (kind == "threads") {
+        // The game's thread table, the job system's worker records and every
+        // thread of the process with where it started: what names the
+        // threads in reports, checked against what each thread is. The
+        // addresses are the current client's.
+        if (!game::is_new_client()) {
+          return;
+        }
+        const std::uintptr_t base = game::get_engine_base();
+        const auto at = [base](const std::uintptr_t address) {
+          return base + (address - 0x140000000ull);
+        };
+        std::string out = "table (IDs 0x15753F660, functions 0x15753F720):\n";
+        std::uint64_t ids[xerces_core::engine_thread_contexts]{};
+        std::uint64_t functions[xerces_core::engine_thread_contexts]{};
+        xerces_safe::read(reinterpret_cast<const void *>(at(0x15753F660)), ids,
+                          sizeof(ids));
+        xerces_safe::read(reinterpret_cast<const void *>(at(0x15753F720)),
+                          functions, sizeof(functions));
+        for (std::size_t i = 0; i < std::size(ids); ++i) {
+          out += std::format("  {:2} {:>8} {:<14} 0x{:X}\n", i, ids[i],
+                             xerces_core::engine_thread_name(i),
+                             functions[i] >= base &&
+                                     functions[i] < base + 0x1D75BC00
+                                 ? functions[i] - base + 0x140000000ull
+                                 : functions[i]);
+        }
+        std::uintptr_t jobs = 0;
+        xerces_safe::read(reinterpret_cast<const void *>(at(0x1435F5790)),
+                          &jobs, sizeof(jobs));
+        out += std::format("job system (0x1435F5790): 0x{:X}\n", jobs);
+        for (int i = 0; jobs && i < 12; ++i) {
+          std::uint32_t id = 0;
+          xerces_safe::read(
+              reinterpret_cast<const void *>(jobs + 0x70 + i * 0x68), &id,
+              sizeof(id));
+          out += std::format("  worker {:2} +0x{:X}: {}\n", i, 0x70 + i * 0x68,
+                             id);
+        }
+        // The processors the job workers were given (0x1422BC380), and the
+        // process's own
+        std::uint32_t job_mask = 0;
+        xerces_safe::read(reinterpret_cast<const void *>(at(0x14325238C)),
+                          &job_mask, sizeof(job_mask));
+        DWORD_PTR process_mask = 0;
+        DWORD_PTR system_mask = 0;
+        GetProcessAffinityMask(GetCurrentProcess(), &process_mask,
+                               &system_mask);
+        out += std::format(
+            "job processor mask (0x14325238C): 0x{:X}; process affinity 0x{:X} "
+            "of 0x{:X}; {} logical processors\n",
+            job_mask, process_mask, system_mask,
+            GetActiveProcessorCount(ALL_PROCESSOR_GROUPS));
+        // CPU time from the clock tick overcharges a thread that wakes often
+        // for a moment; its cycles do not. The cycle counter's rate, to turn
+        // them into time, and when this was taken.
+        LARGE_INTEGER frequency{}, before{}, after{};
+        QueryPerformanceFrequency(&frequency);
+        QueryPerformanceCounter(&before);
+        const std::uint64_t tsc_before = __rdtsc();
+        Sleep(100);
+        const std::uint64_t tsc_after = __rdtsc();
+        QueryPerformanceCounter(&after);
+        const double seconds =
+            static_cast<double>(after.QuadPart - before.QuadPart) /
+            static_cast<double>(frequency.QuadPart);
+        out +=
+            std::format("cycle rate {:.0f} Hz; taken at {:.3f} s\n",
+                        static_cast<double>(tsc_after - tsc_before) / seconds,
+                        static_cast<double>(after.QuadPart) /
+                            static_cast<double>(frequency.QuadPart));
+        using query_fn = LONG(WINAPI *)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+        const auto query = reinterpret_cast<query_fn>(GetProcAddress(
+            GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationThread"));
+        out += "threads:\n";
+        if (const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+            snap != INVALID_HANDLE_VALUE) {
+          THREADENTRY32 entry{};
+          entry.dwSize = sizeof(entry);
+          for (BOOL more = Thread32First(snap, &entry); more;
+               more = Thread32Next(snap, &entry)) {
+            if (entry.th32OwnerProcessID != GetCurrentProcessId()) {
+              continue;
+            }
+            std::uintptr_t start = 0;
+            std::uint64_t cpu_ms = 0;
+            std::uint64_t cycles = 0;
+            std::string described;
+            if (const HANDLE thread = OpenThread(THREAD_QUERY_INFORMATION,
+                                                 FALSE, entry.th32ThreadID)) {
+              if (query) {
+                // ThreadQuerySetWin32StartAddress
+                query(thread, 9, &start, sizeof(start), nullptr);
+              }
+              FILETIME created{}, ended{}, kernel{}, user{};
+              if (GetThreadTimes(thread, &created, &ended, &kernel, &user)) {
+                const auto ticks = [](const FILETIME &t) {
+                  return (static_cast<std::uint64_t>(t.dwHighDateTime) << 32) |
+                         t.dwLowDateTime;
+                };
+                cpu_ms = (ticks(kernel) + ticks(user)) / 10000;
+              }
+              ULONG64 thread_cycles = 0;
+              if (QueryThreadCycleTime(thread, &thread_cycles)) {
+                cycles = thread_cycles;
+              }
+              // Through GetProcAddress, as exception.cpp: Windows before 10
+              // (1607) has no GetThreadDescription, and an import of it
+              // would keep the game from starting there
+              using describe_fn = HRESULT(WINAPI *)(HANDLE, PWSTR *);
+              static const auto describe = reinterpret_cast<describe_fn>(
+                  GetProcAddress(GetModuleHandleW(L"kernel32.dll"),
+                                 "GetThreadDescription"));
+              PWSTR description = nullptr;
+              if (describe && SUCCEEDED(describe(thread, &description)) &&
+                  description) {
+                for (const wchar_t *c = description; *c; ++c) {
+                  described += *c < 0x80 ? static_cast<char>(*c) : '?';
+                }
+                LocalFree(description);
+              }
+              CloseHandle(thread);
+            }
+            HMODULE module = nullptr;
+            char path[MAX_PATH] = {};
+            std::string where = std::format("0x{:X}", start);
+            if (start >= base && start < base + 0x1D75BC00) {
+              where = std::format("BlackOps3.exe 0x{:X}",
+                                  start - base + 0x140000000ull);
+            } else if (start &&
+                       GetModuleHandleExA(
+                           GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(start), &module) &&
+                       GetModuleFileNameA(module, path, MAX_PATH) != 0) {
+              const char *name = std::strrchr(path, '\\');
+              where =
+                  std::format("{}+0x{:X}", name ? name + 1 : path,
+                              start - reinterpret_cast<std::uintptr_t>(module));
+            }
+            const std::size_t context = xerces_core::engine_thread_context(
+                ids, functions, xerces_core::engine_thread_contexts,
+                entry.th32ThreadID);
+            const std::string_view table_name =
+                xerces_core::engine_thread_name(context);
+            out += std::format(
+                "  {:>6} {:<28} cpu {} ms {} cycles {}{}\n", entry.th32ThreadID,
+                described.empty() ? std::string(table_name) : described, cpu_ms,
+                cycles, where,
+                !table_name.empty() && !described.empty() &&
+                        !described.ends_with(table_name)
+                    ? std::format(" (table: {})", table_name)
+                    : std::string{});
+          }
+          CloseHandle(snap);
+        }
+        const auto file = xerces_runtime::home() / "threads.txt";
+        xerces_runtime::write_file(file, out);
+        xerces_runtime::log_info("xerces.crash_test",
+                                 "the game's threads written to " +
                                      file.string());
         return;
       }

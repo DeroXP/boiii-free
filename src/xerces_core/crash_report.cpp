@@ -651,6 +651,38 @@ std::string crash_frame(std::string_view module, std::uint64_t offset) {
          crash_offset_hex(offset);
 }
 
+std::string_view engine_thread_name(const std::size_t context) {
+  // BlackOps3.exe's table at 0x1433B93C0, in its order
+  static constexpr std::array<std::string_view, engine_thread_contexts> names{
+      "Main",         "Backend",      "Worker0",     "Worker1",     "Worker2",
+      "Worker3",      "Worker4",      "Worker5",     "Worker6",     "Worker7",
+      "Server",       "Database",     "Stream",      "StreamAsync", "Sound Mix",
+      "Video Decode", "Sound Decode", "WebM Decode", "Netchan",     "Devhost",
+      "Save Profile", "Window",       "Input"};
+  return context < names.size() ? names[context] : std::string_view{};
+}
+
+std::size_t engine_thread_context(const std::uint64_t *ids,
+                                  const std::uint64_t *functions,
+                                  const std::size_t count,
+                                  const std::uint32_t id) {
+  if (!ids || id == 0) {
+    return engine_thread_contexts;
+  }
+  const std::size_t n = std::min(count, engine_thread_contexts);
+  for (std::size_t i = 0; i < n; ++i) {
+    if (ids[i] != id) {
+      continue;
+    }
+    // Main (0) is not started through the context table: no function
+    if (functions && i != 0 && functions[i] == 0) {
+      continue;
+    }
+    return i;
+  }
+  return engine_thread_contexts;
+}
+
 bool valid_report_id(std::string_view id) {
   return id.size() == 32 && std::ranges::all_of(id, [](char c) {
            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');

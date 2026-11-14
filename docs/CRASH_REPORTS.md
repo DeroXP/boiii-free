@@ -149,6 +149,19 @@ at the same place"). If a stack walk does not come back in two seconds, the
 watchdog starts the stopped thread again, so the report cannot turn a long stall
 into a freeze.
 
+Threads carry the game's own names (2026-11-14). The game names every thread it
+starts ("3_Server", "Database", "Stream", "Sound Mix", "JQ Worker 1 (Processor
+3)"...) with the exception only a debugger reads (0x406D1388); the client passes
+each name on to Windows (`SetThreadDescription`) as the game raises it, and lets
+the game's own handler take the exception as before. So a freeze report's thread
+list, threads at the same place included, says which thread is which
+(`Thread 31092 "Database": waiting ...`), and so does a dump: its thread-names
+stream had 20 names in a test crash, which the debuggers show. A crash's "what
+happened" line and its `Thread ID` line also name the thread from the game's
+own thread table when it is not the main or the server thread ("on the game's
+Database thread"); the `thread` field sent stays main, server or auxiliary.
+What the names are and where they come from is in `docs/research/engine-re.md`.
+
 The watchdog's own way to the end of a frozen game takes no lock and no memory
 (a second read of this code on 2026-11-12 found that it logged, and asked the
 journal for its phase, before it ended the game: either waits forever if the

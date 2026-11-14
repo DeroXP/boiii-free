@@ -27,6 +27,7 @@
 #include <xerces/db_pool.hpp>
 #include <xerces/loader.hpp>
 #include <xerces/runtime.hpp>
+#include <xerces/safe_memory.hpp>
 #include <xerces_core/crash_report.hpp>
 #include <xerces_core/journal.hpp>
 #include <xerces_core/json.hpp>
@@ -423,6 +424,56 @@ const char *thread_role() {
   return "auxiliary";
 }
 
+// The game's own name for a thread from the engine's thread table
+// (xerces_core::engine_thread_name): "Database", "Stream", "Sound Mix"... or
+// "" when the table has no slot for it. A guarded read of the game's data,
+// so the crash handler and the watchdog can ask.
+std::string_view game_thread_name(const DWORD id) {
+  const std::uint64_t *table = game::sys::s_threadContextIds.get();
+  const std::uint64_t *running = game::sys::s_threadContextFunctions.get();
+  std::uint64_t ids[xerces_core::engine_thread_contexts]{};
+  std::uint64_t functions[xerces_core::engine_thread_contexts]{};
+  // A thread's slot whose function is gone holds the ID of a thread that
+  // has ended, which Windows may have given to another since
+  if (!table || !running || !xerces_safe::read(table, ids, sizeof(ids)) ||
+      !xerces_safe::read(running, functions, sizeof(functions))) {
+    return {};
+  }
+  return xerces_core::engine_thread_name(
+      xerces_core::engine_thread_context(ids, functions, std::size(ids), id));
+}
+
+// The game's name for a thread when it says more than its role: the game
+// calls the main thread "Main" and the server's "Server".
+std::string_view game_name_beyond(const std::string_view role, const DWORD id) {
+  const std::string_view name = game_thread_name(id);
+  return utils::string::to_lower(std::string(name)) == role ? std::string_view{}
+                                                            : name;
+}
+
+// Where a crash happened, for the dialog and the report: "on the main
+// thread", "on the game's Database thread".
+std::string on_this_thread() {
+  const std::string_view role = thread_role();
+  const std::string_view name = game_name_beyond(role, GetCurrentThreadId());
+  if (name.empty()) {
+    return std::format("on the {} thread", role);
+  }
+  if (role == "auxiliary") {
+    return std::format("on the game's {} thread", name);
+  }
+  return std::format("on the {} thread (the game's {})", role, name);
+}
+
+// "main", "auxiliary, game's Database": the thread line of the report and
+// the log.
+std::string this_thread_words() {
+  const std::string_view role = thread_role();
+  const std::string_view name = game_name_beyond(role, GetCurrentThreadId());
+  return name.empty() ? std::string(role)
+                      : std::format("{}, game's {}", role, name);
+}
+
 std::string describe_scripts() {
   const std::string_view role = thread_role();
   const bool server_thread =
@@ -578,11 +629,11 @@ void display_error_dialog() {
   const std::string minidumps_out =
       (game::get_appdata_path() / "minidumps").string();
   const std::string error_str = std::format(
-      "{}\n\nDetails: {} (0x{:08X}) at {:p} on the {} thread.\n\n"
+      "{}\n\nDetails: {} (0x{:08X}) at {:p} {}.\n\n"
       "Crash report{} and dump saved in:\n{}\n\n{}",
       crash_reason(), get_exception_string(exception_data.code),
       exception_data.code, game::derelocate(exception_data.address),
-      thread_role(),
+      on_this_thread(),
       crash_report_file.empty() ? std::string{}
                                 : std::format(" ({})", crash_report_file),
       minidumps_out, crash_report_note());
@@ -1103,8 +1154,8 @@ std::string generate_crash_info(const LPEXCEPTION_POINTERS exceptioninfo) {
 
   line("Xerces Crash Report");
   line(std::string{});
-  line(std::format("What happened: {} on the {} thread.", describe_crash(),
-                   thread_role()));
+  line(
+      std::format("What happened: {} {}.", describe_crash(), on_this_thread()));
   if (!exception_data.culprit.empty())
     line("Diagnosis: " + error_help::strip_colors(exception_data.culprit));
   if (!exception_data.scripts.empty())
@@ -1124,8 +1175,8 @@ std::string generate_crash_info(const LPEXCEPTION_POINTERS exceptioninfo) {
     line(utils::string::va("Source: %s:%lu", crash_frame.file_name.c_str(),
                            crash_frame.line_number));
   line(utils::string::va("Base: 0x%llX", game::get_base()));
-  line(utils::string::va("Thread ID: %lu (%s)", GetCurrentThreadId(),
-                         thread_role()));
+  line(std::format("Thread ID: {} ({})", GetCurrentThreadId(),
+                   this_thread_words()));
 
   if (exceptioninfo->ExceptionRecord->ExceptionCode ==
       EXCEPTION_ACCESS_VIOLATION) {
@@ -1174,6 +1225,42 @@ void write_minidump(const LPEXCEPTION_POINTERS exceptioninfo,
 
 // Empty string used as fallback for null localization pointers
 char ui_localize_fallback[4] = "";
+
+// The game names the threads it starts ("3_Server", "Database", "JQ Worker 0
+// (Processor 2)") the old way: an exception only a debugger reads,
+// 0x406D1388, which the game's own handler then takes
+// (docs/research/engine-re.md). Each name is passed on to Windows here, so
+// the freeze report's thread list, a dump and a profiler see it too. Only the
+// calling thread's own name (all the game's are), only plain text, nothing
+// taken from the heap; the exception goes on to the game as before.
+constexpr DWORD THREAD_NAME_EXCEPTION = 0x406D1388;
+using thread_name_set_fn = HRESULT(WINAPI *)(HANDLE, PCWSTR);
+thread_name_set_fn thread_name_set = nullptr;
+
+long WINAPI thread_name_handler(PEXCEPTION_POINTERS exception_info) {
+  const PEXCEPTION_RECORD record = exception_info->ExceptionRecord;
+  if (record->ExceptionCode != THREAD_NAME_EXCEPTION || !thread_name_set ||
+      record->NumberParameters < 3 ||
+      static_cast<DWORD>(record->ExceptionInformation[0]) != 0x1000) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+  const DWORD id = static_cast<DWORD>(record->ExceptionInformation[2]);
+  if (id != 0xFFFFFFFF && id != GetCurrentThreadId()) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+  char name[64]{};
+  if (xerces_safe::read_text(
+          reinterpret_cast<const void *>(record->ExceptionInformation[1]), name,
+          sizeof(name)) == 0) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+  wchar_t wide[std::size(name)]{};
+  for (std::size_t i = 0; name[i] != 0; ++i) {
+    wide[i] = static_cast<unsigned char>(name[i]);
+  }
+  thread_name_set(GetCurrentThread(), wide);
+  return EXCEPTION_CONTINUE_SEARCH;
+}
 
 long WINAPI crash_fix_exception_handler(PEXCEPTION_POINTERS exception_info) {
   const PEXCEPTION_RECORD record = exception_info->ExceptionRecord;
@@ -1491,8 +1578,8 @@ void finish_pending_report(const std::string &id, const resolved_frame &crash,
   note.report_id = id;
   note.code = exception_data.code;
   note.reason = "exception";
-  note.summary = one_line(
-      std::format("{} on the {} thread", describe_crash(), thread_role()));
+  note.summary =
+      one_line(std::format("{} {}", describe_crash(), on_this_thread()));
   note.script = one_line(running_script());
   note.details = details;
   if (crash.module_name != "unknown") {
@@ -1744,7 +1831,7 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
                   crash_frame.line_number);
   exception_log(true, "  Address:    0x%llX", crash_frame.address);
   exception_log(true, "  Thread:     %lu (%s)", GetCurrentThreadId(),
-                thread_role());
+                this_thread_words().c_str());
 
   if (exceptioninfo->ExceptionRecord->ExceptionCode ==
       EXCEPTION_ACCESS_VIOLATION) {
@@ -2134,9 +2221,21 @@ std::string thread_title(const DWORD id) {
       CloseHandle(handle);
     }
   }
+  // The game's own name for it (the engine's thread table), when the role
+  // does not already say it
+  std::string_view game_name =
+      game_name_beyond(role && id != GetCurrentThreadId() ? role : "", id);
+  // A name the game gave the thread itself already says it ("3_Server")
+  if (!game_name.empty() && name.ends_with(game_name)) {
+    game_name = {};
+  }
   std::string title = std::format("Thread {}", id);
-  if (role) {
+  if (role && !game_name.empty()) {
+    title += std::format(" ({}, game's {})", role, game_name);
+  } else if (role) {
     title += std::format(" ({})", role);
+  } else if (!game_name.empty()) {
+    title += std::format(" (game's {})", game_name);
   }
   if (!name.empty()) {
     title += std::format(" \"{}\"", name);
@@ -2312,7 +2411,12 @@ freeze_text_result freeze_text(const std::vector<seen_thread> &threads,
     }
     std::string ids;
     for (const seen_thread *member : members) {
-      ids += std::format("{}{}", ids.empty() ? "" : ", ", member->id);
+      // Its title without "Thread ": the ID and any name it has
+      std::string_view title = member->title;
+      if (title.starts_with("Thread ")) {
+        title.remove_prefix(7);
+      }
+      ids += std::format("{}{}", ids.empty() ? "" : ", ", title);
     }
     seen_thread shown = *members.front();
     shown.title =
@@ -2740,6 +2844,14 @@ struct component final : generic_component {
     }
 
     AddVectoredExceptionHandler(1, crash_fix_exception_handler);
+
+    // Xerces: the game's thread names, passed on to Windows (last in line:
+    // it only reads, and the game's own handler takes the exception)
+    thread_name_set = reinterpret_cast<thread_name_set_fn>(GetProcAddress(
+        GetModuleHandleW(L"kernel32.dll"), "SetThreadDescription"));
+    if (thread_name_set) {
+      AddVectoredExceptionHandler(0, thread_name_handler);
+    }
   }
 
   void post_unpack() override {

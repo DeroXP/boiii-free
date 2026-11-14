@@ -513,7 +513,8 @@ miss turns that feature off and the launcher says, for example:
 - `tools/dev/re/disasm.py` disassembles a function of a dump by its `.pdata`
   bounds with every call target named from the symbol tables, lists the calls
   to an address and finds names; what was learned with it is in
-  `docs/research/engine-re.md`.
+  `docs/research/engine-re.md`. `wakeups.py` and `sample_thread.py` next to it
+  measure a running game's threads from outside it.
 
 ### 4.6 Supported-build matrix
 

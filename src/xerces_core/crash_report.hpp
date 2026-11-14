@@ -245,4 +245,22 @@ crash_redaction redaction_from_config(std::string_view launcher_json);
 // report has the stacks-only dump (a fatal error's has none).
 std::string crash_report_note(bool started_by_launcher, bool send,
                               bool launcher_open, bool dump = true);
+
+// The game's own names for its threads (docs/research/engine-re.md): the
+// engine keeps one thread ID for each of these contexts in a table, in this
+// order, and names a thread from it (Sys_GetThreadContext). The names are
+// the game's without the digit it puts in front of a few ("0_Main").
+inline constexpr std::size_t engine_thread_contexts = 23;
+// The name of a context, "" past the end.
+std::string_view engine_thread_name(std::size_t context);
+// The context whose ID in the game's table is `id`, as the game looks it up
+// (the first that matches), or engine_thread_contexts when none does. An ID
+// of 0 matches nothing: the game leaves the slot of a thread it never
+// started at 0. `functions` (the game's table of each context's thread
+// function, as many entries, or null): a context whose function is 0 has no
+// thread running, since the game clears it when the thread returns, and its
+// ID may since belong to another thread; Main's is always 0 and counts.
+std::size_t engine_thread_context(const std::uint64_t *ids,
+                                  const std::uint64_t *functions,
+                                  std::size_t count, std::uint32_t id);
 } // namespace xerces_core

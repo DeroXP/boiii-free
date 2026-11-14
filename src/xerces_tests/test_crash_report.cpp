@@ -1214,3 +1214,49 @@ TEST_CASE(
   CHECK(fs::exists(fresh_note)); // may still be being written
   fs::remove_all(home);
 }
+
+TEST_CASE("crash report: a thread is named from the game's thread table") {
+  CHECK(engine_thread_name(0) == "Main");
+  CHECK(engine_thread_name(10) == "Server");
+  CHECK(engine_thread_name(11) == "Database");
+  CHECK(engine_thread_name(engine_thread_contexts - 1) == "Input");
+  CHECK(engine_thread_name(engine_thread_contexts).empty());
+
+  // As the table read from a dump of the menus (2026-11-04): main, backend,
+  // no workers, then the server and the rest.
+  std::uint64_t ids[engine_thread_contexts]{0xA27C, 0x66CC};
+  ids[10] = 0x5E08;
+  ids[11] = 0x3380;
+  ids[22] = 0x581C;
+  // Each running context's function (Main has none: it is not started
+  // through the table)
+  std::uint64_t functions[engine_thread_contexts]{0, 0x141C46DE0};
+  functions[10] = 0x1421F84C0;
+  functions[11] = 0x141424F00;
+  functions[22] = 0x1422BB4A0;
+  const auto context = [&](std::uint32_t id) {
+    return engine_thread_context(ids, functions, engine_thread_contexts, id);
+  };
+  CHECK(context(0xA27C) == 0);
+  CHECK(context(0x3380) == 11);
+  CHECK(context(0x581C) == 22);
+  // Not in the table, and 0: the empty slots match nothing
+  CHECK(context(0x1234) == engine_thread_contexts);
+  CHECK(context(0) == engine_thread_contexts);
+  // A short read covers fewer slots; no table at all names nothing
+  CHECK(engine_thread_context(ids, functions, 11, 0x3380) ==
+        engine_thread_contexts);
+  CHECK(engine_thread_context(nullptr, functions, engine_thread_contexts,
+                              0xA27C) == engine_thread_contexts);
+  // A thread that has returned leaves its ID; Windows may give it to another
+  // thread, which must not be named after it, and a later live slot with the
+  // same ID still counts
+  functions[11] = 0;
+  CHECK(context(0x3380) == engine_thread_contexts);
+  ids[15] = 0x3380;
+  functions[15] = 0x1412C0D60;
+  CHECK(context(0x3380) == 15);
+  // Without the functions every ID counts, as the game looks it up
+  CHECK(engine_thread_context(ids, nullptr, engine_thread_contexts, 0x3380) ==
+        11);
+}
