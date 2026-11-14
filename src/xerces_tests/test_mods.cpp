@@ -231,6 +231,22 @@ TEST_CASE("mods: which mod offers which fix") {
                 "lib.gone", "^2"));
 }
 
+TEST_CASE("mods: a saved map that is a mod offers to clear the map") {
+  // A profile saved before the item's kind changed (2026-11-13): the plan is
+  // refused, and the item's details offer the way out although it is neither
+  // in the load order nor the plan's map.
+  const std::vector<installed_content> catalog = {
+      declared(R"("id":"aa.mod","version":"1.0.0")")};
+  mode_profile profile;
+  profile.map = "aa.mod";
+  const plan refused = resolve_plan(catalog, request_of(profile));
+  CHECK(refused.diags.has("plan.map.kind"));
+  CHECK(has_fix(mods_fixes_for(refused, "aa.mod", false, &catalog[0]),
+                "clear_map", "aa.mod", ""));
+  CHECK(mods_set_map(profile, std::nullopt));
+  CHECK(!resolve_plan(catalog, request_of(profile)).diags.has("plan.map.kind"));
+}
+
 TEST_CASE("mods: a mod that must be the top mod offers to move there") {
   // PEGASUS (Workshop 2804432292) quits the game unless it is fs_game.
   installed_content pegasus = content("ws.2804432292", "PEGASUS", "2804432292");

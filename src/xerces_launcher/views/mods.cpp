@@ -1359,6 +1359,8 @@ private:
       label = owner_->tr("Move below") + " " + name_of(fix.detail);
     } else if (fix.kind == "move_to_top") {
       label = owner_->tr("Move to the top");
+    } else if (fix.kind == "clear_map") {
+      label = owner_->tr("Do not use it as the map");
     } else if (fix.kind == "allow_conflict") {
       // Named: a mod can conflict with more than one other.
       label = owner_->tr("Allow the conflict with") + " " +
@@ -1611,6 +1613,11 @@ private:
             return xc::mods_move(p, std::size_t(from - p.mods.begin()), 0);
           },
           [&] { return name + " " + owner_->tr("moved to the top"); });
+    } else if (fix.kind == "clear_map") {
+      // The profile's map is a mod: the plan is refused until it goes.
+      if (profile() && profile()->map == fix.id) {
+        pick_map("");
+      }
     } else if (fix.kind == "unpin") {
       edit([&](xc::mode_profile &p) { return xc::mods_unpin(p, fix.id); },
            [&] { return name + " " + owner_->tr("is no longer pinned"); });

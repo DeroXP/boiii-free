@@ -375,6 +375,10 @@ std::optional<catalog_scan> scan_from(const arguments &args) {
   }
   scan_options options;
   options.layout = layout_of_directory(xerces_core::path_from_utf8(*dir));
+  // As the launcher's scan: a game's usermaps\ or mods\ folder decides its
+  // legacy items' kind
+  options.folder_kind =
+      folder_kind_of_directory(xerces_core::path_from_utf8(*dir));
   catalog_scan scan = scan_mods_directory(xerces_core::path_from_utf8(*dir), options);
   if (scan.diags.has_errors() && !args.has("--json")) {
     print_diagnostics(scan.diags);

@@ -395,11 +395,19 @@ TEST_CASE("planner: maps sit outside the stack") {
   CHECK_EQ(result.map->folder, "zm_test");
   CHECK_EQ(result.stack.size(), 1u);
 
+  // Each offers a way out (a profile saved before an item's kind changed)
   const plan wrong = resolve_plan(catalog, request_for({"ws.3735179543"}));
   CHECK(wrong.diags.has("plan.map.in_stack"));
+  CHECK(std::ranges::any_of(wrong.fixes, [](const fix_action &f) {
+    return f.kind == "remove" && f.id == "ws.3735179543";
+  }));
   plan_request mod_as_map = request_for({});
   mod_as_map.map = "a.mod";
-  CHECK(resolve_plan(catalog, mod_as_map).diags.has("plan.map.kind"));
+  const plan mod_map = resolve_plan(catalog, mod_as_map);
+  CHECK(mod_map.diags.has("plan.map.kind"));
+  CHECK(std::ranges::any_of(mod_map.fixes, [](const fix_action &f) {
+    return f.kind == "clear_map" && f.id == "a.mod";
+  }));
 }
 
 TEST_CASE("planner: pins choose exact versions") {

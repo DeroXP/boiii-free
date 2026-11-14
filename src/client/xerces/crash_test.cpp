@@ -18,6 +18,9 @@
 //                                "freeze")
 //   xerces_crash_test stall      the main thread sleeps 40 s and goes on: a
 //                                freeze report that is taken back
+//   xerces_crash_test hitch [ms] no crash: one frame of ms (300; 50 to 3000),
+//                                half busy, half asleep, for a frame-time
+//                                run's stalls.csv (the stall sampler)
 //   xerces_crash_test throw      a thread of its own throws a C++ exception
 //                                nobody catches: the game log must name it
 //                                (loader.terminate) before the game ends
@@ -117,6 +120,26 @@ BOOL CALLBACK first_visible_window(const HWND window, const LPARAM out) {
     return FALSE;
   }
   return TRUE;
+}
+
+// One long frame (not a freeze): half of it busy in this function, half
+// asleep in the kernel. A frame-time run's stall sampler (perf_probe.cpp)
+// samples the main thread every 8 ms meanwhile, so its stalls.csv shows
+// whether the walk gets from here (and from ntdll) through the client's and
+// the game's frames.
+__declspec(noinline) void hitch(const int ms) {
+  LARGE_INTEGER frequency{};
+  LARGE_INTEGER start{};
+  LARGE_INTEGER now{};
+  QueryPerformanceFrequency(&frequency);
+  QueryPerformanceCounter(&start);
+  const LONGLONG busy = frequency.QuadPart * (ms / 2) / 1000;
+  volatile std::uint64_t spins = 0;
+  do {
+    spins = spins + 1;
+    QueryPerformanceCounter(&now);
+  } while (now.QuadPart - start.QuadPart < busy);
+  Sleep(static_cast<DWORD>(ms - ms / 2));
 }
 
 [[noreturn]] void crash(const std::string &kind) {
@@ -484,6 +507,17 @@ public:
           throw std::runtime_error(
               "xerces_crash_test throw: uncaught on a thread of its own");
         }).detach();
+        return;
+      }
+      if (kind == "hitch") {
+        const int ms = params.size() > 2
+                           ? std::clamp(std::atoi(params.get(2)), 50, 3000)
+                           : 300;
+        xerces_runtime::log_warn(
+            "xerces.crash_test",
+            "A frame of " + std::to_string(ms) +
+                " ms on purpose (xerces_crash_test hitch)");
+        hitch(ms);
         return;
       }
       if (kind == "stall") {

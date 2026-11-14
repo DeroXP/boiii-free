@@ -1089,6 +1089,9 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
       if (it->second->info.kind != content_kind::map) {
         diags.error("plan.map.kind", "/map",
                     "\"" + *request.map + "\" is a mod, not a map.");
+        // A saved map can turn out to be a mod (the kind rule of
+        // 2026-11-13): the launch is refused until it is changed.
+        out.fixes.push_back({"clear_map", *request.map, ""});
       } else {
         out.map = make_entry(*it->second, true, request, diags, out.fixes);
       }
@@ -1103,6 +1106,7 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
       diags.error("plan.map.in_stack", "/mods",
                   "\"" + content->info.name +
                       "\" is a map; a plan holds at most one, as its map.");
+      out.fixes.push_back({"remove", id, ""});
       continue;
     }
     nodes.push_back(id);

@@ -3847,3 +3847,57 @@ three real defects, all fixed:
       3 s the console's close leaves; a router that shortens a port mapping's
       description would keep it.
 - [x] 623 unit tests pass.
+
+## The crash suite again, and the last review's findings (2026-11-14 morning)
+
+Every crash and freeze kind on tonight's build, mods off, each a game of its own
+(`bench\20261113-left\crash-suite.ps1` over `bench\20261112-crash\run-crash.ps1`, crash reports
+on in the test home for the run only, nothing sent; the files are in `bench\20261112-crash\n14-*`):
+
+- [x] `access`: 0xC0000005 at 34 s; the text report ("tried to write to 0x0 (null pointer) in
+      boiii.exe+0x1E8B6E (...crash+0x167) on the main thread", "Thread ID: ... (main)"), its
+      dump (916 KB), the zip and a pending note with its dump. The zip's full dump was 585 MB
+      (65 MB packed) against 482 MB (21 MB) on 2026-11-12: it holds every module's data, which
+      was less alike this time; not tonight's code. (The other pending note in that folder was
+      left from an earlier test at 03:39.)
+- [x] `fastfail` and `throw`: 0xC0000409 with no dump, as before; `throw` logged
+      `loader.terminate` with the exception's text.
+- [x] `fatal`: exit 1; `fatal-<time>.txt` with the error, the dump, the note.
+- [x] `handlerfault` and `dumpfault`: one dump, one text report and one note each;
+      `loader.crash.handler_fault` logged for the first.
+- [x] `freeze`: closed at 60 s with 0xC0000194; the report names the main thread's sleep in
+      the test command and has no "What the frame waits for" line (the main thread is not in
+      the frame's wait).
+- [x] `windowhang`: closed at 61 s; "What the frame waits for: the main thread waits for the
+      render backend; the render backend waits for the Window thread to present; the Window
+      thread is in its message loop, inside boiii.exe (a hook in the window's messages)", the
+      threads named ("Main", "3_Server").
+- [x] `stall`: the report at 30 s, then "[Freeze] Frames came back after 41 seconds: it was a
+      long stall, not a freeze", no note left, the game played on.
+
+The last review of tonight's core fixes (`cd72a1f8`) found nothing more in the planner, the
+Discord stop, `plan apply` or the CLI's messages. Its id finding was already fixed in
+`313d6f3f`. The rest, fixed:
+
+- [x] The stall sampler's walk could still fault while the main thread was stopped, and a
+      fault is handled on the sampler's thread by code that takes the locks the stopped
+      thread may hold. Each frame is now checked before it is unwound: the stack pointer
+      inside the main thread's stack (from its TEB), the unwind data and its chain inside the
+      module, the frame register inside the stack once the prologue has set it; a frame that
+      does not move up the stack ends the walk. Entries that point at their primary entry
+      (bit 0 of the unwind data) are followed, as Windows does. A module that faults while
+      the tables are noted costs only itself.
+- [x] Checked with `xerces_crash_test hitch` (new: one frame of 300 ms or 1500 ms, half busy,
+      half asleep) in a frame-time run in the menus (`bench\20261113-left\hitch-sample.ps1`):
+      257 samples, every one 14 frames deep (the most kept), from ntdll and KERNELBASE
+      through the client's test command, the game's console code, the client's frame stub
+      and the game's main loop to the client's `main`.
+- [x] The CLI's scans with `--mods-dir` take the game folders' rule from the folder's name
+      (`usermaps` maps, `mods` mods), as the launcher's scans do.
+- [x] A profile whose item changed kind (the rule of 2026-11-13) was refused with nothing to
+      press: a map in the load order now offers "Remove from the load order", a saved map
+      that is a mod "Do not use it as the map".
+- [x] Left as the client differs, since each would change an item's id (DESIGN.md 5.2): a
+      root `workshop.json` that cannot be read, one named in another case, and one with a
+      UTF-8 byte order mark.
+- [x] 624 unit tests pass.

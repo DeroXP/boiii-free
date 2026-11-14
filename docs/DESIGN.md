@@ -647,7 +647,14 @@ mod), the file read leniently as the client reads it (one saved in the ANSI code
 page gives its kind and its title; its id still comes from a strict read, so an
 item that was `local.<folder>` stays so for the profiles that name it), and
 without either by its zone files (`mod.ff` or `*_mod.ff` a mod, a
-`zm_`/`mp_`/`cp_` zone a map).
+`zm_`/`mp_`/`cp_` zone a map). The CLI's scans (`--mods-dir`) take the folder
+rule from the folder's name (`folder_kind_of_directory`). An item whose kind
+changed under a saved profile is refused with a fix: `plan.map.in_stack` offers
+`remove` (out of the load order), `plan.map.kind` offers `clear_map`. Left as
+the client differs, since each would change an item's id: a root
+`workshop.json` that cannot be read (the client then reads `zone/workshop.json`),
+one named in another case (`Workshop.json`), and one that starts with a UTF-8
+byte order mark (the client's read fails on it and goes by the zone files).
 
 ### 5.3 Resolving a plan
 

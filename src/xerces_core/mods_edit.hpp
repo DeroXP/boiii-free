@@ -133,6 +133,8 @@ mods_attribute(const plan &resolved,
 // - allow_conflict on both mods of the pair (the planner files it under the
 //   smaller id), also on one that is in the plan only as a dependency;
 // - reset_setting on the mod whose stored value it drops, a dependency too;
+// - clear_map on the mod the profile has as its map (the plan has no map
+//   then, so the item is neither enabled nor the plan's map);
 // - the rest filed under the mod (remove, reorder, move_to_top, unpin, ...)
 //   only while it is enabled or is the plan's map, since they act on the load
 //   order;

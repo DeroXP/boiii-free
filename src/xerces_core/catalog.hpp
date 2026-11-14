@@ -174,6 +174,12 @@ catalog_scan scan_mods_directory(const std::filesystem::path &directory,
 // taken as a game's mods\ or usermaps\ folder.
 content_layout layout_of_directory(const std::filesystem::path &directory);
 
+// The kind every legacy item in a game's own usermaps\ (map) or mods\ (mod)
+// folder has (scan_options::folder_kind), from the folder's name; none for
+// any other folder.
+std::optional<content_kind>
+folder_kind_of_directory(const std::filesystem::path &directory);
+
 // One mod folder: its xerces.mod.json, or a synthesized legacy manifest. For
 // a mod or map, also the asset pool file the client would read (pool_file,
 // pool_limits); one larger than max_pool_file_bytes, or one that cannot be

@@ -782,6 +782,26 @@ content_layout layout_of_directory(const std::filesystem::path &directory) {
                           : content_layout::game_folder;
 }
 
+std::optional<content_kind>
+folder_kind_of_directory(const std::filesystem::path &directory) {
+  const std::filesystem::path path = directory.filename().empty()
+                                         ? directory.parent_path().filename()
+                                         : directory.filename();
+  std::string name = utf8(path.u8string());
+  for (char &c : name) {
+    if (c >= 'A' && c <= 'Z') {
+      c = static_cast<char>(c - 'A' + 'a');
+    }
+  }
+  if (name == "usermaps") {
+    return content_kind::map;
+  }
+  if (name == "mods") {
+    return content_kind::mod;
+  }
+  return std::nullopt;
+}
+
 catalog_scan scan_mods_directory(const std::filesystem::path &directory,
                                  const scan_options &options) {
   catalog_scan scan;

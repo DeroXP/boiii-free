@@ -358,7 +358,7 @@ std::vector<fix_action> mods_fixes_for(const plan &resolved,
       if (fix.id == id || fix.detail == id) {
         add(fix);
       }
-    } else if (fix.kind == "reset_setting") {
+    } else if (fix.kind == "reset_setting" || fix.kind == "clear_map") {
       if (fix.id == id) {
         add(fix);
       }

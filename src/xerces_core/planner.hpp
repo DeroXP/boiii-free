@@ -174,7 +174,8 @@ struct zone_memory_report {
 struct fix_action {
   // install, update, unpin, remove, reorder (id below detail), move_to_top,
   // allow_conflict (detail: the other mod), reset_setting (detail: the
-  // setting's key), update_xerces
+  // setting's key), update_xerces, clear_map (id: the plan's map, which is a
+  // mod)
   std::string kind;
   std::string id;
   std::string detail;

@@ -251,5 +251,17 @@ TEST_CASE(
   CHECK(kind_in("usermaps", content_kind::map) == content_kind::map);
   CHECK(kind_in("mods", content_kind::mod) == content_kind::mod);
   CHECK(kind_in("workshop", std::nullopt) == content_kind::mod);
+  // The CLI's scans take the rule from the folder's name, as the launcher's
+  // take it from where they look (a review, 2026-11-14)
+  CHECK(kind_in("usermaps", folder_kind_of_directory(dir / "usermaps")) ==
+        content_kind::map);
+  CHECK(kind_in("mods", folder_kind_of_directory(dir / "mods" / "")) ==
+        content_kind::mod);
+  CHECK(folder_kind_of_directory(fs::path("D:/Games/BO3/UserMaps")) ==
+        content_kind::map);
+  CHECK(!folder_kind_of_directory(dir / "workshop").has_value());
+  CHECK(!folder_kind_of_directory(
+             fs::path("D:/Steam/steamapps/workshop/content/311210"))
+             .has_value());
   fs::remove_all(dir);
 }

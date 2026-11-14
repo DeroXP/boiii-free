@@ -349,7 +349,10 @@ struct unwind_module {
 std::array<unwind_module, 512> unwind_modules{};
 std::size_t unwind_module_count = 0;
 
-bool add_unwind_module(const DWORD64 base) {
+// Reads the module's headers; the entry is stored only once all are read.
+// Called under a guard of its own (a module may be unloaded between the list
+// and the read), so one bad module costs only itself.
+__declspec(noinline) bool add_unwind_module(const DWORD64 base) {
   if (unwind_module_count >= unwind_modules.size()) {
     return false;
   }
@@ -362,25 +365,36 @@ bool add_unwind_module(const DWORD64 base) {
   if (nt->Signature != IMAGE_NT_SIGNATURE) {
     return false;
   }
-  const IMAGE_DATA_DIRECTORY &exceptions =
+  const IMAGE_DATA_DIRECTORY exceptions =
       nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
-  if (exceptions.VirtualAddress == 0 || exceptions.Size == 0) {
+  const DWORD64 size = nt->OptionalHeader.SizeOfImage;
+  if (exceptions.VirtualAddress == 0 || exceptions.Size == 0 ||
+      static_cast<DWORD64>(exceptions.VirtualAddress) + exceptions.Size >
+          size) {
     return false;
   }
-  unwind_modules[unwind_module_count++] = {
-      base, nt->OptionalHeader.SizeOfImage,
+  unwind_modules[unwind_module_count] = {
+      base, size,
       reinterpret_cast<const RUNTIME_FUNCTION *>(base +
                                                  exceptions.VirtualAddress),
       static_cast<DWORD>(exceptions.Size / sizeof(RUNTIME_FUNCTION))};
+  ++unwind_module_count;
   return true;
 }
 
-// The game's image is mapped by the client, so it is in no module list of
-// Windows': it goes first, from its base. Headers are read under a guard: a
-// module may be unloaded between the list and the read.
+void add_unwind_module_guarded(const DWORD64 base) {
+  __try {
+    add_unwind_module(base);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+  }
+}
+
+// The game's image (loaded by loader::load_binary) goes first, from its base:
+// most of the main thread's frames are in it. It is in Windows' list too,
+// which only adds a second entry that is never reached.
 __declspec(noinline) void read_unwind_modules() {
   unwind_module_count = 0;
-  add_unwind_module(game::get_engine_base());
+  add_unwind_module_guarded(game::get_engine_base());
   HMODULE handles[512]{};
   DWORD needed = 0;
   if (!EnumProcessModules(GetCurrentProcess(), handles, sizeof(handles),
@@ -390,7 +404,7 @@ __declspec(noinline) void read_unwind_modules() {
   const std::size_t count =
       std::min<std::size_t>(needed / sizeof(HMODULE), std::size(handles));
   for (std::size_t i = 0; i < count; ++i) {
-    add_unwind_module(reinterpret_cast<DWORD64>(handles[i]));
+    add_unwind_module_guarded(reinterpret_cast<DWORD64>(handles[i]));
   }
 }
 
@@ -401,9 +415,10 @@ void note_unwind_modules() {
   }
 }
 
-// The function entry for pc from the noted tables (a binary search, no lock)
+// The function entry for pc from the noted tables (a binary search, no lock),
+// and the module it is in
 __declspec(noinline) const RUNTIME_FUNCTION *
-find_function_entry(const DWORD64 pc, DWORD64 &image_base) {
+find_function_entry(const DWORD64 pc, const unwind_module *&owner) {
   for (std::size_t m = 0; m < unwind_module_count; ++m) {
     const unwind_module &module = unwind_modules[m];
     if (pc < module.base || pc >= module.base + module.size) {
@@ -420,8 +435,20 @@ find_function_entry(const DWORD64 pc, DWORD64 &image_base) {
       } else if (rva >= entry.EndAddress) {
         low = mid + 1;
       } else {
-        image_base = module.base;
-        return &entry;
+        const RUNTIME_FUNCTION *found = &entry;
+        // Unwind data with bit 0 set is the image offset (plus one) of the
+        // primary entry, which RtlLookupFunctionEntry follows
+        // (RUNTIME_FUNCTION_INDIRECT): so does this.
+        if ((found->UnwindData & 1) != 0) {
+          const DWORD64 primary = found->UnwindData - 1;
+          if (primary + sizeof(RUNTIME_FUNCTION) > module.size) {
+            return nullptr;
+          }
+          found =
+              reinterpret_cast<const RUNTIME_FUNCTION *>(module.base + primary);
+        }
+        owner = &module;
+        return found;
       }
     }
     return nullptr;
@@ -429,29 +456,128 @@ find_function_entry(const DWORD64 pc, DWORD64 &image_base) {
   return nullptr;
 }
 
-// Unwinds into out.pc. A fault while reading the stopped thread's stack ends
-// the walk with what was found: the sampler must never take the game down.
-void walk_stack(CONTEXT &context, stall_sample &out) {
+// The stopped thread's stack: its base and its committed limit (which moves
+// as the stack grows), from its TEB
+struct stack_range {
+  DWORD64 low = 0;
+  DWORD64 high = 0;
+};
+
+__declspec(noinline) bool read_stack_range(const DWORD64 teb,
+                                           stack_range &out) {
+  const auto *tib = reinterpret_cast<const NT_TIB *>(teb);
+  out.low = reinterpret_cast<DWORD64>(tib->StackLimit);
+  out.high = reinterpret_cast<DWORD64>(tib->StackBase);
+  return out.low != 0 && out.low < out.high;
+}
+
+// The thread's TEB (ThreadBasicInformation), 0 when it cannot be read
+DWORD64 thread_teb(const HANDLE thread) {
+  struct basic_information {
+    LONG exit_status;
+    PVOID teb;
+    PVOID process_id;
+    PVOID thread_id;
+    ULONG_PTR affinity;
+    LONG priority;
+    LONG base_priority;
+  };
+  using query_fn = LONG(WINAPI *)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+  static const auto query = reinterpret_cast<query_fn>(GetProcAddress(
+      GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationThread"));
+  basic_information info{};
+  if (!query || query(thread, 0, &info, sizeof(info), nullptr) < 0) {
+    return 0;
+  }
+  return reinterpret_cast<DWORD64>(info.teb);
+}
+
+// Whether RtlVirtualUnwind can unwind this frame reading only the stopped
+// thread's stack and the module's unwind data: the stack pointer inside the
+// stack, the unwind data (and its chain) inside the module, and the frame
+// register inside the stack once the prologue has set it (the saved registers
+// are read from there). A fault would be handled on the sampler's thread, and
+// Windows' handling looks up function tables and handlers under locks the
+// stopped main thread may hold (a review, 2026-11-14): so the walk stops
+// instead of faulting.
+__declspec(noinline) bool unwindable(const CONTEXT &context,
+                                     const RUNTIME_FUNCTION &function,
+                                     const unwind_module &module,
+                                     const stack_range &stack) {
+  if (context.Rsp < stack.low || context.Rsp + 8 > stack.high ||
+      (context.Rsp & 7) != 0) {
+    return false;
+  }
+  const DWORD64 registers[16] = {
+      context.Rax, context.Rcx, context.Rdx, context.Rbx,
+      context.Rsp, context.Rbp, context.Rsi, context.Rdi,
+      context.R8,  context.R9,  context.R10, context.R11,
+      context.R12, context.R13, context.R14, context.R15};
+  const DWORD64 offset = context.Rip - (module.base + function.BeginAddress);
+  const RUNTIME_FUNCTION *entry = &function;
+  for (int link = 0; link < 8; ++link) {
+    const DWORD64 unwind = entry->UnwindData;
+    if (unwind == 0 || unwind + 4 > module.size) {
+      return false;
+    }
+    const auto *info =
+        reinterpret_cast<const std::uint8_t *>(module.base + unwind);
+    // Header (4 bytes), then the codes, 2 bytes each, an even count of them
+    const DWORD64 codes_end = unwind + 4 + ((info[2] + 1u) & ~1u) * 2u;
+    if (codes_end > module.size) {
+      return false;
+    }
+    // A chained entry's primary is past its prologue
+    if (const unsigned reg = info[3] & 0x0F;
+        reg != 0 && (link > 0 || offset >= info[1])) {
+      const DWORD64 frame =
+          registers[reg] - static_cast<DWORD64>(info[3] >> 4) * 16;
+      if (frame < stack.low || frame >= stack.high) {
+        return false;
+      }
+    }
+    if (((info[0] >> 3) & UNW_FLAG_CHAININFO) == 0) {
+      return true;
+    }
+    if (codes_end + sizeof(RUNTIME_FUNCTION) > module.size) {
+      return false;
+    }
+    entry = reinterpret_cast<const RUNTIME_FUNCTION *>(module.base + codes_end);
+  }
+  return false;
+}
+
+// Unwinds into out.pc while each frame checks out (unwindable); the guard is
+// only a last resort. Without the thread's stack bounds only the pc it stopped
+// at is kept. Every read is in a call: clang's __try guards calls only.
+void walk_stack(CONTEXT &context, const DWORD64 teb, stall_sample &out) {
   __try {
+    stack_range stack{};
+    const bool bounded = teb != 0 && read_stack_range(teb, stack);
     while (out.depth < stall_stack_depth && context.Rip) {
       out.pc[out.depth++] = context.Rip;
-      DWORD64 image_base = 0;
+      const unwind_module *module = nullptr;
       const RUNTIME_FUNCTION *function =
-          find_function_entry(context.Rip, image_base);
-      if (!function) {
+          bounded ? find_function_entry(context.Rip, module) : nullptr;
+      if (!function || !unwindable(context, *function, *module, stack)) {
         break;
       }
+      const DWORD64 before = context.Rsp;
       PVOID handler_data = nullptr;
       DWORD64 establisher_frame = 0;
-      RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, context.Rip,
+      RtlVirtualUnwind(UNW_FLAG_NHANDLER, module->base, context.Rip,
                        const_cast<PRUNTIME_FUNCTION>(function), &context,
                        &handler_data, &establisher_frame, nullptr);
+      if (context.Rsp <= before) {
+        break; // a frame that does not move up the stack: garbage
+      }
     }
   } __except (EXCEPTION_EXECUTE_HANDLER) {
   }
 }
 
-void sample_main_thread(HANDLE thread, std::int64_t now, std::int64_t age) {
+void sample_main_thread(HANDLE thread, DWORD64 teb, std::int64_t now,
+                        std::int64_t age) {
   const std::uint32_t slot = stall_count.load(std::memory_order_relaxed);
   if (slot >= stall_sample_max) {
     stalls_dropped.fetch_add(1, std::memory_order_relaxed);
@@ -467,7 +593,7 @@ void sample_main_thread(HANDLE thread, std::int64_t now, std::int64_t age) {
     return;
   }
   if (GetThreadContext(thread, &context)) {
-    walk_stack(context, out);
+    walk_stack(context, teb, out);
   }
   ResumeThread(thread);
   if (out.depth > 0) {
@@ -479,6 +605,7 @@ void sample_main_thread(HANDLE thread, std::int64_t now, std::int64_t age) {
 
 void stall_sampler() {
   HANDLE thread = nullptr;
+  DWORD64 teb = 0;
   std::uint32_t thread_id = 0;
   std::int64_t last_sample = 0;
   ULONGLONG modules_noted = 0;
@@ -498,9 +625,11 @@ void stall_sampler() {
         CloseHandle(thread);
       }
       thread_id = id;
-      thread = id ? OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT,
+      thread = id ? OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT |
+                                   THREAD_QUERY_LIMITED_INFORMATION,
                                FALSE, id)
                   : nullptr;
+      teb = thread ? thread_teb(thread) : 0;
     }
     if (!thread) {
       continue;
@@ -516,7 +645,7 @@ void stall_sampler() {
       continue;
     }
     last_sample = now;
-    sample_main_thread(thread, now, now - last);
+    sample_main_thread(thread, teb, now, now - last);
   }
 }
 
