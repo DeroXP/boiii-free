@@ -100,6 +100,14 @@ Same network, no mods enabled on either PC (Xerces > Mods).
    - J is already in H's lobby when H starts that map. Expected: J drops to the
      menu with "You don't have the map ..." and a dialog that offers its
      Workshop page. Nothing says "Reconnecting to download".
+5. H's rule is J's only while J is H's guest (after beta.26):
+   - H types `set xerces_map_scripts_first 0`; J (with its own setting on) goes
+     to its own Zombies lobby first, then joins H from there and plays H's
+     custom map. Expected: J loads it as H does (J's Copy report has no
+     `loader.script.map_first` lines, like H's).
+   - J leaves to the menu and starts SANCTUM OBITUS with DS4C from its own
+     lobby (Solo Game). Expected: the map keeps its scripts (J's Copy report
+     has `loader.script.map_first` lines) and no "GSC LINK ERROR".
 
 ## 5. Over the internet with UPnP
 
@@ -233,6 +241,11 @@ On both PCs, after any step that went wrong and once at the end:
    and paste it into the same file. Do it before closing the game; the console
    closes with it.
 3. A picture of any dialog or toast (Print Screen).
-4. A sentence on what you did and what happened, with the time.
+4. A sentence on what you did and what happened, with the time. For a join that
+   hung and then failed, about how many seconds it took: the game's own limits
+   are 20 s (a connected client hearing nothing), 30 s (a lobby client, or the
+   server hearing nothing from a client) and 45 s (a lobby host hearing nothing
+   from a client), so the time says which side stopped hearing the other
+   (docs/research/engine-re.md, "Network timeouts").
 
 Send the files to the user privately.
