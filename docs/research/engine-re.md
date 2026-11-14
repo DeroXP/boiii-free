@@ -361,7 +361,7 @@ hash against `data/lookup_tables/dvar_list.txt`. What a join that stalls runs in
 | `cl_timeout` | 20 s | a connected client hearing nothing from the server |
 | `sv_connectTimeout` | 90 s | the server waiting for a connecting client |
 | `sv_timeout` | 30 s | the server hearing nothing from a client |
-| `sv_reconnectlimit` | 3 | reconnects |
+| `sv_reconnectlimit` | 3 s | the server time since a client's last connect before the server takes its join (`cfl`); every Zombies level's start waits it out (A map's load) |
 | `lobby_clientTimeout` | 30,000 ms | a lobby client hearing nothing from its host (a warning at `lobby_clientWarnTimeout`, 5,500 ms) |
 | `lobby_hostTimeout` | 45,000 ms | a lobby host hearing nothing from a client |
 | `lobby_ptptimeout` | 60,000 ms | the lobby's peer-to-peer link |
@@ -392,7 +392,9 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
      part asleep in short waits: for the sound banks (`SND_LoadSoundsWait` at
      0x142513020; the banks, `zone\snd\all\*.sabl`, are about 500 MB of what the load
      reads) and inside the zone reader. The job workers are busy at the same time.
-  3. About 4 s of streaming the level's images while the loading screen shows (below).
+  3. About 4 s of streaming the level's images while the loading screen shows (below); on
+     Shadows of Evil it runs inside the client's `CONFIRMLOADING` wait, which, not the
+     streaming, ends it.
   4. About 2.5 s to the client's game start (the weapons are registered about a second
      before the connection is active).
 - Every read comes from Windows' cache (the files are opened with
@@ -428,7 +430,8 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   rough, as `sample_thread.py` says.)
 - With the screen update's waits at 0 the loading screen presents about 220 times a
   second and the same streaming is done about 3 s sooner (588 MB and 356 MB in two
-  seconds), yet Shadows of Evil's level starts no sooner (`bench\20261113-left\io-zod-fast`,
+  seconds), yet Shadows of Evil's level starts no sooner with that alone (the flag's 4x has
+  since taken 3 to 4 s off: below) (`bench\20261113-left\io-zod-fast`,
   `fastload-ab.ps1`: 10.2 against 10.1 s of loading). Custom maps, whose images stream
   for longer behind the loading screen, did load sooner (`fastload-maps.ps1` and
   `fastload-maps-rev.ps1`, no mods, both orders): Town Reimagined 15.9 and 16.0 s against
@@ -442,8 +445,8 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   5.29 s, and stays there; the new server is up (`sv.state` 2) at 9.74 s and the client's
   zones are linked at 9.78 s, but the client leaves `CONFIRMLOADING` only at 14.51 s, then
   `SENDINGDATA`, `CONNECTED`, `PRIMED`, `LOADING` and `ACTIVE` within 0.6 s. So about
-  4.8 s of a Shadows of Evil load is the client waiting in `CONFIRMLOADING` after
-  everything is loaded. Not the cause (each tried, no change): the frame cap, the
+  4.8 s of a Shadows of Evil load is the client waiting in `CONFIRMLOADING` after the
+  zones are linked (the level's images still stream during it: below). Not the cause (each tried, no change): the frame cap, the
   loading screen's style (`boiii_loadingScreen` 0, 1, 2), when the client stops the
   Zombies intro (`client_patches.cpp` waits 15 s after the preload; a test build with 0
   and 5 s), `waitForStreamer`.
@@ -454,7 +457,7 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   nothing at all until "Connected" at 14.9 s: a quiet 5 s, about the length of
   `lobbyTimerZMStartInterval` (5,000 ms). Set to 0 from the console before `map`, or 4 s
   into the load, it changed nothing (whether the second one reached the game was not
-  seen). `lobbymsg_prints 1` printed nothing. (What it is: two items down.) The only constant writes of
+  seen). `lobbymsg_prints 1` printed nothing. (What it is: two and three items down, `sv_reconnectlimit`.) The only constant writes of
   the connection state in the readable code are `LOADING` (0x141326EA3) and
   `DISCONNECTED` (0x14135945D), so the others are made in the protection's code or
   through a pointer.
@@ -468,10 +471,10 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   change: it restarts at 0 when the server comes up, runs 1:1 with real time, and the
   client is let go at `level.time` 4,950 on Shadows of Evil, 4,800 on Town Reimagined and
   MW2 Rust, 3,150 on Origins, every run. `timescale` set once the server is up (with
-  `devmap`; the client already takes the dvar's cheat flag off): 4 ended the wait 0.2 s
-  later (11.4 s instead of 14.5), 2 at 12.5 s, 1.01 changed nothing; so it scales with game
-  time, roughly (2 and 4 do not fit one constant: the client seems to look at it on its own
-  real-time beat). What it is not: the thread CPU watch (`tools/dev/re/thread_cpu.py`,
+  `devmap`; the client already takes the dvar's cheat flag off): 4 ended the wait at
+  11.4 s instead of 14.5, 2 at 12.5 s, 1.01 changed nothing; so it scales with game time,
+  roughly (2 and 4 do not fit one constant; an early guess was a real-time beat on the
+  client's side: the server's check, three items down, measures its own time). What it is not: the thread CPU watch (`tools/dev/re/thread_cpu.py`,
   `bench\20261113-left\states-cpu.ps1`, every 200 ms) shows Main at 12 to 25% (the
   loading screen) and the server thread near idle through the wait; sampled
   (`wait-sample.ps1`), Main is 81% in the frame limiter's wait and the server thread 98% in
@@ -509,7 +512,8 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   still down (`sv.state` 0); nothing at all when the client is let in, and no `connect`
   (the one `connect` of the run is the menus' own at the start). So the request to join is
   made early, and the client moves on, with no packet seen here, when the server's clock
-  reaches the mark (whether the server or the client checks it is not seen).
+  reaches the mark (the server checks it: "The hold, found" below; the `cfl` it takes past
+  the limit was not seen in this log).
 - The hold, found (2026-11-14 late morning): `sv_reconnectlimit`. The string "cfl" is
   loaded at two places in the dump: 0x14134BCAC, in `CL_CheckForResend`, which builds the
   packet ("cfl", the player's XUID as an int64, a short) and sends it with
@@ -530,9 +534,11 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   3,150 (with the flag, whose 4x then ran 39 ms); the rest on Shadows of Evil (about 1.9 s) also runs on the game's clock (at 4x it
   took 0.4 s). Not used: at 0 the host is in at level.time 150 to 1,950, sooner than the
   game ever lets anyone in (the limit holds every client at least 3 s), and the level's
-  scripts may count on that; the flag's 4x keeps the arrival at the usual level.time
-  (4,850 against 4,950). With the limit at 0 and the 4x the level started another second
-  sooner (Shadows of Evil `in_game` 8.9 s against 9.9 s; Origins 6.3 s after `map`).
+  scripts may count on that; the flag's 4x keeps the arrival at the usual level.time (the
+  connect at 4,850 either way, the client seen leaving at 4,950). With the limit at 0 and the
+  4x the level started another second sooner in a test build (Shadows of Evil `in_game` 8.9 s
+  against 9.9 s in that run; the flag as committed: 8.8 to 9.6 s against 12.9 s, TESTING.md;
+  Origins 6.3 s after `map`).
   Watched from outside (`watch_states.py` now prints client record 0's state and its time at
   +0x55E4 with `svs.time`): the new server zeroes the record (state 0, time 0) as it starts,
   and `svs.time` restarts at 0 with level.time, so the limit runs out at `svs.time` 3,000.

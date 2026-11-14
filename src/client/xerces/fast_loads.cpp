@@ -28,26 +28,30 @@
 //    pointed here before its entry point runs (post_load); every other COM
 //    object, and every other WMI call, is the real one.
 // 4. A Zombies level's first seconds run 4x on our own server while the
-//    local client waits for it. The new server is up, but it lets the client
-//    connect only once its level.time reaches about 4.8 s (Shadows of Evil,
-//    Town Reimagined and MW2 Rust; 3.2 s on Origins): a wait on the game's
-//    clock, not work (no thread is busy, no dvar changes, the online service
-//    is quiet; timescale 2 or 4 shortens it, 1.01 does not). Most of it is
+//    local client waits for it. The new server is up, but the client is let
+//    go only once its level.time reaches about 4.95 s on Shadows of Evil,
+//    4.8 s on Town Reimagined and MW2 Rust, 3.15 s on Origins: a wait on the
+//    game's clock, not work (no game thread busy: only the protection's
+//    worker 0, not in step with it; no dvar changes, the online service is
+//    quiet; timescale 2 or 4 shortens it, 1.01 does not). Most of it is
 //    sv_reconnectlimit (3 s): the server's handler of the client's join
 //    ("cfl", 0x1421ECAC0) ignores it until that much of its time has passed
 //    since the client's last connect. That limit is left as it is: at 0 the
-//    host was in at level.time 150 (Origins) and 1,650 (Shadows of Evil),
+//    host was in at level.time 150 (Origins) and 1,950 (Shadows of Evil),
 //    sooner than the game ever lets anyone in, which the level's scripts
 //    may not expect; at 4x the client arrives at the usual level.time. The
-//    texture streaming that 1. speeds up used to hide in it. So while the local
-//    client is in CONFIRMLOADING, the server is ours and in GAME, nobody else
-//    is in the lobby and timescale is 1, timescale is 4; it is 1 again as
-//    soon as any of that ends (20 s at most). The server still steps 50 ms
-//    of game time a frame, only more of them a second, and no player is in
-//    the level yet. Shadows of Evil from the menus: in the game 3.5 s sooner
-//    (8.8 s from `map`, 12.9 s with 1.-3. alone); Town Reimagined and MW2
-//    Rust 2.3 s sooner. Not without 1.: the streaming then takes its time
-//    after the wait instead, and the level started 2 s later.
+//    texture streaming that 1. speeds up used to hide in it. So while the
+//    local client is in CONFIRMLOADING, the server is ours, a level's (not
+//    the menus') and in GAME, the mode is Zombies, nobody else is in the
+//    lobby and timescale is 1, timescale is 4; it is 1 again as soon as any
+//    of that ends (20 s at most, once a wait; a timescale something else
+//    changed meanwhile is left as it is). The server still steps 50 ms of
+//    game time a frame, only more of them a second, and no player is in the
+//    level yet. Shadows of Evil from the menus: in the level 3.3 to 4.1 s
+//    sooner (8.8 to 9.6 s from `map`, against 12.9 s with 1.-3. alone and
+//    14.6 s without the flag); Town Reimagined and MW2 Rust 2.3 s sooner
+//    with mods off. Not without 1.: the streaming then takes its time after
+//    the wait instead, and the level started 2 s later.
 
 #include "fast_loads.hpp"
 

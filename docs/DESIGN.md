@@ -3768,21 +3768,24 @@ Backrooms 18.1 against 21.4 s; with both parts and a three-mod stack, Town Reima
 11.0 s against 33.7 s and MW2 Rust 9.9 s against 39.2 s. Shadows of Evil loaded no sooner
 with those alone: its end was held by the client waiting in `CONFIRMLOADING`, which turned
 out to be a wait on the new server's clock: the server lets the local client connect only
-once its `level.time` reaches about 4.8 s on Shadows of Evil, Town Reimagined and MW2 Rust
-(3.2 s on Origins), with no thread busy and no dvar changing meanwhile; most of it is
+once its `level.time` reaches about 4.95 s on Shadows of Evil, 4.8 s on Town Reimagined
+and MW2 Rust and 3.15 s on Origins, with no game thread busy (only the protection's worker
+0, not in step with it) and no dvar changing meanwhile; most of it is
 `sv_reconnectlimit` (3 s), which the server's handler of the client's join ("cfl") checks
 against the client's last connect (docs/research/engine-re.md, "A map's load"). The limit
 is left as it is: at 0 the host was in at level.time 150 to 1,950, sooner than the game
 ever lets anyone in, and the level's scripts may count on that. So the flag also runs a Zombies level's start
 4x on our own server while the local client waits for it: while client 0 is in
-`CONFIRMLOADING`, `sv.state` is `GAME`, the session mode is Zombies, no remote client is in
+`CONFIRMLOADING`, `sv.state` is `GAME` and the server is a level's (not the menus'
+`isUILevel`), the session mode is Zombies, no remote client is in
 the game or party lobby and `timescale` is 1, `timescale` is 4 (the client already takes
 its cheat flag off), and it is 1 again the frame any of that ends (20 s at most, once a
 wait, and left as it is if something else changed it meanwhile). The server still steps
 50 ms of game time a frame, only more frames a second, and nobody is in the level yet.
-Shadows of Evil from the menus came 4 s sooner (8.8 s from `map` to the client's `in_game`
-phase, 12.9 s with the rest of the flag; 14.6 s without the flag) and looked the same 6 and 12 s in; Town
-Reimagined and MW2 Rust 2.3 s sooner. Only with the every-frame loading screen: without it
+Shadows of Evil from the menus came 3.3 to 4.1 s sooner (8.8 to 9.6 s from `map` to the
+client's `in_game` phase, 12.9 s with the rest of the flag; 14.6 s without the flag) and
+looked the same 6 and 12 s in; Town Reimagined and MW2 Rust 2.3 s sooner with mods off (with
+the three-mod stack 8.7 and 9.8 s, against 33.8 and 39.3 s without the flag). Only with the every-frame loading screen: without it
 the texture streaming that hid in the wait came after it instead (`LOADING` took 5.9 s)
 and the level started 2 s later. A `map` from inside a level has no such wait and is
 unchanged. Off unless the flag is given (Settings, launch flags); whether it becomes the

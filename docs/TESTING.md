@@ -3997,10 +3997,12 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       about 220 times a second instead of 57, and Shadows of Evil's streaming behind it ended
       about 3 s sooner (`bench\20261113-left\io-zod-fast`).
 - [x] Shadows of Evil, mods off, two rounds each (`fastload-ab.ps1`): 15.6 / 15.4 s without,
-      16.2 / 15.6 s with, from `map` to the connection active. No gain: the client then waits
-      in `CONFIRMLOADING` for about 4.8 s after the server is up (`tools/dev/re/watch_states.py`,
-      `states-load.ps1`; not the frame cap, the loading screen's style, when the intro is
-      stopped, or `waitForStreamer`).
+      16.2 / 15.6 s with, from `map` to the connection active. No gain from the every-frame
+      loading screen on its own: the client then waits in `CONFIRMLOADING` for about 4.8 s
+      after the server is up (`tools/dev/re/watch_states.py`, `states-load.ps1`; not the frame
+      cap, the loading screen's style, when the intro is stopped, or `waitForStreamer`). The
+      flag's level start at 4x has since taken 3 to 4 s off ("A Zombies level's start at 4x"
+      below).
 - [x] Custom maps through Xerces.exe, no mods (`map-check -Live`, each load a game of its
       own; `fastload-maps.ps1` without first, `fastload-maps-rev.ps1` with first): Town
       Reimagined 22.5 and 22.3 s without, 15.9 and 16.0 s with; MW2 Rust 27.1 and 27.0 s
@@ -4091,7 +4093,8 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       exchange, reverted), `lobby_hostIntervalState` 100, any dvar (`dvars-wait.ps1`,
       `xerces_crash_test dvars`, new). The game was gone once, 0.4 s after a `map` from the
       menus, with no report, no Windows error and no exit code read (a bench launch, nothing
-      watching; once in about 25 runs this morning); `watch_states.py` now prints the exit
+      watching; a second time at 09:40: the open item at the end of this section);
+      `watch_states.py` now prints the exit
       code if the game ends.
 - [x] `-xerces-fast-loads` with the level start at 4x, mods off, from the menus: Shadows of Evil
       in the level 8.8 to 9.6 s after `map` (12.9 s with the flag's other parts alone, 14.6 s
@@ -4145,7 +4148,8 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       it at 0 from the console, mods off: Shadows of Evil let in at level.time 1,950 instead
       of 4,950; with the flag, Origins at 150 instead of 3,150 (its 4x ran 39 ms). A test build that set it to 0 for a solo
       launch next to the 4x (and back once the client was in: the console read 3 afterwards)
-      made Shadows of Evil `in_game` 8.9 s instead of 9.9 s, Origins 6.3 s after `map`, and
+      made Shadows of Evil `in_game` 8.9 s instead of 9.9 s in that run (8.8 to 9.6 s in the
+      flag's own runs above), Origins 6.3 s after `map`, and
       looked sharp at 6 s; dropped, not committed: the host then arrives at a level.time
       sooner than the game ever allows, which the level's scripts may count on.
 - [ ] With a friend in the lobby (TWO_PC_TEST.md step 8): no 4x, the level's clock as usual.
