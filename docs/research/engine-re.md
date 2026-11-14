@@ -184,9 +184,15 @@ base 0x140000000 that upstream's symbol tables use.
   one place starts threads there (0x14000AC1B in 0x14000AB50: for each of the
   count at 0x1435F578C, `CreateThread` suspended with the worker's record,
   `SetThreadPriority` normal, `ResumeThread`), so it is a job worker too, most
-  likely worker 0
-  (its record would be the one before the two read, at the job system + 0x08).
-  Why it does not name itself was not worked out.
+  likely worker 0 (its record would be the one before the two read, at the job
+  system + 0x08). Sampled with stack scans in a level (2,000 samples,
+  `bench\20261113-left\sample-worker0.ps1`): 88% asleep in a `Sleep` loop at
+  0x14213C9B0, the rest a scan from the game's code at 0x142194300 and
+  0x142197070: `EnumChildWindows` (`NtUserBuildHwndList`, 4.5%), `GetClassNameA`
+  and `NtQuerySystemInformation` (which the client's `arxan.cpp` answers): it
+  looks over the PC's windows and processes, the way an anti-cheat scan does. So
+  this worker never goes back to the job queue, and the game's frame work runs
+  on the other two. Why it does not name itself was not worked out.
 - Two more of the game's threads start at 0x142BD5B30 (the C runtime's thread
   start): one waits in the device enumeration (`DEVOBJ.dll`), one at
   0x142BBF8B0. Neither is named.
