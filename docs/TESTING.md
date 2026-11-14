@@ -3498,10 +3498,13 @@ In the game (the user approved the runs; the friends build, test homes):
         later, its three files in the Workshop folder, "Supplemented 20 mods" where there
         were 19, no helper left when the game closed. The user's account is subscribed to
         that item now.
-- [ ] Not tried in the game: UPnP with two PCs; a long download ended by quitting the game
-      (the job that ends the helper with its starter). The aim assist's dead zone was not
-      looked at by itself, but the user played beta.25 with a controller and found the
-      assist good.
+- [x] The helper ends with the program that started it (a game closed or crashed in the
+      middle of a download): a unit test starts a stand-in helper that runs on (a batch
+      file adding a line a second), ends the process that started it, and sees the file stop
+      growing. With the job taken out as a control the test fails (the helper writes on);
+      618 unit tests pass.
+- [ ] Not tried in the game: UPnP with two PCs. The aim assist's dead zone was not looked at
+      by itself, but the user played beta.25 with a controller and found the assist good.
 
 ## Aim assist after the user's beta.24 playtest (2026-11-13)
 

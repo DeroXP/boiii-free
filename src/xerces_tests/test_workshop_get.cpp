@@ -1,7 +1,13 @@
 #include "harness.hpp"
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
 #include <atomic>
 #include <filesystem>
+#include <fstream>
 
 #include <string>
 #include <vector>
@@ -79,4 +85,59 @@ TEST_CASE(
   CHECK(error.empty());
   CHECK(lines == 0);
   CHECK(process.load() == nullptr);
+}
+
+TEST_CASE("workshop get: the helper ends with the program that started it") {
+  namespace fs = std::filesystem;
+  // A stand-in that goes on for as long as it is let: a batch file (Windows
+  // starts cmd.exe for it) that adds a line to a file about once a second.
+  // It stops by itself when stop.txt appears, so a failed test leaves nothing
+  // running.
+  const fs::path dir = fs::temp_directory_path() / "xerces_helper_job";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir);
+  const fs::path alive = dir / "alive.txt";
+  const fs::path stop = dir / "stop.txt";
+  {
+    std::ofstream script(dir / "helper.cmd", std::ios::binary);
+    script << "@echo off\r\n:again\r\nif exist \"%~dp0stop.txt\" exit /b 0\r\n"
+              "echo x>>\"%~dp0alive.txt\"\r\nping -n 2 127.0.0.1 >nul\r\n"
+              "goto again\r\n";
+  }
+  // This program again, as the one that starts the helper and waits for it
+  wchar_t self[MAX_PATH]{};
+  REQUIRE(GetModuleFileNameW(nullptr, self, MAX_PATH) > 0);
+  std::wstring command = L"\"" + std::wstring(self) + L"\" --hold-helper \"" +
+                         (dir / "helper.cmd").wstring() + L"\"";
+  STARTUPINFOW startup{};
+  startup.cb = sizeof(startup);
+  PROCESS_INFORMATION starter{};
+  REQUIRE(CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE,
+                         CREATE_NO_WINDOW, nullptr, nullptr, &startup,
+                         &starter));
+  CloseHandle(starter.hThread);
+  const auto size = [&alive] {
+    std::error_code size_ec;
+    const auto bytes = fs::file_size(alive, size_ec);
+    return size_ec ? std::uintmax_t{0} : bytes;
+  };
+  // the helper runs: the file appears and grows
+  for (int i = 0; i < 100 && size() == 0; ++i) {
+    Sleep(100);
+  }
+  const std::uintmax_t running = size();
+  CHECK(running > 0);
+  // the starter is ended, as a game that crashes or is closed mid-download
+  TerminateProcess(starter.hProcess, 1);
+  WaitForSingleObject(starter.hProcess, 5000);
+  CloseHandle(starter.hProcess);
+  Sleep(1500);
+  const std::uintmax_t after = size();
+  Sleep(3000);
+  const std::uintmax_t later = size();
+  CHECK(later == after); // nothing writes any more: the helper went with it
+  std::ofstream(stop) << "stop";
+  Sleep(1200);
+  fs::remove_all(dir, ec);
 }

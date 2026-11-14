@@ -2,9 +2,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -12,6 +14,9 @@
 #include <winioctl.h>
 
 #include "harness.hpp"
+
+#include <xerces_core/launcher_home.hpp>
+#include <xerces_core/workshop_get.hpp>
 
 namespace xerces_tests {
 namespace {
@@ -116,6 +121,16 @@ int main(int argc, char **argv) {
   using namespace xerces_tests;
   if (argc > 1 && std::string_view(argv[1]) == "--bench-hash") {
     return run_hash_bench(argc, argv);
+  }
+  // For test_workshop_get.cpp: this program as the one that starts a Workshop
+  // helper (argv[2] stands in for xerces_cli.exe) and waits for it, so the
+  // test can end this process and see the helper end with it
+  if (argc > 2 && std::string_view(argv[1]) == "--hold-helper") {
+    std::string error;
+    return xerces_core::workshop_get::run_helper(
+        xerces_core::path_from_utf8(argv[2]),
+        std::filesystem::temp_directory_path() / "xerces_no_game", {1}, nullptr,
+        nullptr, &error);
   }
   const std::string_view filter = argc > 1 ? argv[1] : "";
   int failed_tests = 0;
