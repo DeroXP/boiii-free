@@ -3808,4 +3808,5 @@ messages, and what two new reviews of everything since beta.26 found:
       zm_blundeezy, zm_wizardcastle, zm_log_overunder, zm_zod, zm_mw2rust and zm_ccube
       in the match and back to the menu; zm_backrooms and zm_supermario64 "ran out of
       memory" 6 to 7 s into the load, as the planner says for them without larger zone
-      memory (414 and 66 MiB over).
+      memory (414 and 66 MiB over); with `-xerces-db-pool` both reached the match (loads
+      of 31.8 and 27.7 s) and went back to the menu.
