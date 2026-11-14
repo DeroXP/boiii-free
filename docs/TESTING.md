@@ -3576,3 +3576,10 @@ beta.25 and what came after it: the host's map-first rule no longer outlives the
 (the review's finding, reproduced and fixed on one PC), the handler-fault log line, and
 the test cases and notes since (`xerces_crash_test handlerfault`, `dumpfault`,
 `workshopget`; the Workshop helper's unit test).
+
+- [x] `tools\release.ps1`: lints, 618 unit tests, the CLI smoke test, the three programs'
+      versions; the zip is from 052a6ae1, SHA-256 0cdeba55...7539cb.
+- [x] The unpacked package started once (`bench\20261113-left\pkg26.ps1`): all
+      signatures resolved, DS4C + SANCTUM OBITUS (`zm_log_overunder`), five scripts kept
+      by the map, in the level, no link error, no warning or error, `clean_exit`
+      (`bench\20261112-crash\pkg26-sanctum.png`).
