@@ -20,6 +20,11 @@
 // many waits there were, how long those a sent message ended had lasted, and
 // how long the others did (what a Sleep(1) lasts with this PC's timer).
 //
+// -xerces-input-wake does the same for the Input thread (0x1422BB4A0), which
+// takes the raw mouse input with GetRawInputBuffer and then calls Sleep(1):
+// its wait ends as soon as raw input comes (QS_RAWINPUT), so a mouse
+// movement counts at once instead of after up to a millisecond.
+//
 // Earlier detours of kernel32's Sleep code crashed the game in loads
 // (docs/research/upstream-render.md); this changes only the game's own
 // import pointer, takes no lock and asks for no memory. Opt-in until it has
@@ -38,85 +43,130 @@
 
 namespace xerces_present_wake {
 namespace {
-constexpr std::string_view flag = "-xerces-present-wake";
-// The Window context in the engine's thread table (xerces_core::
-// engine_thread_name)
+constexpr std::string_view present_flag = "-xerces-present-wake";
+constexpr std::string_view input_flag = "-xerces-input-wake";
+// The Window and Input contexts in the engine's thread table
+// (xerces_core::engine_thread_name)
 constexpr std::size_t window_context = 21;
+constexpr std::size_t input_context = 22;
 
 using sleep_fn = void(WINAPI *)(DWORD);
 sleep_fn game_sleep = nullptr;
-
-std::atomic<std::uint64_t> waits{0};
-// Waits a sent message ended, and how long they had lasted
-std::atomic<std::uint64_t> early{0};
-std::atomic<std::uint64_t> early_us{0};
-// Waits that ran their time, and how long that was: what Sleep(1) lasts
-// with the timer this PC has
-std::atomic<std::uint64_t> full{0};
-std::atomic<std::uint64_t> full_us{0};
 std::int64_t qpc_frequency = 1;
+bool present_on = false;
+bool input_on = false;
 
-// The Window thread's ID while it runs: the engine's own table (its ID, and
+struct wake_stats {
+  std::atomic<std::uint64_t> waits{0};
+  // Waits what they wait for ended, and how long they had lasted
+  std::atomic<std::uint64_t> early{0};
+  std::atomic<std::uint64_t> early_us{0};
+  // Waits that ran their time, and how long that was: what Sleep(1) lasts
+  // with the timer this PC has
+  std::atomic<std::uint64_t> full{0};
+  std::atomic<std::uint64_t> full_us{0};
+};
+wake_stats present_stats;
+wake_stats input_stats;
+
+// A context's thread ID while it runs: the engine's own table (its ID, and
 // its function, which the game clears when the thread returns). Plain reads:
 // both tables are in the game's image.
-DWORD window_thread() {
+DWORD context_thread(const std::size_t context) {
   const std::uint64_t *ids = game::sys::s_threadContextIds.get();
   const std::uint64_t *functions = game::sys::s_threadContextFunctions.get();
   if (!ids || !functions) {
     return 0;
   }
-  const volatile std::uint64_t *function = functions + window_context;
-  const volatile std::uint64_t *id = ids + window_context;
+  const volatile std::uint64_t *function = functions + context;
+  const volatile std::uint64_t *id = ids + context;
   return *function != 0 ? static_cast<DWORD>(*id) : 0;
 }
 
-void WINAPI sleep_stub(const DWORD ms) {
-  if (ms != 1 || GetCurrentThreadId() != window_thread()) {
-    game_sleep(ms);
-    return;
-  }
+// Waits up to `ms` or until something of `mask` comes to this thread's
+// queue; false when the wait failed (the caller then sleeps as before).
+// No MWMO_INPUTAVAILABLE: what came before this wait and was not taken must
+// not end every later wait at once (a Sleep(1) of the thread outside its
+// loop, with no look at the queue between, would spin); only what comes
+// during the wait ends it.
+bool wait_waking(const DWORD ms, const DWORD mask, wake_stats &stats) {
   LARGE_INTEGER begin{};
   QueryPerformanceCounter(&begin);
-  // No MWMO_INPUTAVAILABLE: a message sent before this wait and not yet
-  // taken must not end every later wait at once (a Sleep(1) of this thread
-  // outside the loop, with no PeekMessage between, would spin); only a
-  // message sent during the wait ends it
-  const DWORD woke =
-      MsgWaitForMultipleObjectsEx(0, nullptr, 1, QS_SENDMESSAGE, 0);
+  const DWORD woke = MsgWaitForMultipleObjectsEx(0, nullptr, ms, mask, 0);
   if (woke == WAIT_FAILED) {
-    game_sleep(ms);
-    return;
+    return false;
   }
   LARGE_INTEGER end{};
   QueryPerformanceCounter(&end);
   const auto us = static_cast<std::uint64_t>((end.QuadPart - begin.QuadPart) *
                                              1'000'000 / qpc_frequency);
-  waits.fetch_add(1, std::memory_order_relaxed);
+  stats.waits.fetch_add(1, std::memory_order_relaxed);
   if (woke == WAIT_OBJECT_0) {
-    early.fetch_add(1, std::memory_order_relaxed);
-    early_us.fetch_add(us, std::memory_order_relaxed);
+    stats.early.fetch_add(1, std::memory_order_relaxed);
+    stats.early_us.fetch_add(us, std::memory_order_relaxed);
   } else {
-    full.fetch_add(1, std::memory_order_relaxed);
-    full_us.fetch_add(us, std::memory_order_relaxed);
+    stats.full.fetch_add(1, std::memory_order_relaxed);
+    stats.full_us.fetch_add(us, std::memory_order_relaxed);
   }
+  return true;
+}
+
+void WINAPI sleep_stub(const DWORD ms) {
+  if (ms == 1) {
+    const DWORD self = GetCurrentThreadId();
+    if (present_on && self == context_thread(window_context)) {
+      if (wait_waking(ms, QS_SENDMESSAGE, present_stats)) {
+        return;
+      }
+    } else if (input_on && self == context_thread(input_context)) {
+      // The Input thread takes its raw input with GetRawInputBuffer, which
+      // is no look at the queue: GetQueueStatus marks what is there as
+      // seen, so only input that comes during the wait ends it
+      GetQueueStatus(QS_RAWINPUT);
+      if (wait_waking(ms, QS_RAWINPUT, input_stats)) {
+        return;
+      }
+    }
+  }
+  game_sleep(ms);
+}
+
+void report_one(wake_stats &stats, const std::string_view event,
+                const std::string_view message, const std::size_t context) {
+  // Read one at a time: a wait counted at the edge may land in the next 30 s
+  const std::uint64_t w = stats.waits.exchange(0);
+  const std::uint64_t e = stats.early.exchange(0);
+  const std::uint64_t e_us = stats.early_us.exchange(0);
+  const std::uint64_t f = stats.full.exchange(0);
+  const std::uint64_t f_us = stats.full_us.exchange(0);
+  // A wait that was ended lasted mean_us_woken; without the stub it would
+  // have lasted about mean_us_full (a whole Sleep(1) here)
+  xerces_runtime::log_info(
+      event, message,
+      std::format("{{\"waits\":{},\"woken\":{},\"mean_us_woken\":{},"
+                  "\"full_waits\":{},\"mean_us_full\":{},\"thread\":{}}}",
+                  w, e, e ? e_us / e : 0, f, f ? f_us / f : 0,
+                  context_thread(context)));
 }
 
 void report() {
-  // Read one at a time: a wait counted at the edge may land in the next 30 s
-  const std::uint64_t w = waits.exchange(0);
-  const std::uint64_t e = early.exchange(0);
-  const std::uint64_t e_us = early_us.exchange(0);
-  const std::uint64_t f = full.exchange(0);
-  const std::uint64_t f_us = full_us.exchange(0);
-  // A wait a sent message ended lasted mean_us_woken; without the stub it
-  // would have lasted about mean_us_full (a whole Sleep(1) here)
-  xerces_runtime::log_info(
-      "xerces.present_wake.stats",
-      "Present without the message loop's millisecond, the last 30 s",
-      std::format(
-          "{{\"waits\":{},\"woken_by_message\":{},\"mean_us_woken\":{},"
-          "\"full_waits\":{},\"mean_us_full\":{},\"window_thread\":{}}}",
-          w, e, e ? e_us / e : 0, f, f ? f_us / f : 0, window_thread()));
+  if (present_on) {
+    report_one(present_stats, "xerces.present_wake.stats",
+               "Present without the message loop's millisecond, the last 30 s",
+               window_context);
+  }
+  if (input_on) {
+    report_one(input_stats, "xerces.input_wake.stats",
+               "Raw mouse input without the input loop's millisecond, the "
+               "last 30 s",
+               input_context);
+  }
+}
+
+bool flag_given(const std::vector<std::string> &args,
+                const std::string_view name) {
+  return xerces_core::has_launch_flag(args, name) ||
+         xerces_core::has_launch_flag(args, "-" + std::string(name));
 }
 } // namespace
 
@@ -130,14 +180,21 @@ public:
       return;
     }
     const auto args = xerces_runtime::command_line_args();
-    if (!xerces_core::has_launch_flag(args, flag) &&
-        !xerces_core::has_launch_flag(args, "-" + std::string(flag))) {
+    present_on = flag_given(args, present_flag);
+    input_on = flag_given(args, input_flag);
+    if (!present_on && !input_on) {
       return;
     }
     void *entry = utils::nt::library{}.get_iat_entry("kernel32.dll", "Sleep");
     if (!entry) {
-      xerces_runtime::log_warn("xerces.present_wake.off",
-                               "The game's import of Sleep was not found");
+      if (present_on) {
+        xerces_runtime::log_warn("xerces.present_wake.off",
+                                 "The game's import of Sleep was not found");
+      }
+      if (input_on) {
+        xerces_runtime::log_warn("xerces.input_wake.off",
+                                 "The game's import of Sleep was not found");
+      }
       return;
     }
     LARGE_INTEGER frequency{};
@@ -145,10 +202,18 @@ public:
     qpc_frequency = frequency.QuadPart > 0 ? frequency.QuadPart : 1;
     game_sleep = *static_cast<sleep_fn *>(entry);
     utils::hook::set(entry, &sleep_stub);
-    xerces_runtime::log_info(
-        "xerces.present_wake.on",
-        "The game's Window thread wakes for Present as soon as it is sent "
-        "(-xerces-present-wake)");
+    if (present_on) {
+      xerces_runtime::log_info(
+          "xerces.present_wake.on",
+          "The game's Window thread wakes for Present as soon as it is sent "
+          "(-xerces-present-wake)");
+    }
+    if (input_on) {
+      xerces_runtime::log_info(
+          "xerces.input_wake.on",
+          "The game's Input thread wakes for raw mouse input as soon as it "
+          "comes (-xerces-input-wake)");
+    }
     scheduler::loop(report, scheduler::async, 30s);
   }
 };

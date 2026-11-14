@@ -3678,3 +3678,36 @@ docs/research/engine-re.md).
       (about 1.2 ms in a level): Present starts about 0.6 ms sooner when it is woken.
 - [ ] In the user's own play (their mods and maps), and where the processor holds the
       frame rate: whether it should be on by default.
+
+## Raw mouse input without the input loop's millisecond (after beta.26, 2026-11-14)
+
+`-xerces-input-wake`: the game's Input thread takes raw mouse input as soon as it comes
+instead of after its `Sleep(1)` (DESIGN.md 12.4, docs/research/engine-re.md).
+
+- [x] Shadows of Evil, mods off, `bench\20261113-left\input-ab.ps1`:
+      `tools/dev/re/input_latency.py` sends 400 one-count mouse moves (alternating, the
+      game in front) and times each to the game's own X counter, read from outside.
+
+      | Run | mean | median | p90 | most |
+      | --- | --- | --- | --- | --- |
+      | off | 1,110 us | 1,440 us | 1,497 us | 2,072 us |
+      | on | 258 us | 226 us | 373 us | 1,491 us |
+
+      `xerces.input_wake.stats`: 399 waits ended by input for the 400 moves, the rest
+      ran their 1.27 ms; both runs quit cleanly.
+- [x] The cost with a mouse that reports thousands of times a second
+      (`bench\20261113-left\input-flood.ps1`: `input_latency.py --flood` sent about
+      3,500 to 4,000 moves a second for 10 s while `tools/dev/re/wakeups.py` measured):
+      the Input thread used 1.0% of a core without the flag and 6.4% with it (661 and
+      14,118 context switches a second; with the flag about one wait was ended per move,
+      16,059 for about 16,800 moves in the 4.75 s its stats covered).
+- [x] Both flags at once through the soak (`present-soak.ps1 -Wake
+      -xerces-present-wake,-xerces-input-wake`): menus, Shadows of Evil, `fast_restart`,
+      the menus, the level again, quit: `clean_exit`, no crash file; with no mouse
+      input the Input thread's waits ran their 1.24 to 1.29 ms as before.
+- [x] A second reader's review of the input part: no spin (the `GetQueueStatus` first
+      marks what is queued as seen), no stall past the old millisecond, no input lost,
+      the two flags do not cross; the warning when `Sleep` is not found is now logged
+      under each flag's own name.
+- [ ] The user's own play: whether aiming feels any different, and whether it should
+      be on by default.

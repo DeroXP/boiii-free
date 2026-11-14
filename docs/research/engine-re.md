@@ -29,8 +29,10 @@ base 0x140000000 that upstream's symbol tables use.
   each thread's wakes a second and CPU share and the system timer's resolution (nothing
   stopped); `tools/dev/re/sample_thread.py <thread id>` samples where one thread is, the
   way a profiler does (the thread stopped for microseconds per sample, from another
-  process, so it can hold none of the game's locks). `xerces_crash_test threads` writes
-  every thread's ID, name, start and CPU time (`<home>\threads.txt`).
+  process, so it can hold none of the game's locks), and `sample_report.py` groups its
+  samples by function; `input_latency.py` times a mouse move to the game's own mouse
+  counters. `xerces_crash_test threads` writes every thread's ID, name, start and CPU
+  time (`<home>\threads.txt`).
 
 ## Lobbies: who hosts
 
@@ -217,7 +219,13 @@ base 0x140000000 that upstream's symbol tables use.
   0x141D05C50 (both just after `R_StreamPushDisable`, the image streamer's part of the
   code) and about 4% in three functions near `CM_SightTraceThroughTree` (collision
   traces). JQ Worker 1 waited 39% of the time; its most was 6.7% in 0x142911BAC and
-  2.8% in 0x142914E50. Nothing stood out as one function to fix.
+  2.8% in 0x142914E50. Nothing stood out as one function to fix. 0x141D07230, the
+  main thread's most: under the critical section at 0x157DCD268 (entered at the
+  outermost call only, by a nesting count in the TLS block at +0x1D4) it walks the
+  set bits of two bit arrays 0x9D80 bytes apart (ending at 0x150A1F280) and looks at
+  records of 0x78 bytes at 0x146201900 for each: the image streamer's slots, every
+  frame. A place to
+  look if the streamer's cost is ever worth a change.
 - What the main thread waits for: sampled again with stack scans (2,500 samples), 98%
   of its `WaitForSingleObject` time was `Sys_WaitForSingleObject` (0x14212BC50) called
   from 0x141CD0B50, a renderer function (near `R_AddCmdDrawUIQuads`): the main thread
@@ -230,7 +238,8 @@ base 0x140000000 that upstream's symbol tables use.
   `SendMessageA`: at 0x141C47900 it sends the game's window (`[0x157DF74A0]`) message
   0x8043 with `r_vsync` as wParam (Present's sync interval), and waits. Just before
   it, when `r_vsync` is on, a value at 0x14F464C90 is set and the one at 0x14F437800
-  is 2, it calls `Sleep` (through the thunk at 0x14212B350) for `1000 /
+  is 2 (the swap chain's setup writes 2 there at 0x141CAD0C1; it read 1 in the dump,
+  most likely the window mode), it calls `Sleep` (through the thunk at 0x14212B350) for `1000 /
   r_refreshRate - 2` whole milliseconds (2 at 240 Hz, 14 at 60 Hz; the constant is
   -1000.0 at 0x142F1A5C8): it sleeps most of a refresh before it presents. The dvars
   were named from the dump: each `dvar_t` starts with its name's hash (`CanonHash`,
@@ -266,9 +275,20 @@ base 0x140000000 that upstream's symbol tables use.
   0x157DF7520 until it is empty, adding each mouse record's `lLastX` and `lLastY`
   into two counters (0x157DF7498, 0x157DF749C) with locked adds, then `Sleep(1)`. The
   game takes the sums once a frame, so mouse movement can sit up to about a
-  millisecond in the raw input queue before it counts. The same kind of wait as the
-  Window thread's: a wait that ends on raw input (`QS_RAWINPUT`) would take it at
-  once. Not changed.
+  millisecond in the raw input queue before it counts.
+- `-xerces-input-wake` (same file as `-xerces-present-wake`, off unless given) ends the
+  Input thread's `Sleep(1)` as soon as raw input comes (`QS_RAWINPUT`; `GetQueueStatus`
+  first, since `GetRawInputBuffer` is no look at the queue). Measured from outside
+  (`tools/dev/re/input_latency.py`: a one-count mouse move with `SendInput`, then the
+  game's X counter read until it moves; Shadows of Evil, 400 moves each): without the
+  flag 1,110 us on average (median 1,440, p90 1,497, most 2,072); with it 258 us
+  (median 226, p90 373, most 1,491). The flag's stats: 399 waits ended by input for
+  the 400 moves, about 800 waits a second as before (no spin). The price: with about
+  3,500 to 4,000 moves a second (`--flood`) the Input thread used 6.4% of a core
+  against 1.0% without the flag. Its own stats had about one wait ended per move
+  (16,059 for about 16,800 moves in 4.75 s); `wakeups.py` counted 14,118 context
+  switches a second (661 without), so each pass switches three or four times, most
+  likely on Windows' input lock in its input calls.
 
 ## A frame, end to end
 

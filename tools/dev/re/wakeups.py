@@ -1,6 +1,6 @@
 """How often each thread of a process wakes (context switches a second) and the system timer's resolution, read
 from outside the process (NtQuerySystemInformation, NtQueryTimerResolution): no code in the game, no thread
-stopped. python -I tools/dev/re/wakeups.py <process name> [seconds]"""
+stopped. python -I tools/dev/re/wakeups.py <process name> [seconds] [--all]"""
 import ctypes
 import ctypes.wintypes as wt
 import sys
@@ -73,5 +73,5 @@ for tid, (switches, cpu, prio) in b.items():
     rows.append(((switches - s0) / gap, (cpu - c0) / (gap * 1e7) * 100, tid, prio))
 rows.sort(reverse=True)
 print(f"{len(rows)} threads of {name} over {gap:.1f} s: wakes a second, share of a core, priority")
-for rate, share, tid, prio in rows[:25]:
+for rate, share, tid, prio in rows if "--all" in sys.argv else rows[:25]:
     print(f"  {tid:>6}  {rate:8.0f}/s  {share:5.1f}%  prio {prio}")

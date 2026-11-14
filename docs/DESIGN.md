@@ -3710,10 +3710,18 @@ as soon as a message is sent to it (`MsgWaitForMultipleObjectsEx` with
 does for `ExitProcess`, and no code (earlier detours of kernel32's `Sleep` code
 crashed in loads, docs/research/upstream-render.md). `xerces.present_wake.stats`
 every 30 s: the waits, how many a sent message ended and how long those had
-lasted, and how long the others lasted (a whole `Sleep(1)` with the PC's timer). Off unless
-the flag is given: in a level where the GPU's queue held the frame rate it gave
-the same frame rate with frame times about a third steadier (docs/TESTING.md);
-whether it becomes the default is the user's call.
+lasted, and how long the others lasted (a whole `Sleep(1)` with the PC's timer).
+Off unless the flag is given: in a level where the GPU's queue held the frame
+rate it gave the same frame rate with frame times about a third steadier
+(docs/TESTING.md); whether it becomes the default is the user's call.
+
+`-xerces-input-wake` does the same for the game's Input thread, which takes the raw
+mouse input with `GetRawInputBuffer` and then sleeps a millisecond: its wait ends as
+soon as raw input comes (`QS_RAWINPUT`). A mouse movement reached the game's own
+counters in about 0.26 ms instead of 1.1 ms on average (docs/TESTING.md); with a
+mouse that reports thousands of times a second the thread wakes about once for each
+report (6.4% of a core at about 4,000 a second, against 1.0%). `xerces.input_wake.stats`
+every 30 s, as for Present. Off unless given.
 
 #### Precise frame limiter (item 4)
 
