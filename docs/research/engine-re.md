@@ -685,3 +685,11 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   for a zone to be loaded, and in the read trace nothing is read during the wait:
   `core_frontend.ff` starts at its end. What holds that zone's load (asked late; the online
   pump, stopped meanwhile, would fit) is the next thing to find.
+- The Database thread through that pause (`pause-db-sample.ps1`, found by name, the engine
+  base by the same scan): in the middle of a zone's load (`DB_LoadXFile`) and asleep 60%
+  of the time, in `SND_LoadSoundsWait` (44% of that), another wait on the sound path
+  (0x1425D4B50, 17%) and the zone reader's wait (32%). So the zone being loaded waits for
+  its sound banks, the start's main thread waits for that zone, and no file is read. A
+  lead: the sound banks' load may need something the main loop runs each frame (its sound
+  update), which does not run while the start sleeps, so the three wait on each other
+  until something gives after about 3 s. Not proved.
