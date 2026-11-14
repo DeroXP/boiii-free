@@ -487,12 +487,23 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   nothing). Nor the server's flags after `levelTime` in `server_t` (`isUILevel`,
   `isRunnable`, `allowSelfTick`, `allowNetPackets`, 0x15767ACA8, now in `watch_states.py`):
   the new level's server comes up with all but `isUILevel` set and none changes when the
-  client is let in (the menus' server has `isUILevel` 1). Every dvar dumped twice in the wait and once after (`xerces_crash_test dvars`,
-  `dvars-wait.ps1`): nothing changes in the wait; across it only the client's own
-  (`cl_ingame`, `all_players_are_connected`, `cg_fov` and the like). Which script or code
-  holds the connect is not found (the stock Zombies scripts, by the custom maps' identical
-  4.8 s); no other `level.time` gate shows: a `map` from inside a level goes through
-  without one.
+  client is let in (the menus' server has `isUILevel` 1). Nor a script's wait: a test build
+  (reverted) wrapped the server VM's `Wait`, `WaitTill` and `WaitTillFrameEnd` and named
+  each site with `script::get_script_frames`, from the server's start to level.time 9,000
+  (`bench\20261113-left\wait-trace-zod2.txt`). In those seconds the level's scripts set up
+  its scenes: `scene::on_load_wait` at 150, `csceneobject::initialize` (41) at 250, and
+  their models spawn through `spawner::global_spawn_throttle` (`util::spawn_model`), 4,003
+  waits of 0.05 s from 250 on and still going at 9,000; beside them the usual
+  `util::wait_network_frame` loops (`spawn_throttle_reset`, `load::count_network_frames`,
+  `zm_net::network_choke_thread`), `globallogic_utils::gametimer` every second and
+  `globallogic::graceperiod` (15 s). No wait ends just before the client is let in;
+  `callback_playerconnect` runs at 4,850, the client's own arrival. So the hold is in the
+  engine, on game time, its length the map's (and with the three-mod stack 3,300 on Town
+  Reimagined), not a script waiting for something. Every dvar dumped twice in the wait and
+  once after (`xerces_crash_test dvars`, `dvars-wait.ps1`): nothing changes in the wait;
+  across it only the client's own (`cl_ingame`, `all_players_are_connected`, `cg_fov` and
+  the like). Which engine code holds the connect is not found; a `map` from inside a level
+  goes through without such a wait.
 - The wait hid the texture streaming. With the server's clock at 4x only while the client
   waits, and 1 again the frame it moves on, the wait took 1.1 s but `LOADING` then took
   5.9 s ("Awaiting textures" is `ls_status` across it), and the level started 2 s later
