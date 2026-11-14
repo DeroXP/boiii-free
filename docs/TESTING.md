@@ -3810,7 +3810,7 @@ messages, and what two new reviews of everything since beta.26 found:
       Solo Game, SANCTUM OBITUS with DS4C): five scripts kept by the map, no link error;
       `freeze-local-report.ps1 -Kind windowhang` to the local backend: "the Window thread
       is in its message loop, inside boiii.exe (a hook in the window's messages)".
-- [x] The map matrix of Nov 5 again (`bench\\20261113-left\\maps-all.ps1`, the three-mod
+- [x] The map matrix of Nov 5 again (`bench\20261113-left\maps-all.ps1`, the three-mod
       stack through Xerces.exe, the maps home with larger zone memory off): zm_deepboom,
       zm_blundeezy, zm_wizardcastle, zm_log_overunder, zm_zod, zm_mw2rust and zm_ccube
       in the match and back to the menu; zm_backrooms and zm_supermario64 "ran out of
