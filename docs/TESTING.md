@@ -3911,3 +3911,18 @@ Discord stop, `plan apply` or the CLI's messages. Its id finding was already fix
 - [x] `xerces mods info` offers `clear_map` on a mod saved as the map, as the Mods screen
       does.
 - [x] 624 unit tests pass.
+
+## A map's load, measured (2026-11-14 morning)
+
+What a load of Shadows of Evil from the menus waits on (engine-re.md, "A map's load"):
+
+- [x] `-xerces-io-trace` (new, test only): the game's reads through its own import
+      pointers (CreateFileA/W, ReadFile, ReadFileEx; GetOverlappedResult is not
+      imported), 11,216 reads and 215 files over a start and a load, written by
+      `xerces_io_trace_dump`; the game loaded and played as without it.
+- [x] Three loads at `com_maxfps` 60, 240 and 1000 (`bench\20261113-left\loadtime-fps.ps1`):
+      15.9, 15.2 and 15.6 s from `map` to the connection active, the frame cap no factor.
+- [x] Threads sampled across the load (Database, Server, the job workers, Main, Stream,
+      StreamAsync, Backend, Window) and a frame-time run across it: the last 4 s of
+      streaming go at one batch of reads per two loading-screen frames (about 57 a
+      second), not at the disk's or the processor's pace.

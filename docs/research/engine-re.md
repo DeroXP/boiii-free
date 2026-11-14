@@ -32,7 +32,11 @@ base 0x140000000 that upstream's symbol tables use.
   process, so it can hold none of the game's locks), and `sample_report.py` groups its
   samples by function; `input_latency.py` times a mouse move to the game's own mouse
   counters. `xerces_crash_test threads` writes every thread's ID, name, start and CPU
-  time (`<home>\threads.txt`).
+  time (`<home>\threads.txt`). `sample_thread.py --seconds` bounds a run by time (a
+  map's load). The client's `-xerces-io-trace` (test only) records every file the game
+  opens and every read through its own import pointers, `xerces_io_trace_dump` writes
+  them, and `tools/dev/re/io_report.py` sums them up by thread, by second (the reads
+  under way at once, how long each took) and by file.
 
 ## Lobbies: who hosts
 
@@ -367,3 +371,49 @@ hash against `data/lookup_tables/dvar_list.txt`. What a join that stalls runs in
 | `cl_maxpackets`, `sv_maxRate` | 100, 20,000 | client packets a second, server bytes a second |
 
 So a join that fails at about 20, 30 or 45 seconds points at the matching timeout above.
+
+## A map's load (Shadows of Evil)
+
+Measured on 2026-11-14 from the menus to Shadows of Evil, mods off, the files in Windows'
+cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thread.py
+--seconds` on several threads at once from the moment of `map`
+(`bench\20261113-left\zoneload-sample.ps1`), the read trace (`-xerces-io-trace`,
+`src/client/xerces/io_trace.cpp`, read with `tools/dev/re/io_report.py`;
+`bench\20261113-left\io-trace.ps1`), and a frame-time run across the load
+(`io-bench.ps1`).
+
+- About 15 s from `map` to the client's connection being active (the journal's
+  `in_game`), in four parts:
+  1. About 5 s until the client starts loading the level (`loading_map`). The game reads
+     about 480 MB of the map's images early in it, then nearly nothing for 3 s while the
+     main thread tears the menus down (about 80% busy for a second).
+  2. About 4 s of zone loading. The zone files (`.ff`) are read by the Stream thread in
+     synchronous 512 KB reads; the Database thread decodes them and spends much of this
+     part asleep in short waits: for the sound banks (`SND_LoadSoundsWait` at
+     0x142513020; the banks, `zone\snd\all\*.sabl`, are about 500 MB of what the load
+     reads) and inside the zone reader. The job workers are busy at the same time.
+  3. About 4 s of streaming the level's images while the loading screen shows (below).
+  4. About 2.5 s to the client's game start (the weapons are registered about a second
+     before the connection is active).
+- Every read comes from Windows' cache (the files are opened with
+  `FILE_FLAG_OVERLAPPED` and without `FILE_FLAG_NO_BUFFERING`) and takes 0.05 to 0.35 ms.
+  Never more than one read is under way at a time: the streamer's reads (`ReadFileEx`,
+  32 KB to 1 MB, on StreamAsync) go one after another. About 2.2 GB are read in all.
+- Part 3 is paced by the loading screen, not by the disk or the processor. The streamer
+  asks for a batch of about 8 reads (about 3.5 MB) once every two presented frames (107
+  of 119 gaps between batches), 6 to 9 ms after a Present. The loading screen presents
+  about 57 times a second while the main loop runs about 225 frames a second and waits
+  in its frame limiter 75 to 85% of the time; the render backend and the Window thread
+  are mostly idle. So about 470 MB come in at about 115 MB a second, where the same
+  streamer read 455 MB in one second just before (part 2's end) and reads 200 MB or more
+  a second in the level.
+- `com_maxfps` 60, 240 and 1000 change nothing (loading 10.4, 9.8 and 10.4 s): the
+  loading screen's pace is its own, about one frame per 16 ms (57 a second is every fourth
+  frame of the main loop's 4.4 ms ones).
+- Not found yet: where that 16 ms pace is decided. It is no compare near a call of
+  `Sys_Milliseconds` (0x1422B9700) outside the protected code, and
+  `CL_CheckKeepDrawingConnectScreen` (0x1413CCB00) is flattened by the protection. The
+  client function that drives the streamer while loading is at 0x14133D3F0 (it reads a
+  ring of 0x8000 bytes at 0x1452FDF88 in 0x20-byte steps), called from 0x1413398B0.
+  If the loading screen drew as often as the main loop runs, part 3 would take about a
+  second instead of four.
