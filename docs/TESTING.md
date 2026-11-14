@@ -3569,3 +3569,10 @@ aim assist after the user's playtest.
 - [x] The user played the package with a controller: "the aim assist feels good now".
 - [ ] Not tried on the package: the launcher's screens (the build's were checked in dry
       runs).
+
+## beta.26 (2026-11-13)
+
+beta.25 and what came after it: the host's map-first rule no longer outlives the join
+(the review's finding, reproduced and fixed on one PC), the handler-fault log line, and
+the test cases and notes since (`xerces_crash_test handlerfault`, `dumpfault`,
+`workshopget`; the Workshop helper's unit test).

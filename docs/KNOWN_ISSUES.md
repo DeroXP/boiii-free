@@ -176,6 +176,11 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## The game and Xerces
 
+- **Before beta.26: a custom map failed after joining someone.** After joining a
+  host whose map scripts first was off, or a host without Xerces, the next custom
+  map you started yourself from the lobby with a mod that ships the same scripts
+  (DS4C) ended in "GSC LINK ERROR" until the game was restarted. Fixed in beta.26.
+
 - **Crash files are never deleted.** Each crash leaves about 22 MB in
   `%LOCALAPPDATA%\boiii\minidumps` (a dump, a text report and a zip), each
   freeze about 0.6 MB. Delete old ones by hand when the folder grows.
