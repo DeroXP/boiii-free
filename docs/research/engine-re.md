@@ -666,4 +666,10 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   50 ms tick, and the game's `select` calls are all polls with a 0 ms timeout (a test build,
   reverted, logged 286 of them through a start, none blocking; making a waiting emulated
   socket wait in short steps changed nothing). So the game itself reads the answer 3 s
-  later: a timer or state of its online code, not the emulator's speed. Not found which.
+  later: a timer or state of its online code, not the emulator's speed. The same log has
+  no `select` at all from 2.5 s to 16.5 s after the client's first line, the quiet stretch
+  included: the online code's pump runs from the main loop, and the main thread is in the
+  start's own code then. So the start's sleep loop (0x1420EEE3F) most likely waits for
+  something only that pump moves on (the lobby connection's answer would fit) and, since
+  it does not pump, ends by its own timeout, about 3 s. Not proved: the loop is in the
+  protection's encrypted code; what it polls would have to be read at run time.
