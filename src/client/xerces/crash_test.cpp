@@ -37,6 +37,10 @@
 //                                started, to <home>\threads.txt (what names
 //                                the threads in reports; two of these some
 //                                seconds apart give each thread's CPU share)
+//   xerces_crash_test windowhang the game's Window thread is held in a
+//                                message hook for good: Present never comes,
+//                                and the freeze report's "What the frame
+//                                waits for" must lead to it
 //   xerces_crash_test joinrule0  no crash: the map-first rule a join of a host
 //                                with map scripts first off leaves (0); the
 //                                next match this game launches itself must
@@ -90,6 +94,30 @@ constexpr std::string_view flag = "-xerces-crash-test";
 // xerces_crash_test exitfault: this component's shutdown faults
 std::atomic_bool fault_in_shutdown{false};
 std::atomic<int> handler_fault_at{0};
+
+// xerces_crash_test windowhang: the message the hook holds the game's
+// Window thread on
+constexpr UINT window_hang_message = WM_APP + 0x77;
+
+LRESULT CALLBACK window_hang_hook(const int code, const WPARAM wparam,
+                                  const LPARAM lparam) {
+  const auto *message = reinterpret_cast<const MSG *>(lparam);
+  if (code == HC_ACTION && message && message->message == window_hang_message) {
+    // The Window thread never comes back: Present is not taken
+    for (;;) {
+      Sleep(100);
+    }
+  }
+  return CallNextHookEx(nullptr, code, wparam, lparam);
+}
+
+BOOL CALLBACK first_visible_window(const HWND window, const LPARAM out) {
+  if (IsWindowVisible(window)) {
+    *reinterpret_cast<HWND *>(out) = window;
+    return FALSE;
+  }
+  return TRUE;
+}
 
 [[noreturn]] void crash(const std::string &kind) {
   xerces_runtime::log_warn("xerces.crash_test",
@@ -388,6 +416,37 @@ public:
         xerces_runtime::log_info("xerces.crash_test",
                                  "the game's threads written to " +
                                      file.string());
+        return;
+      }
+      if (kind == "windowhang") {
+        // The game's Window thread (the engine's table, slot 21) is held in
+        // a message hook: the render backend waits for its Present, the
+        // main thread for the backend, and the freeze report must say so
+        if (!game::is_new_client()) {
+          return;
+        }
+        const std::uint64_t *ids = game::sys::s_threadContextIds.get();
+        const std::uint64_t *functions =
+            game::sys::s_threadContextFunctions.get();
+        const DWORD window_thread =
+            ids && functions && functions[21] ? static_cast<DWORD>(ids[21]) : 0;
+        HWND window = nullptr;
+        if (window_thread) {
+          EnumThreadWindows(window_thread, first_visible_window,
+                            reinterpret_cast<LPARAM>(&window));
+        }
+        if (!window || !SetWindowsHookExW(WH_GETMESSAGE, window_hang_hook,
+                                          nullptr, window_thread)) {
+          xerces_runtime::log_warn("xerces.crash_test",
+                                   "windowhang: the game's Window thread or "
+                                   "its window was not found");
+          return;
+        }
+        xerces_runtime::log_warn(
+            "xerces.crash_test",
+            "The game's Window thread will hang in a message hook "
+            "(xerces_crash_test windowhang)");
+        PostMessageW(window, window_hang_message, 0, 0);
         return;
       }
       if (kind == "joinrule0") {

@@ -314,9 +314,11 @@ template <utils::hook::detour *Hook> void sv_map_in_mode_stub() {
   std::optional<GameModeConfiguration> mode;
   std::string mapname;
   bool leave_match = false;
+  bool own_level = false;
   {
     const command::params_sv params{};
     if (params.size() > 1 && game::is_new_client()) {
+      own_level = true;
       leave_match = game::com::Com_IsInGame() && needs_usermaps_mod(params[1]);
       if (!game::com::Com_IsInGame() || leave_match) {
         mode = get_default_gamemode_config_for_map(params[1]);
@@ -326,6 +328,12 @@ template <utils::hook::detour *Hook> void sv_map_in_mode_stub() {
   }
 
   if (!mode) {
+    // Xerces: a map started from the console in a match is a level of this
+    // game's own as well: a joined host's map-first rule goes (a review,
+    // 2026-11-14; the menu's path below drops it in launch_from_frontend)
+    if (own_level) {
+      mod_stack::use_own_map_scripts_first();
+    }
     Hook->invoke<void>();
     return;
   }

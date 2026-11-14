@@ -81,7 +81,13 @@ base 0x140000000 that upstream's symbol tables use.
 - A client of another host never runs it: the host launches.
 - Xerces points the command's entry in the engine's command list at its own function,
   which drops the joined host's rule and calls the engine's (`mod_stack.cpp`), as
-  `loader.cpp` does for `quit`. That changes a pointer, no code.
+  `loader.cpp` does for `quit`. That changes a pointer, no code. After a review
+  (2026-11-14): the rule goes only when this game hosts its game lobby at that moment
+  (what the lobby menu checks before it launches, `IsLobbyHost(GAME)`), so a client in
+  another host's lobby that runs the command anyway (a mod's menu, the console) keeps
+  its host's rule; the entry is looked at every second and pointed back when it holds
+  the engine's function again (a rebuilt command list), never when it holds another
+  wrapper's; and a `map` from the console in a match drops the rule too (`party.cpp`).
 
 ## What the copy protection does not allow
 
@@ -174,8 +180,13 @@ base 0x140000000 that upstream's symbol tables use.
   Devhost and Save Profile at 0), each one but Main a thread that started at
   0x14212BB10; two job workers in the records, three threads that started at
   0x14000B490. The third is in no record and never names itself; at both looks
-  of a stalled game it was running in the protection's code (0x15xxxxxxx). What
-  it is was not worked out.
+  of a stalled game it was running in the protection's code (0x15xxxxxxx). Only
+  one place starts threads there (0x14000AC1B in 0x14000AB50: for each of the
+  count at 0x1435F578C, `CreateThread` suspended with the worker's record,
+  `SetThreadPriority` normal, `ResumeThread`), so it is a job worker too, most
+  likely worker 0
+  (its record would be the one before the two read, at the job system + 0x08).
+  Why it does not name itself was not worked out.
 - Two more of the game's threads start at 0x142BD5B30 (the C runtime's thread
   start): one waits in the device enumeration (`DEVOBJ.dll`), one at
   0x142BBF8B0. Neither is named.
@@ -224,7 +235,15 @@ base 0x140000000 that upstream's symbol tables use.
   outermost call only, by a nesting count in the TLS block at +0x1D4) it walks the
   set bits of two bit arrays 0x9D80 bytes apart (ending at 0x150A1F280) and looks at
   records of 0x78 bytes at 0x146201900 for each: the image streamer's slots, every
-  frame. A place to
+  frame. Read in full (it has one caller, just after `R_StreamPushDisable`): 0x8C00
+  slots (35,840) in 1,120 mask words; for each slot set in the first array (in use)
+  it takes the slot's image (`+0x70`); when the slot is also set in the second array
+  (used this frame) and the image is loaded (its flags' low two bits 3, flag 0x4 clear),
+  it clears the image's flag 0x10 and sets the slot in a third array (0x8C00 bytes
+  below the second); otherwise, when the slot's last-used frame (`0x150A8A580 + slot
+  * 4`) is more than 15 frames old, it sets flag 0x10: the streamer's mark for an image
+  nobody has drawn for 16 frames. The cost is the walk over every loaded image's
+  record and image, one cache line each, not the masks. A place to
   look if the streamer's cost is ever worth a change.
 - What the main thread waits for: sampled again with stack scans (2,500 samples), 98%
   of its `WaitForSingleObject` time was `Sys_WaitForSingleObject` (0x14212BC50) called
@@ -239,8 +258,8 @@ base 0x140000000 that upstream's symbol tables use.
   0x8043 with `r_vsync` as wParam (Present's sync interval), and waits. Just before
   it, when `r_vsync` is on, a value at 0x14F464C90 is set and the one at 0x14F437800
   is 2 (the swap chain's setup writes 2 there at 0x141CAD0C1; it read 1 in the dump,
-  most likely the window mode), it calls `Sleep` (through the thunk at 0x14212B350) for `1000 /
-  r_refreshRate - 2` whole milliseconds (2 at 240 Hz, 14 at 60 Hz; the constant is
+  most likely the window mode), it calls `Sleep` (through the thunk at 0x14212B350)
+  for `1000 / r_refreshRate - 2` whole milliseconds (2 at 240 Hz, 14 at 60 Hz; the constant is
   -1000.0 at 0x142F1A5C8): it sleeps most of a refresh before it presents. The dvars
   were named from the dump: each `dvar_t` starts with its name's hash (`CanonHash`,
   FNV-1a from 0x4B9ACE2F with the closing zero), matched against
@@ -254,7 +273,10 @@ base 0x140000000 that upstream's symbol tables use.
 - `-xerces-present-wake` (`src/client/xerces/present_wake.cpp`, off unless given)
   points the game's import of `Sleep` at a stub that, on the Window thread and for a
   wait of 1 ms only, waits at most the same millisecond but wakes as soon as a
-  message is sent to the thread (`MsgWaitForMultipleObjectsEx`, `QS_SENDMESSAGE`).
+  message is sent to the thread (`MsgWaitForMultipleObjectsEx`, `QS_SENDMESSAGE`),
+  and only for the loop's own call (return address 0x1422BC302; the Input thread's is
+  0x1422BB5D6): a `Sleep(1)` of the thread anywhere else stays a sleep, so a loop that
+  does not look at its queue cannot spin (a review, 2026-11-14).
   Measured in Shadows of Evil (2026-11-14, mods off, the user's own display settings:
   a 3840x2160 borderless window, 50% render resolution, MaxFPS 240, vsync off; two
   pairs of 30 s runs with the frame probe, `bench\20261113-left\present-ab.ps1`):

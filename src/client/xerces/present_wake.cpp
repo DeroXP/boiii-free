@@ -111,14 +111,30 @@ bool wait_waking(const DWORD ms, const DWORD mask, wake_stats &stats) {
   return true;
 }
 
+// The two loops' calls of Sleep(1), at base 0x140000000 (the instruction
+// after each call): only these waits end early. A Sleep(1) of the same
+// thread anywhere else (a loop that does not look at its queue) would
+// otherwise return at once while a message waits, and spin (a review,
+// 2026-11-14).
+constexpr std::uintptr_t window_loop_sleep = 0x1422BC302;
+constexpr std::uintptr_t input_loop_sleep = 0x1422BB5D6;
+
+bool called_from(const void *return_address, const std::uintptr_t site) {
+  return reinterpret_cast<std::uintptr_t>(return_address) ==
+         game::relocate(site);
+}
+
 void WINAPI sleep_stub(const DWORD ms) {
   if (ms == 1) {
+    const void *caller = _ReturnAddress();
     const DWORD self = GetCurrentThreadId();
-    if (present_on && self == context_thread(window_context)) {
+    if (present_on && called_from(caller, window_loop_sleep) &&
+        self == context_thread(window_context)) {
       if (wait_waking(ms, QS_SENDMESSAGE, present_stats)) {
         return;
       }
-    } else if (input_on && self == context_thread(input_context)) {
+    } else if (input_on && called_from(caller, input_loop_sleep) &&
+               self == context_thread(input_context)) {
       // The Input thread takes its raw input with GetRawInputBuffer, which
       // is no look at the queue: GetQueueStatus marks what is there as
       // seen, so only input that comes during the wait ends it

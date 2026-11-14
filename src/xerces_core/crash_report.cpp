@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdio>
 #include <format>
 
@@ -681,6 +682,172 @@ std::size_t engine_thread_context(const std::uint64_t *ids,
     return i;
   }
   return engine_thread_contexts;
+}
+
+namespace {
+// BlackOps3.exe's code, at base 0x140000000 (the dump, engine-re.md). Return
+// addresses are exact: the instruction after the call.
+// The renderer function the main thread waits for the backend in
+constexpr std::uint64_t main_waits_begin = 0x141CD0B50;
+constexpr std::uint64_t main_waits_end = 0x141CD0C2D;
+// The backend's SendMessageA(window, 0x8043): Present
+constexpr std::uint64_t backend_sends_present = 0x141C47906;
+// The window procedure, and its calls of the swap chain
+constexpr std::uint64_t window_proc_begin = 0x1422BB620;
+constexpr std::uint64_t window_proc_end = 0x1422BC016;
+constexpr std::uint64_t window_calls_present = 0x1422BBDF1;    // 0x8043
+constexpr std::uint64_t window_calls_fullscreen = 0x1422BBDD8; // 0x8044
+constexpr std::uint64_t window_calls_swap_chain = 0x1422BBE12; // 0x8042
+// The Window thread's loop: its two PeekMessageA, its Sleep(1), and the
+// cursor update after it (0x142287510, ShowCursor until the count is right)
+constexpr std::uint64_t window_peeks_first = 0x1422BC29E;
+constexpr std::uint64_t window_peeks_again = 0x1422BC2F3;
+constexpr std::uint64_t window_sleeps = 0x1422BC302;
+constexpr std::uint64_t cursor_update_begin = 0x142287510;
+constexpr std::uint64_t cursor_update_end = 0x142287567;
+
+bool in_game(const report_frame &frame, const std::uint64_t begin,
+             const std::uint64_t end) {
+  return frame.module == "BlackOps3.exe" && frame.offset >= begin &&
+         frame.offset < end;
+}
+
+bool any_in(const std::vector<report_frame> &frames, const std::uint64_t begin,
+            const std::uint64_t end) {
+  return std::ranges::any_of(frames, [&](const report_frame &frame) {
+    return in_game(frame, begin, end);
+  });
+}
+
+// The innermost frame in the game's own code
+std::optional<std::uint64_t>
+first_game(const std::vector<report_frame> &frames) {
+  for (const report_frame &frame : frames) {
+    if (frame.module == "BlackOps3.exe") {
+      return frame.offset;
+    }
+  }
+  return std::nullopt;
+}
+
+std::string lower_module(const report_frame &frame) {
+  std::string lower = frame.module;
+  std::ranges::transform(lower, lower.begin(), [](const unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  return lower;
+}
+
+bool system_frame(const report_frame &frame) {
+  const std::string lower = lower_module(frame);
+  return lower == "ntdll.dll" || lower == "win32u.dll" ||
+         lower == "kernelbase.dll" || lower == "kernel32.dll" ||
+         lower == "user32.dll" || lower.empty() || lower == "unknown";
+}
+
+// Waiting in a system call, as the report's own lines tell
+bool in_system_call(const std::vector<report_frame> &frames) {
+  if (frames.empty()) {
+    return false;
+  }
+  const std::string lower = lower_module(frames.front());
+  return lower == "ntdll.dll" || lower == "win32u.dll";
+}
+
+// The innermost frame that is not Windows' own: where the thread really is
+std::string innermost(const std::vector<report_frame> &frames) {
+  for (const report_frame &frame : frames) {
+    if (!system_frame(frame)) {
+      return crash_frame(frame.module, frame.offset);
+    }
+  }
+  return frames.empty()
+             ? std::string("no stack")
+             : crash_frame(frames.front().module, frames.front().offset);
+}
+
+std::string innermost_module(const std::vector<report_frame> &frames) {
+  for (const report_frame &frame : frames) {
+    if (!system_frame(frame)) {
+      return frame.module;
+    }
+  }
+  return "Windows";
+}
+
+// "inside X" when the innermost code is not the game's or Windows'
+std::string inside(const std::vector<report_frame> &frames) {
+  const std::string module = innermost_module(frames);
+  return module == "BlackOps3.exe" || module == "Windows"
+             ? std::string()
+             : ", inside " + module;
+}
+
+std::string window_state(const std::vector<report_frame> &window) {
+  const auto at = first_game(window);
+  if (!at) {
+    return "the Window thread is in " + innermost(window);
+  }
+  if (*at == window_calls_present) {
+    return "the Window thread is in Present" + inside(window);
+  }
+  if (*at == window_calls_fullscreen) {
+    return "the Window thread is in SetFullscreenState" + inside(window);
+  }
+  if (*at == window_calls_swap_chain) {
+    return "the Window thread is in CreateSwapChain" + inside(window);
+  }
+  if (*at >= window_proc_begin && *at < window_proc_end) {
+    // Another message than Present, held in the procedure or below it
+    return "the Window thread is in the game's window procedure with another "
+           "message, at " +
+           innermost(window);
+  }
+  if (*at == window_sleeps) {
+    // The stacks are read one after another: a Window thread asleep in its
+    // loop takes a sent Present at its next look, so it holds nothing up
+    return "the Window thread was asleep in its message loop when it was "
+           "read, so it does not hold the frame";
+  }
+  if (*at == window_peeks_first || *at == window_peeks_again) {
+    const std::string hooked = inside(window);
+    if (!hooked.empty()) {
+      // A hook in the window's messages (an overlay, another program's)
+      return "the Window thread is in its message loop" + hooked +
+             " (a hook in the window's messages)";
+    }
+    return "the Window thread is taking its messages";
+  }
+  if (*at >= cursor_update_begin && *at < cursor_update_end) {
+    return "the Window thread is in its cursor update (ShowCursor)" +
+           inside(window);
+  }
+  return "the Window thread is in " + innermost(window);
+}
+} // namespace
+
+std::string frame_wait_chain(const std::vector<report_frame> &main,
+                             const std::vector<report_frame> &backend,
+                             const std::vector<report_frame> &window) {
+  // Waiting in a system call under the renderer's wait: a main thread busy
+  // in something that function calls is not waiting for the backend
+  if (!in_system_call(main) ||
+      !any_in(main, main_waits_begin, main_waits_end)) {
+    return {};
+  }
+  std::string chain = "the main thread waits for the render backend";
+  if (backend.empty()) {
+    return chain + " (its stack was not read)";
+  }
+  if (first_game(backend) != backend_sends_present) {
+    return chain + "; the render backend is not presenting, it is in " +
+           innermost(backend);
+  }
+  chain += "; the render backend waits for the Window thread to present";
+  if (window.empty()) {
+    return chain + " (its stack was not read)";
+  }
+  return chain + "; " + window_state(window);
 }
 
 bool valid_report_id(std::string_view id) {

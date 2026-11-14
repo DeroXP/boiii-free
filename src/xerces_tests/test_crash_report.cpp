@@ -1260,3 +1260,72 @@ TEST_CASE("crash report: a thread is named from the game's thread table") {
   CHECK(engine_thread_context(ids, nullptr, engine_thread_contexts, 0x3380) ==
         11);
 }
+
+TEST_CASE("crash report: what a frozen frame waits for") {
+  const report_frame wait{"ntdll.dll", 0x9F914};
+  const report_frame base{"KERNELBASE.dll", 0x3A2AF};
+  const report_frame user{"USER32.dll", 0x1B2AB};
+  const report_frame detour{"boiii.exe", 0x40B12};
+  const report_frame sys_wait{"BlackOps3.exe", 0x14212BCD2};
+  const report_frame main_wait{"BlackOps3.exe", 0x141CD0B59};
+  const report_frame backend_send{"BlackOps3.exe", 0x141C47906};
+  const report_frame backend_vsync_sleep{"BlackOps3.exe", 0x141C478ED};
+  const report_frame present{"BlackOps3.exe", 0x1422BBDF1};
+  const report_frame fullscreen{"BlackOps3.exe", 0x1422BBDD8};
+  const report_frame other_message{"BlackOps3.exe", 0x1422BB66E};
+  const report_frame loop_peek{"BlackOps3.exe", 0x1422BC29E};
+  const report_frame loop_sleep{"BlackOps3.exe", 0x1422BC302};
+  const report_frame cursor{"BlackOps3.exe", 0x14228755D};
+  const report_frame driver{"nvwgf2umx.dll", 0xA60701};
+  const report_frame overlay{"gameoverlayrenderer64.dll", 0xB3FD0};
+  const report_frame msctf{"MSCTF.dll", 0x4A1C0};
+  const report_frame hook{"boiii.exe", 0x1E7F5C};
+  const report_frame stub{"boiii.exe", 0x2E1B40};
+
+  const std::vector<report_frame> main{wait, base, detour, sys_wait, main_wait};
+  const std::vector<report_frame> backend{wait, user, backend_send};
+  const auto chain = [&](const std::vector<report_frame> &window) {
+    return frame_wait_chain(main, backend, window);
+  };
+
+  // The main thread not waiting for the backend: no chain; busy in what the
+  // renderer's wait calls (not in a system call): no chain either
+  CHECK(frame_wait_chain({wait, hook}, {}, {}).empty());
+  CHECK(frame_wait_chain({}, {}, {}).empty());
+  CHECK(frame_wait_chain({sys_wait, main_wait}, backend, {}).empty());
+
+  // The whole way down to the driver
+  CHECK_EQ(chain({wait, driver, present, loop_peek}),
+           std::string("the main thread waits for the render backend; the "
+                       "render backend waits for the Window thread to present; "
+                       "the Window thread is in Present, inside "
+                       "nvwgf2umx.dll"));
+  CHECK(chain({wait, overlay, fullscreen, loop_peek})
+            .ends_with("in SetFullscreenState, inside "
+                       "gameoverlayrenderer64.dll"));
+  // Another message in the window procedure is not Present
+  CHECK(chain({wait, msctf, other_message, loop_peek})
+            .ends_with("in the game's window procedure with another message, "
+                       "at MSCTF.dll+0x4A1C0"));
+  // Asleep in the loop (also through Xerces' own Sleep stub): read a moment
+  // after the backend, it holds nothing up
+  CHECK(chain({wait, base, loop_sleep}).ends_with("does not hold the frame"));
+  CHECK(chain({wait, user, stub, loop_sleep})
+            .ends_with("does not hold the frame"));
+  // Held inside PeekMessage by a hook of someone's
+  CHECK(chain({wait, base, hook, user, loop_peek})
+            .ends_with("in its message loop, inside boiii.exe (a hook in the "
+                       "window's messages)"));
+  CHECK(chain({wait, user, loop_peek}).ends_with("taking its messages"));
+  // The cursor update after the loop's sleep, through an overlay's hook
+  CHECK(chain({wait, overlay, user, cursor, loop_sleep})
+            .ends_with("in its cursor update (ShowCursor), inside "
+                       "gameoverlayrenderer64.dll"));
+  // The backend in its vsync sleep before Present is not presenting yet
+  CHECK(frame_wait_chain(main, {wait, base, backend_vsync_sleep}, {})
+            .ends_with("the render backend is not presenting, it is in "
+                       "BlackOps3.exe+0x141C478ED"));
+  // Stacks that were not read
+  CHECK(frame_wait_chain(main, {}, {}).ends_with("(its stack was not read)"));
+  CHECK(chain({}).ends_with("(its stack was not read)"));
+}

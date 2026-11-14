@@ -263,4 +263,21 @@ std::string_view engine_thread_name(std::size_t context);
 std::size_t engine_thread_context(const std::uint64_t *ids,
                                   const std::uint64_t *functions,
                                   std::size_t count, std::uint32_t id);
+
+// A frame of a stack as the reports name it: the module's file name and the
+// offset in it (for BlackOps3.exe the address at base 0x140000000).
+struct report_frame {
+  std::string module;
+  std::uint64_t offset = 0;
+};
+
+// What a frozen frame waits for, from the stacks (innermost first) of the
+// main thread, the render backend and the Window thread
+// (docs/research/engine-re.md, "A frame, end to end"): the main thread waits
+// for the backend, the backend for the Window thread's Present, Present for
+// the graphics driver. "" when the main thread is not waiting for the
+// render backend.
+std::string frame_wait_chain(const std::vector<report_frame> &main,
+                             const std::vector<report_frame> &backend,
+                             const std::vector<report_frame> &window);
 } // namespace xerces_core

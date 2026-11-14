@@ -1349,24 +1349,41 @@ namespace {
 game::cmd::xcommand_t engine_lobby_launch = nullptr;
 
 void lobby_launch_command() {
-  use_own_map_scripts_first();
+  // Only a launch of this game's own lobby drops the rule: a client in
+  // another host's lobby that runs the command anyway (a mod's menu, the
+  // console) is refused by the engine and keeps its host's rule (a review,
+  // 2026-11-14). Hosting the game lobby is what the lobby menu checks too
+  // before it launches (lobby.lua, IsLobbyHost(GAME)).
+  if (!game::is_legacy_client() &&
+      game::lobby::LobbyHost_IsHost(game::lobby::LobbyType::GAME)) {
+    use_own_map_scripts_first();
+  }
   if (engine_lobby_launch) {
     engine_lobby_launch();
   }
 }
 
-bool wrap_lobby_launch_command() {
+// Points the command's entry at lobby_launch_command, and again whenever the
+// entry holds the engine's function once more (a rebuilt command list). An
+// entry that holds anything else (another wrapper) is left alone, so two
+// wrappers never call each other in a circle.
+void keep_lobby_launch_wrapped() {
   for (auto *command = *game::cmd::cmd_functions; command;
        command = command->next) {
-    if (command->name && _stricmp(command->name, "lobbyLaunchGame") == 0) {
-      if (command->function != &lobby_launch_command) {
-        engine_lobby_launch = command->function;
-        command->function = &lobby_launch_command;
-      }
-      return true;
+    if (!command->name || _stricmp(command->name, "lobbyLaunchGame") != 0) {
+      continue;
     }
+    if (command->function == &lobby_launch_command) {
+      return;
+    }
+    if (!engine_lobby_launch) {
+      engine_lobby_launch = command->function;
+    }
+    if (command->function == engine_lobby_launch) {
+      command->function = &lobby_launch_command;
+    }
+    return;
   }
-  return false;
 }
 } // namespace
 
@@ -1480,13 +1497,9 @@ public:
 
     startup_list = command_line_list();
     if (game::is_client()) {
-      // The command is registered as the game starts; tried once a second
-      scheduler::schedule(
-          [] {
-            return wrap_lobby_launch_command() ? scheduler::cond_end
-                                               : scheduler::cond_continue;
-          },
-          scheduler::main, 1s);
+      // The command is registered as the game starts, and the list can be
+      // rebuilt later: looked at once a second
+      scheduler::loop(keep_lobby_launch_wrapped, scheduler::main, 1s);
     }
     scheduler::once(
         [] {

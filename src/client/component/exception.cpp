@@ -116,6 +116,32 @@ void add_symbols(resolved_frame &frame) {
   }
   ensure_symbols_initialized();
 
+  // A freeze report's frames come from the module list the watchdog notes
+  // every few seconds; a module loaded since (the graphics driver, in a
+  // freeze soon after the start) is not in it. The symbol engine read the
+  // modules when it started (at the first report of this process), so it
+  // knows those: the name and base from there, the file name only
+  // (2026-11-14: driver frames read unknown+0x7FFC...). A module loaded after
+  // that stays unknown.
+  if (frame.module_name == "unknown") {
+    IMAGEHLP_MODULE64 module_info{};
+    module_info.SizeOfStruct = sizeof(module_info);
+    if (SymGetModuleInfo64(GetCurrentProcess(), frame.address, &module_info) &&
+        module_info.BaseOfImage != 0 &&
+        frame.address >= module_info.BaseOfImage) {
+      const char *file = std::strrchr(module_info.ImageName, '\\');
+      frame.module_name = file ? file + 1 : module_info.ImageName;
+      if (frame.module_name.empty()) {
+        frame.module_name = module_info.ModuleName;
+      }
+      frame.module_base = module_info.BaseOfImage;
+      frame.rva = frame.address - module_info.BaseOfImage;
+      if (frame.module_name == "BlackOps3.exe") {
+        frame.rva += 0x140000000;
+      }
+    }
+  }
+
   // Try to resolve function name from PDB symbols
   alignas(SYMBOL_INFO) char sym_buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME]{};
   SYMBOL_INFO *sym = reinterpret_cast<SYMBOL_INFO *>(sym_buffer);
@@ -2027,8 +2053,8 @@ bool write_dump_file(const std::filesystem::path &path) {
   return written;
 }
 
-// The loaded modules, noted by the watchdog every half minute while frames
-// come: a frozen game's report names addresses from this list.
+// The loaded modules, noted by the watchdog every 5 s while frames come: a
+// frozen game's report names addresses from this list.
 struct module_range {
   uint64_t base = 0;
   uint64_t size = 0;
@@ -2347,6 +2373,42 @@ freeze_text_result freeze_text(const std::vector<seen_thread> &threads,
       out.summary +=
           std::format("{} {} thread {}", out.summary.ends_with(':') ? "" : ";",
                       role, thread_place(thread->frames, true));
+    }
+  }
+  // What the frame waits for (docs/research/engine-re.md, "A frame, end to
+  // end"): the main thread for the render backend, the backend for the
+  // Window thread's Present, Present for the driver. The backend and the
+  // Window thread by the engine's own table.
+  {
+    const auto engine_thread =
+        [&threads](const std::string_view name) -> const seen_thread * {
+      for (const seen_thread &thread : threads) {
+        if (game_thread_name(thread.id) == name) {
+          return &thread;
+        }
+      }
+      return nullptr;
+    };
+    const auto frames_of = [](const seen_thread *thread) {
+      std::vector<xerces_core::report_frame> frames;
+      if (thread) {
+        for (const resolved_frame &frame : thread->frames) {
+          frames.push_back({frame.module_name, frame.rva});
+        }
+      }
+      return frames;
+    };
+    const std::string chain = xerces_core::frame_wait_chain(
+        frames_of(roles[0].second), frames_of(engine_thread("Backend")),
+        frames_of(engine_thread("Window")));
+    if (!chain.empty()) {
+      out.core += "What the frame waits for: " + chain + ".\r\n";
+      // The summary keeps the last link, where the wait ends, short enough
+      // that the script after it is not cut away (the summary is cut at 250)
+      const std::size_t last = chain.rfind("; ");
+      out.summary +=
+          "; " + (last == std::string::npos ? chain : chain.substr(last + 2))
+                     .substr(0, 90);
     }
   }
   if (full) {
@@ -2724,7 +2786,9 @@ void watch_for_freezes() {
         frames_came_back(std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::steady_clock::now() - last_progress));
       }
-      if (ticks++ % 30 == 0) {
+      // Every 5 s: a freeze soon after a module loads (the graphics driver
+      // at the start, a map's) must find it in the list
+      if (ticks++ % 5 == 0) {
         note_modules();
       }
       // Noted while the game runs: asking when it is frozen takes memory

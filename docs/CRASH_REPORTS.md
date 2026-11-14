@@ -162,6 +162,25 @@ own thread table when it is not the main or the server thread ("on the game's
 Database thread"); the `thread` field sent stays main, server or auxiliary.
 What the names are and where they come from is in `docs/research/engine-re.md`.
 
+A freeze report also says what the frame waits for (2026-11-14): after the main and
+server thread's lines, "What the frame waits for:" follows the game's own chain (the
+main thread waits for the render backend, the backend for the Window thread's Present,
+Present for the graphics driver, `docs/research/engine-re.md`, "A frame, end to end")
+as far as it goes, and says where it ends: "the Window thread is in Present, inside
+nvwgf2umx.dll" (the driver), "in its message loop, inside <module> (a hook in the
+window's messages)" (an overlay or another program's hook), "in its cursor update
+(ShowCursor)", "the render backend is not presenting, it is in <frame>", or "the Window
+thread was asleep in its message loop when it was read, so it does not hold the frame"
+(the stacks are read one after another). It goes by the exact calls in the game's code
+(the backend's Present send, the window procedure's Present call), not by which
+function a frame is in. The summary sent keeps that last link. Nothing is
+written when the main thread is not waiting for the backend (a script, a load, a
+lock). `xerces_crash_test windowhang` holds the Window thread in a message hook to see
+it. And a frame in a module loaded since the watchdog last noted the modules (the
+graphics driver in a freeze soon after the start read `unknown+0x7FFC...`) is named
+from the symbol engine's list in the report's second version; the watchdog now notes
+them every 5 s instead of every 30.
+
 The watchdog's own way to the end of a frozen game takes no lock and no memory
 (a second read of this code on 2026-11-12 found that it logged, and asked the
 journal for its phase, before it ended the game: either waits forever if the
