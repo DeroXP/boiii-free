@@ -3583,3 +3583,23 @@ the test cases and notes since (`xerces_crash_test handlerfault`, `dumpfault`,
       signatures resolved, DS4C + SANCTUM OBITUS (`zm_log_overunder`), five scripts kept
       by the map, in the level, no link error, no warning or error, `clean_exit`
       (`bench\20261112-crash\pkg26-sanctum.png`).
+
+## The joined host's map-first rule, dropped at a launch (after beta.26, 2026-11-14)
+
+beta.26 kept a joined host's rule from a level this game started by asking whether it
+hosts its game lobby (`LobbyHost_IsHost(GAME)`). Reading the engine showed that this might
+still read "host" for a client that connects straight to another host while it hosts its
+own game lobby, which would make that client follow its own rule and be dropped by the
+host (docs/research/engine-re.md). Now the rule is dropped when this game launches a match
+of its own (`lobbyLaunchGame`, wrapped in the command list), and the lobby check is gone.
+
+- [x] `xerces_crash_test joinrule0` (new: sets the rule a join of a host with map-first
+      off leaves), then the lobby menu: Solo Game, SANCTUM OBITUS with DS4C
+      (`bench\20261113-left\lobby-launch.ps1`): five scripts kept by the map, in the
+      level after 26 s, no link error.
+- [x] The same with the command wrapper switched off as a control: "GSC LINK ERROR" five
+      seconds into the load, no script kept by the map.
+- [x] 618 unit tests pass.
+- [ ] For the two-PC test (TWO_PC_TEST.md): a client that joined a host with map-first off
+      takes that rule (the host's map with a mod that ships the same scripts loads on both
+      PCs), also when the client joined from its own Zombies lobby.

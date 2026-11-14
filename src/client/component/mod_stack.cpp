@@ -97,23 +97,15 @@ bool own_map_scripts_first() {
   return map_scripts_first_dvar ? map_scripts_first_dvar.get_bool() : true;
 }
 
-// This process hosts the match that is loading: the game lobby is its own.
-// A level this game starts links its first zones before its server runs
-// (about four seconds with sv_running off, measured 2026-11-13), so "no server
-// running" alone took it for a client of another host: the rule left by an
-// earlier join was then used, and with that host's map-first off (or a host
-// without Xerces) a custom map this game started ended in a GSC link error
-// until the game was restarted. A client of another host is in that host's
-// game lobby, never the host of one.
-bool hosts_game_lobby() {
-  return !game::is_legacy_client() &&
-         game::lobby::LobbyHost_IsHost(game::lobby::LobbyType::GAME);
-}
-
+// A level links its zones while no server runs, whether this game hosts it or
+// joined someone (measured 2026-11-14: sv.state, svs.initialized and
+// sv_running are all 0 then, as the map is preloaded before SV_SpawnServer).
+// So the host's rule is dropped when this game launches a match of its own
+// (lobbyLaunchGame, below; the console's map in party.cpp), not guessed at
+// while the zones link.
 bool map_scripts_first_enabled() {
   const int rule = host_rule.load();
-  const bool remote_client =
-      !game::is_server() && !game::server_running() && !hosts_game_lobby();
+  const bool remote_client = !game::is_server() && !game::server_running();
   if (remote_client && rule >= 0) {
     return rule == 1;
   }
@@ -1343,6 +1335,41 @@ void follow_host_map_scripts_first(const std::string_view announced) {
 
 void use_own_map_scripts_first() { host_rule = -1; }
 
+namespace {
+// lobbyLaunchGame is the command a host's lobby runs to start its match: the
+// lobby menu's Solo Game and Start Match, and Xerces' own launch (party.cpp);
+// seen run from Solo Game 3 s before the level loads (2026-11-14). A client of
+// another host never runs it: its host launches. Before, only the console's
+// map dropped the rule a join had left, so a custom map started from the
+// lobby menu after joining a host whose map-first was off (or a host without
+// Xerces) lost its scripts to the mod: a GSC link error until a restart. The
+// command's entry in the command list is pointed here, as loader.cpp does for
+// quit: a pointer, no code bytes (the game's protection reacts to changed
+// code: a detour of SV_SpawnServer crashed the client in testing).
+game::cmd::xcommand_t engine_lobby_launch = nullptr;
+
+void lobby_launch_command() {
+  use_own_map_scripts_first();
+  if (engine_lobby_launch) {
+    engine_lobby_launch();
+  }
+}
+
+bool wrap_lobby_launch_command() {
+  for (auto *command = *game::cmd::cmd_functions; command;
+       command = command->next) {
+    if (command->name && _stricmp(command->name, "lobbyLaunchGame") == 0) {
+      if (command->function != &lobby_launch_command) {
+        engine_lobby_launch = command->function;
+        command->function = &lobby_launch_command;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+} // namespace
+
 // Where each hook goes. The last four are hooked on the client only.
 struct hook_targets {
   std::uintptr_t expand_zone_list_call = 0;
@@ -1452,6 +1479,15 @@ public:
     }
 
     startup_list = command_line_list();
+    if (game::is_client()) {
+      // The command is registered as the game starts; tried once a second
+      scheduler::schedule(
+          [] {
+            return wrap_lobby_launch_command() ? scheduler::cond_end
+                                               : scheduler::cond_continue;
+          },
+          scheduler::main, 1s);
+    }
     scheduler::once(
         [] {
           game::register_dvar_string(

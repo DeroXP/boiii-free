@@ -27,6 +27,10 @@
 //                                the handler is entered again
 //   xerces_crash_test dumpfault  a crash, and the handler's in-memory dump
 //                                faults: caught, the report stands
+//   xerces_crash_test joinrule0  no crash: the map-first rule a join of a host
+//                                with map scripts first off leaves (0); the
+//                                next match this game launches itself must
+//                                drop it (mod_stack.cpp, lobbyLaunchGame)
 //   xerces_crash_test workshopget <id>  no crash: asks Steam for a Workshop
 //                                item as the in-game Workshop menu does (the
 //                                helper process, its lines, its end); the
@@ -55,6 +59,7 @@
 //                                its dump and report, and no clean_exit
 
 #include <component/command.hpp>
+#include <component/mod_stack.hpp>
 #include <component/workshop/workshop.hpp>
 #include <game/game.hpp>
 #include <loader/component_loader.hpp>
@@ -161,6 +166,12 @@ public:
             "The shutdown will fault once the game is quitting "
             "(xerces_crash_test exitfault)");
         fault_in_shutdown = true;
+        return;
+      }
+      if (kind == "joinrule0") {
+        mod_stack::follow_host_map_scripts_first("0");
+        xerces_runtime::log_warn("xerces.crash_test",
+                                 "the host rule a join leaves, set to 0");
         return;
       }
       if (kind == "workshopget") {

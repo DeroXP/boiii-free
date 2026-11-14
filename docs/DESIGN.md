@@ -510,6 +510,10 @@ miss turns that feature off and the launcher says, for example:
 - `xerces_cli sig check --dump <file|folder>` runs the registry against a dump
   offline (exit 4 when a signature misses). One dump of a new build shows
   exactly which signatures need work.
+- `tools/dev/re/disasm.py` disassembles a function of a dump by its `.pdata`
+  bounds with every call target named from the symbol tables, lists the calls
+  to an address and finds names; what was learned with it is in
+  `docs/research/engine-re.md`.
 
 ### 4.6 Supported-build matrix
 
