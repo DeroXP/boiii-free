@@ -78,8 +78,13 @@ void before_lobby_launch() {
       return;
     }
   }
+  // No other player in the game lobby nor in the party (private) lobby,
+  // whose members may not have moved to the game lobby yet
   const bool alone = game::lobby::LobbyHost_GetClientCount(
                          game::lobby::LobbyType::GAME,
+                         game::lobby::LobbyClientType::REMOTE) == 0 &&
+                     game::lobby::LobbyHost_GetClientCount(
+                         game::lobby::LobbyType::PRIVATE,
                          game::lobby::LobbyClientType::REMOTE) == 0;
   game::set_dvar_int(ack_delay, alone ? 0 : *ack_delay_before, false);
   game::set_dvar_int(launch_delay, alone ? 0 : *launch_delay_before, false);
