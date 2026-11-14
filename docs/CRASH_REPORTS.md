@@ -377,3 +377,14 @@ compared in constant time; unset, the admin routes answer 404):
 Signature: the first 16 hex digits of the SHA-256 of kind, module, offset and
 the first 3 frames. Retention: the backend's periodic task deletes reports older
 than 90 days.
+
+## When the crash handler fails itself
+
+A crash while memory is short can make the handler fault or throw on the way (its
+in-memory dump and zip are the likely place). The in-memory dump runs guarded: a fault
+there costs the zip, never the report. A fault anywhere else in the handler comes back to
+it on the same thread; the second time it writes `loader.crash.handler_fault` to the game
+log and goes straight to the crash dialog, a third time it ends the game. What the first
+pass wrote (the early dump, the text report, the pending note) stands, so one crash is
+one report. `xerces_crash_test handlerfault` and `dumpfault` bring both about
+(TESTING.md).

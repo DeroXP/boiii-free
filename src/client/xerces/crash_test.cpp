@@ -21,6 +21,12 @@
 //   xerces_crash_test throw      a thread of its own throws a C++ exception
 //                                nobody catches: the game log must name it
 //                                (loader.terminate) before the game ends
+//   xerces_crash_test handlerfault  a crash, and the crash handler faults
+//                                itself after its first report: one dump
+//                                and one report, not one for each time
+//                                the handler is entered again
+//   xerces_crash_test dumpfault  a crash, and the handler's in-memory dump
+//                                faults: caught, the report stands
 //   xerces_crash_test heap       the main thread takes the heap's lock and
 //                                never gives it back: no report can be
 //                                written, and the watchdog must still close
@@ -59,6 +65,7 @@ constexpr std::string_view flag = "-xerces-crash-test";
 
 // xerces_crash_test exitfault: this component's shutdown faults
 std::atomic_bool fault_in_shutdown{false};
+std::atomic<int> handler_fault_at{0};
 
 [[noreturn]] void crash(const std::string &kind) {
   xerces_runtime::log_warn("xerces.crash_test",
@@ -150,6 +157,16 @@ public:
         fault_in_shutdown = true;
         return;
       }
+      if (kind == "handlerfault" || kind == "dumpfault") {
+        xerces_runtime::log_warn(
+            "xerces.crash_test",
+            "Crashing, and the crash handler will fault itself "
+            "(xerces_crash_test " +
+                kind + ")");
+        handler_fault_at = kind == "handlerfault" ? 1 : 2;
+        crash("access");
+        return;
+      }
       if (kind == "throw") {
         xerces_runtime::log_warn(
             "xerces.crash_test",
@@ -182,6 +199,8 @@ public:
     }
   }
 };
+
+int handler_fault() { return handler_fault_at.load(); }
 } // namespace xerces_crash_test
 
 REGISTER_COMPONENT(xerces_crash_test::component)

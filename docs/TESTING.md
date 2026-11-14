@@ -3470,9 +3470,24 @@ In the game (the user approved the runs; the friends build, test homes):
       the screen; in the other three the character stood in front of the camera on DEFAULT
       and on DEMPSEY 2, with Dempsey's portrait
       (`bench\20261113-left\camera-grid2.png`).
-- [ ] Not tried in the game: the crash handler's re-entry, a second player_downed for one
-      down, aim assist with a real controller, UPnP with two PCs, the Workshop helper from
-      the in-game menu.
+- [x] The crash handler faulting itself (after beta.25; `xerces_crash_test handlerfault`
+      and `dumpfault`, new, with `-quiet-crash`). `handlerfault` (a fault in the handler's
+      unguarded tail, after its first report): one `crash-<time>.dmp` (1.0 MB), one text
+      report, one pending note with its dump, "loader.crash.handler_fault: The crash
+      handler faulted itself; its first report stands" in the game log, the game ended
+      within a second with 0xC0000005. Before, each entry wrote a dump and a report of its
+      own. `dumpfault` (a fault inside the in-memory dump): caught there, the same one set
+      of files, no zip.
+- [x] A second player_downed for one down (after beta.25; a test-only script hook downs the
+      first player, sends the notice again and revives them,
+      `bench\20261113-left\test_revive_hook.gsc.txt`): the prompt shows once while down
+      and is gone once the player is up (`bench\20261113-left\revive-guard.png`). The
+      same with the guard switched off: "HOLD JUMP OR USE TO REVIVE YOURSELF" stays on
+      screen over the standing player (`bench\20261112-crash\revive-noguard-3-up.png`),
+      which is what the guard was added for.
+- [ ] Not tried in the game: aim assist with a real controller, UPnP with two PCs, the
+      Workshop helper from the in-game menu (it would subscribe the user's Steam account
+      to an item).
 
 ## Aim assist after the user's beta.24 playtest (2026-11-13)
 

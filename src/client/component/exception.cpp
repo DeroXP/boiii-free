@@ -21,11 +21,12 @@
 #include <utils/string.hpp>
 #include <utils/thread.hpp>
 
+#include "upnp.hpp"
 #include <exception/minidump.hpp>
+#include <xerces/crash_test.hpp>
 #include <xerces/db_pool.hpp>
 #include <xerces/loader.hpp>
 #include <xerces/runtime.hpp>
-#include "upnp.hpp"
 #include <xerces_core/crash_report.hpp>
 #include <xerces_core/journal.hpp>
 #include <xerces_core/json.hpp>
@@ -1684,6 +1685,15 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
                     "The crash handler faulted (0x%08lX); its first "
                     "report stands",
                     exceptioninfo->ExceptionRecord->ExceptionCode);
+      // said in the game log too (guarded: the handler may be out of memory)
+      run_guarded([exceptioninfo] {
+        char data[64];
+        std::snprintf(data, sizeof(data), "{\"exception\":\"0x%08lX\"}",
+                      exceptioninfo->ExceptionRecord->ExceptionCode);
+        xerces_runtime::log_error(
+            "loader.crash.handler_fault",
+            "The crash handler faulted itself; its first report stands", data);
+      });
       display_error_dialog(); // ends the process
     }
     TerminateProcess(GetCurrentProcess(), crash_handler_code.load()
@@ -1811,9 +1821,19 @@ long WINAPI exception_filter(const LPEXCEPTION_POINTERS exceptioninfo) {
   }
   finish_pending_report(report_id, crash_frame, frames, report);
 
+  // Test only (xerces_crash_test handlerfault): a fault of the handler's own,
+  // outside every guard
+  if (xerces_crash_test::handler_fault() == 1) {
+    volatile int *nowhere = nullptr;
+    *nowhere = 0x58455243; // "XERC"
+  }
   // The whole dump in memory and its zip: the step most likely to run out of
   // memory, and the early dump is on disk already
   run_guarded([exceptioninfo, &stamp, &local_report] {
+    if (xerces_crash_test::handler_fault() == 2) { // test only: dumpfault
+      volatile int *nowhere = nullptr;
+      *nowhere = 0x58455243;
+    }
     write_minidump(exceptioninfo, stamp, local_report);
   });
 
