@@ -19,6 +19,8 @@ k32.OpenProcess.restype = ctypes.c_void_p
 WATCHED = [("client connection", 0x145359BC8), ("server state", 0x15767AC90),
            ("server flags", 0x15767ACA8)]  # sv.isUILevel, isRunnable, allowSelfTick, allowNetPackets
 DRAW = 0x145778C7C
+SVS_TIME = 0x15767A384  # svs.time, what the join handler (0x1421ECAC0) measures with
+SVS_CLIENTS = 0x15767A398  # pointer to the server's client records, 0xE5170 bytes each
 LEVEL_TIME = 0x14A1B6C14  # the server's level.time (ms of game time), as GSC gettime() reads it
 STATE_NAMES = {0: "DISCONNECTED", 1: "CINEMATIC", 2: "UICINEMATIC", 3: "LOGO", 4: "CHALLENGING", 5: "CONNECTING",
                6: "CONFIRMLOADING", 7: "CONNECTED", 8: "SENDINGDATA", 9: "PRIMED", 10: "LOADING", 11: "ACTIVE"}
@@ -43,6 +45,20 @@ def main(argv):
                                    ctypes.byref(value), 4, ctypes.byref(got))
         return value.value if ok else None
 
+    def read_at(absolute, size=4):
+        value = ctypes.c_int64() if size == 8 else ctypes.c_int32()
+        got = ctypes.c_size_t()
+        ok = k32.ReadProcessMemory(ctypes.c_void_p(process), ctypes.c_void_p(absolute), ctypes.byref(value), size,
+                                   ctypes.byref(got))
+        return value.value if ok else None
+
+    def client_record():
+        """Client record 0's state and the time at +0x55E4 the join handler compares with svs.time."""
+        records = read_at(base + SVS_CLIENTS - 0x140000000, 8)
+        if not records:
+            return None
+        return read_at(records), read_at(records + 0x55E4)
+
     last = {}
     draws = 0
     last_draw = read(DRAW)
@@ -62,6 +78,12 @@ def main(argv):
                     label = str(value)
                 print(f"{t:7.2f} s  {name}: {label}  (level.time {read(LEVEL_TIME)})", flush=True)
                 last[name] = value
+        record = client_record()
+        if record != last.get("record"):
+            print(f"{t:7.2f} s  client record 0: state {record[0] if record else None}, last connect "
+                  f"{record[1] if record else None}, svs.time {read(SVS_TIME)}  (level.time {read(LEVEL_TIME)})",
+                  flush=True)
+            last["record"] = record
         draw = read(DRAW)
         if draw != last_draw:
             draws += 1

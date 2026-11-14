@@ -533,6 +533,13 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   scripts may count on that; the flag's 4x keeps the arrival at the usual level.time
   (4,850 against 4,950). With the limit at 0 and the 4x the level started another second
   sooner (Shadows of Evil `in_game` 8.9 s against 9.9 s; Origins 6.3 s after `map`).
+  Watched from outside (`watch_states.py` now prints client record 0's state and its time at
+  +0x55E4 with `svs.time`): the new server zeroes the record (state 0, time 0) as it starts,
+  and `svs.time` restarts at 0 with level.time, so the limit runs out at `svs.time` 3,000.
+  Past it the handler connects the client at once: 0x141ECE9F0 is the connect itself (record
+  state 3, `svs.time` at +0x55E8). Origins: state 3 at `svs.time` 3,000 exactly. Shadows of
+  Evil: only at 4,850, so there the join arrives or is taken 1.85 s after the limit ran out;
+  that part also runs on the game's clock (0.4 s at 4x), and what holds it is not found.
   A `map` from inside a level
   goes through without such a wait, and so does the way back to the menus
   (`menu-return.ps1`, `disconnect` from Shadows of Evil: `CONNECTING` 1.2 s after it, the
