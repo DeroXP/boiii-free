@@ -399,7 +399,8 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
      (0x1413F0B70), 27% polling for the sound banks (`SND_LoadSoundsWait`, `Sleep(30)` a
      poll) and 7% in another wait on the sound path (0x1425D4B50). So this part is paced by
      the reads and the sound banks, not by the decoding; a shorter poll would only trim each
-     wait's overshoot (at most 30 ms).
+     wait's overshoot (at most 30 ms). Nor by Main: 70% waiting in the same window, 86% of
+     that in the frame limiter between loading-screen frames.
   3. About 4 s of streaming the level's images while the loading screen shows (below); on
      Shadows of Evil it runs inside the client's `CONFIRMLOADING` wait, which, not the
      streaming, ends it.
