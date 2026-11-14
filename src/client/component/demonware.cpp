@@ -313,7 +313,8 @@ int select_stub(const int nfds, fd_set *readfds, fd_set *writefds,
   });
 
   if ((!readfds || readfds->fd_count == 0) &&
-      (!writefds || writefds->fd_count == 0)) {
+      (!writefds || writefds->fd_count == 0) && timeout) {
+    // Xerces: a blocking select (no timeout) is left as it is, not dereferenced
     timeout->tv_sec = 0;
     timeout->tv_usec = 0;
   }

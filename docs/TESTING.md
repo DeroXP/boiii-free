@@ -4254,10 +4254,13 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       error in the game log, no report. And `xerces_crash_test fatal` from the console still
       ends in its fatal-error report (`fatal-<time>.txt` and dump): the commands' new catch
       does not take the engine's own errors.
-- [ ] Not changed: the online-service emulation's `select` stub dereferences the timeout
-      without a null check (a blocking select with only emulated sockets would crash; the
-      game's own selects all pass one). `demonware.cpp` is a fenced file (docs/FENCED.md),
-      so the fix is left for an upstream change.
+- [x] The online-service emulation's `select` stub no longer dereferences a null timeout (a
+      blocking select with only emulated sockets would have crashed; the game's own selects
+      all pass one). Kept on the user's word (2026-11-14): `demonware.cpp`'s fence
+      (docs/FENCED.md: "the publisher-file signature skip") is now anchored in
+      `tools/ci/fences.json` by the function holding that write, `post_unpack`, instead of
+      fencing the whole file; `post_unpack` is unchanged by this commit (the lint hashes
+      it), and the commit says "fence reviewed".
 - [x] The nine M1 cases on the afternoon's commit, 002570b0, built as committed (`bench\20261113-left\m1-final7`):
       60 checks pass, none fail.
 - [ ] Twice this morning the game was gone without a crash report or a Windows error: 0.4 s
