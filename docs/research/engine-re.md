@@ -705,5 +705,7 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   pause is a wait-for that nothing can answer: the main thread sleeps in the start's loop
   until a zone is loaded, the zone's load waits for its sound banks, and the banks move on
   only in `SND_Frame`, on that same sleeping main thread; after about 2.7 s something gives
-  (what, not seen). Next: whether running the bank update while the start waits is safe
-  (from which thread), which would take those seconds off every start.
+  (what, not seen: `SND_UpdateWait` (0x142217490), called each pass, takes a spin lock,
+  notes `Sys_Milliseconds` and waits for the sound task at 0x1433BBD20, with no timeout of
+  its own). Next: whether running the bank update while the start waits is safe (from
+  which thread), which would take those seconds off every start.
