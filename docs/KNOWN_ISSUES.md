@@ -124,8 +124,8 @@ to report these again, but tell us if you see them somewhere else or worse.
   Modern was cut to about half of what it was at 1 to 3 m (50% rotation, 40%
   slowdown, all of it only from 3 m), dying and hidden zombies stopped being
   targets, and the view settles around the neck. Stronger is what Modern was
-  plus more (95% and 75%). Say what feels off: strength and ranges are single
-  numbers.
+  plus more (95% and 75%). Played again on beta.25 it felt right. Say what feels
+  off: strength and ranges are single numbers.
 - **It needs an XInput controller.** A controller in another mode (DualShock or
   Switch mode without a wrapper) is not seen; `xerces_aim_debug` in a match says
   "controller NOT found". It is tied to this build of the game: after a game update

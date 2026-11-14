@@ -3485,9 +3485,10 @@ In the game (the user approved the runs; the friends build, test homes):
       same with the guard switched off: "HOLD JUMP OR USE TO REVIVE YOURSELF" stays on
       screen over the standing player (`bench\20261112-crash\revive-noguard-3-up.png`),
       which is what the guard was added for.
-- [ ] Not tried in the game: aim assist with a real controller, UPnP with two PCs, the
-      Workshop helper from the in-game menu (it would subscribe the user's Steam account
-      to an item).
+- [ ] Not tried in the game: UPnP with two PCs, the Workshop helper from the in-game menu
+      (it would subscribe the user's Steam account to an item). The aim assist's dead zone
+      was not looked at by itself, but the user played beta.25 with a controller and found
+      the assist good.
 
 ## Aim assist after the user's beta.24 playtest (2026-11-13)
 
@@ -3523,9 +3524,10 @@ Then, with the simulated stick (`XERCES_AIM_TEST`), `bench\20261113-left\aim.ps1
 - [x] The sight check with foliage and the no-sight and bullet brushes blocking gave the
       same answers as solid alone for the six zombies listed (two in plain sight seen, four
       behind walls not).
-- [ ] Not tried: a real controller (the user's next playtest), a zombie behind a low wall
-      or a car with only the air over its head in sight (what the old check let through),
-      crawlers (their box may differ), split screen.
+- [x] A real controller: the user played beta.25 and said "the aim assist feels good now".
+- [ ] Not tried: a zombie behind a low wall or a car with only the air over its head in
+      sight (what the old check let through), crawlers (their box may differ), split
+      screen.
 
 ## beta.25 (2026-11-13)
 
@@ -3540,5 +3542,6 @@ aim assist after the user's playtest.
       `zm_zod`: all signatures resolved, the DLSS module found, "47 characters from 2
       sources", CHARACTERS with DEMPSEY 2 in front of the camera and his portrait
       (`bench\20261112-crash\pkg25-chars.png`), `clean_exit`, no warning or error.
-- [ ] Not tried on the package: the aim assist with a real controller (the user's next
-      playtest), the launcher's screens (the build's were checked in dry runs).
+- [x] The user played the package with a controller: "the aim assist feels good now".
+- [ ] Not tried on the package: the launcher's screens (the build's were checked in dry
+      runs).
