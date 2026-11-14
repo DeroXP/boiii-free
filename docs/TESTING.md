@@ -4130,6 +4130,12 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       `isUILevel` set, and none changes when the client is let in; not the gate.
 - [x] The nine in-game M1 cases on this build before the review fixes
       (`bench\20261113-left\m1-final4`): 60 checks pass, none fail.
+- [x] With the three-mod stack through Xerces.exe (`fastload-mods.ps1`, f39c0558): Town
+      Reimagined loaded in 8.7 s with the flag (11.0 s before this step) against 33.8 s
+      without it, MW2 Rust 9.8 s (9.9 s) against 39.3 s; each played 45 s and went back to the
+      menu, no error in the logs. With the stack the server let the client in at level.time
+      3,300 (4,800 without mods): "ran 4x for 760 ms ... level.time 200 to 3300". The
+      exit-code watcher saw the four games end by the bench's own stop.
 - [x] 626 unit tests pass; the switch, fence, hosts, strings and notices checks pass.
 - [ ] With a friend in the lobby (TWO_PC_TEST.md step 8): no 4x, the level's clock as usual.
 - [ ] Twice this morning the game was gone without a crash report or a Windows error: 0.4 s
