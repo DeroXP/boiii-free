@@ -107,6 +107,15 @@ hash, sent with the link, shows that the zip is the one we made.
   into the same order. Nothing to turn on. If a map still stutters like that,
   send the game's log; to compare with the game's own sort, type
   `-xerces-stream-sort-engine` into Settings > Launch, Extra launch flags.
+- **Faster map loads** (experimental, off unless you turn it on): type
+  `-xerces-fast-loads` into Settings > Launch, Extra launch flags. The game draws its
+  loading screen only about 57 times a second, and it streams a level's textures in
+  step with that, so a big custom map waited on the loading screen rather than on the
+  disk. With the flag the loading screen draws every frame and, when nobody else is in
+  your lobby, the launch also skips the 2.7 s the lobby waits for other players. Tested
+  here with a three-mod stack: Town Reimagined 11 s instead of 34, MW2 Rust 10 s instead
+  of 39; the stock maps gain about 2 s. Tell us how your loads feel, and turn it off if
+  a load goes wrong.
 - **CHARACTERS (Zombies).** The pause menu of a Zombies match has a CHARACTERS
   entry: every character the game or DS4C lists (DS4C's portraits and outfits),
   and DEFAULT. Since beta.25 the character the list is on also has its portrait
@@ -160,6 +169,16 @@ hash, sent with the link, shows that the zip is the one we made.
   report is taken back. A message box waiting for your answer (a mod's unsafe-Lua
   question, the error dialog) is not a freeze, and neither is the time the PC
   slept (since beta.24).
+- **A load that never ends is reported too.** While the loading screen shows, the game
+  keeps drawing it, so a load stuck inside the game was not a freeze and left nothing.
+  After five minutes on one load the game writes `load-<time>.txt` next to its crash
+  dumps (what the game's loading threads are doing), and leaves the game open. If the
+  load then ends, the report is not sent; if you close the stuck game, it is.
+- **When the graphics driver resets the card** (a driver timeout), every report says
+  so in a "Graphics device" line, with Windows' reason: the game's own error then only
+  says DirectX failed.
+- **If Xerces itself crashes**, it leaves `launcher-<time>.txt` and a small dump in
+  its crash folder (Diagnostics lists them), and says so the next time it starts.
 - **Every crash, freeze and fatal error leaves a report you can read** (since
   beta.22): `crash-<time>.txt`, `freeze-<time>.txt` or `fatal-<time>.txt` in
   `%LOCALAPPDATA%\boiii\minidumps`, next to the dump. It starts with what
