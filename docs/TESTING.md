@@ -4180,7 +4180,10 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       change the startup line came
       3.7 s after `xerces_crash_test threads`, at the `map`, as in the runs before
       (`states-load.ps1 -Tag menucheck-global`). The nine M1 cases on it
-      (`bench\20261113-left\m1-menucheck`): 60 checks pass, none fail.
+      (`bench\20261113-left\m1-menucheck`): 60 checks pass, none fail. The same pattern (the
+      Lua VM read from C++ outside a Lua call) is left in `party.cpp` (a join's map check),
+      `toast.cpp` and `workshop.cpp` (`LobbyVM_CallFunc("LoadMod")`): each runs on an event
+      with the menus up, not polled while their scripts load; not changed.
 - [ ] Twice this morning the game was gone without a crash report or a Windows error: 0.4 s
       after a `map` from the menus (08:35, the a0d86650 build, no flags) and about 0.3 s into
       a start (09:40, with `-xerces-fast-loads`; the log stops at the `launching` phase). Both
