@@ -704,11 +704,14 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   0x1434BF5FC is 0, calling `SND_UpdateWait` each pass; the one write to that byte a scan
   of the readable code finds (direct `mov` to it; not the protected code, not through a
   pointer) is in `SNDL_Update` (0x142509260: the result of `SND_BankUpdate`), and `SNDL_Update` is
-  called only from `SND_Frame` (the main loop's sound update) and `SNDL_GameReset`. So the
-  pause is a wait-for that nothing can answer: the main thread sleeps in the start's loop
-  until a zone is loaded, the zone's load waits for its sound banks, and the banks move on
-  only in `SND_Frame`, on that same sleeping main thread; after about 2.7 s something gives
-  (what, not seen: `SND_UpdateWait` (0x142217490), called each pass, takes a spin lock,
-  notes `Sys_Milliseconds` and waits for the sound task at 0x1433BBD20, with no timeout of
-  its own). Next: whether running the bank update while the start waits is safe (from
-  which thread), which would take those seconds off every start.
+  called only from `SND_Frame` (the main loop's sound update) and `SNDL_GameReset`. It
+  looked like a wait nothing could answer (the main thread asleep in the start's loop), but
+  it is not: a test build (reverted) that logged every `SND_Frame` call saw it run on the
+  main thread about 46 times a second right through the pause (1,161 calls in a start, the
+  first about 10 s after launch, no gap over 300 ms in the pause): the start's loop keeps
+  the sound update going. So `SND_BankUpdate` runs all along and still takes about 2.7 s to
+  report the banks done, with no file read and no thread busy meanwhile: what it waits for
+  (a time, a state of the sound library) is the next question. `SND_UpdateWait`
+  (0x142217490), called each pass of `SND_LoadSoundsWait`, takes a spin lock, notes
+  `Sys_Milliseconds` and waits for the sound task at 0x1433BBD20, with no timeout of its
+  own.
