@@ -673,8 +673,8 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   something only that pump moves on (the lobby connection's answer would fit) and, since
   it does not pump, ends by its own timeout, about 3 s. Not proved: the loop is in the
   protection's encrypted code; what it polls would have to be read at run time. (Read
-  below: it waits for a zone whose sound banks wait for `SND_Frame`; the online pump is
-  likely just stopped alongside, not the cause.)
+  below: it waits for a zone whose sound banks take about 2.7 s; the online pump is likely
+  just stopped alongside, not the cause.)
 - Read at run time (late morning): the code is encrypted again once it has run (read at the
   menus it is still noise), but read from outside while the start is inside it, 10.5 s
   after launch (`bench\20261113-left\read-code-live.py`: the game's image found by its size
