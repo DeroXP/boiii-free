@@ -41,7 +41,17 @@ void execute_custom_command() {
   command_map &map = get_command_map();
 
   if (map.contains(command)) {
-    map[command](params);
+    // Xerces: a command's C++ error is printed, not left to end the game: an
+    // exception out of here reaches the engine's command loop, which has no
+    // handler (std::terminate). Lua errors from ui_scripting are C++
+    // exceptions now (ui_scripting/execution.cpp).
+    try {
+      map[command](params);
+    } catch (const std::exception &e) {
+      game::com::Com_Printf(game::consoleChannel_e::CHANNEL_DONT_FILTER,
+                            game::consoleLabel_e::DEFAULT, "^1%s: %s\n",
+                            command.c_str(), e.what());
+    }
   }
 }
 
@@ -52,7 +62,13 @@ void execute_custom_sv_command() {
   sv_command_map &map = get_sv_command_map();
 
   if (map.contains(command)) {
-    map[command](params);
+    try { // Xerces: as execute_custom_command
+      map[command](params);
+    } catch (const std::exception &e) {
+      game::com::Com_Printf(game::consoleChannel_e::CHANNEL_DONT_FILTER,
+                            game::consoleLabel_e::DEFAULT, "^1%s: %s\n",
+                            command.c_str(), e.what());
+    }
   }
 }
 

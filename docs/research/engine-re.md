@@ -721,4 +721,8 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   "done" at 11.75 s, where the pause ends; later zones' banks take 0.2 to 0.9 s each the
   same way. So the pause is about 1 s before the sound update starts, then the menus' bank
   advancing one step a sound frame at the start loop's pace. Faster passes of that loop,
-  or the sound update starting sooner, are where those seconds would be.
+  or the sound update starting sooner, are where those seconds would be. The loop's sleep
+  is `kernel32!Sleep` itself, called through a pointer the protection keeps in the game's
+  data (0x15AA69D74, read from a running game), not through the import table: shortening
+  only that call would mean changing that slot or hooking `Sleep` for the whole process,
+  both a change to what the protection watches, so it is left.

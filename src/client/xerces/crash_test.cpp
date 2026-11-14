@@ -50,6 +50,23 @@
 //                                <home>\dvars[-tag].txt (two of these
 //                                diffed show what a step of the game set;
 //                                docs/research/engine-re.md)
+//   xerces_crash_test luaerror   a Lua error raised from C++ outside any Lua
+//                                call (indexing nil through the engine's
+//                                gettable), the way the menu check's lookup
+//                                raised one once (docs/TESTING.md): what the
+//                                game and the client do with it (a crash:
+//                                the engine's int3 with no protected call)
+//   xerces_crash_test luaerror get   no crash: a field read from C++ whose
+//                                __index raises an error, now protected
+//   xerces_crash_test luaerror set   no crash: the same for a write
+//                                (__newindex)
+//   xerces_crash_test taskthrow  no crash: a scheduled task that throws,
+//                                stopped and logged by the scheduler
+//   xerces_crash_test cmdthrow   no crash: a command that throws a C++
+//                                exception, printed by the dispatcher
+//   xerces_crash_test luaerror call  no crash: Lua's error() called through
+//                                ui_scripting from C++, which now calls Lua
+//                                protected: logged as a caught C++ exception
 //   xerces_crash_test threads    no crash: the game's thread table, the job
 //                                system's worker records and every thread
 //                                with its name, CPU time, cycles and where it
@@ -94,8 +111,10 @@
 #include <component/command.hpp>
 #include <component/gpu.hpp>
 #include <component/mod_stack.hpp>
+#include <component/scheduler.hpp>
 #include <component/workshop/workshop.hpp>
 #include <game/game.hpp>
+#include <game/ui_scripting/execution.hpp>
 #include <loader/component_loader.hpp>
 
 #include <xerces_core/crash_report.hpp>
@@ -301,6 +320,92 @@ public:
                                      " console commands written to " +
                                      file.string());
         return;
+      }
+      if (kind == "luaerror") {
+        game::lua::hks::lua_State *state = *game::lua::hks::primary_luaVM;
+        if (!state) {
+          return;
+        }
+        if (params.size() > 2 && std::string(params.get(2)) == "get") {
+          // A field read whose __index raises an error (the menu check's crash)
+          try {
+            const ui_scripting::table globals{state->globals.v.table};
+            ui_scripting::table object{};
+            ui_scripting::table meta{};
+            meta.set("__index", globals.get("error"));
+            globals["setmetatable"](object, meta);
+            const ui_scripting::script_value got = object.get("missing");
+            xerces_runtime::log_warn("xerces.crash_test",
+                                     "the read returned without an error");
+          } catch (const std::exception &e) {
+            xerces_runtime::log_info(
+                "xerces.crash_test",
+                std::string("the read's Lua error came back as a C++ "
+                            "exception: ") +
+                    e.what());
+          }
+          return;
+        }
+        if (params.size() > 2 && std::string(params.get(2)) == "set") {
+          // A field write whose __newindex raises an error
+          try {
+            const ui_scripting::table globals{state->globals.v.table};
+            ui_scripting::table object{};
+            ui_scripting::table meta{};
+            meta.set("__newindex", globals.get("error"));
+            globals["setmetatable"](object, meta);
+            object.set("missing", 1);
+            xerces_runtime::log_warn("xerces.crash_test",
+                                     "the write returned without an error");
+          } catch (const std::exception &e) {
+            xerces_runtime::log_info(
+                "xerces.crash_test",
+                std::string("the write's Lua error came back as a C++ "
+                            "exception: ") +
+                    e.what());
+          }
+          return;
+        }
+        if (params.size() > 2 && std::string(params.get(2)) == "call") {
+          try {
+            const ui_scripting::table globals{state->globals.v.table};
+            globals["error"]("xerces_crash_test luaerror call");
+            xerces_runtime::log_warn("xerces.crash_test",
+                                     "error() returned without an error");
+          } catch (const std::exception &e) {
+            xerces_runtime::log_info(
+                "xerces.crash_test",
+                std::string("the Lua error came back as a C++ exception: ") +
+                    e.what());
+          }
+          return;
+        }
+        xerces_runtime::log_warn(
+            "xerces.crash_test",
+            "A Lua error from C++ outside any Lua call (xerces_crash_test "
+            "luaerror)");
+        game::lua::hks::HksObject nothing{};
+        nothing.t = game::lua::hks::HksObjectType::TNIL;
+        game::lua::hks::HksObject key{};
+        key.t = game::lua::hks::HksObjectType::TNIL;
+        game::lua::hks::HksObject result{};
+        game::lua::hks::hks_obj_gettable(&result, state, &nothing, &key);
+        xerces_runtime::log_info("xerces.crash_test",
+                                 "the Lua error came back to C++ (luaerror)");
+        return;
+      }
+      if (kind == "taskthrow") {
+        // A scheduled task whose C++ throws: stopped and logged by the
+        // scheduler, not the end of the game
+        scheduler::once(
+            [] { throw std::runtime_error("xerces_crash_test taskthrow"); },
+            scheduler::main);
+        return;
+      }
+      if (kind == "cmdthrow") {
+        // A console command whose C++ throws: printed by the command
+        // dispatcher (command.cpp), not the end of the game
+        throw std::runtime_error("xerces_crash_test cmdthrow");
       }
       if (kind == "dvars") {
         // The console's command runs on the main thread between frames: the

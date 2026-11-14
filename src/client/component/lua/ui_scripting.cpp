@@ -166,6 +166,11 @@ bool execute_raw_lua(const std::string &code,
   try {
     const table lua = state->globals.v.table;
     state->m_global->m_bytecodeSharingMode = HksBytecodeSharingMode::ON;
+    // Xerces: back to SECURE however loadstring ends (a thrown error used to
+    // leave sharing ON for the session)
+    auto secure_again = utils::finally([state] {
+      state->m_global->m_bytecodeSharingMode = HksBytecodeSharingMode::SECURE;
+    });
     const arguments load_results = lua["loadstring"](code, chunk_name);
     state->m_global->m_bytecodeSharingMode = HksBytecodeSharingMode::SECURE;
 
@@ -525,6 +530,11 @@ void load_script(const std::string &name, const std::string &data,
   lua_State *state = *primary_luaVM;
   const table lua = get_globals();
   state->m_global->m_bytecodeSharingMode = HksBytecodeSharingMode::ON;
+  // Xerces: back to SECURE however loadstring ends (a thrown error used to
+  // leave sharing ON for the session)
+  auto secure_again = utils::finally([state] {
+    state->m_global->m_bytecodeSharingMode = HksBytecodeSharingMode::SECURE;
+  });
   const arguments load_results = lua["loadstring"](data, chunk);
   state->m_global->m_bytecodeSharingMode = HksBytecodeSharingMode::SECURE;
 
@@ -598,6 +608,11 @@ void enable_globals() {
 
   lua_State *state = *primary_luaVM;
   state->m_global->m_bytecodeSharingMode = HksBytecodeSharingMode::ON;
+  // Xerces: back to SECURE however loadstring ends (a thrown error used to
+  // leave sharing ON for the session)
+  auto secure_again = utils::finally([state] {
+    state->m_global->m_bytecodeSharingMode = HksBytecodeSharingMode::SECURE;
+  });
   const arguments _f = lua["loadstring"](code)[0]();
   state->m_global->m_bytecodeSharingMode = HksBytecodeSharingMode::SECURE;
 }
@@ -1244,7 +1259,9 @@ luaReturnCount_e main_handler(lua_State *state) {
 
     return static_cast<luaReturnCount_e>(results.size());
   } catch (const std::exception &ex) {
-    hksi_luaL_error(state, ex.what());
+    // Xerces: the text as an argument, not the format (Lua error text can
+    // reach here now: ui_scripting/execution.cpp)
+    hksi_luaL_error(state, "%s", ex.what());
   }
 
   return luaReturnCount_e::NONE;

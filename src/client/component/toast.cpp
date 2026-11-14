@@ -45,7 +45,15 @@ bool execute_lua(const std::string &code) {
     HashTable *globals = state->globals.v.table;
     const ui_scripting::table lua{globals};
 
+    // Xerces: back to SECURE however loadstring ends (its errors are C++
+    // exceptions now, ui_scripting/execution.cpp)
     state->m_global->m_bytecodeSharingMode = HksBytecodeSharingMode::ON;
+    struct secure_again {
+      lua_State *state;
+      ~secure_again() {
+        state->m_global->m_bytecodeSharingMode = HksBytecodeSharingMode::SECURE;
+      }
+    } const restore{state};
     const auto load_results = lua["loadstring"](code, "toast");
     state->m_global->m_bytecodeSharingMode = HksBytecodeSharingMode::SECURE;
 

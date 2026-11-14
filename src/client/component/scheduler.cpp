@@ -8,6 +8,7 @@
 #include <utils/thread.hpp>
 
 #include <xerces/frame_pacing.hpp>
+#include <xerces/runtime.hpp>
 
 namespace scheduler {
 namespace {
@@ -42,7 +43,20 @@ public:
 
         i->last_call = now;
 
-        const auto res = i->handler();
+        // Xerces: a task whose C++ throws is stopped and logged, not left to
+        // end the game (an exception out of here reaches the engine's frame,
+        // which has no handler: std::terminate). Lua errors from
+        // ui_scripting are C++ exceptions now (ui_scripting/execution.cpp).
+        bool res = cond_continue;
+        try {
+          res = i->handler();
+        } catch (const std::exception &e) {
+          xerces_runtime::log_error(
+              "scheduler.task_failed",
+              std::string("A scheduled task threw and was stopped: ") +
+                  e.what());
+          res = cond_end;
+        }
         if (res == cond_end) {
           i = tasks.erase(i);
         } else {

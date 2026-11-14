@@ -6,19 +6,60 @@
 namespace ui_scripting {
 using namespace game::lua::hks;
 namespace {
+// The message of the error a failed protected call left on the stack
+std::string error_message(lua_State *state) {
+  const HksObject *top = state->m_apistack.top - 1;
+  if (top >= state->m_apistack.base && top->t == HksObjectType::TSTRING &&
+      top->v.str) {
+    return top->v.str->m_data;
+  }
+  return "a Lua error";
+}
+
+// Xerces: object[key] inside a protected call (see call_script_function):
+// a metamethod's error on a read from C++ outside any Lua call crashed the
+// game once (gpu::on_main_menu, docs/TESTING.md). Arguments: object, key.
+luaReturnCount_e protected_gettable(lua_State *s) {
+  HksObject value{};
+  hks_obj_gettable(&value, s, &s->m_apistack.base[0], &s->m_apistack.base[1]);
+  *s->m_apistack.top = value;
+  s->m_apistack.top++;
+  return static_cast<luaReturnCount_e>(1);
+}
+
 script_value get_field(void *ptr, HksObjectType type, const script_value &key) {
   lua_State *state = *primary_luaVM;
   const detail::api_stack_guard stack_guard{state};
-
-  push_value(key);
 
   HksObject value{};
   HksObject obj{};
   obj.t = type;
   obj.v.ptr = ptr;
 
+  if (hksi_lua_pcall.get()) {
+    HksObject getter{};
+    getter.t = HksObjectType::TCFUNCTION;
+    getter.v.cClosure = cclosure_Create(state, protected_gettable, 0, 0, 0);
+    push_value(getter);
+    push_value(obj);
+    push_value(key);
+    if (hksi_lua_pcall(state, 2, 1, 0) != 0) {
+      throw std::runtime_error(error_message(state));
+    }
+    return state->m_apistack.top[-1];
+  }
+
+  push_value(key);
   hks_obj_gettable(&value, state, &obj, &state->m_apistack.top[-1]);
   return value;
+}
+
+// object[key] = value inside a protected call, as protected_gettable.
+// Arguments: object, key, value.
+luaReturnCount_e protected_settable(lua_State *s) {
+  hks_obj_settable(s, &s->m_apistack.base[0], &s->m_apistack.base[1],
+                   &s->m_apistack.base[2]);
+  return static_cast<luaReturnCount_e>(0);
 }
 
 void set_field(void *ptr, HksObjectType type, const script_value &key,
@@ -28,6 +69,21 @@ void set_field(void *ptr, HksObjectType type, const script_value &key,
   HksObject obj{};
   obj.t = type;
   obj.v.ptr = ptr;
+
+  if (hksi_lua_pcall.get()) {
+    const detail::api_stack_guard stack_guard{state};
+    HksObject setter{};
+    setter.t = HksObjectType::TCFUNCTION;
+    setter.v.cClosure = cclosure_Create(state, protected_settable, 0, 0, 0);
+    push_value(setter);
+    push_value(obj);
+    push_value(key);
+    push_value(value);
+    if (hksi_lua_pcall(state, 3, 0, 0) != 0) {
+      throw std::runtime_error(error_message(state));
+    }
+    return;
+  }
 
   hks_obj_settable(state, &obj, &key.get_raw(), &value.get_raw());
 }
@@ -122,6 +178,21 @@ arguments call_script_function(const function &function,
   push_value(function);
   for (auto i = arguments.begin(); i != arguments.end(); ++i) {
     push_value(*i);
+  }
+
+  // Xerces: a protected call. Unprotected, a Lua error with no protected call
+  // to unwind to hits the engine's int3 (0x141D3C84B, under hksi_lua_error):
+  // a crash whenever C++ calls into Lua from outside a Lua call, as from a
+  // scheduler callback (xerces_crash_test luaerror, docs/TESTING.md). Here it
+  // becomes a C++ exception, which the callers catch; inside a C function Lua
+  // called, main_handler turns it back into a Lua error.
+  if (hksi_lua_pcall.get()) {
+    const int32_t status =
+        hksi_lua_pcall(state, static_cast<int32_t>(arguments.size()), -1, 0);
+    if (status != 0) {
+      throw std::runtime_error(error_message(state));
+    }
+    return get_return_values(stack_guard.saved_top());
   }
 
   hksi_lua_call(state, static_cast<int>(arguments.size()), -1, nullptr);

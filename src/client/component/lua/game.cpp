@@ -42,7 +42,7 @@ template <typename F> luaReturnCount_e call(lua_State *luaVM, F f) {
     }
     return static_cast<luaReturnCount_e>(results.size());
   } catch (const std::exception &ex) {
-    hksi_luaL_error(luaVM, ex.what());
+    hksi_luaL_error(luaVM, "%s", ex.what()); // Xerces: the text, not the format
   }
   return luaReturnCount_e::NONE;
 }
@@ -265,19 +265,19 @@ luaReturnCount_e ismodrawfile(lua_State *luaVM) {
 // loaded or a type not known. type is the XAssetType name in any case:
 // "image", "material", "xmodel", "weapon_camo".
 luaReturnCount_e getassetowner(lua_State *luaVM) {
-  return call(luaVM,
-              [](const std::string &type, const std::string &name)
-                  -> std::string {
-                const std::string wanted = utils::string::to_upper(type);
-                for (const xerces_core::asset_pool_info &pool :
-                     xerces_core::asset_pools()) {
-                  if (pool.name == wanted) {
-                    return mod_stack::asset_owner(pool.type, name)
-                        .value_or(std::string{});
-                  }
-                }
-                return {};
-              });
+  return call(
+      luaVM,
+      [](const std::string &type, const std::string &name) -> std::string {
+        const std::string wanted = utils::string::to_upper(type);
+        for (const xerces_core::asset_pool_info &pool :
+             xerces_core::asset_pools()) {
+          if (pool.name == wanted) {
+            return mod_stack::asset_owner(pool.type, name)
+                .value_or(std::string{});
+          }
+        }
+        return {};
+      });
 }
 
 // Xerces: a mod's or custom map's Workshop title by its id; "" when neither

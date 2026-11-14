@@ -4186,6 +4186,78 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       Lua VM read from C++ outside a Lua call) is left in `party.cpp` (a join's map check),
       `toast.cpp` and `workshop.cpp` (`LobbyVM_CallFunc("LoadMod")`): each runs on an event
       with the menus up, not polled while their scripts load; not changed.
+
+## The client's calls into Lua, protected (2026-11-14 afternoon)
+
+- [x] What a Lua error raised from C++ outside any Lua call does: `xerces_crash_test luaerror`
+      (new; indexes nil through the engine's `hks_obj_gettable` from a console command) crashed
+      the game with `EXCEPTION_BREAKPOINT` at 0x141D3C84B: the engine's error path
+      (`hksi_luaL_error` → `hksi_lua_error` → 0x141D3C700) looks for a protected call to
+      unwind to and, with none, hits an `int3`. So every such error is a crash, the menu
+      check's at 10:52 included (it faulted one step earlier, in `luaL_where`).
+- [x] `ui_scripting` now calls Lua protected: `call_script_function` uses `hksi_lua_pcall`
+      instead of `hksi_lua_call`, and `get_field` (every `table[key]` read from C++) runs the
+      read in a small C function under `hksi_lua_pcall`; a failure becomes
+      `std::runtime_error` with the Lua message (the callers catch `std::exception`; inside a
+      C function Lua called, `main_handler` turns it back into a Lua error). Builds without
+      `hksi_lua_pcall` keep the old calls. In the game: `xerces_crash_test luaerror get` (a
+      read whose `__index` is `error`) logged "the read's Lua error came back as a C++
+      exception: bad argument #2 to 'error' ..." and `luaerror call` (Lua's `error()` called
+      from C++) "... came back as a C++ exception: xerces_crash_test luaerror call" with its
+      traceback; the game went on and answered the next command; no crash report.
+- [x] Writes too: `set_field` (`table[key] = value` from C++) runs under `hksi_lua_pcall` the
+      same way; `xerces_crash_test luaerror set` (a write whose `__newindex` is `error`)
+      logged "the write's Lua error came back as a C++ exception".
+- [x] The console's commands: `execute_custom_command` and `execute_custom_sv_command`
+      (`command.cpp`) catch a command's `std::exception` and print it in red to the console;
+      before, it went on into the engine's command loop, which has no handler
+      (`std::terminate`). `xerces_crash_test cmdthrow` (new, a command that throws) printed
+      "xerces_crash_test: xerces_crash_test cmdthrow" and the game answered the next
+      command. (`xerces_crash_test throw` still crashes on purpose: it throws on a thread of
+      its own.) `toast.cpp` puts the Lua state's bytecode sharing back to SECURE however
+      `loadstring` ends (an RAII guard; a thrown error used to leave it ON).
+- [x] In one game: `luaerror get`, `luaerror set`, `luaerror call` and `cmdthrow`, then
+      `xerces_crash_test threads`: all four logged or printed, the last answered, no crash
+      report. The three-load soak with the flag (Shadows of Evil 9.5 s, Origins 5.8 s,
+      Shadows of Evil 6.0 s, the clock back each time): no error or warning in the game
+      log, the character slots read as before, no new entry in `boiii_lua_errors.log`. The
+      nine M1 cases on the protected reads and calls (`bench\20261113-left\m1-luapcall`):
+      60 checks pass, none fail; and on the whole change, writes and commands included
+      (`m1-harden`): 60 pass, none fail.
+- [x] A second read of the change (an agent): the stack handling, the closure's safety from
+      the collector between its creation and its push, `pcall`'s arguments, the fallback
+      (only the dedicated server lacks `hksi_lua_pcall`) and every caller hold up. Fixed
+      from it: `main_handler` and `lua/game.cpp` passed the error text to `hksi_luaL_error`
+      as the format (Lua error text can reach them now; a `%s` in it would have crashed): now
+      `"%s", text`. And `execute_raw_lua`, `load_script` and `enable_globals` restore
+      bytecode sharing to SECURE with `utils::finally`, as `toast.cpp` does (a thrown error
+      left it ON for the session; older than this change). Left: each protected field
+      access creates a small C closure first (one allocation, outside the protected call;
+      a cached closure would go stale when the menus' Lua state is made again).
+      The nine M1 cases with these fixes (`bench\20261113-left\m1-harden2`): 60 pass, none fail.
+- [x] The scheduler (`scheduler.cpp`) ran its tasks without a `try`, so a task whose C++
+      threw ended the game. It now catches a task's `std::exception`, logs
+      `scheduler.task_failed` with the message (an error) and stops that task, once: a
+      repeating task that throws does not throw again every frame. Nothing relied on a
+      task's exception escaping (`xerces_crash_test throw` throws on a thread of its own).
+      `xerces_crash_test taskthrow` (new, a task that throws) logged "A scheduled task threw
+      and was stopped: xerces_crash_test taskthrow", the game answered the next command, no
+      report. The nine M1 cases with it (`bench\20261113-left\m1-sched`): 60 pass, none
+      fail.
+- [x] A sweep for other throws nothing catches (`stoi`/`stoul`/`stof`/`stod`, `.at()`, JSON
+      parses on outside input in `src/client`): the ones fed from outside are guarded
+      (Discord's map and gametype names checked with `contains` first, the IPC's JSON parse
+      returns a status, `asset_limits`' `stoul` and the Workshop download's endpoint port
+      are inside a `try`).
+- [x] After the change, through Xerces.exe with the three-mod stack and the flag: Town
+      Reimagined loaded in 8.8 s (the 4x for 760 ms), played 45 s, back to the menu, no
+      error in the game log, no report. And `xerces_crash_test fatal` from the console still
+      ends in its fatal-error report (`fatal-<time>.txt` and dump): the commands' new catch
+      does not take the engine's own errors.
+- [ ] Not changed: the online-service emulation's `select` stub dereferences the timeout
+      without a null check (a blocking select with only emulated sockets would crash; the
+      game's own selects all pass one). `demonware.cpp` is a fenced file (docs/FENCED.md),
+      so the fix is left for an upstream change.
 - [ ] Twice this morning the game was gone without a crash report or a Windows error: 0.4 s
       after a `map` from the menus (08:35, the a0d86650 build, no flags) and about 0.3 s into
       a start (09:40, with `-xerces-fast-loads`; the log stops at the `launching` phase). Both

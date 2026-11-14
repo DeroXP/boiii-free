@@ -166,6 +166,12 @@ hash, sent with the link, shows that the zip is the one we made.
   game**, then go back to Xerces (start it again if it is closed). "Restart
   game" starts the game again with the same mods, past Xerces, so Xerces cannot
   help with the next start.
+- **Fewer crashes from menu scripts.** When something Xerces asks of the game's
+  menu scripts fails (a Lua error), the game now writes the error in its console
+  and goes on; it used to close at once. One such crash, as the main menu came
+  up, is fixed outright. The same holds for Xerces' own console commands and
+  background tasks: an error in one is written to the console or the log, and
+  that one task stops, instead of the game closing.
 - **A freeze is handled like a crash.** When the game has shown no new frame for
   30 seconds it writes `freeze-<time>.txt` (what every thread is doing) and
   `freeze-<time>.dmp` in `%LOCALAPPDATA%\boiii\minidumps`, next to its crash
