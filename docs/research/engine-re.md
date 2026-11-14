@@ -447,7 +447,15 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   and 5 s), `waitForStreamer`.
   `CL_CheckForResend` (0x14134B990), which handles the early connect states, starts in
   the protection's code. `reliableResendTime` is 300 ms and `join_retryDelay` 1,000 ms.
-  Not found yet.
+  The console, read from its window every 100 ms (`bench\20261113-left\console-watch.ps1`),
+  prints the server's "Game Initialization" and its scripts at about 9.3 s and then
+  nothing at all until "Connected" at 14.9 s: a quiet 5 s, about the length of
+  `lobbyTimerZMStartInterval` (5,000 ms). Set to 0 from the console before `map`, or 4 s
+  into the load, it changed nothing (whether the second one reached the game was not
+  seen). `lobbymsg_prints 1` printed nothing. Not found yet; the only constant writes of
+  the connection state in the readable code are `LOADING` (0x141326EA3) and
+  `DISCONNECTED` (0x14135945D), so the others are made in the protection's code or
+  through a pointer.
 - Part 1 holds two of the lobby's launch waits: `lobbyLaunch_waitForClientAckDelay`
   (2,000 ms) and `lobbyLaunch_gameLaunchDelay` (700 ms), there for the other lobby
   members' games to hear of the launch (`...OnConnect` versions: 800 and
