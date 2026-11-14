@@ -176,6 +176,13 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## The game and Xerces
 
+- **Crash files are never deleted.** Each crash leaves about 22 MB in
+  `%LOCALAPPDATA%\boiii\minidumps` (a dump, a text report and a zip), each
+  freeze about 0.6 MB. Delete old ones by hand when the folder grows.
+- **The launcher closes when the graphics driver resets.** After a driver update
+  or a GPU fault it says so in a message box and closes (since beta.25; before, its
+  window froze). Open it again.
+
 - **A Workshop mod installed twice** (through Steam and as an old manual copy in
   the game's `mods` or `usermaps` folder): which copy loads is not settled. Since
   beta.24 Mods says so on both rows; delete the copy you do not want and scan

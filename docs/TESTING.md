@@ -3348,7 +3348,7 @@ In the game (the test homes, mods off unless said):
 ## The review's unchecked findings (2026-11-13, after beta.24)
 
 The client review's 25 findings that no sceptic had checked, each read against the code
-(beta.24 is a72ffb7e; these are after it, on launcher/upscale only).
+(beta.24 is a72ffb7e; these are after it, and in beta.25).
 
 Fixed:
 
@@ -3511,3 +3511,10 @@ Then, with the simulated stick (`XERCES_AIM_TEST`), `bench\20261113-left\aim.ps1
 - [ ] Not tried: a real controller (the user's next playtest), a zombie behind a low wall
       or a car with only the air over its head in sight (what the old check let through),
       crawlers (their box may differ), split screen.
+
+## beta.25 (2026-11-13)
+
+Everything after beta.24 in one package: the review's unchecked findings and the lost
+graphics device (the two sections above), the portrait on CHARACTERS, the preview's
+camera held, the frame-time run written at the quit, `xerces_crash_test throw`, and the
+aim assist after the user's playtest.

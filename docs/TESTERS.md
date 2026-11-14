@@ -109,7 +109,8 @@ hash, sent with the link, shows that the zip is the one we made.
   `-xerces-stream-sort-engine` into Settings > Launch, Extra launch flags.
 - **CHARACTERS (Zombies).** The pause menu of a Zombies match has a CHARACTERS
   entry: every character the game or DS4C lists (DS4C's portraits and outfits),
-  and DEFAULT. Your pick stays on you: another mod's own character screen
+  and DEFAULT. Since beta.25 the character the list is on also has its portrait
+  beside the live view, when it has one (the game's own and DS4C's do). Your pick stays on you: another mod's own character screen
   (DS4C's) cannot change it until you pick DEFAULT. A character whose look a
   character mod has replaced (Hyperdimension Neptunia gives the first four their
   looks) says which mod. When you host, your last pick is put on again in the next
@@ -132,7 +133,7 @@ hash, sent with the link, shows that the zip is the one we made.
   Stronger. It is on Game's Own until you change it. Modern slows your look speed
   while a zombie is near the crosshair and turns the view with a zombie as it moves
   or you strafe; like those games it needs stick input and has no snap. Modern
-  is a little under those games' own strength (after beta.24: beta.21 to beta.24
+  is a little under those games' own strength (since beta.25: beta.21 to beta.24
   had it much stronger, which is what Stronger still is). It takes only live
   zombies you can see, and it settles the view between a zombie's torso and head,
   around the neck, leaving the height inside that to you. It needs an Xbox-style

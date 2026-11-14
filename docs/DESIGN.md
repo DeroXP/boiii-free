@@ -2289,7 +2289,7 @@ controller.
 Not built: the preview on mods' own character screens, and holding the zombies
 for a player who opens the screen in a match with other players.
 
-Added after beta.24 (2026-11-13), from comparing the screen with DS4C's (a grid
+Added in beta.25 (2026-11-13), from comparing the screen with DS4C's (a grid
 of portraits, `bench\20261113-compare\ds4c-vs-xerces-characters.png`): the
 portrait of the character the list is on, beta.18's code, at the top right with
 the preview (clear of the character) and where beta.18 had it without. The
@@ -4333,7 +4333,7 @@ release from v1.0.
 
 Beta packages for testers (2026-11-05) come first, as a zip by private link:
 
-- `VERSION` is the one place the version is set (`0.1.0-beta.24`). premake
+- `VERSION` is the one place the version is set (`0.1.0-beta.25`). premake
   writes it, the commit and whether the tree had changes into
   `build\src\xerces_version.h`; all three programs show "Xerces <version>
   (<commit>)" (About, the menu watermark, the console title, the crash report)
