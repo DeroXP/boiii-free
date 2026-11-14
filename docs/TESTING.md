@@ -4137,6 +4137,9 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       3,300 (4,800 without mods): "ran 4x for 760 ms ... level.time 200 to 3300". The
       exit-code watcher saw the four games end by the bench's own stop.
 - [x] 626 unit tests pass; the switch, fence, hosts, strings and notices checks pass.
+- [x] The nine in-game M1 cases on the exact build of f7a3c881 (`bench\20261113-left\m1-final5`):
+      60 checks pass, none fail; `exit-watch.ps1` saw every game end with code 0 but the
+      crash case's (0xFFFFFFFF, its deliberate crash).
 - [ ] With a friend in the lobby (TWO_PC_TEST.md step 8): no 4x, the level's clock as usual.
 - [ ] Twice this morning the game was gone without a crash report or a Windows error: 0.4 s
       after a `map` from the menus (08:35, the a0d86650 build, no flags) and about 0.3 s into

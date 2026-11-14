@@ -502,7 +502,15 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   Reimagined), not a script waiting for something. Every dvar dumped twice in the wait and
   once after (`xerces_crash_test dvars`, `dvars-wait.ps1`): nothing changes in the wait;
   across it only the client's own (`cl_ingame`, `all_players_are_connected`, `cg_fov` and
-  the like). Which engine code holds the connect is not found; a `map` from inside a level
+  the like). Nor a packet: a test build (reverted) logged every connectionless command the
+  client's `handle_command` sees, both ways, through a Shadows of Evil load: the only ones
+  are two `cfl`, at the very moment the load starts (the same millisecond as the client's
+  `loading_map`) and 1.8 s later, with the client in `CONFIRMLOADING` and the new server
+  still down (`sv.state` 0); nothing at all when the client is let in, and no `connect`
+  (the one `connect` of the run is the menus' own at the start). So the request to join is
+  made early, and the client moves on, with no packet seen here, when the server's clock
+  reaches the mark (whether the server or the client checks it is not seen).
+  Which engine code holds the connect is not found; a `map` from inside a level
   goes through without such a wait, and so does the way back to the menus
   (`menu-return.ps1`, `disconnect` from Shadows of Evil: `CONNECTING` 1.2 s after it, the
   menus' server loading 3.4 s later and up at 5.7 s, the client `CONNECTED` at its
