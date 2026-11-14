@@ -392,6 +392,14 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
      part asleep in short waits: for the sound banks (`SND_LoadSoundsWait` at
      0x142513020; the banks, `zone\snd\all\*.sabl`, are about 500 MB of what the load
      reads) and inside the zone reader. The job workers are busy at the same time.
+     Sampled again with `-xerces-fast-loads` (2026-11-14 late morning, `wait-sample.ps1 -Tag
+     zones -Threads Database,Main`, from `CONFIRMLOADING` to the server up, 3.3 to 7.7 s):
+     the Database thread sleeps 59% of it; of that, 38% in its own idle loop (0x141424F00,
+     `Sleep(1)`, nothing queued), 26% in the zone reader's wait for the Stream thread
+     (0x1413F0B70), 27% polling for the sound banks (`SND_LoadSoundsWait`, `Sleep(30)` a
+     poll) and 7% in another wait on the sound path (0x1425D4B50). So this part is paced by
+     the reads and the sound banks, not by the decoding; a shorter poll would only trim each
+     wait's overshoot (at most 30 ms).
   3. About 4 s of streaming the level's images while the loading screen shows (below); on
      Shadows of Evil it runs inside the client's `CONFIRMLOADING` wait, which, not the
      streaming, ends it.
