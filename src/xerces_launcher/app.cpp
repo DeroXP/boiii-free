@@ -23,6 +23,7 @@
 #include <xerces_core/launcher_home.hpp>
 #include <xerces_core/launcher_pacing.hpp>
 
+#include "crash_guard.hpp"
 #include "font_engine.hpp"
 #include "link_protocol.hpp"
 #include "log.hpp"
@@ -1278,6 +1279,11 @@ bool app::run_script(double seconds) {
       window_.minimize();
     } else if (step.verb == "quit") {
       window_.request_close();
+    } else if (step.verb == "crash") {
+      // Checks only (--script): the launcher's crash guard (crash_guard.hpp)
+      log_warn("launcher.script.crash", "crashing on purpose");
+      volatile int *nowhere = nullptr;
+      *nowhere = 0x58455243; // "XERC"
     }
   }
   return ran;
@@ -1360,6 +1366,13 @@ int app::run() {
   // from when this launcher really starts, after any wait above.
   started_ = std::chrono::steady_clock::now();
   open_log(generic(paths.logs));
+  // From here a crash of the launcher leaves its report in <home>\crash
+  install_crash_guard(paths.crash, services::version());
+  const std::vector<previous_crash> previous_crashes =
+      take_previous_crashes(paths.crash);
+  for (const previous_crash &crash : previous_crashes) {
+    log_warn("launcher.crash.previous", crash.file + ": " + crash.what);
+  }
   // client_data: the game's data folder, passed to it as XERCES_DATA_PATH
   // (null when neither a package nor the checkout has one).
   log_info("launcher.start", "Xerces " + services::version(),
@@ -1514,6 +1527,11 @@ int app::run() {
   }
   apply_look();
   mark("first screen loaded");
+  if (!previous_crashes.empty()) {
+    notify(tr("Xerces closed unexpectedly last time. Its report is in the "
+              "crash folder (Diagnostics)."),
+           true);
+  }
   // The game crashed at every start from a OneDrive folder on 2026-11-06
   // (launcher_home.hpp, onedrive_folder_of).
   if (!paths.program.empty() &&

@@ -953,6 +953,7 @@
   "Writing the temporary file failed (is the disk full?).": "",
   "Xerces": "",
   "Xerces can copy your player name and servers from BOIII. It only reads: your BOIII files stay exactly as they are.": "",
+  "Xerces closed unexpectedly last time. Its report is in the crash folder (Diagnostics).": "",
   "Xerces closes when the game starts.": "",
   "Xerces could not load its screens. Reinstalling it usually fixes this.": "",
   "Xerces could not read it (too large, or held open by another program), so which pools it raises is unknown.": "",

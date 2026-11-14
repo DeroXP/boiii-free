@@ -108,7 +108,8 @@ struct launch_outcome {
   bool db_pool = false;
   bool precise_limiter = false;
   // -xerces-record-frames: the launch records ten minutes of frame times from
-  // the first level (the frame probe, XERCES_BENCH, into <client folder>ench).
+  // the first level (the frame probe, XERCES_BENCH, into <client
+  // folder>\bench).
   bool record_frames = false;
   bool flip_model = false;
 };

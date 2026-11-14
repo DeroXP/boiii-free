@@ -197,6 +197,19 @@ held: no report can be written, and the game still closes after 60 s.
 A stall's report gives its place among a game's three reports back when it is
 taken back; three long stalls used to leave a later crash without a report.
 
+The launcher has a crash handler of its own (2026-11-14; `crash_guard.cpp`). Before, a
+crash of `Xerces.exe` left nothing but Windows' own record. Now an unhandled exception on
+any of its threads, or an uncaught C++ exception, writes `<home>\crash\launcher-<time>.txt`
+(what happened, the address by module and offset, for an access violation what it tried
+to do, Xerces' version, the stack) and `launcher-<time>.dmp` (the threads and their
+stacks). The text is built in fixed buffers and `dbghelp.dll` is loaded at the start, so
+the crash asks nothing new of the heap or the loader. Both show in Diagnostics' crash
+list. The next start logs each new one (`launcher.crash.previous`) and says "Xerces
+closed unexpectedly last time. Its report is in the crash folder (Diagnostics)." once
+(the names it has said so for are kept in `launcher-seen.txt` there). They are not sent:
+the contract below is the game's, and a launcher crash would need fields of its own.
+The launcher's test scripts (`--script`) have a `crash` step.
+
 A load that does not end gets a report of its own (2026-11-14). While the loading
 screen shows, the main loop goes on finishing frames (`docs/research/engine-re.md`,
 "A map's load"), so a load stuck in the Database or stream threads trips no freeze:

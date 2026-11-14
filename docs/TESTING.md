@@ -1781,11 +1781,11 @@ operator slots are not built.
 
 Settings > Display > "Record frame times" adds `-xerces-record-frames`; the
 launch then gives the game `XERCES_BENCH=1`, `XERCES_BENCH_AUTO=ingame:20:600`
-and `XERCES_BENCH_OUT=<client folder>ench` (the probe refuses AppData and the
+and `XERCES_BENCH_OUT=<client folder>\bench` (the probe refuses AppData and the
 game's folder).
 
 - [x] A launch from the launcher (test home, vanilla): the game log has
-      `perf.bench.armed`, "Frame probe on; runs go to <client folder>ench". The
+      `perf.bench.armed`, "Frame probe on; runs go to <client folder>\bench". The
       setting is saved as `-xerces-record-frames` in the flags.
 - [x] Unit test: the preview sees the flag (585 pass).
 
@@ -3950,3 +3950,13 @@ zm_zod`, crash reports on in the test home, nothing sent
 - [x] 625 unit tests pass (the load's wait text: the sound banks, the zone reader, idle,
       working, the Stream thread).
 
+## The launcher's own crash handler (2026-11-14 morning)
+
+- [x] A test launcher on a scratch home with `--script` `+2500 crash`: exit 0xC0000005;
+      `<home>\crash\launcher-<time>.txt` ("exception 0xC0000005 at Xerces.exe+0x165A0 on
+      thread ...", "It tried to write address 0x0.", the version, a six-frame stack down to
+      `RtlUserThreadStart`) and `launcher-<time>.dmp` (238 KB).
+- [x] The next start: `launcher.crash.previous` in its log with the file and its "What
+      happened" line, and the notice "Xerces closed unexpectedly last time. Its report is
+      in the crash folder (Diagnostics)." at the foot of Home
+      (`bench\20261113-left\launcher-crash\after-1.png`); the start after that, neither.
