@@ -4021,5 +4021,10 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       `lobbyLaunch_waitForClientAckDelay` read 2000 again.
 - [x] The nine in-game M1 cases on the final build (`bench\20261113-left\m1-final`): 60
       checks pass, none fail.
+- [x] With the three-mod stack (Workshop 1944930083, 3171632315, 3656779213) through Xerces.exe,
+      with the flag first (`bench\20261113-left\fastload-mods.ps1`): Town Reimagined 11.0 s
+      with, 33.7 s without; MW2 Rust 9.9 s with, 39.2 s without. Every load reached the level,
+      played 45 s and went back to the menu. The player's own loads of these maps in their logs:
+      about 31 s (Town) and 17 to 36 s (MW2 Rust).
 - [ ] Played by a person with their own mod stack, and a launch with a friend in the lobby
       (the waits must stay as they were).

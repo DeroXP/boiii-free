@@ -3759,7 +3759,8 @@ in the lobby, whose games need that time to hear of it. Zeroing both saved about
 before the level started loading. The two are put back 15 s after such a launch (a
 later launch as a friend's guest reads one of them) and read again before each launch. Custom maps loaded much sooner with it (no mods, each load a game of its
 own, both orders): Town Reimagined 16.0 s against 22.3 s, MW2 Rust 14.8 against 27.0 s,
-Backrooms 18.1 against 21.4 s. Shadows of Evil loaded no sooner: its end is held by the
+Backrooms 18.1 against 21.4 s; with both parts and a three-mod stack, Town Reimagined
+11.0 s against 33.7 s and MW2 Rust 9.9 s against 39.2 s. Shadows of Evil loaded no sooner: its end is held by the
 client waiting in `CONFIRMLOADING` (docs/research/engine-re.md). Off unless the flag is
 given (Settings, launch flags); whether it becomes the default is the user's call.
 
