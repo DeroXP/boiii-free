@@ -4067,3 +4067,12 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       24.5 and 23.9 s without, 18.9 and 19.2 s with; "BitLocker's WMI namespace answered at
       once 1 time(s)" in each game log with the flag, and the client's first line at 2.6 s
       instead of 7.6 s.
+- [x] Through Xerces.exe with the three-mod stack and the flag (`maps-all.ps1`): the menus
+      at 25.2 and 24.1 s (28 to 30 s in the runs before this change), Town Reimagined loaded
+      in 11.0 s and MW2 Rust in 9.9 s, each played 45 s and went back to the menu.
+- [x] A second read of the change: nothing that breaks (the counts in the stub, the game's
+      own import patched and no one else's, WbemLocator is in-process with no apartment
+      proxy, a blanket call on it fails as before). Noted and left: an interface other than
+      IUnknown/IWbemLocator asked of the proxy comes from the real object (COM identity,
+      would matter only if the locator were marshalled); a PC that grants non-admins
+      BitLocker's namespace now gets the denial the others get.
