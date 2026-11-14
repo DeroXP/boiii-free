@@ -4026,5 +4026,10 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       with, 33.7 s without; MW2 Rust 9.9 s with, 39.2 s without. Every load reached the level,
       played 45 s and went back to the menu. The player's own loads of these maps in their logs:
       about 31 s (Town) and 17 to 36 s (MW2 Rust).
+- [x] All three opt-in flags together (`-xerces-fast-loads -xerces-present-wake
+      -xerces-input-wake`) with the three-mod stack (`bench\20261113-left\allflags.txt`): Town
+      Reimagined 11.1 s, Shadows of Evil 13.9 s, each played 45 s and back to the menu.
+      Backrooms ran out of memory as it does with this stack without larger zone memory
+      (2026-11-14 night); with `-xerces-db-pool` added it loaded in 15.4 s and played.
 - [ ] Played by a person with their own mod stack, and a launch with a friend in the lobby
       (the waits must stay as they were).
