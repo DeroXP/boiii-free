@@ -4158,6 +4158,25 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       Origins at 50 and 3,150, the server's client record going to state 3 at that same
       `svs.time` (`watch_states.py`).
 - [ ] With a friend in the lobby (TWO_PC_TEST.md step 8): no 4x, the level's clock as usual.
+- [ ] A crash at the menus' start, once (10:52, `-xerces-fast-loads`, 27 s after launch, phase
+      `frontend`; report `crash-2026-11-14-10-52-47.txt` in `%LOCALAPPDATA%\boiii\minidumps`,
+      not sent): an access violation reading 0xFFFFFFFFFFFFFFF0 in the game's
+      `hksi_lua_getinfo` (0x141D40FB9, `mov rcx, [rax-0x10]` with rax 0), under its
+      `luaL_where` (0x141D40910, through the client's `hks_where_stub` and
+      `hksi_lua_getinfo_stub`), under `hks_obj_gettable` for `["GetLobbyUIScreen"]` on the
+      `Engine` table (`script_value::operator[]<17>`), in `gpu::on_main_menu` (gpu.cpp:85),
+      called by `xerces_perf::poll_menu` every 100 ms from the first frame until the menu is
+      up. So a Lua error was raised while reading that field from C++ outside any Lua call
+      (most likely `Engine`'s metatable refusing a name the menus' scripts had not registered
+      yet), and the game's `luaL_where` asked `getinfo` about a frame `getstack` had reported
+      but that does not exist there. Not from this morning's changes: the menu check has been
+      there since the perf instrumentation, and other callers (`ipc.cpp`, `join_after_menu`,
+      the GPU warning) use it too. Tried and dropped: reading the global that
+      `Lua_CoD_LuaCall_GetLobbyUIScreen` (0x141F08A30) reads (0x156111F18) stays 0 at the
+      menu, so the startup line never came (that symbol's name, or the function behind
+      `Engine.GetLobbyUIScreen`, is not what it seems). Open: a menu check that does not go
+      through the Lua VM, or the field read without metamethods; the client calls the VM
+      unprotected, so surviving `where` alone would leave the error itself to be caught.
 - [ ] Twice this morning the game was gone without a crash report or a Windows error: 0.4 s
       after a `map` from the menus (08:35, the a0d86650 build, no flags) and about 0.3 s into
       a start (09:40, with `-xerces-fast-loads`; the log stops at the `launching` phase). Both
