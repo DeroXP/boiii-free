@@ -3772,7 +3772,9 @@ once its `level.time` reaches about 4.95 s on Shadows of Evil, 4.8 s on Town Rei
 and MW2 Rust and 3.15 s on Origins, with no game thread busy (only the protection's worker
 0, not in step with it) and no dvar changing meanwhile; most of it is
 `sv_reconnectlimit` (3 s), which the server's handler of the client's join ("cfl") checks
-against the client's last connect (docs/research/engine-re.md, "A map's load"). The limit
+against the client's last connect, and the client sends the join again only every 3 s of
+its own clock, so the first one past the limit is taken (docs/research/engine-re.md, "A
+map's load"). The limit
 is left as it is: at 0 the host was in at level.time 150 to 1,950, sooner than the game
 ever lets anyone in, and the level's scripts may count on that. So the flag also runs a Zombies level's start
 4x on our own server while the local client waits for it: while client 0 is in

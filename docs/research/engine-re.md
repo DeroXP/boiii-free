@@ -544,8 +544,15 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   and `svs.time` restarts at 0 with level.time, so the limit runs out at `svs.time` 3,000.
   Past it the handler connects the client at once: 0x141ECE9F0 is the connect itself (record
   state 3, `svs.time` at +0x55E8). Origins: state 3 at `svs.time` 3,000 exactly. Shadows of
-  Evil: only at 4,850, so there the join arrives or is taken 1.85 s after the limit ran out;
-  that part also runs on the game's clock (0.4 s at 4x), and what holds it is not found.
+  Evil: only at 4,850, so there the join arrives or is taken 1.85 s after the limit ran out.
+  It arrives then: a test build (reverted) logged every "cfl" the client sends
+  (`NET_OutOfBandData`, 0x14211AB40): the client sends it again every 3 s of its own clock
+  (the one `timescale` scales; longer in real time while the zones load). Shadows of Evil:
+  sent with the server still down, again 2.5 s later, then at level.time 1,900 (refused, under
+  3,000) and 4,900 (taken); Origins: at 50 (refused) and 3,150 (taken). So the hold is the
+  3 s limit plus however far the client's next resend lands past it, which the load's own
+  timing decides: hence the map-to-map spread (3.15 to 4.95 s) and why 4x shortens all of
+  it.
   A `map` from inside a level
   goes through without such a wait, and so does the way back to the menus
   (`menu-return.ps1`, `disconnect` from Shadows of Evil: `CONNECTING` 1.2 s after it, the
