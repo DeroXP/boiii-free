@@ -251,6 +251,14 @@ base 0x140000000 that upstream's symbol tables use.
   nobody has drawn for 16 frames. The cost is the walk over every loaded image's
   record and image, one cache line each, not the masks. A place to
   look if the streamer's cost is ever worth a change.
+- Under load (2026-11-14, `bench\20261113-left\load-sample.ps1`: Shadows of Evil
+  started at round 40 through `xerces_zm_startRound`, mods off, 166 zombies left in
+  the round with the player down among them, about 214 FPS on the HUD): the server
+  thread (the zombies' AI and the scripts) used 7% of a core and waited 82% of its
+  samples; the main thread 76%, each job worker 56%, the Window thread 48%, the
+  backend 29%, the same split as at the start of the level, and the same functions
+  on top (the streamer's slot walk 6.8% of the main thread). Nothing grew with the
+  zombies on this PC.
 - What the main thread waits for: sampled again with stack scans (2,500 samples), 98%
   of its `WaitForSingleObject` time was `Sys_WaitForSingleObject` (0x14212BC50) called
   from 0x141CD0B50, a renderer function (near `R_AddCmdDrawUIQuads`): the main thread
