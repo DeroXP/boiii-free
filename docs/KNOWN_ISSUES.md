@@ -178,6 +178,12 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## The game and Xerces
 
+- **Before beta.27: the game could close as the main menu came up.** Rarely, at
+  the start, the game closed with a crash report naming `hksi_lua_getinfo`; and
+  any error in something Xerces asked of the game's menu scripts, or in one of
+  Xerces' own console commands or background tasks, closed the game. Fixed in
+  beta.27: such an error is written to the console or the log and the game goes on.
+
 - **Before beta.26: a custom map failed after joining someone.** After joining a
   host whose map scripts first was off, or a host without Xerces, the next custom
   map you started yourself from the lobby with a mod that ships the same scripts
