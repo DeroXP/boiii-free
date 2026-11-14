@@ -503,7 +503,10 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   once after (`xerces_crash_test dvars`, `dvars-wait.ps1`): nothing changes in the wait;
   across it only the client's own (`cl_ingame`, `all_players_are_connected`, `cg_fov` and
   the like). Which engine code holds the connect is not found; a `map` from inside a level
-  goes through without such a wait.
+  goes through without such a wait, and so does the way back to the menus
+  (`menu-return.ps1`, `disconnect` from Shadows of Evil: `CONNECTING` 1.2 s after it, the
+  menus' server loading 3.4 s later and up at 5.7 s, the client `CONNECTED` at its
+  level.time 200 and active 1.2 s after that).
 - The wait hid the texture streaming. With the server's clock at 4x only while the client
   waits, and 1 again the frame it moves on, the wait took 1.1 s but `LOADING` then took
   5.9 s ("Awaiting textures" is `ls_status` across it), and the level started 2 s later
