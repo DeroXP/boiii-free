@@ -694,4 +694,9 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   update), which does not run while the start sleeps, so the three wait on each other
   until something gives after about 3 s. Not proved. The Stream thread through the same
   pause (`pause-db-sample.ps1 -Thread Stream`): 99.8% waiting for work in its loop
-  (0x142122F40): nobody asks for the sound banks' data in those seconds.
+  (0x142122F40): nobody asks for the sound banks' data in those seconds. "Sound Mix" (98%,
+  its mixing loop's wait) and "Sound Decode" (99.7%, waiting for work) are idle as well:
+  every thread on the way waits and none works, so the request that would move the banks
+  along is not made while the start sleeps. Which code makes it (the main loop's sound
+  update is the likeliest) is the next step; then whether the start's loop can be made to
+  let it run, or the banks be asked for before it.
