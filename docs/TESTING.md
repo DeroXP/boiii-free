@@ -3926,3 +3926,6 @@ What a load of Shadows of Evil from the menus waits on (engine-re.md, "A map's l
       StreamAsync, Backend, Window) and a frame-time run across it: the last 4 s of
       streaming go at one batch of reads per two loading-screen frames (about 57 a
       second), not at the disk's or the processor's pace.
+- [x] Streaming settings from the console before `map` (`loadtime-dvar.ps1`):
+      `waitForStreamer` 0, 1, 2 and `sv_mapSwitchPerloadFrontendStreamerFrames` 0 change
+      nothing; `streamMBPerSecond` 30 adds 1.8 s, 1000 nothing (its default 0 is no limit).

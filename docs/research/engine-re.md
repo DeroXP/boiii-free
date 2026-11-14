@@ -417,3 +417,10 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   ring of 0x8000 bytes at 0x1452FDF88 in 0x20-byte steps), called from 0x1413398B0.
   If the loading screen drew as often as the main loop runs, part 3 would take about a
   second instead of four.
+- Streaming settings tried (each set from the console just before `map`, one load each,
+  `bench\20261113-left\loadtime-dvar.ps1`; the console's answers say their ranges):
+  `waitForStreamer` (0 to 2, default 1) at 0, 1 and 2: 15.5, 15.2 and 15.4 s, no change.
+  `streamMBPerSecond` (0 to 1000, default 0, which is no limit): 30 made the load 1.8 s
+  longer, 1000 changed nothing. `sv_mapSwitchPerloadFrontendStreamerFrames` (default
+  600) at 0: no change. `r_streamTextureMemoryMax` is 800 and `r_stream` 7. The level
+  starts on the zombies' black screen, so what streams in its first seconds is not seen.
