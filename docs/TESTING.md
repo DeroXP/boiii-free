@@ -3422,10 +3422,12 @@ Checked and left:
       logged (`launcher.gpu.lost`), told in a message box, and the launcher closes.
       Rebuilding the device in place is not built. The ten screens in dry runs, 0 warnings
       or errors (the new frame check); a device loss itself was not brought about.
-- [ ] Other mistyped CLI commands (mods, plan, logs) still say "Xerces is not running".
-- [ ] Judged real but not fixed by the review's sceptics: the stall sampler's suspend of the
+- [x] Other mistyped CLI commands (mods, plan, logs) still said "Xerces is not running":
+      fixed 2026-11-14 (below).
+- [x] Judged real but not fixed by the review's sceptics: the stall sampler's suspend of the
       main thread, false "is a dependency of it" errors, the map-or-mod rule, Discord
-      callbacks during close, `plan apply --vanilla` rewriting installed.json.
+      callbacks during close, `plan apply --vanilla` rewriting installed.json: all five
+      fixed 2026-11-14 (below).
 
 Tried: 617 unit tests pass; the launcher's First run, Friends, Settings and Home in dry
 runs, 0 warnings or errors; the CLI checks above.
@@ -3711,3 +3713,99 @@ instead of after its `Sleep(1)` (DESIGN.md 12.4, docs/research/engine-re.md).
       under each flag's own name.
 - [ ] The user's own play: whether aiming feels any different, and whether it should
       be on by default.
+
+## The client on tonight's build, and a freeze report end to end (2026-11-14 night)
+
+- [x] `m1-check.ps1 -Live`, all nine cases, on the build with the thread names and both
+      wake flags' code (`bench\20261113-left\m1-all.ps1`): vanilla 4, modded 6, cli with
+      load and unload 9, reopen 8, cliapply 8, dvars 8, crash 7, restart 4, safeoff 6:
+      60 pass, none fails (as beta.23's).
+- [x] The backend's crash tests (`tests/test_crash*.py`): 126 pass.
+- [x] A real freeze report end to end, never the production backend: a throwaway
+      backend on 127.0.0.1:8765 (SQLite in the scratchpad), `XERCES_CRASH_URL` pointing
+      at it for every process (`xerces_cli crash list` printed that URL), "Send crash
+      reports" on in the bench home for the run only
+      (`bench\20261113-left\freeze-local-report.ps1`): `xerces_crash_test freeze` in the
+      menus, the game closed at 60 s, `xerces_cli crash send` 201; the stored report
+      has reason `freeze`, thread `main`, the 528 KB dump, and the text with the game's
+      thread names. It showed driver frames as `unknown+0x7FFC...` in a freeze 10 s
+      after the start (the watchdog's module list was older than the driver).
+- [x] Fixed (the module from the symbol engine's list, the list every 5 s), with "What
+      the frame waits for" new: `freeze-local-report.ps1 -Kind windowhang` (the Window
+      thread held in a message hook), report stored by the local backend: "What the
+      frame waits for: the main thread waits for the render backend; the render backend
+      waits for the Window thread to present; the Window thread is in its message loop,
+      inside boiii.exe (a hook in the window's messages)", the summary ending with that
+      last link, driver frames as `nvwgf2umx.dll+0xA60701 (NVDEV_Thunk+0x23491)`.
+- [x] 620 unit tests pass (new: the wait chain's cases).
+- [ ] A real freeze in Present (a driver hang), when one happens.
+
+## The review's five leftover findings, and two more reviews (2026-11-14 night)
+
+The five findings an earlier review's sceptics had judged real but left, the CLI's
+messages, and what two new reviews of everything since beta.26 found:
+
+- [x] False "it is a dependency of it" errors: every mod the user put between a
+      dependency and its dependent was named as a dependency of it. Now a pair is blamed
+      only when the lower mod depends on the upper one through dependency edges alone
+      (`planner.cpp`, `reachable_by`). Unit test: a.mod, b.mod, c.mod with c.mod needing
+      a.mod gives one error, about a.mod, none about b.mod; it fails with the fix taken
+      out (tried).
+- [x] `plan apply --vanilla` / `--mods-off` rewrote installed.json with an empty index
+      (those launches skip the catalog scan): reproduced on a copy of a test home (39
+      items to 42 bytes on a dry launch). Now the CLI hands the launch no catalog then,
+      and the file is left as it is: unchanged after `--vanilla` and `--mods-off` dry
+      launches, still written (4,802 bytes) by a modded one.
+- [x] The map-or-mod rule: the launcher took an item as a map only for `"Type": "map"`
+      in strictly parsed JSON. Now as the client decides (`workshop/installed.cpp`):
+      "Type" or "type", "map...", "usermap...", "custom map..." a map and anything with
+      "mod" a mod, workshop.json read leniently (an ANSI-saved title keeps its Workshop
+      id, its title shown as valid UTF-8), the zone files when there is no Type
+      (`legacy_kind`), and the game's own `usermaps` and `mods` folders decide for the
+      items in them (`scan_options::folder_kind`). Unit tests for each case and a
+      catalog test of the three folders.
+- [x] Discord callbacks at the launcher's close could reach the half-destroyed Friends
+      screen: `stop()` now makes nothing active and drops the handlers before the last
+      `Discord_RunCallbacks`.
+- [x] The stall sampler (Record frame times) suspended the main thread and then called
+      `RtlLookupFunctionEntry`, which takes ntdll's function-table lock: a main thread
+      stopped in a DLL's load would have hung the game for good. It now looks the
+      function up in each module's own `.pdata`, noted every 2 s while the main thread
+      runs (the game's image added from its base, as no Windows list has it), with no
+      lock.
+- [x] The CLI: a mistyped action of mods, plan, logs or diag says `Unknown command "mods
+      frobnicate". Try --help.` (exit 1); only `index` and `test`, which talk to a
+      running Xerces, say it is not running (tried both).
+- [x] A review of everything since beta.26 (no high-severity defects): the
+      `lobbyLaunchGame` wrapper now drops a joined host's map-first rule only when this
+      game hosts its game lobby at that moment (a mod's menu or the console running the
+      command on a client in another host's lobby, which the engine refuses, kept the
+      host's rule from then on); the wrap is checked every second and put back when the
+      entry holds the engine's function again, never over another wrapper's; a `map`
+      typed in a match drops the rule too (`party.cpp`); the wake flags act only at the
+      two loops' own calls of `Sleep` (return addresses 0x1422BC302 and 0x1422BB5D6), so
+      a `Sleep(1)` of those threads anywhere else cannot spin.
+- [x] A review of the freeze report's changes (no hang, crash or privacy issue): the
+      wait chain now goes by exact call sites. The backend must be at its Present send
+      (not its vsync sleep just before), the main thread in a system call under the
+      renderer's wait, and the Window thread is "in Present" only at the window
+      procedure's Present call (SetFullscreenState and CreateSwapChain by their own
+      calls, any other message "with another message"); asleep in its loop (with or
+      without the wake flags' stub) it "does not hold the frame" (the stacks are read one
+      after another); in a PeekMessage with someone's code innermost it is "a hook in the
+      window's messages"; in the cursor update it says so. The summary's link is cut at
+      90 characters so the script after it stays.
+- [x] 623 unit tests pass.
+- [x] On the final build: both wake flags in Shadows of Evil (`wake-recheck.ps1`): a mouse
+      move reached the game's counter in 259 us on average (300 of 300 woke the Input
+      thread), about 4,700 Presents in 30 s were taken early, `clean_exit`; the map-first
+      wrap with the host check (`lobby-launch.ps1 -Tag ishost`, a stale rule of 0, then
+      Solo Game, SANCTUM OBITUS with DS4C): five scripts kept by the map, no link error;
+      `freeze-local-report.ps1 -Kind windowhang` to the local backend: "the Window thread
+      is in its message loop, inside boiii.exe (a hook in the window's messages)".
+- [x] The map matrix of Nov 5 again (`bench\\20261113-left\\maps-all.ps1`, the three-mod
+      stack through Xerces.exe, the maps home with larger zone memory off): zm_deepboom,
+      zm_blundeezy, zm_wizardcastle, zm_log_overunder, zm_zod, zm_mw2rust and zm_ccube
+      in the match and back to the menu; zm_backrooms and zm_supermario64 "ran out of
+      memory" 6 to 7 s into the load, as the planner says for them without larger zone
+      memory (414 and 66 MiB over).

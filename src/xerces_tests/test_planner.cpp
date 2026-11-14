@@ -149,6 +149,29 @@ TEST_CASE("planner: an order that breaks a dependency is an error") {
   CHECK_EQ(ids(result), (std::vector<std::string>{"a.mod", "b.mod"}));
 }
 
+TEST_CASE("planner: a mod between a dependency and its dependent is no "
+          "dependency") {
+  // c.mod needs a.mod, and the user put a.mod first with b.mod between: the
+  // one error is about a.mod above c.mod, none about b.mod
+  const std::vector<installed_content> catalog = {
+      make(mod("a.mod", "1.0.0")), make(mod("b.mod", "1.0.0")),
+      make(mod("c.mod", "1.0.0", R"(,"dependencies":[{"id":"a.mod"}])"))};
+  const plan result =
+      resolve_plan(catalog, request_for({"a.mod", "b.mod", "c.mod"}));
+  std::size_t breaks = 0;
+  for (const auto &item : result.diags.items()) {
+    if (item.code == "plan.order.breaks_dependency") {
+      ++breaks;
+      CHECK(item.message.find("a.mod") != std::string::npos);
+      CHECK(item.message.find("b.mod") == std::string::npos);
+    }
+  }
+  CHECK_EQ(breaks, std::size_t{1});
+  // c.mod still ends up above a.mod
+  const auto order = ids(result);
+  CHECK(std::ranges::find(order, "c.mod") < std::ranges::find(order, "a.mod"));
+}
+
 TEST_CASE("planner: hints decide where nothing else does") {
   const std::vector<installed_content> catalog = {
       make(mod("x.mod", "1.0.0",

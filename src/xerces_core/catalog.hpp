@@ -157,6 +157,11 @@ struct scan_options {
   // Where the folders come from, which decides where the client looks for a
   // mod's or map's asset pool file (asset_limits.hpp).
   content_layout layout = content_layout::game_folder;
+  // The game's own mods and usermaps folders: the client takes every item
+  // there as a mod or a map whatever its workshop.json says (its scan,
+  // workshop/installed.cpp), and so does a legacy item's manifest here.
+  // Steam's Workshop folder: none, each item decides (legacy_kind).
+  std::optional<content_kind> folder_kind;
   // Files hashed at once; 0 is default_hash_threads(directory) (file_hash.hpp).
   unsigned hash_threads = 0;
 };

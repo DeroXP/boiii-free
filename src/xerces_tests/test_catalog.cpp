@@ -228,3 +228,28 @@ TEST_CASE("catalog: description files over 1 MiB are not read") {
   CHECK(listed);
   fs::remove_all(dir);
 }
+
+TEST_CASE(
+    "catalog: the game's mods and usermaps folders decide an item's kind") {
+  // The same legacy item, a workshop.json saying "mod", in each place the
+  // launcher scans: the client takes it as a map under usermaps, as a mod
+  // under mods, and by its workshop.json in Steam's Workshop folder
+  const fs::path dir = fresh_dir("folder_kind");
+  for (const char *root : {"usermaps", "mods", "workshop"}) {
+    write_bytes(dir / root / "zm_test" / "zone" / "workshop.json",
+                R"({"PublisherID":"3735179543","Title":"Test","Type":"mod"})");
+    write_bytes(dir / root / "zm_test" / "zone" / "zm_test.ff", "ff");
+  }
+  const auto kind_in = [&](const char *root,
+                           std::optional<content_kind> folder_kind) {
+    scan_options options;
+    options.folder_kind = folder_kind;
+    const catalog_scan scan = scan_mods_directory(dir / root, options);
+    REQUIRE_EQ(scan.catalog.size(), std::size_t{1});
+    return scan.catalog.front().info.kind;
+  };
+  CHECK(kind_in("usermaps", content_kind::map) == content_kind::map);
+  CHECK(kind_in("mods", content_kind::mod) == content_kind::mod);
+  CHECK(kind_in("workshop", std::nullopt) == content_kind::mod);
+  fs::remove_all(dir);
+}

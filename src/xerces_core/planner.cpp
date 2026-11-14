@@ -368,6 +368,31 @@ public:
   explicit order_graph(std::vector<std::string> nodes)
       : nodes_(std::move(nodes)) {}
 
+  // Whether `to` is below `from` through edges of one kind alone
+  bool reachable_by(const std::string &from, const std::string &to,
+                    const reason why) const {
+    std::vector<std::string> stack{from};
+    std::set<std::string> seen;
+    while (!stack.empty()) {
+      const std::string current = stack.back();
+      stack.pop_back();
+      if (current == to) {
+        return true;
+      }
+      if (!seen.insert(current).second) {
+        continue;
+      }
+      if (const auto it = above_.find(current); it != above_.end()) {
+        for (const std::string &lower : it->second) {
+          if (direct(current, lower) == why) {
+            stack.push_back(lower);
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   bool reachable(const std::string &from, const std::string &to) const {
     std::vector<std::string> stack{from};
     std::set<std::string> seen;
@@ -1174,7 +1199,13 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
   }
   for (std::size_t i = 0; i < user_order.size(); ++i) {
     for (std::size_t j = i + 1; j < user_order.size(); ++j) {
-      if (!graph.add(user_order[i], user_order[j], order_graph::reason::user)) {
+      if (!graph.add(user_order[i], user_order[j], order_graph::reason::user) &&
+          // Only when the lower one really depends on the upper one: a mod
+          // that merely sits between a dependency and its dependent fails
+          // here too (through the user's other pairs), and was named as a
+          // dependency it is not (a review, 2026-11-13)
+          graph.reachable_by(user_order[j], user_order[i],
+                             order_graph::reason::dependency)) {
         diags.error("plan.order.breaks_dependency", "/mods",
                     "You put " + display_name(selected, user_order[i]) +
                         " above " + display_name(selected, user_order[j]) +

@@ -133,6 +133,11 @@ catalog_state scan_catalog(const game_state &game, hash_cache &cache,
     // Where the client looks for each mod's asset pool file.
     options.layout = from.name == "workshop" ? content_layout::workshop
                                              : content_layout::game_folder;
+    if (from.name == "usermaps") {
+      options.folder_kind = content_kind::map;
+    } else if (from.name == "mods") {
+      options.folder_kind = content_kind::mod;
+    }
     options.hash_threads =
         hash_threads != 0 ? hash_threads : default_hash_threads(from.dir);
     result.hash_threads = std::max(result.hash_threads, options.hash_threads);

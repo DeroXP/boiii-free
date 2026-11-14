@@ -854,6 +854,9 @@ catalog_scan scan_mods_directory(const std::filesystem::path &directory,
     const auto digests = digests_of(mine, &unreadable);
     installed_content content =
         load_content(folder, digests, unreadable, taken, scan.diags);
+    if (options.folder_kind && content.info.legacy) {
+      content.info.kind = *options.folder_kind;
+    }
     read_pool_file(content, folder, options.layout, scan.diags);
     read_zone_headers(content, folder);
     if (content.info.id.empty()) {

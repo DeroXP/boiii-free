@@ -8,6 +8,8 @@
 #include "perf_probe.hpp"
 #include "runtime.hpp"
 
+#include <psapi.h>
+
 #include <component/command.hpp>
 #include <component/scheduler.hpp>
 #include <game/game.hpp>
@@ -332,6 +334,101 @@ std::atomic<std::uint32_t> stall_count{0};
 std::atomic<std::uint32_t> stalls_dropped{0};
 std::atomic<int> writes_pending{0}; // end_run's writes not done yet
 
+// The loaded modules' function tables, noted by the sampler while the main
+// thread runs, never while it is stopped. RtlLookupFunctionEntry takes
+// ntdll's function-table lock, which the stopped main thread may hold (in a
+// DLL's load or unload): the sampler would then wait for ever and the game
+// stay stopped (a review, 2026-11-13). The lookup below takes no lock. Only
+// the sampler's thread touches these.
+struct unwind_module {
+  DWORD64 base = 0;
+  DWORD64 size = 0;
+  const RUNTIME_FUNCTION *table = nullptr;
+  DWORD count = 0;
+};
+std::array<unwind_module, 512> unwind_modules{};
+std::size_t unwind_module_count = 0;
+
+bool add_unwind_module(const DWORD64 base) {
+  if (unwind_module_count >= unwind_modules.size()) {
+    return false;
+  }
+  const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(base);
+  if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
+    return false;
+  }
+  const auto *nt =
+      reinterpret_cast<const IMAGE_NT_HEADERS64 *>(base + dos->e_lfanew);
+  if (nt->Signature != IMAGE_NT_SIGNATURE) {
+    return false;
+  }
+  const IMAGE_DATA_DIRECTORY &exceptions =
+      nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+  if (exceptions.VirtualAddress == 0 || exceptions.Size == 0) {
+    return false;
+  }
+  unwind_modules[unwind_module_count++] = {
+      base, nt->OptionalHeader.SizeOfImage,
+      reinterpret_cast<const RUNTIME_FUNCTION *>(base +
+                                                 exceptions.VirtualAddress),
+      static_cast<DWORD>(exceptions.Size / sizeof(RUNTIME_FUNCTION))};
+  return true;
+}
+
+// The game's image is mapped by the client, so it is in no module list of
+// Windows': it goes first, from its base. Headers are read under a guard: a
+// module may be unloaded between the list and the read.
+__declspec(noinline) void read_unwind_modules() {
+  unwind_module_count = 0;
+  add_unwind_module(game::get_engine_base());
+  HMODULE handles[512]{};
+  DWORD needed = 0;
+  if (!EnumProcessModules(GetCurrentProcess(), handles, sizeof(handles),
+                          &needed)) {
+    return;
+  }
+  const std::size_t count =
+      std::min<std::size_t>(needed / sizeof(HMODULE), std::size(handles));
+  for (std::size_t i = 0; i < count; ++i) {
+    add_unwind_module(reinterpret_cast<DWORD64>(handles[i]));
+  }
+}
+
+void note_unwind_modules() {
+  __try {
+    read_unwind_modules();
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+  }
+}
+
+// The function entry for pc from the noted tables (a binary search, no lock)
+__declspec(noinline) const RUNTIME_FUNCTION *
+find_function_entry(const DWORD64 pc, DWORD64 &image_base) {
+  for (std::size_t m = 0; m < unwind_module_count; ++m) {
+    const unwind_module &module = unwind_modules[m];
+    if (pc < module.base || pc >= module.base + module.size) {
+      continue;
+    }
+    const auto rva = static_cast<DWORD>(pc - module.base);
+    std::size_t low = 0;
+    std::size_t high = module.count;
+    while (low < high) {
+      const std::size_t mid = (low + high) / 2;
+      const RUNTIME_FUNCTION &entry = module.table[mid];
+      if (rva < entry.BeginAddress) {
+        high = mid;
+      } else if (rva >= entry.EndAddress) {
+        low = mid + 1;
+      } else {
+        image_base = module.base;
+        return &entry;
+      }
+    }
+    return nullptr;
+  }
+  return nullptr;
+}
+
 // Unwinds into out.pc. A fault while reading the stopped thread's stack ends
 // the walk with what was found: the sampler must never take the game down.
 void walk_stack(CONTEXT &context, stall_sample &out) {
@@ -339,15 +436,16 @@ void walk_stack(CONTEXT &context, stall_sample &out) {
     while (out.depth < stall_stack_depth && context.Rip) {
       out.pc[out.depth++] = context.Rip;
       DWORD64 image_base = 0;
-      const PRUNTIME_FUNCTION function =
-          RtlLookupFunctionEntry(context.Rip, &image_base, nullptr);
+      const RUNTIME_FUNCTION *function =
+          find_function_entry(context.Rip, image_base);
       if (!function) {
         break;
       }
       PVOID handler_data = nullptr;
       DWORD64 establisher_frame = 0;
-      RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, context.Rip, function,
-                       &context, &handler_data, &establisher_frame, nullptr);
+      RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, context.Rip,
+                       const_cast<PRUNTIME_FUNCTION>(function), &context,
+                       &handler_data, &establisher_frame, nullptr);
     }
   } __except (EXCEPTION_EXECUTE_HANDLER) {
   }
@@ -383,8 +481,14 @@ void stall_sampler() {
   HANDLE thread = nullptr;
   std::uint32_t thread_id = 0;
   std::int64_t last_sample = 0;
+  ULONGLONG modules_noted = 0;
   for (;;) {
     Sleep(4);
+    // The function tables, every 2 s, while the main thread runs
+    if (const ULONGLONG tick = GetTickCount64(); tick - modules_noted >= 2000) {
+      note_unwind_modules();
+      modules_noted = tick;
+    }
     const std::int64_t last = last_main_frame.load(std::memory_order_relaxed);
     if (last == 0) {
       continue; // no main frame yet (start-up, loading)

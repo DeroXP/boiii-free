@@ -179,6 +179,47 @@ TEST_CASE("manifest: legacy mods get a synthesized manifest") {
   CHECK(synthesize_legacy(map, {}).kind == content_kind::map);
 }
 
+TEST_CASE("manifest: a legacy item is a map or a mod as the game decides") {
+  // workshop.json's Type in any of the client's spellings
+  for (const char *json :
+       {R"({"Type":"map"})", R"({"type":"map"})", R"({"Type":"Usermap"})",
+        R"({"Type":"custom map"})", R"({"Type":"MAP"})"}) {
+    CHECK(legacy_kind(std::string(json), {}) == content_kind::map);
+  }
+  CHECK(legacy_kind(std::string(R"({"Type":"mod"})"), {}) == content_kind::mod);
+  CHECK(legacy_kind(std::string(R"({"Type":"Zombies Mod"})"), {}) ==
+        content_kind::mod);
+  // Saved in the ANSI code page (an accented title): still read, as the
+  // client reads it, and the title shown is valid UTF-8
+  const std::string ansi =
+      "{\"PublisherID\":\"3735179543\",\"Title\":\"Caf\xE9 "
+      "Map\",\"Type\":\"map\"}";
+  CHECK(legacy_kind(ansi, {}) == content_kind::map);
+  legacy_input accented;
+  accented.folder = "3735179543";
+  accented.workshop_json = ansi;
+  const manifest m = synthesize_legacy(accented, {});
+  CHECK(m.kind == content_kind::map);
+  CHECK_EQ(m.id, "ws.3735179543"); // not local.<folder>
+  CHECK(m.name.starts_with("Caf"));
+  CHECK(m.name.find("\xE9") == std::string::npos ||
+        m.name.find("\xC3\xA9") != std::string::npos);
+  // No Type: the zone files decide, in zone/ or the folder itself only
+  CHECK(legacy_kind(std::nullopt,
+                    {"zone/zm_island.ff", "zone/en_zm_island.ff"}) ==
+        content_kind::map);
+  CHECK(legacy_kind(std::nullopt, {"mp_test.ff"}) == content_kind::map);
+  CHECK(legacy_kind(std::nullopt, {"zone/core_mod.ff", "zone/zm_x.ff"}) ==
+        content_kind::mod);
+  CHECK(legacy_kind(std::nullopt, {"zone/mod.ff"}) == content_kind::mod);
+  CHECK(!legacy_kind(std::nullopt, {"deep/zone/zm_x.ff", "readme.txt"}));
+  CHECK(!legacy_kind(std::string(R"({"Type":"other"})"), {}));
+  // A Type the client cannot place falls to the zone files, as there
+  CHECK(legacy_kind(std::string(R"({"Type":""})"), {"zone/zm_x.ff"}) ==
+        content_kind::map);
+  CHECK(workshop_json_is_map(R"({"type":"usermap"})"));
+}
+
 TEST_CASE("manifest: canonical JSON round trip") {
   const auto result = parse_manifest(xerces_tests::read_file(
       xerces_tests::fixtures_dir() / "manifests" / "design-example.json"));

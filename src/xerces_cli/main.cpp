@@ -1583,13 +1583,15 @@ int main(int argc, char **argv) {
         group == "quit") {
       return cmd_live(args, group);
     }
-    const std::set<std::string> live = {"status", "mods",   "plan",  "load",
-                                        "unload", "reload", "index", "sig",
-                                        "bench",  "test",   "diag",  "logs"};
+    // Only the groups that talk to a running Xerces and are not handled
+    // above; a mistyped action of a group handled above (mods, plan, logs,
+    // diag) is an unknown command, as for packs and sig
+    const std::set<std::string> live = {"index", "test"};
     if (live.contains(group)) {
       return not_running(group + (action.empty() ? "" : " " + action));
     }
-    std::cerr << "Unknown command \"" << group << "\". Try --help.\n";
+    std::cerr << "Unknown command \"" << group
+              << (action.empty() ? "" : " " + action) << "\". Try --help.\n";
     return exit_error;
   } catch (const std::exception &e) {
     std::cerr << "error: " << e.what() << "\n";

@@ -639,7 +639,13 @@ marked **legacy**: id `ws.<publishedfileid>` or `local.<folder>` (lowercased,
 invalid characters replaced, a short hash suffix on collisions), name from
 `workshop.json`, version `0.0.0+ws.<time_updated>` or a content hash,
 `native_code` set when the folder contains executable files, assets from the
-index (6.1).
+index (6.1). A map or a mod as the game client decides (`legacy_kind`, 2026-11-14):
+in the game's `usermaps` folder a map and in its `mods` folder a mod, whatever
+`workshop.json` says; in Steam's Workshop folder by `workshop.json`'s "Type" or
+"type" ("map", "usermap" or "custom map" at its start a map, anything with "mod" a
+mod), the file read leniently as the client reads it (one saved in the ANSI code
+page keeps its Workshop id), and without either by its zone files (`mod.ff` or
+`*_mod.ff` a mod, a `zm_`/`mp_`/`cp_` zone a map).
 
 ### 5.3 Resolving a plan
 

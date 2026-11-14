@@ -786,7 +786,11 @@ int cmd_plan_apply(const arguments &args) {
   in.paths = &home.paths;
   in.config = &home.config;
   in.game = &home.game;
-  in.catalog = &home.catalog.items;
+  // The catalog only when it was scanned: a vanilla or mods-off launch skips
+  // the scan, and an empty catalog would rewrite installed.json with nothing
+  // in it, so a join could no longer tell this PC's copies of a host's items
+  // (a review, 2026-11-13). Without one the launch leaves the file as it is.
+  in.catalog = modded ? &home.catalog.items : nullptr;
   in.mode = mode;
   in.modded = !vanilla;
   in.mods_off = mods_off;

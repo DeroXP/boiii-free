@@ -65,6 +65,15 @@ void discord_presence::start(const std::filesystem::path &program,
 }
 
 void discord_presence::stop(bool forget) {
+  // The callbacks still pending run below, and none of them may reach the
+  // screen that set the handlers: at the launcher's close it is half
+  // destroyed already (its strings, RmlUi's data model, the documents), and
+  // a Discord event that came in the last moments would write into freed
+  // memory (a review, 2026-11-13). So nothing is active from here on.
+  if (active == this) {
+    active = nullptr;
+  }
+  handlers_ = {};
   if (started_) {
     Discord_ClearPresence();
     Discord_RunCallbacks();
@@ -72,9 +81,6 @@ void discord_presence::stop(bool forget) {
     started_ = false;
     connected_ = false;
     log_info("launcher.discord.stop", "disconnected from the Discord app");
-  }
-  if (active == this) {
-    active = nullptr;
   }
   if (forget) {
     const std::string path = key_path();

@@ -25,6 +25,12 @@ inline constexpr int max_depth = 64;
 // `column` are 1-based.
 parse_result parse(std::string_view text);
 
+// As parse, but bytes that are not UTF-8 are taken as they are (a file saved
+// in the ANSI code page): for reading what the game reads the same way, such
+// as workshop.json. A string from it may not be valid UTF-8: pass text meant
+// for display through valid_utf8.
+parse_result parse_lenient(std::string_view text);
+
 // Canonical form: object keys sorted by their UTF-8 bytes, no whitespace,
 // integral numbers below 1e21 written out in full, other numbers in their
 // shortest round-trip form, strings with only the escapes JSON requires.

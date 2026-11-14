@@ -899,13 +899,61 @@ std::string manifest_to_json(const manifest &value) {
   return json::canonical(doc);
 }
 
-bool workshop_json_is_map(std::string_view workshop_json) {
-  const auto parsed = json::parse(workshop_json);
-  if (!parsed.ok || !parsed.document.IsObject()) {
-    return false;
+namespace {
+// workshop.json's "Type" (or "type") as the client normalizes it
+std::optional<content_kind> kind_of_type(const rapidjson::Value &doc) {
+  for (const char *key : {"Type", "type"}) {
+    const auto type = json::get_string(doc, key);
+    if (!type || type->empty()) {
+      continue;
+    }
+    const std::string text = lower_ascii(*type);
+    if (text.starts_with("map") || text.starts_with("usermap") ||
+        text.starts_with("custom map")) {
+      return content_kind::map;
+    }
+    if (text.find("mod") != std::string::npos) {
+      return content_kind::mod;
+    }
+    return std::nullopt;
   }
-  const auto type = json::get_string(parsed.document, "Type");
-  return type && lower_ascii(*type) == "map";
+  return std::nullopt;
+}
+} // namespace
+
+bool workshop_json_is_map(std::string_view workshop_json) {
+  const auto parsed = json::parse_lenient(workshop_json);
+  return parsed.ok && parsed.document.IsObject() &&
+         kind_of_type(parsed.document) == content_kind::map;
+}
+
+std::optional<content_kind>
+legacy_kind(const std::optional<std::string> &workshop_json,
+            const std::vector<std::string> &files) {
+  if (workshop_json) {
+    const auto parsed = json::parse_lenient(*workshop_json);
+    if (parsed.ok && parsed.document.IsObject()) {
+      if (const auto kind = kind_of_type(parsed.document)) {
+        return kind;
+      }
+    }
+  }
+  bool map_zone = false;
+  for (const std::string &path : files) {
+    std::string name = lower_ascii(path);
+    if (name.starts_with("zone/")) {
+      name = name.substr(5);
+    }
+    if (name.find('/') != std::string::npos || !name.ends_with(".ff")) {
+      continue; // the client looks in zone/ and the folder itself only
+    }
+    if (name == "mod.ff" || name.ends_with("_mod.ff")) {
+      return content_kind::mod;
+    }
+    map_zone = map_zone || name.starts_with("zm_") || name.starts_with("mp_") ||
+               name.starts_with("cp_");
+  }
+  return map_zone ? std::optional(content_kind::map) : std::nullopt;
 }
 
 manifest synthesize_legacy(const legacy_input &input,
@@ -916,20 +964,27 @@ manifest synthesize_legacy(const legacy_input &input,
 
   std::optional<std::string> publisher_id;
   std::optional<std::string> title;
+  // The client reads workshop.json without checking its encoding: one saved
+  // in the ANSI code page (an accented title) is still the item's, with its
+  // Workshop id and kind (a review, 2026-11-13).
   if (input.workshop_json) {
-    const auto parsed = json::parse(*input.workshop_json);
+    const auto parsed = json::parse_lenient(*input.workshop_json);
     if (parsed.ok && parsed.document.IsObject()) {
       publisher_id = json::get_string(parsed.document, "PublisherID");
-      title = json::get_string(parsed.document, "Title");
-      if (const auto type = json::get_string(parsed.document, "Type");
-          type && lower_ascii(*type) == "map") {
-        m.kind = content_kind::map;
+      if (const auto text = json::get_string(parsed.document, "Title")) {
+        title = json::valid_utf8(*text, 4096);
       }
     } else if (diags != nullptr) {
       diags->warning("legacy.workshop_json", input.folder,
                      "workshop.json in " + input.folder +
                          " is not valid JSON; the folder name is used.");
     }
+  }
+
+  // A map as the client decides it in Steam's Workshop folder; the game's
+  // own mods and usermaps folders decide by themselves (scan_options).
+  if (legacy_kind(input.workshop_json, input.files) == content_kind::map) {
+    m.kind = content_kind::map;
   }
 
   // A published file id; digits past 64 bits fall back to the folder name.

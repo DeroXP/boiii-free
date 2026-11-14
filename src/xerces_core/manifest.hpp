@@ -150,4 +150,14 @@ std::string strip_color_codes(std::string_view text);
 
 // "Type" from workshop.json, when it is a map.
 bool workshop_json_is_map(std::string_view workshop_json);
+
+// A Workshop item's kind as the game client decides it for an item in
+// Steam's Workshop folder (client workshop/installed.cpp): workshop.json's
+// "Type" or "type", read leniently ("map...", "usermap...", "custom map..."
+// a map; anything with "mod" a mod); without one, its zone files ("mod.ff"
+// or "*_mod.ff" a mod, a zm_/mp_/cp_ .ff a map) in zone/ or the folder
+// itself. `files` are the folder's relative paths, '/' separated.
+std::optional<content_kind>
+legacy_kind(const std::optional<std::string> &workshop_json,
+            const std::vector<std::string> &files);
 } // namespace xerces_core

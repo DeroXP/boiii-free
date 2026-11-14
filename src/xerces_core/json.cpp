@@ -188,7 +188,8 @@ std::optional<std::size_t> too_deep(std::string_view text) {
 }
 } // namespace
 
-parse_result parse(std::string_view text) {
+namespace {
+template <unsigned Flags> parse_result parse_with(std::string_view text) {
   parse_result result;
   std::size_t offset = 0;
   if (const auto deep = too_deep(text)) {
@@ -197,10 +198,7 @@ parse_result parse(std::string_view text) {
         "Nesting is deeper than " + std::to_string(max_depth) + " levels.";
   } else {
     // Iterative, so rapidjson's own parsing does not recurse either.
-    result.document.Parse<rapidjson::kParseValidateEncodingFlag |
-                          rapidjson::kParseFullPrecisionFlag |
-                          rapidjson::kParseIterativeFlag>(text.data(),
-                                                          text.size());
+    result.document.Parse<Flags>(text.data(), text.size());
     if (!result.document.HasParseError()) {
       result.ok = true;
       return result;
@@ -219,6 +217,18 @@ parse_result parse(std::string_view text) {
     }
   }
   return result;
+}
+} // namespace
+
+parse_result parse(std::string_view text) {
+  return parse_with<rapidjson::kParseValidateEncodingFlag |
+                    rapidjson::kParseFullPrecisionFlag |
+                    rapidjson::kParseIterativeFlag>(text);
+}
+
+parse_result parse_lenient(std::string_view text) {
+  return parse_with<rapidjson::kParseFullPrecisionFlag |
+                    rapidjson::kParseIterativeFlag>(text);
 }
 
 std::string canonical(const rapidjson::Value &value) {
