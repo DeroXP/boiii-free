@@ -673,3 +673,15 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   something only that pump moves on (the lobby connection's answer would fit) and, since
   it does not pump, ends by its own timeout, about 3 s. Not proved: the loop is in the
   protection's encrypted code; what it polls would have to be read at run time.
+- Read at run time (late morning): the code is encrypted again once it has run (read at the
+  menus it is still noise), but read from outside while the start is inside it, 10.5 s
+  after launch (`bench\20261113-left\read-code-live.py`: the game's image found by its size
+  and `MZ`, then ReadProcessMemory), it disassembles. The loop at 0x1420EEE34 sleeps (a
+  call through the protection) until `0x141422620(0x141426E00(4))` is true, then calls
+  `SND_InitAfterGlobals` (0x14250BE70). 0x141426E00 asks 0x141426C90 (near
+  `DB_ExpandZoneList`) for the name of a zone, 4 being the kind; 0x141422620 walks the
+  loaded-zone table (65 entries of 0x60 bytes from 0x149910B80, the state at +0xB8) and is
+  true once a zone of that name is in state 2 or 3: a `DB_IsZoneLoaded`. So the start waits
+  for a zone to be loaded, and in the read trace nothing is read during the wait:
+  `core_frontend.ff` starts at its end. What holds that zone's load (asked late; the online
+  pump, stopped meanwhile, would fit) is the next thing to find.
