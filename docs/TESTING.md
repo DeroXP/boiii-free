@@ -4140,6 +4140,14 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
 - [x] The nine in-game M1 cases on the exact build of f7a3c881 (`bench\20261113-left\m1-final5`):
       60 checks pass, none fail; `exit-watch.ps1` saw every game end with code 0 but the
       crash case's (0xFFFFFFFF, its deliberate crash).
+- [x] What the hold is: `sv_reconnectlimit` (engine-re.md, "The hold, found"; the "cfl"
+      handler read in the dump, a test build that logged every connectionless command). With
+      it at 0 from the console, mods off: Shadows of Evil let in at level.time 1,950 instead
+      of 4,950; with the flag, Origins at 150 instead of 3,150 (its 4x ran 39 ms). A test build that set it to 0 for a solo
+      launch next to the 4x (and back once the client was in: the console read 3 afterwards)
+      made Shadows of Evil `in_game` 8.9 s instead of 9.9 s, Origins 6.3 s after `map`, and
+      looked sharp at 6 s; dropped, not committed: the host then arrives at a level.time
+      sooner than the game ever allows, which the level's scripts may count on.
 - [ ] With a friend in the lobby (TWO_PC_TEST.md step 8): no 4x, the level's clock as usual.
 - [ ] Twice this morning the game was gone without a crash report or a Windows error: 0.4 s
       after a `map` from the menus (08:35, the a0d86650 build, no flags) and about 0.3 s into

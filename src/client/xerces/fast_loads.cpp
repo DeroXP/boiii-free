@@ -32,8 +32,14 @@
 //    connect only once its level.time reaches about 4.8 s (Shadows of Evil,
 //    Town Reimagined and MW2 Rust; 3.2 s on Origins): a wait on the game's
 //    clock, not work (no thread is busy, no dvar changes, the online service
-//    is quiet; timescale 2 or 4 shortens it, 1.01 does not). The texture
-//    streaming that 1. speeds up used to hide in it. So while the local
+//    is quiet; timescale 2 or 4 shortens it, 1.01 does not). Most of it is
+//    sv_reconnectlimit (3 s): the server's handler of the client's join
+//    ("cfl", 0x1421ECAC0) ignores it until that much of its time has passed
+//    since the client's last connect. That limit is left as it is: at 0 the
+//    host was in at level.time 150 (Origins) and 1,650 (Shadows of Evil),
+//    sooner than the game ever lets anyone in, which the level's scripts
+//    may not expect; at 4x the client arrives at the usual level.time. The
+//    texture streaming that 1. speeds up used to hide in it. So while the local
 //    client is in CONFIRMLOADING, the server is ours and in GAME, nobody else
 //    is in the lobby and timescale is 1, timescale is 4; it is 1 again as
 //    soon as any of that ends (20 s at most). The server still steps 50 ms

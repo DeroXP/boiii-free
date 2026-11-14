@@ -510,7 +510,30 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   (the one `connect` of the run is the menus' own at the start). So the request to join is
   made early, and the client moves on, with no packet seen here, when the server's clock
   reaches the mark (whether the server or the client checks it is not seen).
-  Which engine code holds the connect is not found; a `map` from inside a level
+- The hold, found (2026-11-14 late morning): `sv_reconnectlimit`. The string "cfl" is
+  loaded at two places in the dump: 0x14134BCAC, in `CL_CheckForResend`, which builds the
+  packet ("cfl", the player's XUID as an int64, a short) and sends it with
+  `NET_OutOfBandData`; and 0x1421F738C, in the server's connectionless-packet dispatch
+  (between "connect", which goes to `SV_DirectConnect`, and the next), which calls
+  0x1421ECAC0. That handler returns at once for the menus' server (`sv.isUILevel`), answers
+  `EXE_MIGRATION_IN_PROGRESS` during a host migration, reads the XUID and the short, finds
+  the player's slot in the game lobby (0x141ECC460) and, with the slot below
+  `com_maxclients`, compares `svs.time` (0x15767A384) minus the slot's client record's
+  time at +0x55E4 (its last connect; records 0xE5170 bytes apart from the pointer at
+  0x15767A398) with `sv_reconnectlimit` (the dvar pointer at 0x157736840, value 3) x 1000:
+  less, and the `cfl` is ignored. Past it, a party check (0x141ECE9F0), then it counts the
+  records in state 3 or above and, with one or all of them there, calls 0x1421E8CE0 (the
+  start). Both dvars named from the 2026-11-04 dump: the pointers lead to dvar records whose
+  debug names are `sv_reconnectlimit` and `com_maxclients`. Tried, mods off: with
+  `sv_reconnectlimit 0` set before `map`, Shadows of Evil let the client in at level.time
+  1,950 instead of 4,950 (3 s sooner, as the limit says), and Origins at 150 instead of
+  3,150 (with the flag, whose 4x then ran 39 ms); the rest on Shadows of Evil (about 1.9 s) also runs on the game's clock (at 4x it
+  took 0.4 s). Not used: at 0 the host is in at level.time 150 to 1,950, sooner than the
+  game ever lets anyone in (the limit holds every client at least 3 s), and the level's
+  scripts may count on that; the flag's 4x keeps the arrival at the usual level.time
+  (4,850 against 4,950). With the limit at 0 and the 4x the level started another second
+  sooner (Shadows of Evil `in_game` 8.9 s against 9.9 s; Origins 6.3 s after `map`).
+  A `map` from inside a level
   goes through without such a wait, and so does the way back to the menus
   (`menu-return.ps1`, `disconnect` from Shadows of Evil: `CONNECTING` 1.2 s after it, the
   menus' server loading 3.4 s later and up at 5.7 s, the client `CONNECTED` at its

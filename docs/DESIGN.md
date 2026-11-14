@@ -3769,8 +3769,11 @@ Backrooms 18.1 against 21.4 s; with both parts and a three-mod stack, Town Reima
 with those alone: its end was held by the client waiting in `CONFIRMLOADING`, which turned
 out to be a wait on the new server's clock: the server lets the local client connect only
 once its `level.time` reaches about 4.8 s on Shadows of Evil, Town Reimagined and MW2 Rust
-(3.2 s on Origins), with no thread busy and no dvar changing meanwhile
-(docs/research/engine-re.md, "A map's load"). So the flag also runs a Zombies level's start
+(3.2 s on Origins), with no thread busy and no dvar changing meanwhile; most of it is
+`sv_reconnectlimit` (3 s), which the server's handler of the client's join ("cfl") checks
+against the client's last connect (docs/research/engine-re.md, "A map's load"). The limit
+is left as it is: at 0 the host was in at level.time 150 to 1,950, sooner than the game
+ever lets anyone in, and the level's scripts may count on that. So the flag also runs a Zombies level's start
 4x on our own server while the local client waits for it: while client 0 is in
 `CONFIRMLOADING`, `sv.state` is `GAME`, the session mode is Zombies, no remote client is in
 the game or party lobby and `timescale` is 1, `timescale` is 4 (the client already takes
