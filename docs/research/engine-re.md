@@ -656,4 +656,6 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   (opened buffered and overlapped, read in milliseconds) are not slow. So a start stands
   still about 2.7 s between two of the menus' zones, waiting on a timer or a flag. A next
   lead: the image has a `FAKE_INTRO_SECONDS` string and a `com_introPlayed` dvar (a
-  minimum time for an intro the launch skips with `-nointro`?); not tried.
+  minimum time for an intro the launch skips with `-nointro`?). `+set com_introPlayed 1` on
+  the command line changed nothing: `symbols` to `frontend` 16.5 s against 16.4 s (unless
+  the start reads it before the command line's dvars are set).
