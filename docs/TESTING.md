@@ -3518,3 +3518,12 @@ Everything after beta.24 in one package: the review's unchecked findings and the
 graphics device (the two sections above), the portrait on CHARACTERS, the preview's
 camera held, the frame-time run written at the quit, `xerces_crash_test throw`, and the
 aim assist after the user's playtest.
+
+- [x] `tools\release.ps1`: lints, 617 unit tests, the CLI smoke test, the three programs'
+      versions; the zip is from a8cc0ea9, SHA-256 b3985500...704816e.
+- [x] The unpacked package started once (`bench\20261113-left\pkg25.ps1`), DS4C on
+      `zm_zod`: all signatures resolved, the DLSS module found, "47 characters from 2
+      sources", CHARACTERS with DEMPSEY 2 in front of the camera and his portrait
+      (`bench\20261112-crash\pkg25-chars.png`), `clean_exit`, no warning or error.
+- [ ] Not tried on the package: the aim assist with a real controller (the user's next
+      playtest), the launcher's screens (the build's were checked in dry runs).
