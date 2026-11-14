@@ -454,7 +454,7 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   nothing at all until "Connected" at 14.9 s: a quiet 5 s, about the length of
   `lobbyTimerZMStartInterval` (5,000 ms). Set to 0 from the console before `map`, or 4 s
   into the load, it changed nothing (whether the second one reached the game was not
-  seen). `lobbymsg_prints 1` printed nothing. Not found yet; the only constant writes of
+  seen). `lobbymsg_prints 1` printed nothing. (What it is: two items down.) The only constant writes of
   the connection state in the readable code are `LOADING` (0x141326EA3) and
   `DISCONNECTED` (0x14135945D), so the others are made in the protection's code or
   through a pointer.
@@ -463,6 +463,44 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   3.0 s after the server (4.8 s on Shadows of Evil), 6.2 s after entering (9.2 s). Nor the
   sound banks: Shadows of Evil's (`zm_zod.all.sabl`, 211 MB) is read by 39.4 s of its trace
   and the console says its sounds are loaded right after, about 5 s before the connect.
+- What it is (2026-11-14 morning): a wait on the new server's clock. `watch_states.py` now
+  prints the server's `level.time` (0x14A1B6C14, what GSC `gettime()` reads) with each
+  change: it restarts at 0 when the server comes up, runs 1:1 with real time, and the
+  client is let go at `level.time` 4,950 on Shadows of Evil, 4,800 on Town Reimagined and
+  MW2 Rust, 3,150 on Origins, every run. `timescale` set once the server is up (with
+  `devmap`; the client already takes the dvar's cheat flag off): 4 ended the wait 0.2 s
+  later (11.4 s instead of 14.5), 2 at 12.5 s, 1.01 changed nothing; so it scales with game
+  time, roughly (2 and 4 do not fit one constant: the client seems to look at it on its own
+  real-time beat). What it is not: the thread CPU watch (`tools/dev/re/thread_cpu.py`,
+  `bench\20261113-left\states-cpu.ps1`, every 200 ms) shows Main at 12 to 25% (the
+  loading screen) and the server thread near idle through the wait; sampled
+  (`wait-sample.ps1`), Main is 81% in the frame limiter's wait and the server thread 98% in
+  its wait for the next frame's signal (0x1421F7790, called from the thread's loop at
+  0x1421F84C0). Only the protection's worker 0 is busy, 100% of a core: with the read
+  trace in the same run (`-ExtraFlags -xerces-io-trace`), it reads the 71.9 MB
+  `RemoteDesktopCompanion.exe` at 8.9 s and works on it until about 17.5 s; but the client
+  left at 14.4 and 14.5 s in two runs whose worker started 1.4 s apart, so not that. Nor
+  the online service: a test build traced every exchange with the client's emulated
+  Demonware (send, receive, service and task): the last before the connect is a rich
+  presence update (service 68) as the load starts, then only the STUN pings every 15 s.
+  Nor `lobby_hostIntervalState` (5,000 ms, the host's lobby state interval; 100 changed
+  nothing). Nor the server's flags after `levelTime` in `server_t` (`isUILevel`,
+  `isRunnable`, `allowSelfTick`, `allowNetPackets`, 0x15767ACA8, now in `watch_states.py`):
+  the new level's server comes up with all but `isUILevel` set and none changes when the
+  client is let in (the menus' server has `isUILevel` 1). Every dvar dumped twice in the wait and once after (`xerces_crash_test dvars`,
+  `dvars-wait.ps1`): nothing changes in the wait; across it only the client's own
+  (`cl_ingame`, `all_players_are_connected`, `cg_fov` and the like). Which script or code
+  holds the connect is not found (the stock Zombies scripts, by the custom maps' identical
+  4.8 s); no other `level.time` gate shows: a `map` from inside a level goes through
+  without one.
+- The wait hid the texture streaming. With the server's clock at 4x only while the client
+  waits, and 1 again the frame it moves on, the wait took 1.1 s but `LOADING` then took
+  5.9 s ("Awaiting textures" is `ls_status` across it), and the level started 2 s later
+  than without. With the every-frame loading screen (`-xerces-fast-loads`, which streams
+  about 3 s sooner) the same 4x left `LOADING` at 0.05 s: Shadows of Evil from `map` to
+  active in 8.4 s against 11.9 s with the flag's other parts. At 8x the wait was 0.53 s
+  but the level started only 0.05 s sooner than at 4x. The flag now does this for a Zombies
+  level when no one else is in the lobby (docs/DESIGN.md, "Faster loads").
 - The read trace also shows the game reading other programs' executables while it loads: 68.6
   MB of `RemoteDesktopCompanion.exe` (Meta Horizon's remote desktop, running on this PC)
   and also `OVRServer_x64.exe`, `explorer.exe`, `nvcontainer.exe`, `MQRDCrashpadHandler.exe`

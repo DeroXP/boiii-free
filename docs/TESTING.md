@@ -4078,3 +4078,63 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       BitLocker's namespace now gets the denial the others get.
 - [x] The nine in-game M1 cases on the exact final build, a0d86650
       (`bench\20261113-left\m1-final3`): 60 checks pass, none fail.
+
+## A Zombies level's start at 4x while the client waits (2026-11-14 morning)
+
+- [x] What the client's `CONFIRMLOADING` wait is (docs/research/engine-re.md, "A map's load"):
+      the server's `level.time` at the moment the client is let go, Shadows of Evil 4,950,
+      Origins 3,150, Town Reimagined and MW2 Rust 4,800 (`states-load.ps1`, `watch_states.py`
+      with `level.time`); `timescale` 4, 2 and 1.01 set once the server is up (`devmap`): the
+      wait ended at 11.4, 12.5 and 14.8 s against 14.5. Ruled out on the way: the protection's
+      worker 0 (busy through the wait, `states-cpu.ps1` with and without the read trace, but
+      not in step with it), the emulated online service (a test build's trace of every
+      exchange, reverted), `lobby_hostIntervalState` 100, any dvar (`dvars-wait.ps1`,
+      `xerces_crash_test dvars`, new). The game was gone once, 0.4 s after a `map` from the
+      menus, with no report, no Windows error and no exit code read (a bench launch, nothing
+      watching; once in about 25 runs this morning); `watch_states.py` now prints the exit
+      code if the game ends.
+- [x] `-xerces-fast-loads` with the level start at 4x, mods off, from the menus: Shadows of Evil
+      in the level 8.8 to 9.6 s after `map` (12.9 s with the flag's other parts alone, 14.6 s
+      without the flag), Origins 7.4 s; "The level's start ran 4x for 1145 ms ... level.time
+      200 to 4850; client state 8" (760 ms on Origins), `LOADING` 0.05 s. Through Xerces.exe
+      (`maps-all.ps1`, no mods): Town Reimagined 11.6 s against 13.9 s, MW2 Rust 11.6 s
+      against 13.8 s, each played 45 s and back to the menu. Without the every-frame loading
+      screen (a test build) the 4x made Shadows of Evil 2 s slower (`LOADING` 5.9 s): the
+      flag does it only with that part on.
+- [x] The level looks the same: captures 0, 6 and 12 s into Shadows of Evil without and with
+      the flag (`start-look.ps1`, `bench\20261113-left\start-look`): black at 0 s in both (the
+      Zombies intro), the same sharp alley at 6 s, the same picture statistics at 12 s.
+- [x] Three loads in one game (`fastload-soak.ps1 -CheckClock`, Shadows of Evil, Origins,
+      Shadows of Evil): `timescale` is 1 after each; only the load from the menus has the
+      wait (9.6 s, against 13.7 s before this); the two by `map` from inside a level are as
+      before (5.4 and 5.8 s) and log no 4x.
+- [x] A `timescale 2` typed in the menus does not outlive the map's load (the game puts it back
+      to 1), so the 4x ran there too; the clock is left as it is only when it is not 1 as the
+      wait starts, or was changed during it.
+- [x] The sound while the clock runs 4x: the game's own audio recorded with Windows' process
+      loopback (`bench\20261113-left\proc-audio\proc_audio.exe`, only the game's process;
+      `audio-wait.ps1`, `analyze.py`), Shadows of Evil with and without the flag. The loading
+      screen's fade-in and its music start come in the 4x window (7.9 to 9.05 s) with the
+      same spectral peaks as without it (about 43, 80, 100, 120, 187 and 1,250 to 1,300 Hz in
+      the music; 400, 520 and 555 Hz in the fade-in) and the same centroid (1,454 to 1,483 Hz
+      against 1,493); the loudness envelope lines up at a constant offset. So the loading
+      screen's sound does not follow `timescale`; no change to the sound needed.
+- [x] A second read of the change (an agent): no defect in the 4x part (the cap, a player
+      joining, an error or quit in the wait, the restore value, the registration only with
+      the every-frame loading screen). Fixed from it: the `dvars` dump's tag is kept to letters,
+      digits, `-` and `_` (`../x:y` wrote `dvars-xy.txt` in home), and a failed write is
+      logged as such. Added from its open questions: the menus' own server (`isUILevel`,
+      1 for the menus, 0 for a level, seen with `watch_states.py`) never gets the 4x.
+- [x] The server's flags after `levelTime` (`isUILevel`, `isRunnable`, `allowSelfTick`,
+      `allowNetPackets`) through a load: the new level's server comes up with all but
+      `isUILevel` set, and none changes when the client is let in; not the gate.
+- [x] The nine in-game M1 cases on this build before the review fixes
+      (`bench\20261113-left\m1-final4`): 60 checks pass, none fail.
+- [x] 626 unit tests pass; the switch, fence, hosts, strings and notices checks pass.
+- [ ] With a friend in the lobby (TWO_PC_TEST.md step 8): no 4x, the level's clock as usual.
+- [ ] Twice this morning the game was gone without a crash report or a Windows error: 0.4 s
+      after a `map` from the menus (08:35, the a0d86650 build, no flags) and about 0.3 s into
+      a start (09:40, with `-xerces-fast-loads`; the log stops at the `launching` phase). Both
+      were bench launches with nothing reading the exit code; Xerces.exe reports any exit
+      other than 0 without a clean exit. `bench\20261113-left\exit-watch.ps1` now records the
+      next boiii.exe's exit code; the rerun of the second one went through.

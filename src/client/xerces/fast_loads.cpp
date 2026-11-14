@@ -27,6 +27,21 @@
 //    game got anyway, 5 s sooner. The game's import of CoCreateInstance is
 //    pointed here before its entry point runs (post_load); every other COM
 //    object, and every other WMI call, is the real one.
+// 4. A Zombies level's first seconds run 4x on our own server while the
+//    local client waits for it. The new server is up, but it lets the client
+//    connect only once its level.time reaches about 4.8 s (Shadows of Evil,
+//    Town Reimagined and MW2 Rust; 3.2 s on Origins): a wait on the game's
+//    clock, not work (no thread is busy, no dvar changes, the online service
+//    is quiet; timescale 2 or 4 shortens it, 1.01 does not). The texture
+//    streaming that 1. speeds up used to hide in it. So while the local
+//    client is in CONFIRMLOADING, the server is ours and in GAME, nobody else
+//    is in the lobby and timescale is 1, timescale is 4; it is 1 again as
+//    soon as any of that ends (20 s at most). The server still steps 50 ms
+//    of game time a frame, only more of them a second, and no player is in
+//    the level yet. Shadows of Evil from the menus: in the game 3.5 s sooner
+//    (8.8 s from `map`, 12.9 s with 1.-3. alone); Town Reimagined and MW2
+//    Rust 2.3 s sooner. Not without 1.: the streaming then takes its time
+//    after the wait instead, and the level started 2 s later.
 
 #include "fast_loads.hpp"
 
@@ -257,6 +272,91 @@ void before_lobby_launch() {
             : "Other players in the lobby: the launch waits for them as usual");
 }
 
+// ---------------------------------------------------------- level start (4.)
+constexpr float level_start_speed = 4.0f;
+constexpr auto level_start_longest = std::chrono::seconds(20);
+bool level_start_enabled = false;
+// What timescale was before our 4 (set while it is in), main thread only
+std::optional<float> speed_before;
+std::chrono::steady_clock::time_point speed_since{};
+int speed_level_time_from = 0;
+// This wait has had its 4x (main thread only)
+bool level_start_done = false;
+
+bool lobby_alone() {
+  return game::lobby::LobbyHost_GetClientCount(
+             game::lobby::LobbyType::GAME,
+             game::lobby::LobbyClientType::REMOTE) == 0 &&
+         game::lobby::LobbyHost_GetClientCount(
+             game::lobby::LobbyType::PRIVATE,
+             game::lobby::LobbyClientType::REMOTE) == 0;
+}
+
+bool level_start_waiting() {
+  return game::cg::clientUIActives->actives[0].connectionState ==
+             game::connstate_t::CONFIRMLOADING &&
+         game::sv::sv->state == game::sv::serverState_t::GAME &&
+         !game::sv::sv->isUILevel && // a level, not the menus' own
+         game::com::Com_SessionMode_IsMode(game::eModes::ZOMBIES) &&
+         lobby_alone();
+}
+
+// Every frame, main thread. Once a wait: after it ends (or after 20 s, or
+// when a player joins the lobby) not again until the client leaves
+// CONFIRMLOADING.
+void level_start_frame() {
+  const bool confirm_loading =
+      game::cg::clientUIActives->actives[0].connectionState ==
+      game::connstate_t::CONFIRMLOADING;
+  if (!speed_before) {
+    if (!confirm_loading) {
+      level_start_done = false;
+      return;
+    }
+    if (level_start_done || !level_start_waiting()) {
+      return;
+    }
+    const std::optional<float> now = game::get_dvar_float("timescale");
+    if (!now || *now != 1.0f) {
+      level_start_done = true; // someone's own clock (or not this game's
+      return;                  // dvar): left alone for this wait
+    }
+    speed_before = now;
+    game::set_dvar_float("timescale", level_start_speed, true);
+    speed_since = std::chrono::steady_clock::now();
+    speed_level_time_from = game::sv::sv->levelTime;
+    return;
+  }
+  const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - speed_since)
+                      .count();
+  if (level_start_waiting() &&
+      ms < std::chrono::duration_cast<std::chrono::milliseconds>(
+               level_start_longest)
+               .count()) {
+    return;
+  }
+  // Ours back, unless something else changed the clock meanwhile
+  const std::optional<float> now = game::get_dvar_float("timescale");
+  const bool ours = now && *now == level_start_speed;
+  if (ours) {
+    game::set_dvar_float("timescale", *speed_before, true);
+  }
+  speed_before.reset();
+  level_start_done = true;
+  xerces_runtime::log_info(
+      "xerces.fast_loads.level_start",
+      std::format("The level's start ran {}x for {} ms while the client "
+                  "waited (level.time {} to {}; client state {}){}",
+                  level_start_speed, ms, speed_level_time_from,
+                  game::sv::sv->levelTime,
+                  static_cast<int>(
+                      game::cg::clientUIActives->actives[0].connectionState),
+                  ours ? ""
+                       : "; the clock had been changed since: left as "
+                         "it is"));
+}
+
 bool flag_given() {
   const auto args = xerces_runtime::command_line_args();
   return xerces_core::has_launch_flag(args, flag) ||
@@ -283,13 +383,19 @@ public:
       return;
     }
     enabled = true;
+    // 4. only with 1.: without it the streaming comes after the wait instead
+    level_start_enabled = draw_every_frame();
+    if (level_start_enabled) {
+      scheduler::loop(level_start_frame, scheduler::main);
+    }
     xerces_runtime::log_info(
         "xerces.fast_loads.on",
-        draw_every_frame()
-            ? "The loading screen draws every frame and a launch alone does "
-              "not wait for others (-xerces-fast-loads)"
+        level_start_enabled
+            ? "The loading screen draws every frame, a launch alone does not "
+              "wait for others and a Zombies level's start runs 4x while the "
+              "client waits for it (-xerces-fast-loads)"
             : "A launch alone does not wait for others; the loading screen "
-              "is as it was (-xerces-fast-loads)");
+              "and the level's start are as they were (-xerces-fast-loads)");
     xerces_runtime::log_info(
         "xerces.fast_loads.wmi",
         !wmi_hooked ? "The game's import of CoCreateInstance was not found: "

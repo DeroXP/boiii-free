@@ -46,6 +46,10 @@
 //                                engine's list, with its handler (the game's
 //                                address at base 0x140000000, or the module
 //                                that added it), to <home>\commands.txt
+//   xerces_crash_test dvars [tag] no crash: every dvar with its value, to
+//                                <home>\dvars[-tag].txt (two of these
+//                                diffed show what a step of the game set;
+//                                docs/research/engine-re.md)
 //   xerces_crash_test threads    no crash: the game's thread table, the job
 //                                system's worker records and every thread
 //                                with its name, CPU time, cycles and where it
@@ -296,6 +300,48 @@ public:
                                  std::to_string(count) +
                                      " console commands written to " +
                                      file.string());
+        return;
+      }
+      if (kind == "dvars") {
+        // The console's command runs on the main thread between frames: the
+        // pool does not change under it
+        // A file name, not a path: letters, digits, - and _ only
+        std::string tag = params.size() > 2 ? params.get(2) : "";
+        std::erase_if(tag, [](const char c) {
+          return !std::isalnum(static_cast<unsigned char>(c)) && c != '-' &&
+                 c != '_';
+        });
+        std::string out;
+        game::EngineDependentDvarPool pool = game::dvar_pool();
+        const int count = *game::g_dvarCount;
+        for (int i = 0; i < count; ++i) {
+          const game::EngineDependentDvarMut dvar = pool[i];
+          const char *name = dvar.debugName();
+          const char *value = game::Dvar_DisplayableValue(dvar);
+          char line[96];
+          if (name) {
+            out += name;
+          } else {
+            std::snprintf(line, sizeof(line), "#%08X",
+                          static_cast<unsigned>(dvar.name()));
+            out += line;
+          }
+          out += ' ';
+          out += value ? value : "";
+          out += '\n';
+        }
+        const auto file =
+            xerces_runtime::home() /
+            (tag.empty() ? std::string("dvars.txt") : "dvars-" + tag + ".txt");
+        if (!xerces_runtime::write_file(file, out)) {
+          xerces_runtime::log_warn("xerces.crash_test",
+                                   "the dvars could not be written to " +
+                                       file.string());
+          return;
+        }
+        xerces_runtime::log_info("xerces.crash_test", std::to_string(count) +
+                                                          " dvars written to " +
+                                                          file.string());
         return;
       }
       if (kind == "threads") {
