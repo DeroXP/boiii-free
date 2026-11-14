@@ -650,4 +650,10 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   `SND_LoadSoundsWait` (its `Sleep(30)` poll, reached from 0x1420EEE5A: the menus' sound
   banks) and one at 0x1420EEE3F, in the function at 0x1420EEB10, which is in the
   protection's encrypted code (it reads as noise in the dump), so what that loop waits for
-  is not read. A next lead.
+  is not read. The read trace of an earlier start (`io-startup`, before the BitLocker
+  shortcut, so 5 s later) has the same hole: reads end with `core_ui.ff` at about 9.9 s and
+  the next is `core_frontend.ff` at 12.66 s, nothing at all in between, and the sound banks
+  (opened buffered and overlapped, read in milliseconds) are not slow. So a start stands
+  still about 2.7 s between two of the menus' zones, waiting on a timer or a flag. A next
+  lead: the image has a `FAKE_INTRO_SECONDS` string and a `com_introPlayed` dvar (a
+  minimum time for an intro the launch skips with `-nointro`?); not tried.
