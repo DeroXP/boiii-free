@@ -4076,3 +4076,5 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       IUnknown/IWbemLocator asked of the proxy comes from the real object (COM identity,
       would matter only if the locator were marshalled); a PC that grants non-admins
       BitLocker's namespace now gets the denial the others get.
+- [x] The nine in-game M1 cases on the exact final build, a0d86650
+      (`bench\20261113-left\m1-final3`): 60 checks pass, none fail.
