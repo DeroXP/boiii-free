@@ -4152,6 +4152,11 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       flag's own runs above), Origins 6.3 s after `map`, and
       looked sharp at 6 s; dropped, not committed: the host then arrives at a level.time
       sooner than the game ever allows, which the level's scripts may count on.
+- [x] The rest of the hold: a test build (reverted) logged every "cfl" the client sends, mods
+      off, no flag (`bench\20261113-left\cfl-zm_zod.txt`, `cfl-zm_tomb.txt`): every 3 s of
+      the client's clock; Shadows of Evil at level.time 1,900 (refused) and 4,900 (taken),
+      Origins at 50 and 3,150, the server's client record going to state 3 at that same
+      `svs.time` (`watch_states.py`).
 - [ ] With a friend in the lobby (TWO_PC_TEST.md step 8): no 4x, the level's clock as usual.
 - [ ] Twice this morning the game was gone without a crash report or a Windows error: 0.4 s
       after a `map` from the menus (08:35, the a0d86650 build, no flags) and about 0.3 s into
