@@ -697,6 +697,13 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   (0x142122F40): nobody asks for the sound banks' data in those seconds. "Sound Mix" (98%,
   its mixing loop's wait) and "Sound Decode" (99.7%, waiting for work) are idle as well:
   every thread on the way waits and none works, so the request that would move the banks
-  along is not made while the start sleeps. Which code makes it (the main loop's sound
-  update is the likeliest) is the next step; then whether the start's loop can be made to
-  let it run, or the banks be asked for before it.
+  along is not made while the start sleeps. Which code makes it: `SND_LoadSoundsWait`
+  (0x142513020) loops, `Sleep(30)` a pass, while the sound system is active and the byte at
+  0x1434BF5FC is 0, calling `SND_UpdateWait` each pass; that byte is written in one place
+  only, `SNDL_Update` (0x142509260: the result of `SND_BankUpdate`), and `SNDL_Update` is
+  called only from `SND_Frame` (the main loop's sound update) and `SNDL_GameReset`. So the
+  pause is a wait-for that nothing can answer: the main thread sleeps in the start's loop
+  until a zone is loaded, the zone's load waits for its sound banks, and the banks move on
+  only in `SND_Frame`, on that same sleeping main thread; after about 2.7 s something gives
+  (what, not seen). Next: whether running the bank update while the start waits is safe
+  (from which thread), which would take those seconds off every start.
