@@ -417,8 +417,8 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   last draw (0x145778C7C), 33 ms (`mov ecx, 0x21` at 0x1413E15A9) in states 9 and 10
   (`PRIMED`, `LOADING`);
   otherwise it calls 0x14212B350 with 0 and returns. A first scan for compares near the
-  clock missed it: the 16 is loaded into a register first. `-xerces-fast-loading-screen`
-  (opt-in, `src/client/xerces/loading_screen.cpp`) sets both waits to 0 after checking
+  clock missed it: the 16 is loaded into a register first. `-xerces-fast-loads`
+  (opt-in, `src/client/xerces/fast_loads.cpp`) sets both waits to 0 after checking
   the two instructions.
   `CL_CheckKeepDrawingConnectScreen` (0x1413CCB00) is flattened by the protection.
   (Stack scans of the main thread in that part also pass through 0x14133D3F0: that is
@@ -448,6 +448,15 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   `CL_CheckForResend` (0x14134B990), which handles the early connect states, starts in
   the protection's code. `reliableResendTime` is 300 ms and `join_retryDelay` 1,000 ms.
   Not found yet.
+- Part 1 holds two of the lobby's launch waits: `lobbyLaunch_waitForClientAckDelay`
+  (2,000 ms) and `lobbyLaunch_gameLaunchDelay` (700 ms), there for the other lobby
+  members' games to hear of the launch (`...OnConnect` versions: 800 and
+  `lobbyLaunch_fadeToBlackDelayOnConnect` 100; `lobbyLaunch_fadeToBlackDelay` 0). From the
+  console before `map`: the ack wait at 0 brought `loading_map` from 5.5 s to 4.2 s, both
+  at 0 to 3.6 s (13.3 s in all against 15.5); the launch wait alone, and
+  `lobbyTimerZMStartInterval` (5,000) or `lobby_clientLoadingIntoUICheck` (1) at 0,
+  changed nothing. `-xerces-fast-loads` zeroes the two for a launch with no other player
+  in the lobby.
 - Streaming settings tried (each set from the console just before `map`, one load each,
   `bench\20261113-left\loadtime-dvar.ps1`; the console's answers say their ranges):
   `waitForStreamer` (0 to 2, default 1) at 0, 1 and 2: 15.5, 15.2 and 15.4 s, no change.

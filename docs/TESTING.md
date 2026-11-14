@@ -3991,7 +3991,7 @@ zm_zod`, crash reports on in the test home, nothing sent
 
 The engine draws the loading screen at most every 16 ms (33 ms in `PRIMED`/`LOADING`),
 and the texture streamer asks for reads from that screen update (engine-re.md, "A map's
-load"). `-xerces-fast-loading-screen` (new, opt-in) sets both waits to 0:
+load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-fast-loads`) sets both waits to 0:
 
 - [x] The flag applied ("xerces.loading_screen.on" in the log), the loading screen presented
       about 220 times a second instead of 57, and Shadows of Evil's streaming behind it ended
@@ -4006,4 +4006,11 @@ load"). `-xerces-fast-loading-screen` (new, opt-in) sets both waits to 0:
       Reimagined 22.5 and 22.3 s without, 15.9 and 16.0 s with; MW2 Rust 27.1 and 27.0 s
       without, 16.9 and 14.8 s with; Backrooms 21.4 s without, 18.1 s with. Every load reached
       the level, played 45 s and went back to the menu.
-- [ ] Played by a person with their own mod stack.
+- [x] Folded into `-xerces-fast-loads` with the lobby's launch waits (no other player in the
+      game lobby: `lobbyLaunch_waitForClientAckDelay` and `lobbyLaunch_gameLaunchDelay` 0 for
+      that launch). Through Xerces.exe, no mods, with first (`fastload-maps-rev.ps1`):
+      Shadows of Evil 12.5 s with, 14.5 s without; Town Reimagined 12.8 s with, 22.3 s
+      without. Both games with the flag logged "xerces.fast_loads.launch: No other player in
+      the lobby"; every load reached the level, played 45 s and went back to the menu.
+- [ ] Played by a person with their own mod stack, and a launch with a friend in the lobby
+      (the waits must stay as they were).
