@@ -91,6 +91,7 @@ happened and what the game was doing (`exception.cpp`, from `session_text`):
 | A crash | `crash-<time>.txt`, `crash-<time>.dmp`, `xerces-crash-<time>.zip` (the dump and the same text as `info.txt`) | `exception`, reason `exception` |
 | A freeze (no frame for 30 s) | `freeze-<time>.txt`, `freeze-<time>.dmp` | `unknown_exit`, reason `freeze` |
 | A fatal engine error (`Com_Error` fatal, `Sys_Error`) | `fatal-<time>.txt`, `fatal-<time>.dmp` (every thread, new) | `unknown_exit`, reason `fatal_error` |
+| A load that does not end (5 minutes in one load, frames still coming; 2026-11-14) | `load-<time>.txt` (no dump: the game is not closed) | `unknown_exit`, reason `freeze`, its summary starting "Load stuck:"; sent only if the game is closed while stuck |
 
 Every text report has, in this order:
 
@@ -195,6 +196,22 @@ held: no report can be written, and the game still closes after 60 s.
 
 A stall's report gives its place among a game's three reports back when it is
 taken back; three long stalls used to leave a later crash without a report.
+
+A load that does not end gets a report of its own (2026-11-14). While the loading
+screen shows, the main loop goes on finishing frames (`docs/research/engine-re.md`,
+"A map's load"), so a load stuck in the Database or stream threads trips no freeze:
+the game sat on the loading screen and wrote nothing. Now, after five minutes in one
+load (the journal's `launching`, `symbols` or `loading_map`; longer than any connect
+timeout), the same report as a freeze's is written as `load-<time>.txt`, headed
+"Xerces Load Report", with "What the load is doing:" in place of the frame's chain:
+the Database thread waiting for the sound banks to load, in the zone reader for the
+next part of a zone file, idle in its own loop with no zone left, or working, and
+where the Stream thread is. Its note for the launcher (reason `freeze`, the summary
+starting "Load stuck:") is taken back if the load ends ("[Load] The load ended after
+N seconds: it was slow, not stuck"); if the game is closed while stuck, it stays to
+be sent. The game is never closed for it. `xerces_crash_test loadhang [delay_ms]
+[hold_s]` stops the Database thread that far into the next `map`'s load, and
+`XERCES_LOAD_STUCK_SECONDS` (10 or more) shortens the five minutes for a test.
 
 To see them without waiting for a real one: start the game with
 `-xerces-crash-test` and type `xerces_crash_test` (a crash),

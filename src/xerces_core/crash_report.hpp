@@ -280,4 +280,12 @@ struct report_frame {
 std::string frame_wait_chain(const std::vector<report_frame> &main,
                              const std::vector<report_frame> &backend,
                              const std::vector<report_frame> &window);
+
+// What a load that does not end is doing, from the stacks of the Database
+// thread (zone loading) and the Stream thread (docs/research/engine-re.md,
+// "A map's load"): the Database thread waiting for the sound banks, in the
+// zone reader, idle in its own loop or elsewhere, or working; the Stream
+// thread waiting or working. "" with neither stack.
+std::string load_wait_text(const std::vector<report_frame> &database,
+                           const std::vector<report_frame> &stream);
 } // namespace xerces_core

@@ -1329,3 +1329,39 @@ TEST_CASE("crash report: what a frozen frame waits for") {
   CHECK(frame_wait_chain(main, {}, {}).ends_with("(its stack was not read)"));
   CHECK(chain({}).ends_with("(its stack was not read)"));
 }
+
+TEST_CASE("crash report: what a load that does not end is doing") {
+  const report_frame wait{"ntdll.dll", 0x9F914};
+  const report_frame sleep{"KERNELBASE.dll", 0x3B5A1};
+  const report_frame sound_banks{"BlackOps3.exe", 0x142513041};
+  const report_frame zone_reader{"BlackOps3.exe", 0x1413F0C2A};
+  const report_frame loop{"BlackOps3.exe", 0x141424F7B};
+  const report_frame loader{"BlackOps3.exe", 0x1413EF6F0};
+  const report_frame decode{"BlackOps3.exe", 0x142BC4829};
+  const report_frame stream_wait{"BlackOps3.exe", 0x14212BA2E};
+
+  CHECK(load_wait_text({}, {}).empty());
+  CHECK_EQ(load_wait_text({wait, sleep, sound_banks, loader}, {}),
+           std::string("the Database thread waits for the sound banks to "
+                       "load"));
+  CHECK_EQ(load_wait_text({wait, sleep, zone_reader, loader}, {}),
+           std::string("the Database thread waits in the zone reader for the "
+                       "next part of a zone file"));
+  CHECK_EQ(load_wait_text({wait, sleep, loop}, {}),
+           std::string("the Database thread is idle: it has no zone left to "
+                       "load"));
+  CHECK_EQ(load_wait_text({wait, sleep, loader}, {}),
+           std::string("the Database thread waits in "
+                       "BlackOps3.exe+0x1413EF6F0"));
+  // Working: not in a system call, wherever its stack leads
+  CHECK_EQ(load_wait_text({decode, sound_banks}, {}),
+           std::string("the Database thread is working, in "
+                       "BlackOps3.exe+0x142BC4829"));
+  CHECK_EQ(load_wait_text({wait, sleep, loop}, {wait, stream_wait}),
+           std::string("the Database thread is idle: it has no zone left to "
+                       "load; the Stream thread waits in "
+                       "BlackOps3.exe+0x14212BA2E"));
+  CHECK_EQ(load_wait_text({}, {decode}),
+           std::string("the Stream thread is working, in "
+                       "BlackOps3.exe+0x142BC4829"));
+}

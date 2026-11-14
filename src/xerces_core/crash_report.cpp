@@ -705,6 +705,16 @@ constexpr std::uint64_t window_peeks_again = 0x1422BC2F3;
 constexpr std::uint64_t window_sleeps = 0x1422BC302;
 constexpr std::uint64_t cursor_update_begin = 0x142287510;
 constexpr std::uint64_t cursor_update_end = 0x142287567;
+// A map's load (engine-re.md, "A map's load"): the Database thread's own
+// loop (0x141424F00, where it waits for a zone to load), the wait for the
+// sound banks (SND_LoadSoundsWait) and the zone reader's wait for the next
+// part of a zone file
+constexpr std::uint64_t database_loop_begin = 0x141424F00;
+constexpr std::uint64_t database_loop_end = 0x141425021;
+constexpr std::uint64_t sound_banks_wait_begin = 0x142513020;
+constexpr std::uint64_t sound_banks_wait_end = 0x14251305B;
+constexpr std::uint64_t zone_reader_wait_begin = 0x1413F0B70;
+constexpr std::uint64_t zone_reader_wait_end = 0x1413F0D7F;
 
 bool in_game(const report_frame &frame, const std::uint64_t begin,
              const std::uint64_t end) {
@@ -848,6 +858,33 @@ std::string frame_wait_chain(const std::vector<report_frame> &main,
     return chain + " (its stack was not read)";
   }
   return chain + "; " + window_state(window);
+}
+
+std::string load_wait_text(const std::vector<report_frame> &database,
+                           const std::vector<report_frame> &stream) {
+  std::string out;
+  if (!database.empty()) {
+    if (!in_system_call(database)) {
+      out = "the Database thread is working, in " + innermost(database);
+    } else if (any_in(database, sound_banks_wait_begin, sound_banks_wait_end)) {
+      out = "the Database thread waits for the sound banks to load";
+    } else if (any_in(database, zone_reader_wait_begin, zone_reader_wait_end)) {
+      out = "the Database thread waits in the zone reader for the next part "
+            "of a zone file";
+    } else if (const auto at = first_game(database);
+               at && *at >= database_loop_begin && *at < database_loop_end) {
+      out = "the Database thread is idle: it has no zone left to load";
+    } else {
+      out = "the Database thread waits in " + innermost(database);
+    }
+  }
+  if (!stream.empty()) {
+    out += std::string(out.empty() ? "" : "; ") +
+           (in_system_call(stream) ? "the Stream thread waits in "
+                                   : "the Stream thread is working, in ") +
+           innermost(stream);
+  }
+  return out;
 }
 
 bool valid_report_id(std::string_view id) {

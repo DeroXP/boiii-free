@@ -18,6 +18,15 @@
 //                                "freeze")
 //   xerces_crash_test stall      the main thread sleeps 40 s and goes on: a
 //                                freeze report that is taken back
+//   xerces_crash_test loadhang [delay_ms] [hold_s]
+//                                no crash: delay_ms (1500) into the next
+//                                map's load the game's Database thread (the
+//                                engine's table, slot 11) is stopped for
+//                                hold_s seconds (0, the default: for good),
+//                                so the load does not end while the loading
+//                                screen runs on (the stuck-load report,
+//                                exception.cpp; XERCES_LOAD_STUCK_SECONDS
+//                                shortens its wait). `map` follows it.
 //   xerces_crash_test hitch [ms] no crash: one frame of ms (300; 50 to 3000),
 //                                half busy, half asleep, for a frame-time
 //                                run's stalls.csv (the stall sampler)
@@ -140,6 +149,16 @@ __declspec(noinline) void hitch(const int ms) {
     QueryPerformanceCounter(&now);
   } while (now.QuadPart - start.QuadPart < busy);
   Sleep(static_cast<DWORD>(ms - ms / 2));
+}
+
+// The game's Database thread (the engine's table, slot 11), 0 when unknown
+DWORD database_thread_id() {
+  if (!game::is_new_client()) {
+    return 0;
+  }
+  const std::uint64_t *ids = game::sys::s_threadContextIds.get();
+  const std::uint64_t *functions = game::sys::s_threadContextFunctions.get();
+  return ids && functions && functions[11] ? static_cast<DWORD>(ids[11]) : 0;
 }
 
 [[noreturn]] void crash(const std::string &kind) {
@@ -506,6 +525,54 @@ public:
         std::thread([] {
           throw std::runtime_error(
               "xerces_crash_test throw: uncaught on a thread of its own");
+        }).detach();
+        return;
+      }
+      if (kind == "loadhang") {
+        // From a thread of its own: once the journal says a level loads,
+        // after delay ms, the Database thread is stopped, and after hold
+        // seconds it goes on again (0: never). The console may not take
+        // typing over the loading screen, so `map` follows this command.
+        const int delay = params.size() > 2
+                              ? std::clamp(std::atoi(params.get(2)), 0, 30000)
+                              : 1500;
+        const int hold = params.size() > 3
+                             ? std::clamp(std::atoi(params.get(3)), 0, 3600)
+                             : 0;
+        xerces_runtime::log_warn(
+            "xerces.crash_test",
+            std::format("loadhang: the next load's Database thread is stopped "
+                        "{} ms in, for {} s (0: for good)",
+                        delay, hold));
+        std::thread([delay, hold] {
+          for (int i = 0; i < 600 && xerces_runtime::journal_phase() !=
+                                         xerces_core::launch_phase::loading_map;
+               ++i) {
+            Sleep(100);
+          }
+          Sleep(static_cast<DWORD>(delay));
+          const DWORD database = database_thread_id();
+          const HANDLE thread =
+              database ? OpenThread(THREAD_SUSPEND_RESUME, FALSE, database)
+                       : nullptr;
+          if (!thread) {
+            xerces_runtime::log_warn("xerces.crash_test",
+                                     "loadhang: the Database thread was not "
+                                     "found");
+            return;
+          }
+          SuspendThread(thread);
+          xerces_runtime::log_warn(
+              "xerces.crash_test",
+              std::format("loadhang: the Database thread ({}) is stopped",
+                          database));
+          if (hold > 0) {
+            Sleep(static_cast<DWORD>(hold) * 1000);
+            ResumeThread(thread);
+            xerces_runtime::log_warn("xerces.crash_test",
+                                     "loadhang: the Database thread goes on");
+          }
+          CloseHandle(thread);
         }).detach();
         return;
       }

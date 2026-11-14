@@ -1996,6 +1996,19 @@ constexpr std::chrono::seconds FREEZE_TIME = 30s;
 // from the list of modules the watchdog keeps while the game runs well.
 constexpr std::chrono::seconds FREEZE_CLOSE_TIME = 60s;
 constexpr std::chrono::seconds FREEZE_CLOSE_LOADING = 180s;
+// A load that does not end (2026-11-14). While the loading screen shows, the
+// main loop goes on finishing frames (docs/research/engine-re.md, "A map's
+// load"), so a load stuck in the Database or stream threads trips no freeze
+// and the game sits on the loading screen with nothing written. After this
+// long in one load (the journal's launching or loading_map), a report like a
+// freeze's goes next to the crash dumps (load-<time>.txt: every thread's
+// stack and what the Database and Stream threads are doing), with a note for
+// the launcher that is taken back if the load ends: closed while stuck, the
+// game leaves it to be sent. The game is not closed. Longer than any
+// connect timeout (cl_connectTimeout is 120 s). XERCES_LOAD_STUCK_SECONDS
+// (10 or more) sets it for tests.
+constexpr std::chrono::seconds LOAD_STUCK_TIME = 300s;
+std::chrono::seconds load_stuck_time = LOAD_STUCK_TIME;
 // How long before the close the freeze's dump is written (write_freeze_files)
 constexpr std::chrono::seconds FREEZE_DUMP_BEFORE_CLOSE = 10s;
 // A gap this long between two of the watchdog's one-second looks means it
@@ -2027,6 +2040,12 @@ std::atomic<int> modal_boxes{0};
 // watchdog takes only once frames have come back.
 std::mutex freeze_mutex;
 std::string freeze_report_id;
+// A stuck load's report (LOAD_STUCK_TIME): whether one is being written, its
+// crash report's id, and whether the load ended meanwhile (under
+// freeze_mutex, but load_report_running)
+std::atomic<bool> load_report_running{false};
+std::string load_report_id;
+bool load_withdraw = false;
 // The report's thread only.
 std::filesystem::path freeze_dump;
 // The thread the report holds stopped for its stack walk, and since when:
@@ -2347,8 +2366,11 @@ constexpr std::size_t WAITING_FRAMES = 8;
 
 // full: with the scripts running and what the game was doing, which read
 // the game's own state; the first version leaves them out.
+// loading: a stuck load's report (LOAD_STUCK_TIME) after that long in the
+// load, 0 for a freeze.
 freeze_text_result freeze_text(const std::vector<seen_thread> &threads,
-                               const bool full) {
+                               const bool full,
+                               const std::chrono::seconds loading = 0s) {
   const auto find = [&threads](const DWORD id) -> const seen_thread * {
     const auto found = std::ranges::find(threads, id, &seen_thread::id);
     return id != 0 && found != threads.end() ? &*found : nullptr;
@@ -2363,11 +2385,21 @@ freeze_text_result freeze_text(const std::vector<seen_thread> &threads,
   }};
 
   freeze_text_result out;
-  out.core = "Xerces Freeze Report\r\n\r\n";
-  out.core += std::format("What happened: the game has not finished a frame "
-                          "for {} seconds, so it is frozen.\r\n",
-                          FREEZE_TIME.count());
-  out.summary = "Freeze:";
+  if (loading.count() > 0) {
+    out.core = "Xerces Load Report\r\n\r\n";
+    out.core += std::format(
+        "What happened: the game has been loading for {} min {:02} s and is "
+        "not done. Frames still come (the loading screen runs), so it is no "
+        "freeze, and the game stays open.\r\n",
+        loading.count() / 60, loading.count() % 60);
+    out.summary = "Load stuck:";
+  } else {
+    out.core = "Xerces Freeze Report\r\n\r\n";
+    out.core += std::format("What happened: the game has not finished a "
+                            "frame for {} seconds, so it is frozen.\r\n",
+                            FREEZE_TIME.count());
+    out.summary = "Freeze:";
+  }
   for (const auto &[role, thread] : roles) {
     if (!thread) {
       continue;
@@ -2403,9 +2435,22 @@ freeze_text_result freeze_text(const std::vector<seen_thread> &threads,
       }
       return frames;
     };
-    const std::string chain = xerces_core::frame_wait_chain(
-        frames_of(roles[0].second), frames_of(engine_thread("Backend")),
-        frames_of(engine_thread("Window")));
+    if (loading.count() > 0) {
+      // What the load is doing (engine-re.md, "A map's load")
+      const std::string load =
+          xerces_core::load_wait_text(frames_of(engine_thread("Database")),
+                                      frames_of(engine_thread("Stream")));
+      if (!load.empty()) {
+        out.core += "What the load is doing: " + load + ".\r\n";
+        out.summary += "; " + load.substr(0, 120);
+      }
+    }
+    const std::string chain =
+        loading.count() > 0
+            ? std::string()
+            : xerces_core::frame_wait_chain(frames_of(roles[0].second),
+                                            frames_of(engine_thread("Backend")),
+                                            frames_of(engine_thread("Window")));
     if (!chain.empty()) {
       out.core += "What the frame waits for: " + chain + ".\r\n";
       // The summary keeps the last link, where the wait ends, short enough
@@ -2422,10 +2467,16 @@ freeze_text_result freeze_text(const std::vector<seen_thread> &threads,
       out.summary += "; script " + script;
     }
   }
-  out.core += std::format(
-      "The game closes {} seconds after its last frame ({} while it is "
-      "loading) unless frames come back.\r\n\r\n",
-      FREEZE_CLOSE_TIME.count(), FREEZE_CLOSE_LOADING.count());
+  if (loading.count() > 0) {
+    out.core += "If the load ends, this report is taken back. If the game is "
+                "closed while it is stuck, the launcher sends it (with crash "
+                "reports on).\r\n\r\n";
+  } else {
+    out.core += std::format(
+        "The game closes {} seconds after its last frame ({} while it is "
+        "loading) unless frames come back.\r\n\r\n",
+        FREEZE_CLOSE_TIME.count(), FREEZE_CLOSE_LOADING.count());
+  }
   if (full) {
     out.core += session_text() + "\r\n" + scripts_text();
   }
@@ -2562,17 +2613,22 @@ void attach_freeze_dump(const std::string &id) {
 
 // Frames came back: it was a long stall, not a freeze, and its report is not
 // to be sent. No lock is held here.
-void withdraw_freeze_report(const std::string &id,
-                            const std::chrono::seconds stalled) {
-  if (id.empty()) {
-    return;
-  }
+// The note (and any dump) of a report not to be sent, and its slot back
+void remove_pending_report(const std::string &id) {
   const std::filesystem::path dir =
       xerces_runtime::home() / "crash" / "pending";
   std::error_code ec;
   std::filesystem::remove(dir / (id + ".json"), ec);
   std::filesystem::remove(dir / (id + ".dmp"), ec);
   return_report_slot();
+}
+
+void withdraw_freeze_report(const std::string &id,
+                            const std::chrono::seconds stalled) {
+  if (id.empty()) {
+    return;
+  }
+  remove_pending_report(id);
   exception_log(false,
                 "[Freeze] Frames came back after %lld seconds; the freeze "
                 "report was taken back",
@@ -2585,8 +2641,11 @@ struct freeze_files {
   std::filesystem::path text_file;
 };
 
-freeze_files write_freeze_files() {
+// loading: a stuck load's files (load-<time>.txt and the note, no dump: the
+// game is not about to be closed), 0 for a freeze's.
+freeze_files write_freeze_files(const std::chrono::seconds loading = 0s) {
   freeze_files out;
+  const bool load = loading.count() > 0;
   const std::vector<thread_stack> stacks = capture_threads();
   std::vector<seen_thread> threads;
   threads.reserve(stacks.size());
@@ -2610,15 +2669,16 @@ freeze_files write_freeze_files() {
       game::get_appdata_path() / "minidumps";
   std::error_code ec;
   std::filesystem::create_directories(minidumps, ec);
-  out.text_file = minidumps / ("freeze-" + stamp + ".txt");
+  out.text_file = minidumps / ((load ? "load-" : "freeze-") + stamp + ".txt");
 
   // First what asks nothing of Windows that a frozen game may hold: the
   // stacks by module and offset, on disk and in the launcher's note before
   // anything else is tried.
-  const freeze_text_result first = freeze_text(threads, false);
+  const freeze_text_result first = freeze_text(threads, false, loading);
   out.summary = first.summary;
   write_report_file(out.text_file, first.core);
-  exception_log(false, "[Freeze] %s", first.summary.c_str());
+  exception_log(false, load ? "[Load] %s" : "[Freeze] %s",
+                first.summary.c_str());
   out.id = new_freeze_report();
   write_freeze_note(out.id, main_frames(), first);
 
@@ -2629,10 +2689,13 @@ freeze_files write_freeze_files() {
       add_symbols(frame);
     }
   }
-  freeze_text_result full = freeze_text(threads, true);
+  freeze_text_result full = freeze_text(threads, true, loading);
   out.summary = full.summary;
   write_report_file(out.text_file, full.core + console_text());
   write_freeze_note(out.id, main_frames(), full);
+  if (load) {
+    return out;
+  }
 
   // The dump last, and only when the game is about to be closed: it stops
   // every thread but this one and the watchdog, and if a stopped thread
@@ -2728,6 +2791,75 @@ void frames_came_back(const std::chrono::seconds stalled) {
                              stalled.count()));
 }
 
+// A stuck load's report, on a thread of its own: the game still runs, so
+// it can be made when asked for (the watchdog's no-memory rule is for a
+// frozen game).
+void load_report_thread(const std::chrono::seconds loading) {
+  freeze_files files;
+  try {
+    files = write_freeze_files(loading);
+  } catch (const std::exception &error) {
+    exception_log(false, "[Load] The load report failed: %s", error.what());
+  }
+  std::string taken_back;
+  {
+    const std::lock_guard lock(freeze_mutex);
+    load_report_id = files.id;
+    if (std::exchange(load_withdraw, false)) {
+      taken_back = std::exchange(load_report_id, {});
+    }
+  }
+  if (!taken_back.empty()) {
+    remove_pending_report(taken_back);
+  }
+  load_report_running = false;
+  if (!files.text_file.empty()) {
+    console::print(std::format("^1[Load] The game has been loading for {} "
+                               "min {:02} s. {}\n^1[Load] Report: {}\n",
+                               loading.count() / 60, loading.count() % 60,
+                               files.summary, files.text_file.string()));
+  }
+}
+
+void start_load_report(const std::chrono::seconds loading) {
+  // Never two stack walks at once: a freeze's report goes first
+  if (freeze_report_running.load() || load_report_running.exchange(true)) {
+    return;
+  }
+  {
+    const std::lock_guard lock(freeze_mutex);
+    load_withdraw = false;
+  }
+  utils::thread::create_named_thread("Load Report", [loading] {
+    load_report_thread(loading);
+  }).detach();
+}
+
+// The load ended after all: it was slow, not stuck, and its report is not
+// to be sent.
+void load_finished(const std::chrono::seconds took) {
+  std::string taken_back;
+  {
+    const std::lock_guard lock(freeze_mutex);
+    if (load_report_running.load()) {
+      load_withdraw = true;
+    } else {
+      taken_back = std::exchange(load_report_id, {});
+    }
+  }
+  if (!taken_back.empty()) {
+    remove_pending_report(taken_back);
+  }
+  exception_log(false,
+                "[Load] The load ended after %lld seconds; its report was "
+                "taken back",
+                static_cast<long long>(took.count()));
+  console::print(std::format("^3[Load] The load ended after {} seconds: it "
+                             "was slow, not stuck. Its report stays in the "
+                             "minidumps folder and is not sent.\n",
+                             took.count()));
+}
+
 DWORD WINAPI log_freeze_close(LPVOID seconds) {
   exception_log(false,
                 "[Freeze] No frame for %lld seconds: the game is closed, as "
@@ -2753,9 +2885,16 @@ DWORD WINAPI log_freeze_close(LPVOID seconds) {
   std::abort();
 }
 
-bool loading_now() {
+// Asks the journal, which takes memory: only while frames come.
+struct load_state {
+  bool loading = false; // not in a level or the menus (FREEZE_CLOSE_LOADING)
+  bool load = false;    // starting or loading a level (LOAD_STUCK_TIME)
+};
+
+load_state loading_now() {
   const std::string phase = xerces_runtime::journal_phase_for_crash();
-  return phase != "in_game" && phase != "frontend";
+  return {phase != "in_game" && phase != "frontend",
+          phase == "launching" || phase == "symbols" || phase == "loading_map"};
 }
 
 void watch_for_freezes() {
@@ -2766,6 +2905,9 @@ void watch_for_freezes() {
   auto last_progress = std::chrono::steady_clock::now();
   auto last_look = last_progress;
   bool reported = false;
+  // Since when the journal has said the game is loading, while frames come
+  std::optional<std::chrono::steady_clock::time_point> loading_since;
+  bool load_reported = false;
   uint32_t ticks = 0;
   for (;;) {
     std::this_thread::sleep_for(1s);
@@ -2775,6 +2917,9 @@ void watch_for_freezes() {
     const auto look = std::chrono::steady_clock::now();
     if (const auto gap = look - last_look; gap > WATCHDOG_GAP) {
       last_progress += gap - 1s;
+      if (loading_since) {
+        *loading_since += gap - 1s;
+      }
     }
     last_look = look;
     release_walked_thread();
@@ -2797,7 +2942,25 @@ void watch_for_freezes() {
         note_modules();
       }
       // Noted while the game runs: asking when it is frozen takes memory
-      loading_noted = loading_now();
+      const load_state state = loading_now();
+      loading_noted = state.loading;
+      const auto now = std::chrono::steady_clock::now();
+      if (state.load) {
+        if (!loading_since) {
+          loading_since = now;
+        } else if (!load_reported && now - *loading_since >= load_stuck_time) {
+          load_reported = true;
+          start_load_report(std::chrono::duration_cast<std::chrono::seconds>(
+              now - *loading_since));
+        }
+      } else if (loading_since) {
+        if (load_reported) {
+          load_finished(std::chrono::duration_cast<std::chrono::seconds>(
+              now - *loading_since));
+        }
+        loading_since.reset();
+        load_reported = false;
+      }
       last_frame = frame;
       last_progress = std::chrono::steady_clock::now();
       reported = false;
@@ -2942,6 +3105,15 @@ struct component final : generic_component {
     if (freeze_report_event) {
       utils::thread::create_named_thread("Freeze Report", freeze_report_thread)
           .detach();
+    }
+    // Tests only: a shorter wait before a stuck load's report
+    wchar_t text[16]{};
+    if (const DWORD length = GetEnvironmentVariableW(
+            L"XERCES_LOAD_STUCK_SECONDS", text, std::size(text));
+        length > 0 && length < std::size(text)) {
+      if (const int seconds = _wtoi(text); seconds >= 10) {
+        load_stuck_time = std::chrono::seconds(seconds);
+      }
     }
     utils::thread::create_named_thread("Freeze Watchdog", watch_for_freezes)
         .detach();

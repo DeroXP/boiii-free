@@ -3929,3 +3929,24 @@ What a load of Shadows of Evil from the menus waits on (engine-re.md, "A map's l
 - [x] Streaming settings from the console before `map` (`loadtime-dvar.ps1`):
       `waitForStreamer` 0, 1, 2 and `sv_mapSwitchPerloadFrontendStreamerFrames` 0 change
       nothing; `streamMBPerSecond` 30 adds 1.8 s, 1000 nothing (its default 0 is no limit).
+
+## A load that does not end (2026-11-14 morning)
+
+The loading screen keeps the main loop's frames coming, so a stuck load wrote nothing.
+Now it gets `load-<time>.txt` after 5 minutes (CRASH_REPORTS.md). Tested with
+`XERCES_LOAD_STUCK_SECONDS=20` and `xerces_crash_test loadhang 1500 <hold>` before `map
+zm_zod`, crash reports on in the test home, nothing sent
+(`bench\20261113-left\loadhang-test.ps1`):
+
+- [x] Run A (the Database thread stopped for 40 s): the report 25 s after `map` ("the
+      game has been loading for 0 min 20 s and is not done ... What the load is doing:
+      the Database thread is working, in BlackOps3.exe+0x1413F1477; the Stream thread
+      waits in BlackOps3.exe+0x14212BA8E" - a stopped thread shows where it stopped), its
+      note in `crash\pending` (49 KB); the load went on when the thread did, the level
+      came at 55 s, "[Load] The load ended after 50 seconds: it was slow, not stuck", and
+      the note was gone.
+- [x] Run B (stopped for good, the game stopped while stuck): the report, and its note
+      still there after the game was gone, for the launcher to send.
+- [x] 625 unit tests pass (the load's wait text: the sound banks, the zone reader, idle,
+      working, the Stream thread).
+
