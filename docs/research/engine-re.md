@@ -640,3 +640,14 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   `-xerces-fast-loads` answers that one connection with the same code at once while the
   process is not elevated: the client's first line came at 2.6 s instead of 7.6 s, the
   menus at 18.9 and 19.2 s instead of 24.5 and 23.9 s (`start-ab.ps1`).
+- With that answered, a start's threads (`startup-cpu.ps1`, every thread's CPU every 500 ms
+  from the moment boiii.exe exists, with `-xerces-fast-loads`): the main thread busy from
+  0.5 to 8.7 s (the client's and the game's set-up; the Database thread starts at 6 s);
+  then about 2.6 s, 9.3 to 11.9 s, with no thread busy at all; then the menus' zones (the
+  Database thread and the job workers, 12 to 18.4 s), the render thread at 100% (19.5 to
+  21 s, with "Mode Preload") and the menus. The main thread through the quiet stretch
+  (`startup-gap.ps1`): 77% asleep, in two loops of the game's start: one in
+  `SND_LoadSoundsWait` (its `Sleep(30)` poll, reached from 0x1420EEE5A: the menus' sound
+  banks) and one at 0x1420EEE3F, in the function at 0x1420EEB10, which is in the
+  protection's encrypted code (it reads as noise in the dump), so what that loop waits for
+  is not read. A next lead.
