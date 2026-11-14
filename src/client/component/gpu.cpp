@@ -80,6 +80,17 @@ bool on_main_menu() {
     return false;
   }
 
+  // Xerces: the lobby's UI screen, read where Engine.GetLobbyUIScreen reads
+  // it (0x141F08A30 calls 0x141EF6260: mov eax, [0x156111F18]), not through
+  // the Lua VM. Asked from a scheduler callback, outside any Lua call, a Lua
+  // error in that lookup (seen once on 2026-11-14 as the menus' scripts
+  // loaded) went to the game's error position, which read a caller frame
+  // that does not exist there and crashed the game.
+  if (game::is_new_client()) {
+    return *reinterpret_cast<const std::int32_t *>(
+               game::relocate(0x156111F18)) != 0;
+  }
+
   try {
     const ui_scripting::table globals{state->globals.v.table};
     const ui_scripting::arguments screen =

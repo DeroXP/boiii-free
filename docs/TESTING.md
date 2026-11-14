@@ -4158,7 +4158,7 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       Origins at 50 and 3,150, the server's client record going to state 3 at that same
       `svs.time` (`watch_states.py`).
 - [ ] With a friend in the lobby (TWO_PC_TEST.md step 8): no 4x, the level's clock as usual.
-- [ ] A crash at the menus' start, once (10:52, `-xerces-fast-loads`, 27 s after launch, phase
+- [x] A crash at the menus' start, once (10:52, `-xerces-fast-loads`, 27 s after launch, phase
       `frontend`; report `crash-2026-11-14-10-52-47.txt` in `%LOCALAPPDATA%\boiii\minidumps`,
       not sent): an access violation reading 0xFFFFFFFFFFFFFFF0 in the game's
       `hksi_lua_getinfo` (0x141D40FB9, `mov rcx, [rax-0x10]` with rax 0), under its
@@ -4171,12 +4171,16 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       yet), and the game's `luaL_where` asked `getinfo` about a frame `getstack` had reported
       but that does not exist there. Not from this morning's changes: the menu check has been
       there since the perf instrumentation, and other callers (`ipc.cpp`, `join_after_menu`,
-      the GPU warning) use it too. Tried and dropped: reading the global that
-      `Lua_CoD_LuaCall_GetLobbyUIScreen` (0x141F08A30) reads (0x156111F18) stays 0 at the
-      menu, so the startup line never came (that symbol's name, or the function behind
-      `Engine.GetLobbyUIScreen`, is not what it seems). Open: a menu check that does not go
-      through the Lua VM, or the field read without metamethods; the client calls the VM
-      unprotected, so surviving `where` alone would leave the error itself to be caught.
+      the GPU warning) use it too. Fixed: `on_main_menu` now reads the lobby's UI screen
+      where `Lua_CoD_LuaCall_GetLobbyUIScreen` (0x141F08A30) reads it, through 0x141EF6260
+      (`mov eax, [0x156111F18]`), and touches the Lua VM no more on this game build (the Lua
+      lookup stays for others). The same answer as before: in the bench the value turns
+      non-zero only at the `map` command (a first check without a `map` saw nothing within
+      90 s on either build: the bench's menu check has always fired there), and with the
+      change the startup line came
+      3.7 s after `xerces_crash_test threads`, at the `map`, as in the runs before
+      (`states-load.ps1 -Tag menucheck-global`). The nine M1 cases on it
+      (`bench\20261113-left\m1-menucheck`): 60 checks pass, none fail.
 - [ ] Twice this morning the game was gone without a crash report or a Windows error: 0.4 s
       after a `map` from the menus (08:35, the a0d86650 build, no flags) and about 0.3 s into
       a start (09:40, with `-xerces-fast-loads`; the log stops at the `launching` phase). Both
