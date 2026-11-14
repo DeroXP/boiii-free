@@ -4157,6 +4157,8 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       the client's clock; Shadows of Evil at level.time 1,900 (refused) and 4,900 (taken),
       Origins at 50 and 3,150, the server's client record going to state 3 at that same
       `svs.time` (`watch_states.py`).
+- [x] The nine in-game M1 cases on the morning's last build, 82722665 (`bench\20261113-left\m1-final6`):
+      60 checks pass, none fail.
 - [ ] With a friend in the lobby (TWO_PC_TEST.md step 8): no 4x, the level's clock as usual.
 - [x] A crash at the menus' start, once (10:52, `-xerces-fast-loads`, 27 s after launch, phase
       `frontend`; report `crash-2026-11-14-10-52-47.txt` in `%LOCALAPPDATA%\boiii\minidumps`,
