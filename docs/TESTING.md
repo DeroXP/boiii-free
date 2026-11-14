@@ -4258,6 +4258,8 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       without a null check (a blocking select with only emulated sockets would crash; the
       game's own selects all pass one). `demonware.cpp` is a fenced file (docs/FENCED.md),
       so the fix is left for an upstream change.
+- [x] The nine M1 cases on the afternoon's commit, 002570b0, built as committed (`bench\20261113-left\m1-final7`):
+      60 checks pass, none fail.
 - [ ] Twice this morning the game was gone without a crash report or a Windows error: 0.4 s
       after a `map` from the menus (08:35, the a0d86650 build, no flags) and about 0.3 s into
       a start (09:40, with `-xerces-fast-loads`; the log stops at the `launching` phase). Both
