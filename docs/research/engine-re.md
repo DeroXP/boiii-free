@@ -472,3 +472,27 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   longer, 1000 changed nothing. `sv_mapSwitchPerloadFrontendStreamerFrames` (default
   600) at 0: no change. `r_streamTextureMemoryMax` is 800 and `r_stream` 7. The level
   starts on the zombies' black screen, so what streams in its first seconds is not seen.
+
+## A start (to the menus)
+
+Measured on 2026-11-14, mods off, the files in Windows' cache (`bench\20261113-left\startup-watch.ps1`,
+`startup-io.ps1`, `startup-sample.ps1`): the console window read from outside every 100 ms
+(`console-watch.ps1`), the read trace, and the Database thread sampled from the moment it
+exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
+
+- About 7.6 s pass before the client logs its first phase (`symbols`); the menus come at
+  about 24 s. In between, the menus' zones load one after another (`core_pre_gfx`,
+  `core_patch`, `core_gfx`, `core_post_gfx`, `core_common`, `core_specialists`,
+  `core_frontend` and their language zones), each 0.7 to 1.6 s by the console's own lines.
+- About 1 GB is read, from the cache, at 100 to 180 MB a second with the disk idle 96% of
+  the time and never more than two reads under way: the reads are not what takes long.
+- The Database thread is asleep about 70% of that time and blocked on a lock about 14%
+  (inside d3d11, creating resources while another thread holds the device), working about
+  20%. Its sleeps, by where they return to: its own loop waiting for the next zone
+  (`Sleep(1)` at 0x141425017, 40%); `SND_LoadSoundsWait` polling for the sound banks
+  every 30 ms (`Sleep(30)` at 0x142513049, 24%); the zone reader's wait for the next part
+  of a file (under the stream call at 0x1413F0CE0, 19%); and a sound stream wait polling
+  every millisecond (0x1425D4D52, 13%). So the menus' load waits on sound banks, on the
+  zone requests coming one at a time, and on the graphics driver's lock, not on the disk
+  or on decoding. Shortening the 30 ms poll would save its overshoot only, about 15 ms a
+  wait.
