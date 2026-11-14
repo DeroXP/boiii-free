@@ -6,8 +6,10 @@ time since the start, and the game's exit code if it ends.
   python -I tools/dev/re/watch_states.py <pid> <engine base hex> [seconds]
 
 Watched: local client 0's connection state (0x145359BC8: 9 PRIMED, 10 LOADING, 11 ACTIVE), the server's state
-(0x15767AC90, sv.state: 0 dead, 1 loading, 2 game) and its four flags after levelTime, and the screen update's last draw time (0x145778C7C, whose
-changes are counted a second rather than printed), with the server's level.time (0x14A1B6C14).
+(0x15767AC90, sv.state: 0 dead, 1 loading, 2 game) and its four flags after levelTime, the server's client record 0
+(its state and last connect time, which the join handler checks against sv_reconnectlimit, with svs.time), and the
+screen update's last draw time (0x145778C7C, whose changes are counted a second rather than printed); each change
+with the server's level.time (0x14A1B6C14), and the game's exit code if it ends.
 """
 import ctypes
 import sys
