@@ -433,7 +433,9 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   for longer behind the loading screen, did load sooner (`fastload-maps.ps1` and
   `fastload-maps-rev.ps1`, no mods, both orders): Town Reimagined 15.9 and 16.0 s against
   22.5 and 22.3 s, MW2 Rust 16.9 and 14.8 s against 27.1 and 27.0 s, Backrooms 18.1
-  against 21.4 s. Shadows of Evil's end is held elsewhere:
+  against 21.4 s. With a three-mod stack, whose assets add to what streams, and the solo
+  launch without the lobby's waits (`fastload-mods.ps1`): Town Reimagined 11.0 s against
+  33.7 s, MW2 Rust 9.9 s against 39.2 s. Shadows of Evil's end is held elsewhere:
 - The client's connection state and the server's, read every few ms from outside
   (`tools/dev/re/watch_states.py`, `states-load.ps1`), Shadows of Evil, `map` at 1.35 s:
   the client goes `DISCONNECTED` at 4.79 s (the menus' server down), `CONFIRMLOADING` at
