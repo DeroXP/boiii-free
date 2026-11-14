@@ -73,12 +73,14 @@ to report these again, but tell us if you see them somewhere else or worse.
   game re-sorts its list of loaded textures with a sort that is slow when the list
   is far out of order, and the frame waits for it. Since beta.23 Xerces sorts that
   list another way (about a hundred times quicker in that case, into the same
-  order). What puts the list that far out of order there is not known, so this
-  has not been seen to help in a real match yet. If you still see the long
-  frames, send the game's log: its `xerces.stream_sort.far` lines say how often
-  the list was that far out of order and what the sorts cost. To compare with
-  the game's own sort, type `-xerces-stream-sort-engine` into Settings > Launch,
-  Extra launch flags.
+  order). What puts the list that far out of order is not known, but it happens
+  in real matches: in eight minutes of MW2 Rust with a mod stack (beta.24) the
+  list of about 28,600 textures was that far out of order 14 times, each a sort
+  of some 290 ms for the game's own way and about 2 ms for Xerces'. If you still
+  see long frames, send the game's log: its `xerces.stream_sort.far` lines say
+  how often the list was that far out of order and what the sorts cost. To
+  compare with the game's own sort, type `-xerces-stream-sort-engine` into
+  Settings > Launch, Extra launch flags.
 
 ## Zombies characters (CHARACTERS)
 
