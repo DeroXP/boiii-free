@@ -3986,3 +3986,24 @@ zm_zod`, crash reports on in the test home, nothing sent
       stuck" in the old wording, fixed after), run B's note kept with the Database
       thread's frames (`nvwgf2umx.dll`, the thread stopped in the driver), "[Load] The
       game has been loading for 0 min 20 s and is not done" as its line.
+
+## A loading screen that draws every frame (2026-11-14 morning)
+
+The engine draws the loading screen at most every 16 ms (33 ms in `PRIMED`/`LOADING`),
+and the texture streamer asks for reads from that screen update (engine-re.md, "A map's
+load"). `-xerces-fast-loading-screen` (new, opt-in) sets both waits to 0:
+
+- [x] The flag applied ("xerces.loading_screen.on" in the log), the loading screen presented
+      about 220 times a second instead of 57, and Shadows of Evil's streaming behind it ended
+      about 3 s sooner (`bench\20261113-left\io-zod-fast`).
+- [x] Shadows of Evil, mods off, two rounds each (`fastload-ab.ps1`): 15.6 / 15.4 s without,
+      16.2 / 15.6 s with, from `map` to the connection active. No gain: the client then waits
+      in `CONFIRMLOADING` for about 4.8 s after the server is up (`tools/dev/re/watch_states.py`,
+      `states-load.ps1`; not the frame cap, the loading screen's style, when the intro is
+      stopped, or `waitForStreamer`).
+- [x] Custom maps through Xerces.exe, no mods (`map-check -Live`, each load a game of its
+      own; `fastload-maps.ps1` without first, `fastload-maps-rev.ps1` with first): Town
+      Reimagined 22.5 and 22.3 s without, 15.9 and 16.0 s with; MW2 Rust 27.1 and 27.0 s
+      without, 16.9 and 14.8 s with; Backrooms 21.4 s without, 18.1 s with. Every load reached
+      the level, played 45 s and went back to the menu.
+- [ ] Played by a person with their own mod stack.

@@ -410,13 +410,44 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
 - `com_maxfps` 60, 240 and 1000 change nothing (loading 10.4, 9.8 and 10.4 s): the
   loading screen's pace is its own, about one frame per 16 ms (57 a second is every fourth
   frame of the main loop's 4.4 ms ones).
-- Not found yet: where that 16 ms pace is decided. It is no compare near a call of
-  `Sys_Milliseconds` (0x1422B9700) outside the protected code, and
-  `CL_CheckKeepDrawingConnectScreen` (0x1413CCB00) is flattened by the protection. The
-  client function that drives the streamer while loading is at 0x14133D3F0 (it reads a
-  ring of 0x8000 bytes at 0x1452FDF88 in 0x20-byte steps), called from 0x1413398B0.
-  If the loading screen drew as often as the main loop runs, part 3 would take about a
-  second instead of four.
+- Where that pace is decided: `SCR_UpdateScreen` (0x1413E1570), which the main frame
+  calls once each time round (0x1420ECE6D). While local client 0's connection state
+  (0x145359BC8, `clientUIActives[0]`) is below 11 (active) it draws only if
+  `Sys_Milliseconds()` has moved on 16 ms (`mov ebx, 0x10` at 0x1413E15A4) since its
+  last draw (0x145778C7C), 33 ms (`mov ecx, 0x21` at 0x1413E15A9) in states 9 and 10
+  (`PRIMED`, `LOADING`);
+  otherwise it calls 0x14212B350 with 0 and returns. A first scan for compares near the
+  clock missed it: the 16 is loaded into a register first. `-xerces-fast-loading-screen`
+  (opt-in, `src/client/xerces/loading_screen.cpp`) sets both waits to 0 after checking
+  the two instructions.
+  `CL_CheckKeepDrawingConnectScreen` (0x1413CCB00) is flattened by the protection.
+  (Stack scans of the main thread in that part also pass through 0x14133D3F0: that is
+  the console's drawing, which reads the console's text ring of 0x8000 bytes at
+  0x1452FDF88 in 0x20-byte steps, called from 0x141339890, which then draws the input
+  line. A stale value on the stack, not the streamer's driver: the scans' chains are
+  rough, as `sample_thread.py` says.)
+- With the screen update's waits at 0 the loading screen presents about 220 times a
+  second and the same streaming is done about 3 s sooner (588 MB and 356 MB in two
+  seconds), yet Shadows of Evil's level starts no sooner (`bench\20261113-left\io-zod-fast`,
+  `fastload-ab.ps1`: 10.2 against 10.1 s of loading). Custom maps, whose images stream
+  for longer behind the loading screen, did load sooner (`fastload-maps.ps1` and
+  `fastload-maps-rev.ps1`, no mods, both orders): Town Reimagined 15.9 and 16.0 s against
+  22.5 and 22.3 s, MW2 Rust 16.9 and 14.8 s against 27.1 and 27.0 s, Backrooms 18.1
+  against 21.4 s. Shadows of Evil's end is held elsewhere:
+- The client's connection state and the server's, read every few ms from outside
+  (`tools/dev/re/watch_states.py`, `states-load.ps1`), Shadows of Evil, `map` at 1.35 s:
+  the client goes `DISCONNECTED` at 4.79 s (the menus' server down), `CONFIRMLOADING` at
+  5.29 s, and stays there; the new server is up (`sv.state` 2) at 9.74 s and the client's
+  zones are linked at 9.78 s, but the client leaves `CONFIRMLOADING` only at 14.51 s, then
+  `SENDINGDATA`, `CONNECTED`, `PRIMED`, `LOADING` and `ACTIVE` within 0.6 s. So about
+  4.8 s of a Shadows of Evil load is the client waiting in `CONFIRMLOADING` after
+  everything is loaded. Not the cause (each tried, no change): the frame cap, the
+  loading screen's style (`boiii_loadingScreen` 0, 1, 2), when the client stops the
+  Zombies intro (`client_patches.cpp` waits 15 s after the preload; a test build with 0
+  and 5 s), `waitForStreamer`.
+  `CL_CheckForResend` (0x14134B990), which handles the early connect states, starts in
+  the protection's code. `reliableResendTime` is 300 ms and `join_retryDelay` 1,000 ms.
+  Not found yet.
 - Streaming settings tried (each set from the console just before `map`, one load each,
   `bench\20261113-left\loadtime-dvar.ps1`; the console's answers say their ranges):
   `waitForStreamer` (0 to 2, default 1) at 0, 1 and 2: 15.5, 15.2 and 15.4 s, no change.

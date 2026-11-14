@@ -3738,6 +3738,23 @@ mouse that reports thousands of times a second the thread wakes about once for e
 report (6.4% of a core at about 4,000 a second, against 1.0%). `xerces.input_wake.stats`
 every 30 s, as for Present. Off unless given.
 
+#### A loading screen that draws every frame (2026-11-14)
+
+The engine's screen update (`SCR_UpdateScreen`) draws a frame only once 16 ms have
+passed since its last while the local client's connection is not active (33 ms in its
+`PRIMED` and `LOADING` states), so the loading screen runs at about 57 frames a second
+whatever the frame cap. The texture streamer asks for its next reads from that screen
+update, so the last seconds of a map's load, when the level's images stream in behind
+the loading screen, go at that pace and not at the disk's (docs/research/engine-re.md,
+"A map's load"). The launch flag `-xerces-fast-loading-screen`
+(`src/client/xerces/loading_screen.cpp`) sets both waits to 0 after checking the two
+instructions, so the loading screen draws every frame the main loop makes (still under
+`com_maxfps`). Custom maps loaded much sooner with it (no mods, each load a game of its
+own, both orders): Town Reimagined 16.0 s against 22.3 s, MW2 Rust 14.8 against 27.0 s,
+Backrooms 18.1 against 21.4 s. Shadows of Evil loaded no sooner: its end is held by the
+client waiting in `CONFIRMLOADING` (docs/research/engine-re.md). Off unless the flag is
+given (Settings, launch flags); whether it becomes the default is the user's call.
+
 #### Precise frame limiter (item 4)
 
 On only with the launch flag `-xerces-precise-limiter` (Settings, Display,
