@@ -714,4 +714,11 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   (a time, a state of the sound library) is the next question. `SND_UpdateWait`
   (0x142217490), called each pass of `SND_LoadSoundsWait`, takes a spin lock, notes
   `Sys_Milliseconds` and waits for the sound task at 0x1433BBD20, with no timeout of its
-  own.
+  own. Another test build (reverted) logged each change of `SND_BankUpdate`'s result
+  through a start (`bench\20261113-left\bank-log.txt`; the process started at about
+  11:51:46.1): no call at all until 10.4 s in (so the pause's first second or so comes
+  before the sound update runs), then "not done" for 66 calls (1.4 s, about 48 a second),
+  "done" at 11.75 s, where the pause ends; later zones' banks take 0.2 to 0.9 s each the
+  same way. So the pause is about 1 s before the sound update starts, then the menus' bank
+  advancing one step a sound frame at the start loop's pace. Faster passes of that loop,
+  or the sound update starting sooner, are where those seconds would be.
