@@ -334,12 +334,11 @@ std::atomic<std::uint32_t> stall_count{0};
 std::atomic<std::uint32_t> stalls_dropped{0};
 std::atomic<int> writes_pending{0}; // end_run's writes not done yet
 
-// The loaded modules' function tables, noted by the sampler while the main
-// thread runs, never while it is stopped. RtlLookupFunctionEntry takes
-// ntdll's function-table lock, which the stopped main thread may hold (in a
-// DLL's load or unload): the sampler would then wait for ever and the game
-// stay stopped (a review, 2026-11-13). The lookup below takes no lock. Only
-// the sampler's thread touches these.
+// The loaded modules' function tables, noted by the sampler every 2 s, for a
+// look-up without ntdll's function-table lock. The walk runs only once the
+// main thread goes on again (sample_main_thread), so the lock no longer
+// matters there; the noted tables stay as the cheaper look-up. Only the
+// sampler's thread touches these.
 struct unwind_module {
   DWORD64 base = 0;
   DWORD64 size = 0;
@@ -456,8 +455,8 @@ find_function_entry(const DWORD64 pc, const unwind_module *&owner) {
   return nullptr;
 }
 
-// The stopped thread's stack: its base and its committed limit (which moves
-// as the stack grows), from its TEB
+// A stack's range: the stopped thread's base and committed limit (which
+// moves as the stack grows) from its TEB, or the copy's
 struct stack_range {
   DWORD64 low = 0;
   DWORD64 high = 0;
@@ -492,14 +491,67 @@ DWORD64 thread_teb(const HANDLE thread) {
   return reinterpret_cast<DWORD64>(info.teb);
 }
 
-// Whether RtlVirtualUnwind can unwind this frame reading only the stopped
-// thread's stack and the module's unwind data: the stack pointer inside the
-// stack, the unwind data (and its chain) inside the module, and the frame
-// register inside the stack once the prologue has set it (the saved registers
-// are read from there). A fault would be handled on the sampler's thread, and
-// Windows' handling looks up function tables and handlers under locks the
-// stopped main thread may hold (a review, 2026-11-14): so the walk stops
-// instead of faulting.
+// The copy of the main thread's stack the walk unwinds (stack_copy_bytes of
+// it, from the stack pointer up), allocated by the sampler at its start.
+// Only the sampler's thread touches it.
+constexpr std::size_t stack_copy_bytes = 256 * 1024;
+std::uint8_t *stack_copy = nullptr;
+
+// While the thread is stopped: its stack from rsp up (at most max bytes) into
+// to, and the size copied (0 when rsp is not inside its committed stack, as
+// in a frame just allocated into the guard page). Only memory reads of the
+// stack and the TEB: nothing that can take a lock or fault on a live stack.
+__declspec(noinline) std::size_t copy_stack(const DWORD64 teb,
+                                            const DWORD64 rsp, std::uint8_t *to,
+                                            const std::size_t max) {
+  stack_range stack{};
+  if (!read_stack_range(teb, stack) || rsp < stack.low || rsp >= stack.high) {
+    return 0;
+  }
+  const std::size_t size =
+      static_cast<std::size_t>(std::min<DWORD64>(stack.high - rsp, max)) &
+      ~std::size_t{7};
+  std::memcpy(to, reinterpret_cast<const void *>(rsp), size);
+  return size;
+}
+
+std::size_t copy_stack_guarded(const DWORD64 teb, const DWORD64 rsp,
+                               std::uint8_t *to, const std::size_t max) {
+  __try {
+    return copy_stack(teb, rsp, to, max);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return 0;
+  }
+}
+
+// After the thread is let go: what pointed into the copied range (the
+// registers, frame pointers saved on the stack) points into the copy, so the
+// unwind reads the copy. A value that only looks like such a pointer is
+// moved too, which the unwind never minds.
+void rebase_onto_copy(CONTEXT &context, std::uint8_t *copy,
+                      const std::size_t size, const DWORD64 rsp) {
+  const DWORD64 delta = reinterpret_cast<DWORD64>(copy) - rsp;
+  const auto moved = [&](DWORD64 value) {
+    return value >= rsp && value < rsp + size ? value + delta : value;
+  };
+  for (std::size_t at = 0; at + 8 <= size; at += 8) {
+    DWORD64 value = 0;
+    std::memcpy(&value, copy + at, 8);
+    if (const DWORD64 to = moved(value); to != value) {
+      std::memcpy(copy + at, &to, 8);
+    }
+  }
+  for (DWORD64 *reg :
+       {&context.Rax, &context.Rcx, &context.Rdx, &context.Rbx, &context.Rsp,
+        &context.Rbp, &context.Rsi, &context.Rdi, &context.R8, &context.R9,
+        &context.R10, &context.R11, &context.R12, &context.R13, &context.R14,
+        &context.R15}) {
+    *reg = moved(*reg);
+  }
+}
+
+// Whether a frame is worth unwinding: its stack pointer inside the copy, its
+// unwind data (and the chain's) inside the module.
 __declspec(noinline) bool unwindable(const CONTEXT &context,
                                      const RUNTIME_FUNCTION &function,
                                      const unwind_module &module,
@@ -508,12 +560,6 @@ __declspec(noinline) bool unwindable(const CONTEXT &context,
       (context.Rsp & 7) != 0) {
     return false;
   }
-  const DWORD64 registers[16] = {
-      context.Rax, context.Rcx, context.Rdx, context.Rbx,
-      context.Rsp, context.Rbp, context.Rsi, context.Rdi,
-      context.R8,  context.R9,  context.R10, context.R11,
-      context.R12, context.R13, context.R14, context.R15};
-  const DWORD64 offset = context.Rip - (module.base + function.BeginAddress);
   const RUNTIME_FUNCTION *entry = &function;
   for (int link = 0; link < 8; ++link) {
     const DWORD64 unwind = entry->UnwindData;
@@ -527,15 +573,6 @@ __declspec(noinline) bool unwindable(const CONTEXT &context,
     if (codes_end > module.size) {
       return false;
     }
-    // A chained entry's primary is past its prologue
-    if (const unsigned reg = info[3] & 0x0F;
-        reg != 0 && (link > 0 || offset >= info[1])) {
-      const DWORD64 frame =
-          registers[reg] - static_cast<DWORD64>(info[3] >> 4) * 16;
-      if (frame < stack.low || frame >= stack.high) {
-        return false;
-      }
-    }
     if (((info[0] >> 3) & UNW_FLAG_CHAININFO) == 0) {
       return true;
     }
@@ -547,19 +584,18 @@ __declspec(noinline) bool unwindable(const CONTEXT &context,
   return false;
 }
 
-// Unwinds into out.pc while each frame checks out (unwindable); the guard is
-// only a last resort. Without the thread's stack bounds only the pc it stopped
-// at is kept. Every read is in a call: clang's __try guards calls only.
-void walk_stack(CONTEXT &context, const DWORD64 teb, stall_sample &out) {
+// Unwinds the copy into out.pc (the pc the thread stopped at is already
+// there). The main thread runs again by now: RtlVirtualUnwind may look a
+// function up under ntdll's lock (a tail call out of an epilogue) and a bad
+// frame may fault, and neither can hold the game any more (a review,
+// 2026-11-14). Every read is in a call: clang's __try guards calls only.
+void walk_copy(CONTEXT &context, const stack_range &copy, stall_sample &out) {
   __try {
-    stack_range stack{};
-    const bool bounded = teb != 0 && read_stack_range(teb, stack);
-    while (out.depth < stall_stack_depth && context.Rip) {
-      out.pc[out.depth++] = context.Rip;
+    while (out.depth < stall_stack_depth) {
       const unwind_module *module = nullptr;
       const RUNTIME_FUNCTION *function =
-          bounded ? find_function_entry(context.Rip, module) : nullptr;
-      if (!function || !unwindable(context, *function, *module, stack)) {
+          find_function_entry(context.Rip, module);
+      if (!function || !unwindable(context, *function, *module, copy)) {
         break;
       }
       const DWORD64 before = context.Rsp;
@@ -568,14 +604,17 @@ void walk_stack(CONTEXT &context, const DWORD64 teb, stall_sample &out) {
       RtlVirtualUnwind(UNW_FLAG_NHANDLER, module->base, context.Rip,
                        const_cast<PRUNTIME_FUNCTION>(function), &context,
                        &handler_data, &establisher_frame, nullptr);
-      if (context.Rsp <= before) {
+      if (context.Rsp <= before || context.Rip == 0) {
         break; // a frame that does not move up the stack: garbage
       }
+      out.pc[out.depth++] = context.Rip;
     }
   } __except (EXCEPTION_EXECUTE_HANDLER) {
   }
 }
 
+// The main thread is stopped only for its context and a copy of its stack;
+// the walk runs on the copy once it goes on.
 void sample_main_thread(HANDLE thread, DWORD64 teb, std::int64_t now,
                         std::int64_t age) {
   const std::uint32_t slot = stall_count.load(std::memory_order_relaxed);
@@ -592,18 +631,32 @@ void sample_main_thread(HANDLE thread, DWORD64 teb, std::int64_t now,
   if (SuspendThread(thread) == static_cast<DWORD>(-1)) {
     return;
   }
-  if (GetThreadContext(thread, &context)) {
-    walk_stack(context, teb, out);
-  }
+  const bool got = GetThreadContext(thread, &context) != FALSE;
+  const DWORD64 rsp = context.Rsp;
+  const std::size_t copied =
+      got && teb != 0 && stack_copy != nullptr
+          ? copy_stack_guarded(teb, rsp, stack_copy, stack_copy_bytes)
+          : 0;
   ResumeThread(thread);
-  if (out.depth > 0) {
-    out.qpc = now;
-    out.stalled_ticks = age;
-    stall_count.store(slot + 1, std::memory_order_release);
+  if (!got || context.Rip == 0) {
+    return;
   }
+  out.pc[out.depth++] = context.Rip;
+  if (copied > 0) {
+    rebase_onto_copy(context, stack_copy, copied, rsp);
+    walk_copy(context,
+              {reinterpret_cast<DWORD64>(stack_copy),
+               reinterpret_cast<DWORD64>(stack_copy) + copied},
+              out);
+  }
+  out.qpc = now;
+  out.stalled_ticks = age;
+  stall_count.store(slot + 1, std::memory_order_release);
 }
 
 void stall_sampler() {
+  stack_copy = static_cast<std::uint8_t *>(VirtualAlloc(
+      nullptr, stack_copy_bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
   HANDLE thread = nullptr;
   DWORD64 teb = 0;
   std::uint32_t thread_id = 0;

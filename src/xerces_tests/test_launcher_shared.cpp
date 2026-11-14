@@ -1111,6 +1111,18 @@ TEST_CASE("mods info: the details pane's facts") {
   REQUIRE(beta.has_value());
   CHECK_EQ(beta->position, std::size_t(0));
   CHECK(!beta->supports_mode);
+
+  // A mod saved as the map (an item whose kind changed): off and not the
+  // plan's map, and its way out is offered all the same
+  zm.map = "fixture.beta";
+  const plan as_map = resolve_profile(setup.catalog.items, setup.config, "zm",
+                                      setup.game.steam_build);
+  const auto saved_map =
+      describe_mod(setup.catalog, &zm, as_map, "zm", "fixture.beta");
+  REQUIRE(saved_map.has_value());
+  CHECK(std::ranges::any_of(saved_map->fixes, [](const fix_action &f) {
+    return f.kind == "clear_map" && f.id == "fixture.beta";
+  }));
 }
 
 TEST_CASE("mods info: a folder name outside the code page") {

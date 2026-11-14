@@ -3900,4 +3900,14 @@ Discord stop, `plan apply` or the CLI's messages. Its id finding was already fix
 - [x] Left as the client differs, since each would change an item's id (DESIGN.md 5.2): a
       root `workshop.json` that cannot be read, one named in another case, and one with a
       UTF-8 byte order mark.
+- [x] A second read of that fix found what no check before the unwind can rule out: Windows'
+      unwinder looks a function up under ntdll's lock when a frame ends in a jump out of the
+      function (a tail call), and a frame read wrongly can still fault. So the main thread is
+      now stopped only for its registers and a copy of its stack (up to 256 KB from the stack
+      pointer, read from the TEB's bounds; nothing below the committed limit); the walk runs
+      on the copy once the thread goes on, with the copy's stack pointers moved onto it. A
+      look-up under the lock or a fault then costs a sample, never the game. The same hitch
+      run (`bench\20261113-left\hitch2`): 253 samples, 252 of them 14 frames deep.
+- [x] `xerces mods info` offers `clear_map` on a mod saved as the map, as the Mods screen
+      does.
 - [x] 624 unit tests pass.

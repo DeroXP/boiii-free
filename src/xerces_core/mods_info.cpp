@@ -171,6 +171,14 @@ std::optional<mod_details> describe_mod(const catalog_state &catalog,
         }
       }
     }
+  } else {
+    // A saved map that is a mod is neither on nor the plan's map: its way
+    // out is offered all the same, as on the Mods screen (mods_fixes_for)
+    for (const auto &fix : resolved.fixes) {
+      if (fix.id == id && fix.kind == "clear_map") {
+        out.fixes.push_back(fix);
+      }
+    }
   }
   for (const auto &why : resolved.explanations) {
     if (why.subject == id || why.object == id) {

@@ -2,7 +2,8 @@
 stopped for a few microseconds, its instruction pointer (and the return address on top of its stack) read, and it
 is let go. Nothing is loaded into the game.
   python -I tools/dev/re/sample_thread.py <thread id> [samples] [engine start rva] [--raw <file>]
-                                          [--engine-base <hex>] [--scan <bytes>]
+                                          [--engine-base <hex>] [--scan <bytes>] [--seconds <s>]
+--seconds stops after that long even if fewer samples were taken (a map load: give many samples).
 --engine-base places the game's code for a thread that did not start in it (the main thread): the first line
 of `xerces_crash_test threads`. --scan reads that many bytes of the stack (still stopped) and keeps the first
 values that point into code, a rough call chain (a stack scan: some are stale).
@@ -81,6 +82,11 @@ def main():
         at = args.index("--scan")
         scan = int(args[at + 1], 0)
         del args[at:at + 2]
+    seconds = None
+    if "--seconds" in args:
+        at = args.index("--seconds")
+        seconds = float(args[at + 1])
+        del args[at:at + 2]
     if "--engine-base" in args:
         at = args.index("--engine-base")
         given_base = int(args[at + 1], 16)
@@ -141,6 +147,8 @@ def main():
     taken = 0
     t0 = time.perf_counter()
     for _ in range(samples):
+        if seconds is not None and time.perf_counter() - t0 >= seconds:
+            break
         ctypes.memset(aligned, 0, 1232)
         ctypes.c_uint32.from_address(aligned + 0x30).value = 0x00100001  # CONTEXT_CONTROL (AMD64)
         if k32.SuspendThread(ctypes.c_void_p(thread)) == 0xFFFFFFFF:
