@@ -1,6 +1,12 @@
 """Where one thread of the game spends its time, sampled from outside the process as a profiler does: the thread is
 stopped for a few microseconds, its instruction pointer (and the return address on top of its stack) read, and it
-is let go. Nothing is loaded into the game. python -I tools/dev/re/sample_thread.py <thread id> [samples] [engine start rva]
+is let go. Nothing is loaded into the game.
+  python -I tools/dev/re/sample_thread.py <thread id> [samples] [engine start rva] [--raw <file>]
+                                          [--engine-base <hex>] [--scan <bytes>]
+--engine-base places the game's code for a thread that did not start in it (the main thread): the first line
+of `xerces_crash_test threads`. --scan reads that many bytes of the stack (still stopped) and keeps the first
+values that point into code, a rough call chain (a stack scan: some are stale).
+--raw writes each sample's two places, one line each, for a later grouping by function (sample_report.py).
 The game's own code is mapped by the client, not loaded as a module: give the thread's start address's RVA in
 BlackOps3.exe (0x212BB10 for the game's context threads) to place it."""
 import collections
@@ -63,9 +69,25 @@ def exports(dll):
 
 
 def main():
-    tid = int(sys.argv[1])
-    samples = int(sys.argv[2]) if len(sys.argv) > 2 else 2000
-    start_rva = int(sys.argv[3], 16) if len(sys.argv) > 3 else 0x212BB10
+    raw_path = None
+    given_base = None
+    args = list(sys.argv[1:])
+    if "--raw" in args:
+        at = args.index("--raw")
+        raw_path = args[at + 1]
+        del args[at:at + 2]
+    scan = 0
+    if "--scan" in args:
+        at = args.index("--scan")
+        scan = int(args[at + 1], 0)
+        del args[at:at + 2]
+    if "--engine-base" in args:
+        at = args.index("--engine-base")
+        given_base = int(args[at + 1], 16)
+        del args[at:at + 2]
+    tid = int(args[0])
+    samples = int(args[1]) if len(args) > 1 else 2000
+    start_rva = int(args[2], 16) if len(args) > 2 else 0x212BB10
     k32.OpenThread.restype = ctypes.c_void_p
     k32.OpenProcess.restype = ctypes.c_void_p
     k32.LoadLibraryW.restype = ctypes.c_void_p
@@ -77,7 +99,7 @@ def main():
     process = k32.OpenProcess(PROCESS_READ, False, pid)
     start = ctypes.c_void_p()
     ntdll.NtQueryInformationThread(ctypes.c_void_p(thread), 9, ctypes.byref(start), 8, None)
-    engine_base = (start.value or 0) - start_rva
+    engine_base = given_base if given_base is not None else (start.value or 0) - start_rva
     mods = module_table(process)
     named = {}
     for dll in ("ntdll.dll", "win32u.dll", "user32.dll", "kernelbase.dll", "kernel32.dll", "gdi32.dll"):
@@ -101,11 +123,21 @@ def main():
                 return f"{name}+0x{address - base:X}"
         return f"0x{address:X}"
 
+    def code(address):
+        """Whether a stack value may be a return address: in the game's code sections or in a loaded module (a
+        heuristic: a module's data counts too)."""
+        rva = address - engine_base
+        if 0 <= rva < 0x1D75BC00:
+            # the game's image (inside the client's module): its two code sections only, not its data
+            return 0x1000 <= rva < 0x2EFDC00 or 0x1AA6B000 <= rva
+        return any(base + 0x1000 <= address < base + size for base, size, _ in mods)
+
     buf = (ctypes.c_byte * (1232 + 16))()
     aligned = (ctypes.addressof(buf) + 15) & ~15
     leaf = collections.Counter()
     caller = collections.Counter()
     pairs = collections.Counter()
+    raw = []
     taken = 0
     t0 = time.perf_counter()
     for _ in range(samples):
@@ -114,6 +146,18 @@ def main():
         if k32.SuspendThread(ctypes.c_void_p(thread)) == 0xFFFFFFFF:
             break
         ok = k32.GetThreadContext(ctypes.c_void_p(thread), ctypes.c_void_p(aligned))
+        stack = b""
+        if ok and scan:
+            # read while the thread is still stopped, so the stack is the one the context belongs to
+            # in pieces: a shallow stack ends before `scan` bytes, and a read past its end fails whole
+            sp = ctypes.c_uint64.from_address(aligned + 0x98).value
+            piece = ctypes.create_string_buffer(0x100)
+            got = ctypes.c_size_t()
+            for at in range(0, scan, 0x100):
+                if not k32.ReadProcessMemory(ctypes.c_void_p(process), ctypes.c_void_p(sp + at), piece, 0x100,
+                                             ctypes.byref(got)):
+                    break
+                stack += piece.raw[: got.value]
         k32.ResumeThread(ctypes.c_void_p(thread))
         if ok:
             rip = ctypes.c_uint64.from_address(aligned + 0xF8).value
@@ -124,9 +168,20 @@ def main():
             leaf[a.split("+0x")[0] if "!" in a else a] += 1
             caller[b.split("+0x")[0] if "!" in b else b] += 1
             pairs[(a.split("+0x")[0] if "!" in a else a, b)] += 1
+            chain = []
+            for i in range(0, len(stack) - 7, 8):
+                value = struct.unpack_from("<Q", stack, i)[0]
+                if code(value):
+                    chain.append(place(value))
+                    if len(chain) >= 12:
+                        break
+            raw.append(f"{a}\t{b}" + ("\t" + " < ".join(chain) if scan else ""))
             taken += 1
         time.sleep(0.0007)
     gap = time.perf_counter() - t0
+    if raw_path:
+        with open(raw_path, "w", encoding="utf8") as f:
+            f.write("\n".join(raw) + "\n")
     print(f"thread {tid}: {taken} samples over {gap:.1f} s (engine base 0x{engine_base:X})")
     print("where it was:")
     for k, n in leaf.most_common(15):

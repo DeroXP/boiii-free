@@ -3696,6 +3696,25 @@ The first load and launcher baseline from existing logs is in
      time was not reproduced (docs/TESTING.md, "Town Reimagined's 140 ms
      frames").
 
+#### Present without the message loop's millisecond (2026-11-14)
+
+The game presents from its Window thread: the render backend sends the game's
+window message 0x8043 and waits, the window procedure calls
+`IDXGISwapChain::Present`, and the Window thread only takes a sent message after
+each `Sleep(1)` of its message loop (docs/research/engine-re.md, Threads). The
+launch flag `-xerces-present-wake` (`src/client/xerces/present_wake.cpp`) points
+the game's import of `Sleep` at a stub: on the Window thread a wait of 1 ms ends
+as soon as a message is sent to it (`MsgWaitForMultipleObjectsEx` with
+`QS_SENDMESSAGE`, at most the same millisecond); every other thread and wait is
+`Sleep` as before. It changes a pointer in the game's import table, as main.cpp
+does for `ExitProcess`, and no code (earlier detours of kernel32's `Sleep` code
+crashed in loads, docs/research/upstream-render.md). `xerces.present_wake.stats`
+every 30 s: the waits, how many a sent message ended and how long those had
+lasted, and how long the others lasted (a whole `Sleep(1)` with the PC's timer). Off unless
+the flag is given: in a level where the GPU's queue held the frame rate it gave
+the same frame rate with frame times about a third steadier (docs/TESTING.md);
+whether it becomes the default is the user's call.
+
 #### Precise frame limiter (item 4)
 
 On only with the launch flag `-xerces-precise-limiter` (Settings, Display,

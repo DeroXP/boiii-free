@@ -204,5 +204,91 @@ base 0x140000000 that upstream's symbol tables use.
   second (`wakeups.py`) for about half a millisecond each. Sampled (`sample_thread.py`,
   3000 samples): 72% asleep in `Sleep`, and most of the rest in `PeekMessage`, in
   `ShowCursor` through the Steam overlay's hook of it (`gameoverlayrenderer64.dll`),
-  `GetProp`, and DXGI's device-state and redirection checks. Not worth a change: the
-  thread runs beside the frame, not in it, and the main thread had room left.
+  `GetProp`, and DXGI's device-state and redirection checks. The window procedure
+  (0x1422BB620) also calls `SetThreadExecutionState(ES_CONTINUOUS |
+  ES_DISPLAY_REQUIRED)` on every message it gets (the display is kept on, with
+  `r_fullscreen` 1), and on `WM_WTSSESSION_CHANGE` (0x2B1) a lock of Windows adds one
+  to `cl_paused` and an unlock takes it off.
+- Where the main thread and a job worker were, standing at the start of Shadows of
+  Evil (3,000 samples each, `sample_report.py`, functions by `.pdata` and named by the
+  nearest known symbol, which is only a hint): the main thread waited 21% of the time
+  in `WaitForSingleObject` (for the render backend and the workers), 5.5% in `Sleep`,
+  3.6% in `SetEvent`; the most of its own code was 8% in 0x141D07230 and 2.9% in
+  0x141D05C50 (both just after `R_StreamPushDisable`, the image streamer's part of the
+  code) and about 4% in three functions near `CM_SightTraceThroughTree` (collision
+  traces). JQ Worker 1 waited 39% of the time; its most was 6.7% in 0x142911BAC and
+  2.8% in 0x142914E50. Nothing stood out as one function to fix.
+- What the main thread waits for: sampled again with stack scans (2,500 samples), 98%
+  of its `WaitForSingleObject` time was `Sys_WaitForSingleObject` (0x14212BC50) called
+  from 0x141CD0B50, a renderer function (near `R_AddCmdDrawUIQuads`): the main thread
+  waits for the render backend, which waits for the Window thread's Present (below).
+  So when the processor holds the frame rate, Present's wait is on the main thread's
+  path too.
+- The game presents on the Window thread. Sampled from outside
+  (`sample_thread.py --scan`, `sample_report.py --chain`), the render backend thread
+  (2_Backend) spent 66% of its samples in a level and 88% in the menus inside
+  `SendMessageA`: at 0x141C47900 it sends the game's window (`[0x157DF74A0]`) message
+  0x8043 with `r_vsync` as wParam (Present's sync interval), and waits. Just before
+  it, when `r_vsync` is on, a value at 0x14F464C90 is set and the one at 0x14F437800
+  is 2, it calls `Sleep` (through the thunk at 0x14212B350) for `1000 /
+  r_refreshRate - 2` whole milliseconds (2 at 240 Hz, 14 at 60 Hz; the constant is
+  -1000.0 at 0x142F1A5C8): it sleeps most of a refresh before it presents. The dvars
+  were named from the dump: each `dvar_t` starts with its name's hash (`CanonHash`,
+  FNV-1a from 0x4B9ACE2F with the closing zero), matched against
+  `data/lookup_tables/dvar_list.txt`. The window procedure handles three
+  private messages with the swap chain kept at `[0x14F4378D8]`: 0x8042 calls
+  `IDXGIFactory::CreateSwapChain` (wParam the factory, the device from
+  `[0x14F437780]`, lParam the description), 0x8043 `IDXGISwapChain::Present(wParam,
+  0)` and 0x8044 `SetFullscreenState(wParam, lParam)`. So every frame's Present waits
+  until the Window thread's `Sleep(1)` ends and its `PeekMessage` takes the sent
+  message: up to a millisecond and a bit.
+- `-xerces-present-wake` (`src/client/xerces/present_wake.cpp`, off unless given)
+  points the game's import of `Sleep` at a stub that, on the Window thread and for a
+  wait of 1 ms only, waits at most the same millisecond but wakes as soon as a
+  message is sent to the thread (`MsgWaitForMultipleObjectsEx`, `QS_SENDMESSAGE`).
+  Measured in Shadows of Evil (2026-11-14, mods off, the user's own display settings:
+  a 3840x2160 borderless window, 50% render resolution, MaxFPS 240, vsync off; two
+  pairs of 30 s runs with the frame probe, `bench\20261113-left\present-ab.ps1`):
+  about 150 Presents a second were taken early; the mean
+  frame rate stayed the same (204.6 and 206.8 FPS without, 207.9 and 205.3 with),
+  the time inside Present grew from 2.0 to 3.0 ms (Present now waits on the GPU's
+  queue instead of the loop's sleep: the GPU's queue held the rate), and the frame
+  times' standard deviation fell from 0.96 and 0.87 ms to 0.61 and 0.58 ms. p99 and
+  the 1% low did not change beyond the runs' own spread. A wait a sent Present
+  ended had lasted about 0.6 ms, where a whole `Sleep(1)` lasted about 1.2 ms (the
+  0.5 ms timer this PC had): those Presents start about 0.6 ms sooner (the stats of
+  a later run through two loads, a `fast_restart` and the menus, which ended
+  cleanly; a second reader's review asked for that run). Not tried where the
+  processor holds the frame rate (a run with a lower render resolution did not start:
+  the test launcher passes no `+set`), nor in the user's own play with mods.
+- The Input thread (0x1422BB4A0) makes a message-only window, class
+  `CoDBlackOpsInputs`, and loops: `GetRawInputBuffer` into a 0x400-byte buffer at
+  0x157DF7520 until it is empty, adding each mouse record's `lLastX` and `lLastY`
+  into two counters (0x157DF7498, 0x157DF749C) with locked adds, then `Sleep(1)`. The
+  game takes the sums once a frame, so mouse movement can sit up to about a
+  millisecond in the raw input queue before it counts. The same kind of wait as the
+  Window thread's: a wait that ends on raw input (`QS_RAWINPUT`) would take it at
+  once. Not changed.
+
+## Network timeouts (for the two-PC test)
+
+The values in the dump of 2026-11-04 (the menus), read by matching each `dvar_t`'s name
+hash against `data/lookup_tables/dvar_list.txt`. What a join that stalls runs into:
+
+| Dvar | Value | What it bounds |
+| --- | --- | --- |
+| `cl_connectTimeout` | 120 s | a client's whole connect |
+| `cl_connectionAttempts` | 40 | the connect packets a client sends |
+| `cl_timeout` | 20 s | a connected client hearing nothing from the server |
+| `sv_connectTimeout` | 90 s | the server waiting for a connecting client |
+| `sv_timeout` | 30 s | the server hearing nothing from a client |
+| `sv_reconnectlimit` | 3 | reconnects |
+| `lobby_clientTimeout` | 30,000 ms | a lobby client hearing nothing from its host (a warning at `lobby_clientWarnTimeout`, 5,500 ms) |
+| `lobby_hostTimeout` | 45,000 ms | a lobby host hearing nothing from a client |
+| `lobby_ptptimeout` | 60,000 ms | the lobby's peer-to-peer link |
+| `lobby_clientContentTimeout`, `lobby_hostContentTimeout` | 20,000 ms | content checks in the lobby |
+| `reliableTimeoutTime` | 20,000 ms | a reliable message's answer |
+| `lobbyMigrate_Enabled` | 0 | host migration (off) |
+| `cl_maxpackets`, `sv_maxRate` | 100, 20,000 | client packets a second, server bytes a second |
+
+So a join that fails at about 20, 30 or 45 seconds points at the matching timeout above.

@@ -236,7 +236,10 @@ public:
         const auto at = [base](const std::uintptr_t address) {
           return base + (address - 0x140000000ull);
         };
-        std::string out = "table (IDs 0x15753F660, functions 0x15753F720):\n";
+        // Where the game's image is, for tools that place addresses from
+        // outside (tools/dev/re/sample_thread.py --engine-base)
+        std::string out = std::format("engine base 0x{:X}\n", base);
+        out += "table (IDs 0x15753F660, functions 0x15753F720):\n";
         std::uint64_t ids[xerces_core::engine_thread_contexts]{};
         std::uint64_t functions[xerces_core::engine_thread_contexts]{};
         xerces_safe::read(reinterpret_cast<const void *>(at(0x15753F660)), ids,

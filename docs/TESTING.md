@@ -3641,3 +3641,40 @@ on to Windows and names a crashing thread from the table.
 - [ ] A crash on one of the game's other threads (a real one): "on the game's
       <name> thread" in what happened, and `auxiliary, game's <name>` on the
       `Thread ID` line.
+
+## Present without the message loop's millisecond (after beta.26, 2026-11-14)
+
+`-xerces-present-wake` lets the game's Window thread take Present as soon as the render
+backend sends it, instead of after the `Sleep(1)` of its message loop (DESIGN.md 12.4,
+docs/research/engine-re.md).
+
+- [x] Found by sampling the render backend from outside the game (`2_Backend` in
+      `SendMessageA` 66% of the time in a level, 88% in the menus) and reading the window
+      procedure: messages 0x8042, 0x8043 and 0x8044 create the swap chain, Present and set
+      full screen.
+- [x] Shadows of Evil, mods off, the user's own display settings (3840x2160 borderless,
+      50% render resolution, MaxFPS 240, vsync off), `bench\20261113-left\present-ab.ps1`
+      (the frame probe, 30 s from 8 s into the level), two pairs in opposite orders:
+
+      | Run | FPS | median | p99 | 1% low | sd | in Present |
+      | --- | --- | --- | --- | --- | --- | --- |
+      | off (1st) | 204.6 | 4.99 ms | 7.50 ms | 114.1 | 0.96 ms | 2.07 ms |
+      | on (1st) | 207.9 | 4.73 ms | 7.21 ms | 113.2 | 0.61 ms | 3.00 ms |
+      | on (2nd) | 205.3 | 4.78 ms | 7.59 ms | 116.2 | 0.58 ms | 3.03 ms |
+      | off (2nd) | 206.8 | 4.83 ms | 7.51 ms | 121.3 | 0.87 ms | 1.99 ms |
+
+      About 4,500 of 17,700 waits in 30 s ended early for a sent message. The game played
+      and quit as usual.
+- [x] A second reader's review: no hang or crash path, nothing changed for other
+      threads; three fixes taken (no `MWMO_INPUTAVAILABLE`, so a message seen but not
+      taken cannot make a `Sleep(1)` outside the loop spin; a failed wait falls back to
+      `Sleep`; the stats measure both kinds of wait instead of assuming 1 ms), and the
+      soak it asked for, since earlier detours of kernel32's `Sleep` code had crashed in
+      loads (docs/research/upstream-render.md).
+- [x] The soak (`bench\20261113-left\present-soak.ps1`, flag on): menus, Shadows of
+      Evil, `fast_restart`, `disconnect` to the menus, the level again, quit:
+      `clean_exit`, no crash file. `xerces.present_wake.stats` every 30 s: a wait a
+      sent message ended had lasted 0.56 to 0.63 ms, a whole wait 0.89 to 1.79 ms
+      (about 1.2 ms in a level): Present starts about 0.6 ms sooner when it is woken.
+- [ ] In the user's own play (their mods and maps), and where the processor holds the
+      frame rate: whether it should be on by default.
