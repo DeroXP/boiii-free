@@ -4053,3 +4053,5 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       overflow` 0xC00000FD ("The thread ran out of stack."), each with its text and dump. The
       next start logged it and showed the notice, the start after that neither; the names
       said are in `cache\launcher-crashes-seen.txt`, the crash folder holds only reports.
+- [x] The nine in-game M1 cases again on the final build, after this (`bench\20261113-left\m1-final2`):
+      60 checks pass, none fail.
