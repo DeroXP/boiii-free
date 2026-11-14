@@ -964,13 +964,19 @@ manifest synthesize_legacy(const legacy_input &input,
 
   std::optional<std::string> publisher_id;
   std::optional<std::string> title;
-  // The client reads workshop.json without checking its encoding: one saved
-  // in the ANSI code page (an accented title) is still the item's, with its
-  // Workshop id and kind (a review, 2026-11-13).
+  // The client reads workshop.json without checking its encoding, so one
+  // saved in the ANSI code page (an accented title) is read here too, for its
+  // kind (legacy_kind) and its title, shown as valid UTF-8 (a review,
+  // 2026-11-13). The id still comes from a strict read only: an item whose
+  // file did not read before was local.<folder>, and profiles and pins saved
+  // since name it so; giving it its ws.<id> now would lose it from them.
   if (input.workshop_json) {
+    const auto strict = json::parse(*input.workshop_json);
+    if (strict.ok && strict.document.IsObject()) {
+      publisher_id = json::get_string(strict.document, "PublisherID");
+    }
     const auto parsed = json::parse_lenient(*input.workshop_json);
     if (parsed.ok && parsed.document.IsObject()) {
-      publisher_id = json::get_string(parsed.document, "PublisherID");
       if (const auto text = json::get_string(parsed.document, "Title")) {
         title = json::valid_utf8(*text, 4096);
       }

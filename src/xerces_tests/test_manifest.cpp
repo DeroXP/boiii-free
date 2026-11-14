@@ -200,7 +200,8 @@ TEST_CASE("manifest: a legacy item is a map or a mod as the game decides") {
   accented.workshop_json = ansi;
   const manifest m = synthesize_legacy(accented, {});
   CHECK(m.kind == content_kind::map);
-  CHECK_EQ(m.id, "ws.3735179543"); // not local.<folder>
+  // Its id as before, from the strict read: profiles saved with it keep it
+  CHECK_EQ(m.id, "local.3735179543");
   CHECK(m.name.starts_with("Caf"));
   CHECK(m.name.find("\xE9") == std::string::npos ||
         m.name.find("\xC3\xA9") != std::string::npos);
