@@ -456,6 +456,16 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   the connection state in the readable code are `LOADING` (0x141326EA3) and
   `DISCONNECTED` (0x14135945D), so the others are made in the protection's code or
   through a pointer.
+- Not a fixed time either: on Origins (`zm_tomb`, `states-tomb`) the client entered
+  `CONFIRMLOADING` at 5.28 s, the server came up at 8.50 s and the client left at 11.51 s:
+  3.0 s after the server (4.8 s on Shadows of Evil), 6.2 s after entering (9.2 s). Nor the
+  sound banks: Shadows of Evil's (`zm_zod.all.sabl`, 211 MB) is read by 39.4 s of its trace
+  and the console says its sounds are loaded right after, about 5 s before the connect.
+- The read trace also shows the game reading other programs' executables while it loads: 68.6
+  MB of `RemoteDesktopCompanion.exe` (Meta Horizon's remote desktop, running on this PC)
+  and later `MQRDCrashpadHandler.exe`, in synchronous reads on an unnamed thread. That fits
+  the protection's scan of the PC's windows and processes (Threads, worker 0): it reads
+  the files of programs it finds.
 - Part 1 holds two of the lobby's launch waits: `lobbyLaunch_waitForClientAckDelay`
   (2,000 ms) and `lobbyLaunch_gameLaunchDelay` (700 ms), there for the other lobby
   members' games to hear of the launch (`...OnConnect` versions: 800 and
