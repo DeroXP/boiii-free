@@ -12,3 +12,7 @@ nul
 /**/*.luac
 /**/*.aps
 /dist/
+
+# Python bytecode (tools/release imports its neighbours; release.ps1 and
+# source_archive.py refuse a tree with untracked files)
+__pycache__/
