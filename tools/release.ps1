@@ -155,6 +155,8 @@ try {
   Invoke-Checked 'check_licences.py' { python -I tools\ci\check_licences.py }
   Invoke-Checked 'check_microsoft_notices.py --self-test' { python -I tools\ci\check_microsoft_notices.py --self-test }
   Invoke-Checked 'check_microsoft_notices.py' { python -I tools\ci\check_microsoft_notices.py }
+  # The website (site/README.md) is made from docs this release changes: every link resolves
+  Invoke-Checked 'build_site.py --check' { python -I tools\site\build_site.py --check }
   # No code GPL-3.0 cannot take in (DESIGN.md 16.5; src\common\str.hpp held
   # kernel code until its rewrite).
   Invoke-Checked 'notices.py --licences' { python -I tools\release\notices.py --licences }

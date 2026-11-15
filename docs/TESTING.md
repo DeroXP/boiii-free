@@ -4314,3 +4314,19 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       (`loader.out_of_memory`); the user's own settings have `-xerces-db-pool -xerces-db-pool-8gb`.
 - [ ] A Windows Security prompt ("allow public networks to access BOIII") came up over a test game with the
       rebuilt boiii.exe. Left for the user, as always.
+- [x] The user's stack on every installed Zombies map, first pass (68f788cc): Shadows of Evil, Origins, Kino der
+      Toten, Moon, Asylum and The Prototype loaded (10.8 to 14.2 s) and played; **Ascension froze**: the server
+      thread looped in the engine's own player method `ClientSysSetState`, called from Xerces' wrapper, as Girls'
+      Frontline's `clientsystem.gsc` sent a slot's state to the player connecting; the watchdog closed the game
+      after 315 s of loading (`freeze-2026-11-14-22-37-39.txt`). That method is protected code that loops when
+      called from outside the game's image; Xerces now does what it does itself (4d3b9e14). Ascension with the
+      eight mods then: loaded in 13 s, played 30 s, back to the menu. The sweep stopped there and ran again from
+      the start on 4d3b9e14 (next item).
+- [x] The sound banks' extra steps (4d3b9e14, `bank-ab.ps1`, alternating with `XERCES_BANK_STEPS=0`): vanilla
+      launch to the menus 19.8, 19.4, 19.7 s at the engine's pace against 18.6, 18.6, 18.6 s with them; the
+      eight-mod stack 23.9 and 24.4 s against 23.3 and 22.5 s. The log: 56 extra steps at the start, 7 or 14 for
+      each later zone. With the eight mods the menus come about 3.6 s after vanilla's: the mods' own front-end
+      zones (four more bank sets), not a wait.
+- [x] The website (03a73536, 77375627): `build_site.py --check` passes; seen in the browser pane at desktop and
+      phone width (no sideways scroll, the menu opens, the light theme applies) and rendered by Edge headless
+      (`bench\20261114-night\site`).
