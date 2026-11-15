@@ -79,20 +79,18 @@ public:
     model.Bind("key_hint", &key_hint_);
     model.Bind("command_hint", &command_hint_);
     model.Bind("bind_error", &bind_error_);
-    model.BindEventCallback(
-        "act", [this](Rml::DataModelHandle, Rml::Event &,
-                      const Rml::VariantList &args) {
-          if (!args.empty()) {
-            act(args[0].Get<Rml::String>());
-          }
-        });
-    model.BindEventCallback(
-        "remove", [this](Rml::DataModelHandle, Rml::Event &,
-                         const Rml::VariantList &args) {
-          if (!args.empty()) {
-            remove(args[0].Get<Rml::String>());
-          }
-        });
+    model.BindEventCallback("act", [this](Rml::DataModelHandle, Rml::Event &,
+                                          const Rml::VariantList &args) {
+      if (!args.empty()) {
+        act(args[0].Get<Rml::String>());
+      }
+    });
+    model.BindEventCallback("remove", [this](Rml::DataModelHandle, Rml::Event &,
+                                             const Rml::VariantList &args) {
+      if (!args.empty()) {
+        remove(args[0].Get<Rml::String>());
+      }
+    });
     handle_ = model.GetModelHandle();
     // RmlUi translates text nodes only, never a placeholder attribute, so
     // the fields' placeholders come from the model.
@@ -158,8 +156,8 @@ private:
                      : std::string();
     pools_on_ = xerces_core::asset_pools_enabled(
         read_text(*dir / "launcher_settings.json").value_or(""));
-    for (const auto &bind : xerces_core::parse_binds(
-             read_text(*dir / "binds.cfg").value_or(""))) {
+    for (const auto &bind :
+         xerces_core::parse_binds(read_text(*dir / "binds.cfg").value_or(""))) {
       binds_.push_back({bind.key, bind.command});
     }
     handle_.DirtyAllVariables();
@@ -197,7 +195,8 @@ private:
   }
 
   bool save_binds(const std::vector<xerces_core::game_bind> &binds) {
-    if (!write_text(*folder() / "binds.cfg", xerces_core::binds_to_text(binds))) {
+    if (!write_text(*folder() / "binds.cfg",
+                    xerces_core::binds_to_text(binds))) {
       owner_->notify(owner_->tr("binds.cfg could not be written."), true);
       return false;
     }
@@ -227,7 +226,8 @@ private:
       // instead of being replaced by a file with the switch only.
       const fs::path file = *folder() / "launcher_settings.json";
       using xerces_core::pool_switch;
-      const pool_switch done = xerces_core::switch_asset_pools(file, !pools_on_);
+      const pool_switch done =
+          xerces_core::switch_asset_pools(file, !pools_on_);
       if (done != pool_switch::written) {
         log_warn("launcher.game_files.pools_refused",
                  done == pool_switch::unreadable      ? "unreadable"

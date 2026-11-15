@@ -29,8 +29,8 @@ std::string utf8(const std::wstring &text) {
   if (text.empty()) {
     return {};
   }
-  const int size = WideCharToMultiByte(CP_UTF8, 0, text.data(), int(text.size()),
-                                       nullptr, 0, nullptr, nullptr);
+  const int size = WideCharToMultiByte(
+      CP_UTF8, 0, text.data(), int(text.size()), nullptr, 0, nullptr, nullptr);
   std::string out(std::size_t(size), '\0');
   WideCharToMultiByte(CP_UTF8, 0, text.data(), int(text.size()), out.data(),
                       size, nullptr, nullptr);
@@ -41,8 +41,8 @@ std::wstring wide(std::string_view text) {
   if (text.empty()) {
     return {};
   }
-  const int size =
-      MultiByteToWideChar(CP_UTF8, 0, text.data(), int(text.size()), nullptr, 0);
+  const int size = MultiByteToWideChar(CP_UTF8, 0, text.data(),
+                                       int(text.size()), nullptr, 0);
   std::wstring out(std::size_t(size), L'\0');
   MultiByteToWideChar(CP_UTF8, 0, text.data(), int(text.size()), out.data(),
                       size);
@@ -132,7 +132,8 @@ struct user_only_security {
     GetTokenInformation(token, TokenUser, nullptr, 0, &size);
     std::vector<std::uint8_t> buffer(size);
     LPWSTR sid = nullptr;
-    if (size && GetTokenInformation(token, TokenUser, buffer.data(), size, &size) &&
+    if (size &&
+        GetTokenInformation(token, TokenUser, buffer.data(), size, &size) &&
         ConvertSidToStringSidW(
             reinterpret_cast<TOKEN_USER *>(buffer.data())->User.Sid, &sid)) {
       const std::wstring sddl = std::wstring(L"D:P(A;") +
@@ -203,14 +204,16 @@ std::optional<std::string> read_message(HANDLE pipe, HANDLE stop_event,
     ResetEvent(overlapped.hEvent);
     DWORD got = 0;
     bool more = false;
-    if (ReadFile(pipe, buffer.data(), DWORD(buffer.size()), &got, &overlapped)) {
+    if (ReadFile(pipe, buffer.data(), DWORD(buffer.size()), &got,
+                 &overlapped)) {
       message.append(buffer.data(), got);
     } else if (GetLastError() == ERROR_MORE_DATA) {
       GetOverlappedResult(pipe, &overlapped, &got, FALSE);
       message.append(buffer.data(), got);
       more = true;
     } else if (GetLastError() == ERROR_IO_PENDING) {
-      const auto moved = finish(pipe, overlapped, stop_event, timeout_ms, &more);
+      const auto moved =
+          finish(pipe, overlapped, stop_event, timeout_ms, &more);
       if (!moved) {
         break;
       }
@@ -271,7 +274,9 @@ void wait_for_client_close(HANDLE pipe, HANDLE stop_event, DWORD timeout_ms) {
   CloseHandle(overlapped.hEvent);
 }
 
-std::string id_or_null(const std::string &id) { return id.empty() ? "null" : id; }
+std::string id_or_null(const std::string &id) {
+  return id.empty() ? "null" : id;
+}
 } // namespace
 
 bool same_image(std::string_view a, std::string_view b) {
@@ -379,7 +384,8 @@ parsed_request parse_request(std::string_view message) {
   parsed_request out;
   const auto parsed = json::parse(message);
   if (!parsed.ok) {
-    out.error_response = make_error("", parse_error, "not JSON: " + parsed.error);
+    out.error_response =
+        make_error("", parse_error, "not JSON: " + parsed.error);
     return out;
   }
   const auto &root = parsed.document;
@@ -395,8 +401,8 @@ parsed_request parse_request(std::string_view message) {
   const auto method = root.IsObject() ? json::get_string(root, "method")
                                       : std::optional<std::string>{};
   if (!root.IsObject() || version != "2.0" || !method || method->empty()) {
-    out.error_response =
-        make_error(id, invalid_request, "a JSON-RPC 2.0 request object is needed");
+    out.error_response = make_error(id, invalid_request,
+                                    "a JSON-RPC 2.0 request object is needed");
     return out;
   }
   request value;
@@ -405,8 +411,8 @@ parsed_request parse_request(std::string_view message) {
   value.params = "{}";
   if (const auto *params = json::member(root, "params")) {
     if (!params->IsObject() && !params->IsArray()) {
-      out.error_response =
-          make_error(id, invalid_params, "params must be an object or an array");
+      out.error_response = make_error(id, invalid_params,
+                                      "params must be an object or an array");
       return out;
     }
     value.params = json::canonical(*params);
@@ -417,8 +423,9 @@ parsed_request parse_request(std::string_view message) {
 
 std::string make_request(std::string_view method, std::string_view params_json,
                          int id) {
-  return "{\"id\":" + std::to_string(id) + ",\"jsonrpc\":\"2.0\",\"method\":" +
-         json::quote(method) + ",\"params\":" +
+  return "{\"id\":" + std::to_string(id) +
+         ",\"jsonrpc\":\"2.0\",\"method\":" + json::quote(method) +
+         ",\"params\":" +
          std::string(params_json.empty() ? "{}" : params_json) + "}";
 }
 
@@ -492,7 +499,8 @@ bool pipe_server::start(const std::filesystem::path &run_dir, std::string role,
           PIPE_REJECT_REMOTE_CLIENTS,
       1, 64 * 1024, 64 * 1024, 0, &pipe_security.attributes);
   if (pipe == INVALID_HANDLE_VALUE) {
-    return fail("CreateNamedPipe failed (" + std::to_string(GetLastError()) + ")");
+    return fail("CreateNamedPipe failed (" + std::to_string(GetLastError()) +
+                ")");
   }
   first_instance_ = pipe;
   stop_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -604,11 +612,10 @@ call_result call(const run_entry &server, std::string_view method,
   HANDLE pipe = INVALID_HANDLE_VALUE;
   for (int attempt = 0; attempt < 2; ++attempt) {
     // Identification only: the server cannot act as this user.
-    pipe = CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-                       OPEN_EXISTING,
-                       FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT |
-                           SECURITY_IDENTIFICATION,
-                       nullptr);
+    pipe = CreateFileW(
+        name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
+        nullptr);
     if (pipe != INVALID_HANDLE_VALUE || GetLastError() != ERROR_PIPE_BUSY) {
       break;
     }
@@ -640,9 +647,9 @@ call_result call(const run_entry &server, std::string_view method,
   const auto reply = read_message(pipe, nullptr, DWORD(timeout_ms), &too_big);
   CloseHandle(pipe);
   if (!reply) {
-    out.error = too_big ? "the response is too large"
-                        : "no response within " + std::to_string(timeout_ms) +
-                              " ms";
+    out.error =
+        too_big ? "the response is too large"
+                : "no response within " + std::to_string(timeout_ms) + " ms";
     return out;
   }
   out.ok = true;

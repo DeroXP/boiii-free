@@ -4443,3 +4443,14 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       played 30 s and went back to the menu; the one other line is the check's `not_started` above (its game ran).
       No freeze and no crash report, so two freezes in 190 games of that map tonight (about one in a hundred), and
       the reader still has not had one to read. KNOWN_ISSUES.md and site/tested.json carry the new count.
+- [x] CI's Check Formatting, red since beta.25 (2026-11-14), passes its StyLua and clang-format steps locally.
+      StyLua 2.6.0 (what CI's `latest` gave; the workflow now pins it) reflowed one button callback in each of the
+      two hand-written menu scripts, and tools/ui/tokens.py now writes xerces_tokens.lua with two-space indents
+      instead of tabs. The clang-format step behind it had not run since; clang-format 23 flagged 66 files under
+      src: 64 reformatted (Xerces's own, and our lines in five of upstream's; one include order changed, in
+      signatures.cpp), the spike's copied RmlUi DX11 backend added to .clang-format-ignore like the HarfBuzz copy,
+      and upstream's scr/vm/op/code.cpp left alone: it is identical to upstream/beta, which passes CI's
+      clang-format 22, and only 23 lays out its commented jump tables differently. The Release build of all four
+      programs compiles and the 629 unit tests pass. The Prettier step runs `yarn check`, which is Yarn 1's own
+      lockfile check, not the package script, so Prettier has never run in CI; with `proseWrap: always` at 80
+      columns it would rewrap most of docs/.

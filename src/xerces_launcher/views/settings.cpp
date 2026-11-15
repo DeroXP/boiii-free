@@ -74,38 +74,55 @@ std::string utf8(const fs::path &path) {
 enum class text_field { none, name, fps, fov, flags };
 
 text_field field_of(const std::string &id) {
-  if (id == "player-name") return text_field::name;
-  if (id == "fps-field") return text_field::fps;
-  if (id == "fov-field") return text_field::fov;
-  if (id == "flags-field") return text_field::flags;
+  if (id == "player-name")
+    return text_field::name;
+  if (id == "fps-field")
+    return text_field::fps;
+  if (id == "fov-field")
+    return text_field::fov;
+  if (id == "flags-field")
+    return text_field::flags;
   return text_field::none;
 }
 
 const char *field_id(text_field field) {
   switch (field) {
-  case text_field::name: return "player-name";
-  case text_field::fps: return "fps-field";
-  case text_field::fov: return "fov-field";
-  case text_field::flags: return "flags-field";
-  default: return "";
+  case text_field::name:
+    return "player-name";
+  case text_field::fps:
+    return "fps-field";
+  case text_field::fov:
+    return "fov-field";
+  case text_field::flags:
+    return "flags-field";
+  default:
+    return "";
   }
 }
 
 text_field field_named(const std::string &name) {
-  if (name == "name") return text_field::name;
-  if (name == "fps") return text_field::fps;
-  if (name == "fov") return text_field::fov;
-  if (name == "flags") return text_field::flags;
+  if (name == "name")
+    return text_field::name;
+  if (name == "fps")
+    return text_field::fps;
+  if (name == "fov")
+    return text_field::fov;
+  if (name == "flags")
+    return text_field::flags;
   return text_field::none;
 }
 
 // A control next to each text field, for leaving it with Esc.
 const char *near_control(text_field field) {
   switch (field) {
-  case text_field::fps: return "fps-slider";
-  case text_field::fov: return "fov-slider";
-  case text_field::flags: return "close-on-launch";
-  default: return "game-change";
+  case text_field::fps:
+    return "fps-slider";
+  case text_field::fov:
+    return "fov-slider";
+  case text_field::flags:
+    return "close-on-launch";
+  default:
+    return "game-change";
   }
 }
 
@@ -182,48 +199,44 @@ public:
     model.Bind("crash_busy", &crash_busy_);
     model.Bind("version", &version_);
 
-    model.BindEventCallback(
-        "act", [this](Rml::DataModelHandle, Rml::Event &,
-                      const Rml::VariantList &args) {
-          if (!args.empty()) {
-            act(args[0].Get<Rml::String>());
-          }
-        });
-    model.BindEventCallback(
-        "choose", [this](Rml::DataModelHandle, Rml::Event &,
-                         const Rml::VariantList &args) {
-          if (args.size() >= 2) {
-            choose(args[0].Get<Rml::String>(), args[1].Get<Rml::String>());
-          }
-        });
-    model.BindEventCallback(
-        "toggle", [this](Rml::DataModelHandle, Rml::Event &,
-                         const Rml::VariantList &args) {
-          if (!args.empty()) {
-            toggle(args[0].Get<Rml::String>());
-          }
-        });
-    model.BindEventCallback(
-        "commit", [this](Rml::DataModelHandle, Rml::Event &,
-                         const Rml::VariantList &args) {
-          if (!args.empty()) {
-            commit(field_named(args[0].Get<Rml::String>()), false);
-          }
-        });
-    model.BindEventCallback(
-        "slid", [this](Rml::DataModelHandle, Rml::Event &event,
-                       const Rml::VariantList &args) {
-          if (!args.empty()) {
-            slid(args[0].Get<Rml::String>(), event);
-          }
-        });
-    model.BindEventCallback(
-        "remove_dvar", [this](Rml::DataModelHandle, Rml::Event &,
-                              const Rml::VariantList &args) {
-          if (!args.empty()) {
-            remove_dvar(args[0].Get<Rml::String>());
-          }
-        });
+    model.BindEventCallback("act", [this](Rml::DataModelHandle, Rml::Event &,
+                                          const Rml::VariantList &args) {
+      if (!args.empty()) {
+        act(args[0].Get<Rml::String>());
+      }
+    });
+    model.BindEventCallback("choose", [this](Rml::DataModelHandle, Rml::Event &,
+                                             const Rml::VariantList &args) {
+      if (args.size() >= 2) {
+        choose(args[0].Get<Rml::String>(), args[1].Get<Rml::String>());
+      }
+    });
+    model.BindEventCallback("toggle", [this](Rml::DataModelHandle, Rml::Event &,
+                                             const Rml::VariantList &args) {
+      if (!args.empty()) {
+        toggle(args[0].Get<Rml::String>());
+      }
+    });
+    model.BindEventCallback("commit", [this](Rml::DataModelHandle, Rml::Event &,
+                                             const Rml::VariantList &args) {
+      if (!args.empty()) {
+        commit(field_named(args[0].Get<Rml::String>()), false);
+      }
+    });
+    model.BindEventCallback("slid",
+                            [this](Rml::DataModelHandle, Rml::Event &event,
+                                   const Rml::VariantList &args) {
+                              if (!args.empty()) {
+                                slid(args[0].Get<Rml::String>(), event);
+                              }
+                            });
+    model.BindEventCallback("remove_dvar",
+                            [this](Rml::DataModelHandle, Rml::Event &,
+                                   const Rml::VariantList &args) {
+                              if (!args.empty()) {
+                                remove_dvar(args[0].Get<Rml::String>());
+                              }
+                            });
     handle_ = model.GetModelHandle();
     fps_max_ = core::fps_slider_max();
     // RmlUi translates text nodes only, never a placeholder attribute, so
@@ -368,20 +381,24 @@ private:
   }
 
   Rml::Element *visible(const std::string &id) const {
-    Rml::Element *element = doc && !id.empty() ? doc->GetElementById(id) : nullptr;
+    Rml::Element *element =
+        doc && !id.empty() ? doc->GetElementById(id) : nullptr;
     return element && element->IsVisible(true) ? element : nullptr;
   }
 
   // In a row of choices the chosen one; else the same column, else the
   // first control that is shown.
-  Rml::Element *pick(const std::vector<std::string> &row, std::size_t column) const {
+  Rml::Element *pick(const std::vector<std::string> &row,
+                     std::size_t column) const {
     for (const std::string &id : row) {
-      if (Rml::Element *element = visible(id); element && element->IsClassSet("on") &&
+      if (Rml::Element *element = visible(id); element &&
+                                               element->IsClassSet("on") &&
                                                element->IsClassSet("choice")) {
         return element;
       }
     }
-    if (Rml::Element *element = visible(row[std::min(column, row.size() - 1)])) {
+    if (Rml::Element *element =
+            visible(row[std::min(column, row.size() - 1)])) {
       return element;
     }
     for (const std::string &id : row) {
@@ -413,12 +430,14 @@ private:
       Rml::ElementList fields;
       section->GetElementsByClassName(fields, "field");
       if (!fields.empty() && fields.front() == field) {
-        section->ScrollIntoView(Rml::ScrollIntoViewOptions(Rml::ScrollAlignment::Start));
+        section->ScrollIntoView(
+            Rml::ScrollIntoViewOptions(Rml::ScrollAlignment::Start));
         return;
       }
     }
     (field ? field : target)
-        ->ScrollIntoView(Rml::ScrollIntoViewOptions(Rml::ScrollAlignment::Nearest));
+        ->ScrollIntoView(
+            Rml::ScrollIntoViewOptions(Rml::ScrollAlignment::Nearest));
   }
 
   bool move_row(Rml::Element *focus, int delta) {
@@ -548,9 +567,10 @@ private:
       game_detail_.clear();
     } else {
       game_path_ = owner_->tr("Not found");
-      game_detail_ = game.error.empty()
-                         ? owner_->tr("Pick the folder that has BlackOps3.exe in it.")
-                         : game.error;
+      game_detail_ =
+          game.error.empty()
+              ? owner_->tr("Pick the folder that has BlackOps3.exe in it.")
+              : game.error;
       // One line each (the page's text runs newlines together).
       if (!game.tried.empty()) {
         game_tried_.push_back(owner_->tr("Looked in:"));
@@ -559,7 +579,8 @@ private:
           game_tried_.push_back(game.tried[i]);
         }
         if (game.tried.size() > shown) {
-          game_tried_.push_back("+" + std::to_string(game.tried.size() - shown) +
+          game_tried_.push_back("+" +
+                                std::to_string(game.tried.size() - shown) +
                                 " " + owner_->tr("more"));
         }
       }
@@ -581,8 +602,8 @@ private:
     }
     name_placeholder_ = in_game ? *in_game : owner_->tr("Your Steam name");
     if (!name_error_.empty()) {
-      name_note_ = owner_->tr("The game's file was not changed.") + " " +
-                   name_error_;
+      name_note_ =
+          owner_->tr("The game's file was not changed.") + " " + name_error_;
     } else if (!game.dir) {
       name_note_ = owner_->tr("Set the game folder first: the game reads the "
                               "name from a file in it.");
@@ -619,14 +640,14 @@ private:
     fps_note_ = !c.dvars.contains(std::string(core::dvar_fps_limit))
                     ? owner_->tr("The game's setting")
                 : fps && *fps == 0 ? owner_->tr("No limit")
-                : fps ? "+set com_maxfps " + std::to_string(*fps)
-                      : owner_->tr("Not a whole number");
+                : fps              ? "+set com_maxfps " + std::to_string(*fps)
+                                   : owner_->tr("Not a whole number");
     const std::optional<int> fov = dvar_number(core::dvar_fov);
     if (keep(text_field::fov)) {
       fov_ = dvar_text(core::dvar_fov);
     }
-    fov_stop_ = fov ? std::clamp(*fov, core::fov_min, core::fov_max)
-                    : fov_slider_game;
+    fov_stop_ =
+        fov ? std::clamp(*fov, core::fov_min, core::fov_max) : fov_slider_game;
     fov_note_ = !c.dvars.contains(std::string(core::dvar_fov))
                     ? owner_->tr("The game's setting")
                 : fov ? "+set cg_fov_default " + std::to_string(*fov)
@@ -653,14 +674,16 @@ private:
       game_skips_intro_ =
           core::saved_dvar_on(saved, core::dvar_skip_intro).value_or(false);
       game_skips_cinematics_ =
-          core::saved_dvar_on(saved, core::dvar_skip_cinematics).value_or(false);
+          core::saved_dvar_on(saved, core::dvar_skip_cinematics)
+              .value_or(false);
     }
-    intro_note_ = !nointro_ && game_skips_intro_
-                      ? owner_->tr("The game still skips it: its own Skip Intro "
-                                   "switch is saved on (boiii_skipIntro 1 in "
-                                   "boiii_players\\user\\config.cfg). Turn it "
-                                   "off in the game's Quick Settings.")
-                      : std::string();
+    intro_note_ =
+        !nointro_ && game_skips_intro_
+            ? owner_->tr("The game still skips it: its own Skip Intro "
+                         "switch is saved on (boiii_skipIntro 1 in "
+                         "boiii_players\\user\\config.cfg). Turn it "
+                         "off in the game's Quick Settings.")
+            : std::string();
     cinematics_note_ =
         !nocinematics_ && game_skips_cinematics_
             ? owner_->tr("The game still skips them: its own Skip All "
@@ -835,10 +858,11 @@ private:
         detect_from_ = s.game_rev();
         owner_->notify(owner_->tr("Game folder saved. Checking it now..."));
       } else {
-        owner_->notify(s.game().error.empty()
-                           ? owner_->tr("That folder has no BlackOps3.exe in it.")
-                           : s.game().error,
-                       true);
+        owner_->notify(
+            s.game().error.empty()
+                ? owner_->tr("That folder has no BlackOps3.exe in it.")
+                : s.game().error,
+            true);
       }
       refresh();
     } else if (action == "detect") {
@@ -854,7 +878,8 @@ private:
       owner_->show("game_files"); // views/game_files.cpp
     } else if (action == "open game") {
       if (s.game().dir && !owner_->open_folder(*s.game().dir)) {
-        owner_->notify(owner_->tr("The game folder could not be opened."), true);
+        owner_->notify(owner_->tr("The game folder could not be opened."),
+                       true);
       }
     } else if (action == "open home") {
       if (!owner_->open_folder(s.paths().home)) {
@@ -984,7 +1009,8 @@ private:
     if (key == "display") {
       set_flags(core::with_display_mode(c.extra_flags, value),
                 "display " + value,
-                value == "windowed" ? owner_->tr("Display mode: windowed (-windowed).")
+                value == "windowed"
+                    ? owner_->tr("Display mode: windowed (-windowed).")
                 : value == "borderless"
                     ? owner_->tr("Display mode: borderless (-borderless).")
                     : owner_->tr("Display mode: the game's setting."));
@@ -1017,7 +1043,8 @@ private:
       const std::string label =
           key == "vsync" ? owner_->tr("V-Sync") : owner_->tr("FPS counter");
       if (value == "game") {
-        set_dvar(dvar, std::nullopt, label + ": " + owner_->tr("the game's setting."));
+        set_dvar(dvar, std::nullopt,
+                 label + ": " + owner_->tr("the game's setting."));
       } else {
         set_dvar(dvar, value == "on" ? "1" : "0",
                  label + ": " + owner_->tr(value == "on" ? "on." : "off."));
@@ -1137,9 +1164,8 @@ private:
     } else if (key == "close") {
       c.close_on_launch = !c.close_on_launch;
       save(std::string("close_on_launch ") + (c.close_on_launch ? "on" : "off"),
-           c.close_on_launch
-               ? owner_->tr("Xerces closes when the game starts.")
-               : owner_->tr("Xerces stays open while you play."));
+           c.close_on_launch ? owner_->tr("Xerces closes when the game starts.")
+                             : owner_->tr("Xerces stays open while you play."));
     } else if (key == "reduced") {
       c.reduced_motion = !c.reduced_motion;
       save(std::string("reduced_motion ") + (c.reduced_motion ? "on" : "off"),
@@ -1174,8 +1200,7 @@ private:
         focus && focus->GetId() == "dvar-" + name && !move_row(focus, +1)) {
       move_row(focus, -1);
     }
-    set_dvar(name, std::nullopt,
-             owner_->tr("Removed") + " +set " + name + ".");
+    set_dvar(name, std::nullopt, owner_->tr("Removed") + " +set " + name + ".");
   }
 
   // ----------------------------------------------------------- text fields
@@ -1195,11 +1220,16 @@ private:
   // The saved value of a field, as the field shows it.
   std::string saved(text_field field) {
     switch (field) {
-    case text_field::name: return config().player_name;
-    case text_field::fps: return dvar_text(core::dvar_fps_limit);
-    case text_field::fov: return dvar_text(core::dvar_fov);
-    case text_field::flags: return core::join_flags(config().extra_flags);
-    default: return {};
+    case text_field::name:
+      return config().player_name;
+    case text_field::fps:
+      return dvar_text(core::dvar_fps_limit);
+    case text_field::fov:
+      return dvar_text(core::dvar_fov);
+    case text_field::flags:
+      return core::join_flags(config().extra_flags);
+    default:
+      return {};
     }
   }
 
@@ -1218,16 +1248,26 @@ private:
   // by_enter: the player pressed Enter; otherwise the field lost focus.
   void commit(text_field field, bool by_enter) {
     switch (field) {
-    case text_field::name: commit_name(by_enter); break;
-    case text_field::fps: commit_number(text_field::fps); break;
-    case text_field::fov: commit_number(text_field::fov); break;
-    case text_field::flags: commit_flags(); break;
-    default: break;
+    case text_field::name:
+      commit_name(by_enter);
+      break;
+    case text_field::fps:
+      commit_number(text_field::fps);
+      break;
+    case text_field::fov:
+      commit_number(text_field::fov);
+      break;
+    case text_field::flags:
+      commit_flags();
+      break;
+    default:
+      break;
     }
   }
 
   void commit_name(bool by_enter) {
-    const core::player_name_result cleaned = core::clean_player_name(typed(text_field::name));
+    const core::player_name_result cleaned =
+        core::clean_player_name(typed(text_field::name));
     core::launcher_config &c = config();
     force_ = text_field::name;
     // An unchanged name is only written again on Enter, when the game's file
@@ -1287,18 +1327,22 @@ private:
       name_pending_ = true;
       return owner_->tr("Name saved. Set the game folder so the game gets it.");
     }
-    const core::name_apply_result result = core::apply_player_name(*game.dir, name);
+    const core::name_apply_result result =
+        core::apply_player_name(*game.dir, name);
     switch (result.status) {
     case core::name_apply::written:
     case core::name_apply::unchanged:
       name_pending_ = false;
       log_info("launcher.settings.player_name", "written to properties.json");
       return name.empty()
-                 ? owner_->tr("Name cleared: the game uses your Steam name from its next start.")
-                 : owner_->tr("Name saved. The game uses it from its next start.");
+                 ? owner_->tr("Name cleared: the game uses your Steam name "
+                              "from its next start.")
+                 : owner_->tr(
+                       "Name saved. The game uses it from its next start.");
     case core::name_apply::no_file:
       name_pending_ = true;
-      return owner_->tr("Name saved. Start the game once, then press Enter here.");
+      return owner_->tr(
+          "Name saved. Start the game once, then press Enter here.");
     case core::name_apply::failed:
     default:
       name_pending_ = true;
@@ -1354,8 +1398,8 @@ private:
       return;
     }
     std::error_code ec;
-    const bool file_there = fs::is_regular_file(
-        core::player_properties_file(*s.game().dir), ec);
+    const bool file_there =
+        fs::is_regular_file(core::player_properties_file(*s.game().dir), ec);
     switch (core::pending_name_after(folder_changed, file_there)) {
     case core::pending_name_step::write: {
       const core::name_apply_result result =
@@ -1387,14 +1431,16 @@ private:
     const int min = fps ? core::fps_limit_min : core::fov_min;
     const int max = fps ? core::fps_limit_max : core::fov_max;
     const std::string_view dvar = fps ? core::dvar_fps_limit : core::dvar_fov;
-    const std::string label = fps ? owner_->tr("FPS limit") : owner_->tr("Field of view");
+    const std::string label =
+        fps ? owner_->tr("FPS limit") : owner_->tr("Field of view");
     const core::number_input number =
         core::parse_number_input(typed(field), min, max);
     force_ = field;
     switch (number.state) {
     case core::number_input::kind::empty:
       if (config().dvars.contains(std::string(dvar))) {
-        set_dvar(dvar, std::nullopt, label + ": " + owner_->tr("the game's setting."));
+        set_dvar(dvar, std::nullopt,
+                 label + ": " + owner_->tr("the game's setting."));
       } else {
         refresh();
       }
@@ -1406,9 +1452,8 @@ private:
         break;
       }
       set_dvar(dvar, value,
-               fps && number.value == 0
-                   ? label + ": " + owner_->tr("no limit.")
-                   : label + ": " + value + ".");
+               fps && number.value == 0 ? label + ": " + owner_->tr("no limit.")
+                                        : label + ": " + value + ".");
       break;
     }
     case core::number_input::kind::invalid:
@@ -1424,7 +1469,8 @@ private:
 
   void slid(const std::string &which, Rml::Event &event) {
     Rml::ElementFormControl *slider =
-        rmlui_dynamic_cast<Rml::ElementFormControl *>(event.GetCurrentElement());
+        rmlui_dynamic_cast<Rml::ElementFormControl *>(
+            event.GetCurrentElement());
     if (!slider) {
       return;
     }
@@ -1453,14 +1499,14 @@ private:
       set_dvar(core::dvar_fps_limit,
                limit ? std::optional<std::string>(std::to_string(*limit))
                      : std::nullopt,
-               !limit       ? label + ": " + owner_->tr("the game's setting.")
+               !limit        ? label + ": " + owner_->tr("the game's setting.")
                : *limit == 0 ? label + ": " + owner_->tr("no limit.")
                              : label + ": " + std::to_string(*limit) + ".");
       force_ = text_field::fps;
     } else if (which == "fov") {
       const std::optional<int> fov = dvar_number(core::dvar_fov);
-      const int current =
-          fov ? std::clamp(*fov, core::fov_min, core::fov_max) : fov_slider_game;
+      const int current = fov ? std::clamp(*fov, core::fov_min, core::fov_max)
+                              : fov_slider_game;
       if (stop == current) {
         return;
       }
@@ -1478,14 +1524,17 @@ private:
   }
 
   void commit_flags() {
-    const core::flags_parse parsed = core::parse_launch_flags(typed(text_field::flags));
+    const core::flags_parse parsed =
+        core::parse_launch_flags(typed(text_field::flags));
     std::string problem;
     if (!parsed.invalid.empty()) {
-      problem = owner_->tr("Not saved:") + " " + core::join_flags(parsed.invalid) +
-                " " +
-                owner_->tr(parsed.invalid.size() == 1
-                               ? "is not a flag (a '-' then letters, digits, '-' or '_')."
-                               : "are not flags (a '-' then letters, digits, '-' or '_').");
+      problem =
+          owner_->tr("Not saved:") + " " + core::join_flags(parsed.invalid) +
+          " " +
+          owner_->tr(
+              parsed.invalid.size() == 1
+                  ? "is not a flag (a '-' then letters, digits, '-' or '_')."
+                  : "are not flags (a '-' then letters, digits, '-' or '_').");
     } else if (!parsed.reserved.empty()) {
       problem = owner_->tr("Not saved:") + " " +
                 core::join_flags(parsed.reserved) + " " +
@@ -1534,7 +1583,8 @@ private:
   bool name_pending_ = false;
   std::string last_focus_;
   text_field escaping_from_ = text_field::none;
-  std::string name_error_; // why the game's file could not take the name (translated)
+  std::string
+      name_error_; // why the game's file could not take the name (translated)
 
   Rml::String game_path_, game_detail_;
   Rml::Vector<Rml::String> game_tried_; // "Looked in:", then the folders

@@ -47,7 +47,8 @@ TEST_CASE("ipc: JSON-RPC requests and their errors") {
   CHECK(!error->ok);
   CHECK_EQ(error->code, ipc::parse_error);
 
-  const auto old = ipc::parse_request(R"({"jsonrpc":"1.0","method":"x","id":1})");
+  const auto old =
+      ipc::parse_request(R"({"jsonrpc":"1.0","method":"x","id":1})");
   CHECK_EQ(ipc::parse_response(old.error_response)->code, ipc::invalid_request);
   const auto bad_params =
       ipc::parse_request(R"({"jsonrpc":"2.0","method":"x","params":3,"id":1})");
@@ -133,12 +134,16 @@ TEST_CASE("ipc: a pipe served and called in one process") {
 
   ipc::pipe_server server;
   std::string error;
-  REQUIRE(server.start(run, "test", [](const ipc::request &request) {
-    if (request.method == "echo") {
-      return ipc::make_result(request.id, request.params);
-    }
-    return ipc::make_error(request.id, ipc::method_not_found, "no such method");
-  }, &error));
+  REQUIRE(server.start(
+      run, "test",
+      [](const ipc::request &request) {
+        if (request.method == "echo") {
+          return ipc::make_result(request.id, request.params);
+        }
+        return ipc::make_error(request.id, ipc::method_not_found,
+                               "no such method");
+      },
+      &error));
 
   const auto entries = ipc::live_run_entries(run);
   REQUIRE_EQ(entries.size(), std::size_t{1});

@@ -185,15 +185,15 @@ TEST_CASE("account: nothing after an invite link is read as an option") {
   // the rest of it arrived as options: another home, a script to run.
   using args = std::vector<std::string>;
   CHECK_EQ(arguments_through_link(args{"--home", "C:\\Home", "--join-link",
-                                       "xerces://join/XJN-AB12CD34",
-                                       "--script", "evil", "--home", "D:\\x"}),
+                                       "xerces://join/XJN-AB12CD34", "--script",
+                                       "evil", "--home", "D:\\x"}),
            4u);
   // A browser's bare link, the same.
   CHECK_EQ(arguments_through_link(
                args{"xerces://join/XJN-AB12CD34", "--home", "D:\\x"}),
            1u);
-  CHECK_EQ(arguments_through_link(args{"--dry-launch", "xerces://join/x",
-                                       "--script", "evil"}),
+  CHECK_EQ(arguments_through_link(
+               args{"--dry-launch", "xerces://join/x", "--script", "evil"}),
            2u);
   // The option without its link ends the options too.
   CHECK_EQ(arguments_through_link(args{"--view", "mods", "--join-link"}), 3u);

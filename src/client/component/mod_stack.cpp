@@ -1159,9 +1159,9 @@ void request_reload() { reload_pending = true; }
 std::optional<std::string> asset_owner(const int32_t type,
                                        const std::string &name) {
   const auto asset_type = static_cast<XAssetType>(type);
-  const void *data = game::db::xasset::DB_FindXAssetHeader(
-                         asset_type, name.c_str(), false, 0)
-                         .data;
+  const void *data =
+      game::db::xasset::DB_FindXAssetHeader(asset_type, name.c_str(), false, 0)
+          .data;
   // A name the type has no asset for gets a stand-in (the default image,
   // material or model), whose owner says nothing about the name: on
   // 2026-11-06 names that were no image, like a camo's "Topaz", came back as
@@ -1190,7 +1190,8 @@ std::optional<std::string> asset_owner(const int32_t type,
     return std::nullopt;
   case xerces_core::zone_kind::usermap: {
     const char *id = game::ugc::active_usermap->publisherId;
-    std::string text(id, strnlen(id, sizeof(game::ugc::active_usermap->publisherId)));
+    std::string text(
+        id, strnlen(id, sizeof(game::ugc::active_usermap->publisherId)));
     return text.empty() ? std::nullopt : std::optional(std::move(text));
   }
   default:
@@ -1200,9 +1201,9 @@ std::optional<std::string> asset_owner(const int32_t type,
 
 const void *game_copy(const int32_t type, const std::string &name) {
   const auto asset_type = static_cast<XAssetType>(type);
-  const void *data = game::db::xasset::DB_FindXAssetHeader(
-                         asset_type, name.c_str(), false, 0)
-                         .data;
+  const void *data =
+      game::db::xasset::DB_FindXAssetHeader(asset_type, name.c_str(), false, 0)
+          .data;
   if (!data || game::db::xasset::DB_IsXAssetDefault(asset_type, name.c_str())) {
     return nullptr;
   }
@@ -1228,9 +1229,9 @@ const void *game_copy(const int32_t type, const std::string &name) {
   // The bound only guards against a broken chain.
   auto &pool = game::db::xasset::pool::g_assetEntryPool->pool;
   uint32_t index = entry->nextOverride;
-  for (int steps = 0; index != 0 &&
-                      index < game::db::xasset::pool::XASSET_ENTRY_POOL_LENGTH &&
-                      steps < 256;
+  for (int steps = 0;
+       index != 0 && index < game::db::xasset::pool::XASSET_ENTRY_POOL_LENGTH &&
+       steps < 256;
        ++steps) {
     const XAssetEntry *candidate = &pool[index].entry;
     if (candidate->asset.type == asset_type && candidate->asset.header.data &&
@@ -1252,9 +1253,9 @@ std::vector<asset_copy> asset_copies(const int32_t type,
                                      const std::string &name) {
   std::vector<asset_copy> result;
   const auto asset_type = static_cast<XAssetType>(type);
-  const void *data = game::db::xasset::DB_FindXAssetHeader(
-                         asset_type, name.c_str(), false, 0)
-                         .data;
+  const void *data =
+      game::db::xasset::DB_FindXAssetHeader(asset_type, name.c_str(), false, 0)
+          .data;
   if (!data || game::db::xasset::DB_IsXAssetDefault(asset_type, name.c_str())) {
     return result;
   }
@@ -1297,9 +1298,9 @@ std::vector<asset_copy> asset_copies(const int32_t type,
   // are loaded
   auto &pool = game::db::xasset::pool::g_assetEntryPool->pool;
   uint32_t index = entry->nextOverride;
-  for (int steps = 0; index != 0 &&
-                      index < game::db::xasset::pool::XASSET_ENTRY_POOL_LENGTH &&
-                      steps < 256;
+  for (int steps = 0;
+       index != 0 && index < game::db::xasset::pool::XASSET_ENTRY_POOL_LENGTH &&
+       steps < 256;
        ++steps) {
     const XAssetEntry *candidate = &pool[index].entry;
     if (candidate->asset.type == asset_type && candidate->asset.header.data &&

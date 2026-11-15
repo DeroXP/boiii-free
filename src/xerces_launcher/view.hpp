@@ -53,7 +53,9 @@ public:
   virtual Rml::Element *default_focus();
   // Keys while the view is current, before the app's own map (Q/E tabs, /
   // search, Esc). Return true when the view used the key.
-  virtual bool key(Rml::Input::KeyIdentifier, int /*modifiers*/) { return false; }
+  virtual bool key(Rml::Input::KeyIdentifier, int /*modifiers*/) {
+    return false;
+  }
   // The search field "/" and Y focus; default #search.
   virtual Rml::Element *search_field();
 
@@ -64,8 +66,8 @@ using view_factory = std::unique_ptr<view> (*)();
 
 struct view_info {
   const char *id;
-  int order;     // tab order (and load order)
-  bool tab;      // has a header tab (#tab-<id>)
+  int order; // tab order (and load order)
+  bool tab;  // has a header tab (#tab-<id>)
   view_factory create;
 };
 

@@ -29,7 +29,7 @@
 namespace xerces_launcher {
 namespace {
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
-#define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((HANDLE)-4)
+#define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((HANDLE) - 4)
 #endif
 #ifndef WM_DPICHANGED
 #define WM_DPICHANGED 0x02E0
@@ -45,13 +45,14 @@ metrics_for_dpi_fn metrics_for_dpi = nullptr;
 
 void load_dpi_functions() {
   HMODULE user32 = GetModuleHandleW(L"user32.dll");
-  set_dpi_context = reinterpret_cast<set_dpi_context_fn>(reinterpret_cast<void *>(
-      GetProcAddress(user32, "SetProcessDpiAwarenessContext")));
-  get_dpi_for_window =
-      reinterpret_cast<get_dpi_for_window_fn>(reinterpret_cast<void *>(
-          GetProcAddress(user32, "GetDpiForWindow")));
-  metrics_for_dpi = reinterpret_cast<metrics_for_dpi_fn>(
-      reinterpret_cast<void *>(GetProcAddress(user32, "GetSystemMetricsForDpi")));
+  set_dpi_context =
+      reinterpret_cast<set_dpi_context_fn>(reinterpret_cast<void *>(
+          GetProcAddress(user32, "SetProcessDpiAwarenessContext")));
+  get_dpi_for_window = reinterpret_cast<get_dpi_for_window_fn>(
+      reinterpret_cast<void *>(GetProcAddress(user32, "GetDpiForWindow")));
+  metrics_for_dpi =
+      reinterpret_cast<metrics_for_dpi_fn>(reinterpret_cast<void *>(
+          GetProcAddress(user32, "GetSystemMetricsForDpi")));
   if (set_dpi_context) {
     set_dpi_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
   }
@@ -63,7 +64,8 @@ UINT window_dpi(HWND window) {
 }
 
 int metric(int index, UINT dpi) {
-  return metrics_for_dpi ? metrics_for_dpi(index, dpi) : GetSystemMetrics(index);
+  return metrics_for_dpi ? metrics_for_dpi(index, dpi)
+                         : GetSystemMetrics(index);
 }
 
 struct device_resources {
@@ -146,9 +148,10 @@ bool create_swap_chain() {
   IDXGIDevice *dxgi_device = nullptr;
   IDXGIAdapter *adapter = nullptr;
   IDXGIFactory *factory = nullptr;
-  bool ok = SUCCEEDED(s->gpu.device->QueryInterface(IID_PPV_ARGS(&dxgi_device))) &&
-            SUCCEEDED(dxgi_device->GetAdapter(&adapter)) &&
-            SUCCEEDED(adapter->GetParent(IID_PPV_ARGS(&factory)));
+  bool ok =
+      SUCCEEDED(s->gpu.device->QueryInterface(IID_PPV_ARGS(&dxgi_device))) &&
+      SUCCEEDED(dxgi_device->GetAdapter(&adapter)) &&
+      SUCCEEDED(adapter->GetParent(IID_PPV_ARGS(&factory)));
   if (ok) {
     DXGI_SWAP_CHAIN_DESC desc = {};
     desc.BufferCount = 2;
@@ -158,8 +161,8 @@ bool create_swap_chain() {
     desc.SampleDesc.Count = 1;
     desc.Windowed = TRUE;
     desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    ok = SUCCEEDED(factory->CreateSwapChain(s->gpu.device, &desc,
-                                            &s->gpu.swap_chain));
+    ok = SUCCEEDED(
+        factory->CreateSwapChain(s->gpu.device, &desc, &s->gpu.swap_chain));
     // The launcher handles Alt+Enter itself (it never goes fullscreen).
     factory->MakeWindowAssociation(s->handle, DXGI_MWA_NO_ALT_ENTER);
   }
@@ -241,8 +244,8 @@ void capture_back_buffer() {
   }
   s->gpu.device_context->CopyResource(staging, back_buffer);
   D3D11_MAPPED_SUBRESOURCE mapped{};
-  if (SUCCEEDED(s->gpu.device_context->Map(staging, 0, D3D11_MAP_READ, 0,
-                                           &mapped))) {
+  if (SUCCEEDED(
+          s->gpu.device_context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped))) {
     std::vector<unsigned char> rgb(std::size_t(desc.Width) * desc.Height * 3);
     for (UINT y = 0; y < desc.Height; ++y) {
       const auto *row = static_cast<const unsigned char *>(mapped.pData) +
@@ -278,7 +281,8 @@ LRESULT CALLBACK window_procedure(HWND handle, UINT message, WPARAM w_param,
       auto *params = reinterpret_cast<NCCALCSIZE_PARAMS *>(l_param);
       if (IsZoomed(handle)) {
         const UINT dpi = window_dpi(handle);
-        const int frame = metric(SM_CXFRAME, dpi) + metric(SM_CXPADDEDBORDER, dpi);
+        const int frame =
+            metric(SM_CXFRAME, dpi) + metric(SM_CXPADDEDBORDER, dpi);
         params->rgrc[0].left += frame;
         params->rgrc[0].right -= frame;
         params->rgrc[0].top += frame;
@@ -486,10 +490,10 @@ bool window::open(const std::string &title, int width_dp, int height_dp,
   GetMonitorInfoW(MonitorFromWindow(s->handle, MONITOR_DEFAULTTOPRIMARY),
                   &monitor);
   const RECT work = monitor.rcWork;
-  const int width = std::min(MulDiv(width_dp, int(dpi), 96),
-                             int(work.right - work.left));
-  const int height = std::min(MulDiv(height_dp, int(dpi), 96),
-                              int(work.bottom - work.top));
+  const int width =
+      std::min(MulDiv(width_dp, int(dpi), 96), int(work.right - work.left));
+  const int height =
+      std::min(MulDiv(height_dp, int(dpi), 96), int(work.bottom - work.top));
   SetWindowPos(s->handle, nullptr,
                work.left + (work.right - work.left - width) / 2,
                work.top + (work.bottom - work.top - height) / 2, width, height,
@@ -521,11 +525,12 @@ bool window::open(const std::string &title, int width_dp, int height_dp,
       // and stop, rather than hand RmlUi a null renderer.
       Rml::Log::Message(Rml::Log::LT_ERROR,
                         "Direct3D 11 could not start; the launcher stops.");
-      MessageBoxW(s->handle,
-                  L"Xerces could not start Direct3D 11 on this PC, so it cannot "
-                  L"draw its window.\n\nUpdating the graphics driver usually "
-                  L"fixes this. The log is in the Xerces logs folder.",
-                  L"Xerces", MB_OK | MB_ICONERROR);
+      MessageBoxW(
+          s->handle,
+          L"Xerces could not start Direct3D 11 on this PC, so it cannot "
+          L"draw its window.\n\nUpdating the graphics driver usually "
+          L"fixes this. The log is in the Xerces logs folder.",
+          L"Xerces", MB_OK | MB_ICONERROR);
       ExitProcess(1);
     }
     return &*s->render_interface;

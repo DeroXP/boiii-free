@@ -199,7 +199,8 @@ TEST_CASE("conflicts: unindexed mods are named in the report") {
         std::string::npos);
 }
 
-TEST_CASE("conflicts: fastfiles at a Workshop item's root are not loose files") {
+TEST_CASE(
+    "conflicts: fastfiles at a Workshop item's root are not loose files") {
   // A Workshop item keeps core_mod.ff, zm_mod.ff and their packs at its
   // root, not under zone/. Only zone/ was skipped, so two such mods "both
   // replaced zm_mod.ff", and the files were read whole to get there.

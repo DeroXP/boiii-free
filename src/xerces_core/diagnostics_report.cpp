@@ -23,7 +23,7 @@ std::string utf8(const std::filesystem::path &path) {
 // when ICU is missing (Wine/Proton, Windows before 1903): too much risk and
 // work for printing a date.
 static_assert(std::ratio_equal_v<std::filesystem::file_time_type::period,
-                                  std::ratio<1, 10'000'000>>,
+                                 std::ratio<1, 10'000'000>>,
               "file_time_type is expected to count 100 ns FILETIME ticks");
 constexpr std::int64_t filetime_to_unix_seconds = 11'644'473'600LL;
 

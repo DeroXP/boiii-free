@@ -15,7 +15,8 @@
 namespace xerces_launcher {
 namespace {
 std::wstring widen(const std::string &text) {
-  const int size = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+  const int size =
+      MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
   std::wstring out(size > 0 ? std::size_t(size - 1) : 0, L'\0');
   if (size > 1) {
     MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, out.data(), size);

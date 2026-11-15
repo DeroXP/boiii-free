@@ -164,16 +164,17 @@ catalog_state scan_catalog(const game_state &game, hash_cache &cache,
           continue;
         }
         const std::string message =
-            "Two copies of " + item.info.id + " are installed: " +
-            path_utf8(other.path) + " and " + path_utf8(item.path) +
+            "Two copies of " + item.info.id +
+            " are installed: " + path_utf8(other.path) + " and " +
+            path_utf8(item.path) +
             ". Which one loads is not settled: delete the one you do not "
             "want (the copy in the game's mods or usermaps folder is "
             "usually an old manual one) and scan again.";
         result.diags.add(severity::warning, "catalog.duplicate", other.folder,
                          message);
         if (item.folder != other.folder) {
-          result.diags.add(severity::warning, "catalog.duplicate",
-                           item.folder, message);
+          result.diags.add(severity::warning, "catalog.duplicate", item.folder,
+                           message);
         }
         break;
       }

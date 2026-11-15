@@ -42,8 +42,8 @@ struct place_row {
 struct import_row {
   Rml::String key, title, value, detail;
   bool on = false;
-  bool done = false;      // nothing (more) of it can go into the Xerces config
-  Rml::String done_note;  // footer line when a done row is picked (C++ only)
+  bool done = false;     // nothing (more) of it can go into the Xerces config
+  Rml::String done_note; // footer line when a done row is picked (C++ only)
 };
 
 std::string two_digits(std::size_t value) {
@@ -162,41 +162,38 @@ public:
     model.Bind("home_path", &home_path_);
     model.Bind("send_crash", &send_crash_);
 
-    model.BindEventCallback(
-        "act", [this](Rml::DataModelHandle, Rml::Event &,
-                      const Rml::VariantList &args) {
-          if (!args.empty()) {
-            act(args[0].Get<Rml::String>());
-          }
-        });
-    model.BindEventCallback(
-        "go", [this](Rml::DataModelHandle, Rml::Event &,
-                     const Rml::VariantList &args) {
-          if (!args.empty()) {
-            go(args[0].Get<int>());
-          }
-        });
-    model.BindEventCallback(
-        "toggle", [this](Rml::DataModelHandle, Rml::Event &,
-                         const Rml::VariantList &args) {
-          if (!args.empty()) {
-            toggle(args[0].Get<Rml::String>());
-          }
-        });
-    model.BindEventCallback(
-        "set_theme", [this](Rml::DataModelHandle, Rml::Event &,
-                            const Rml::VariantList &args) {
-          if (!args.empty()) {
-            set_theme(args[0].Get<Rml::String>());
-          }
-        });
-    model.BindEventCallback(
-        "set_scale", [this](Rml::DataModelHandle, Rml::Event &,
-                            const Rml::VariantList &args) {
-          if (!args.empty()) {
-            set_scale(args[0].Get<int>());
-          }
-        });
+    model.BindEventCallback("act", [this](Rml::DataModelHandle, Rml::Event &,
+                                          const Rml::VariantList &args) {
+      if (!args.empty()) {
+        act(args[0].Get<Rml::String>());
+      }
+    });
+    model.BindEventCallback("go", [this](Rml::DataModelHandle, Rml::Event &,
+                                         const Rml::VariantList &args) {
+      if (!args.empty()) {
+        go(args[0].Get<int>());
+      }
+    });
+    model.BindEventCallback("toggle", [this](Rml::DataModelHandle, Rml::Event &,
+                                             const Rml::VariantList &args) {
+      if (!args.empty()) {
+        toggle(args[0].Get<Rml::String>());
+      }
+    });
+    model.BindEventCallback("set_theme",
+                            [this](Rml::DataModelHandle, Rml::Event &,
+                                   const Rml::VariantList &args) {
+                              if (!args.empty()) {
+                                set_theme(args[0].Get<Rml::String>());
+                              }
+                            });
+    model.BindEventCallback("set_scale",
+                            [this](Rml::DataModelHandle, Rml::Event &,
+                                   const Rml::VariantList &args) {
+                              if (!args.empty()) {
+                                set_scale(args[0].Get<int>());
+                              }
+                            });
     handle_ = model.GetModelHandle();
     return true;
   }
@@ -350,7 +347,8 @@ private:
       }
     } else if (action == "choose") {
       // pick_folder translates its title itself: pass the English key.
-      const auto picked = owner_->pick_folder("Choose the Black Ops III folder");
+      const auto picked =
+          owner_->pick_folder("Choose the Black Ops III folder");
       if (!picked) {
         return;
       }
@@ -399,7 +397,8 @@ private:
     const auto &game = owner_->svc().game();
     found_ = xerces_core::find_boiii_import(boiii_appdata(), game.dir);
     for (const auto &item : found_.diags.items()) {
-      log_info("launcher.first_run.import_note", item.message + " " + item.path);
+      log_info("launcher.first_run.import_note",
+               item.message + " " + item.path);
     }
   }
 
@@ -525,8 +524,9 @@ private:
       if (game.preflight) {
         game_verdict_ = owner_->tr(verdict_name(game.preflight->verdict));
         game_message_ = game.preflight->message;
-        game_known_as_ = game.preflight->build ? game.preflight->build->name
-                                               : owner_->tr("Not a listed build");
+        game_known_as_ = game.preflight->build
+                             ? game.preflight->build->name
+                             : owner_->tr("Not a listed build");
       } else {
         game_verdict_ = owner_->tr("Not checked");
         game_known_as_ = "-";
@@ -540,11 +540,12 @@ private:
       row.path = utf8(place.path);
       if (place.kind == "appdata") {
         row.name = "%LOCALAPPDATA%\\boiii";
-        row.state = place.exists
-                        ? owner_->tr("Found. Nothing here maps onto Xerces "
-                                     "settings. Its user folder, where BOIII "
-                                     "keeps your identity key, is never opened.")
-                        : owner_->tr("Not on this PC.");
+        row.state =
+            place.exists
+                ? owner_->tr("Found. Nothing here maps onto Xerces "
+                             "settings. Its user folder, where BOIII "
+                             "keeps your identity key, is never opened.")
+                : owner_->tr("Not on this PC.");
       } else {
         row.name = "boiii_players";
         row.state = place.exists ? owner_->tr("Found in the game folder.")
@@ -559,8 +560,10 @@ private:
 
     imports_.clear();
     const auto relative = [&](const fs::path &file) {
-      const fs::path players = game.dir ? *game.dir / "boiii_players" : fs::path();
-      const fs::path rel = players.empty() ? file : file.lexically_relative(players);
+      const fs::path players =
+          game.dir ? *game.dir / "boiii_players" : fs::path();
+      const fs::path rel =
+          players.empty() ? file : file.lexically_relative(players);
       return "boiii_players\\" + utf8(rel.empty() ? file : rel);
     };
     if (found_.player_name) {
@@ -573,8 +576,8 @@ private:
       row.detail = row.done ? owner_->tr("Already your name in Xerces")
                             : relative(found_.player_name_file);
       if (!row.done && !config.player_name.empty()) {
-        row.detail += " \xC2\xB7 " + owner_->tr("replaces") + " " +
-                      config.player_name;
+        row.detail +=
+            " \xC2\xB7 " + owner_->tr("replaces") + " " + config.player_name;
       }
       imports_.push_back(std::move(row));
     }
@@ -636,9 +639,9 @@ private:
     can_import_ = std::ranges::any_of(
         imports_, [](const import_row &row) { return row.on && !row.done; });
     const bool all_done =
-        !imports_.empty() && std::ranges::all_of(imports_, [](const import_row &row) {
-          return row.done;
-        });
+        !imports_.empty() &&
+        std::ranges::all_of(imports_,
+                            [](const import_row &row) { return row.done; });
     import_done_ = all_done;
     import_empty_ =
         game.dir ? owner_->tr("Nothing from BOIII to import. That is fine: "
@@ -649,9 +652,10 @@ private:
     if (found_.skipped_lines > 0) {
       import_notes_.push_back(
           std::to_string(found_.skipped_lines) + " " +
-          owner_->tr(found_.skipped_lines == 1
-                         ? "server line was not host:port and is left out."
-                         : "server lines were not host:port and are left out."));
+          owner_->tr(
+              found_.skipped_lines == 1
+                  ? "server line was not host:port and is left out."
+                  : "server lines were not host:port and are left out."));
     }
     for (const auto &item : found_.diags.items()) {
       if (item.level == xerces_core::severity::warning) {
@@ -697,7 +701,8 @@ private:
   int step_ = 1;
   Rml::String next_label_ = "Next", progress_ = "01 / 04";
 
-  bool looking_ = true, game_found_ = false, game_ok_ = false, game_bad_ = false;
+  bool looking_ = true, game_found_ = false, game_ok_ = false,
+       game_bad_ = false;
   Rml::String game_title_, game_path_, game_build_, game_verdict_,
       game_known_as_, game_message_, game_error_;
   Rml::Vector<path_row> tried_;

@@ -313,8 +313,9 @@ void write_run(const finished_run &done) {
 // module+offset only when a run is written.
 constexpr std::size_t stall_stack_depth = 14;
 constexpr std::size_t stall_sample_max = 20000;
-double stall_threshold_ms = 40.0; // a frame this long is sampled; XERCES_BENCH_STALL_MS
-constexpr double stall_interval_ms = 8.0;   // between samples of one frame
+double stall_threshold_ms =
+    40.0; // a frame this long is sampled; XERCES_BENCH_STALL_MS
+constexpr double stall_interval_ms = 8.0; // between samples of one frame
 
 struct stall_sample {
   std::int64_t qpc = 0;
@@ -324,8 +325,8 @@ struct stall_sample {
 };
 
 std::atomic<std::int64_t> last_main_frame{0};
-std::atomic_bool sampling{false}; // a run is going (mirror of run.active)
-stall_sample *stall_samples = nullptr;         // stall_sample_max entries
+std::atomic_bool sampling{false};      // a run is going (mirror of run.active)
+stall_sample *stall_samples = nullptr; // stall_sample_max entries
 // Written by the sampler, and set back to 0 by begin_run while no run is
 // sampled and none waits to be written
 std::atomic<std::uint32_t> stall_count{0};
@@ -717,7 +718,8 @@ std::string module_offset(std::uint64_t address) {
   wchar_t path[MAX_PATH];
   const DWORD size = GetModuleFileNameW(module, path, MAX_PATH);
   std::wstring name(path, size);
-  if (const auto slash = name.find_last_of(L"\\/"); slash != std::wstring::npos) {
+  if (const auto slash = name.find_last_of(L"\\/");
+      slash != std::wstring::npos) {
     name = name.substr(slash + 1);
   }
   char text[64];

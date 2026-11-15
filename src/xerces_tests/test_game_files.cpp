@@ -89,10 +89,11 @@ TEST_CASE("game files: the asset pool switch keeps the other settings") {
   CHECK(!asset_pools_enabled(R"({"asset_limits_enabled":"0"})"));
   CHECK(!asset_pools_enabled(R"({"disable_asset_pools":"1"})"));
 
-  const std::string off = set_asset_pools_enabled(
-                              R"({"ap_image":"9000","friends_only":"1","disable_asset_pools":"1"})",
-                              false)
-                              .value_or("");
+  const std::string off =
+      set_asset_pools_enabled(
+          R"({"ap_image":"9000","friends_only":"1","disable_asset_pools":"1"})",
+          false)
+          .value_or("");
   CHECK(!asset_pools_enabled(off));
   const auto parsed = json::parse(off);
   REQUIRE(parsed.ok);
@@ -140,8 +141,9 @@ TEST_CASE("game files: the pool switch leaves a file it cannot use alone") {
   // a scanner can). It used to count as "no file" and was replaced by a
   // file with the switch alone.
   const std::string before = xerces_tests::read_file(file);
-  const HANDLE held = CreateFileW(file.c_str(), GENERIC_READ, 0, nullptr,
-                                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  const HANDLE held =
+      CreateFileW(file.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+                  FILE_ATTRIBUTE_NORMAL, nullptr);
   REQUIRE(held != INVALID_HANDLE_VALUE);
   CHECK(switch_asset_pools(file, false) == pool_switch::unreadable);
   CloseHandle(held);

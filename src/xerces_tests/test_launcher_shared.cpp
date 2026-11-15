@@ -930,7 +930,8 @@ TEST_CASE("shared launcher: a file held open for a moment is still replaced") {
   fs::remove_all(root, ec);
 }
 
-TEST_CASE("shared launcher: a file under a folder outside the code page opens") {
+TEST_CASE(
+    "shared launcher: a file under a folder outside the code page opens") {
   // RmlUi hands its file interface UTF-8 paths with '/' between the parts;
   // fopen reads them in the ANSI code page and finds nothing under a folder
   // such as "<Igry in Cyrillic>".
@@ -965,9 +966,9 @@ TEST_CASE("shared launcher: the profile and user name are read as UTF-8") {
   CHECK_EQ(environment_utf8(L"XERCES_TEST_USER"),
            std::string("\xD0\x98\xD0\xB3\xD0\xBE\xD1\x80\xD1\x8C"));
   // The text a log or a report holds is UTF-8: the folder is found in it.
-  CHECK_EQ(redact_profile("C:\\Users\\Jos\xC3\xA9\\AppData\\Local\\Xerces",
-                          profile),
-           std::string("%USERPROFILE%\\AppData\\Local\\Xerces"));
+  CHECK_EQ(
+      redact_profile("C:\\Users\\Jos\xC3\xA9\\AppData\\Local\\Xerces", profile),
+      std::string("%USERPROFILE%\\AppData\\Local\\Xerces"));
   SetEnvironmentVariableW(L"XERCES_TEST_PROFILE", nullptr);
   SetEnvironmentVariableW(L"XERCES_TEST_USER", nullptr);
   CHECK(environment_utf8(L"XERCES_TEST_PROFILE").empty());
@@ -1306,16 +1307,16 @@ TEST_CASE("catalog: a Workshop item also kept as a manual copy is named on "
       R"({"PublisherID":"3171632315","Title":"Dup","Type":"mod",)"
       R"("FolderName":"dup"})";
   // Through Steam, and the same item copied by hand into the game's mods
-  const fs::path steam_copy = root / "steamapps" / "workshop" / "content" /
-                              "311210" / "3171632315";
+  const fs::path steam_copy =
+      root / "steamapps" / "workshop" / "content" / "311210" / "3171632315";
   write(steam_copy / "workshop.json", workshop_json);
   write(steam_copy / "zone" / "core_mod.ff", "steam copy");
   const fs::path manual_copy = game_dir / "mods" / "dup";
   write(manual_copy / "zone" / "workshop.json", workshop_json);
   write(manual_copy / "zone" / "core_mod.ff", "manual copy");
   // And a different item, which must not be named
-  const fs::path other = root / "steamapps" / "workshop" / "content" /
-                         "311210" / "1404915347";
+  const fs::path other =
+      root / "steamapps" / "workshop" / "content" / "311210" / "1404915347";
   write(other / "workshop.json",
         R"({"PublisherID":"1404915347","Title":"Other","Type":"mod"})");
   write(other / "zone" / "core_mod.ff", "other");

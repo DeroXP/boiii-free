@@ -26,8 +26,7 @@ namespace fs = std::filesystem;
 namespace {
 struct temp_dir {
   fs::path path;
-  explicit temp_dir(const char *name)
-      : path(fs::temp_directory_path() / name) {
+  explicit temp_dir(const char *name) : path(fs::temp_directory_path() / name) {
     std::error_code ec;
     fs::remove_all(path, ec);
     fs::create_directories(path);
@@ -52,7 +51,8 @@ TEST_CASE("first run: player name and server lists from boiii_players") {
   // Upstream's reader accepts a BOM; the name keeps colour codes and loses
   // anything that is not printable ASCII.
   write(game / "boiii_players" / "properties.json",
-        "\xEF\xBB\xBF{\"playerName\":\"  ^1Ghost\\u00e9 \",\"launchOptions\":\"-x\"}");
+        "\xEF\xBB\xBF{\"playerName\":\"  ^1Ghost\\u00e9 "
+        "\",\"launchOptions\":\"-x\"}");
   write(game / "boiii_players" / "user" / "favorite_servers.txt",
         "192.168.1.20:27017\r\n10.0.0.5:27018\n\n192.168.1.20:27017\n"
         "0.0.0.0:0\nnot an address\nplay.example.org:27017\n");
@@ -117,7 +117,8 @@ TEST_CASE("first run: the identity folder is never read") {
   CHECK(is_boiii_identity_path(appdata / "user", appdata));
   CHECK(is_boiii_identity_path(appdata / "user" / "properties.json", appdata));
   CHECK(is_boiii_identity_path(appdata / "USER" / "x.key", appdata));
-  CHECK(is_boiii_identity_path(appdata / "cache" / ".." / "user" / "a", appdata));
+  CHECK(
+      is_boiii_identity_path(appdata / "cache" / ".." / "user" / "a", appdata));
   CHECK(!is_boiii_identity_path(appdata / "users" / "a", appdata));
   CHECK(!is_boiii_identity_path(appdata / "cache", appdata));
   CHECK(!is_boiii_identity_path(root.path / "game" / "boiii_players" / "user",
@@ -139,7 +140,8 @@ TEST_CASE("first run: the identity folder is never read") {
   CHECK(!top.found_anything());
 }
 
-TEST_CASE("first run: links into the identity folder are seen from outside it") {
+TEST_CASE(
+    "first run: links into the identity folder are seen from outside it") {
   using enum boiii_identity_check;
   temp_dir root("xerces_first_run_links");
   const fs::path appdata = root.path / "boiii";
@@ -164,14 +166,16 @@ TEST_CASE("first run: links into the identity folder are seen from outside it") 
   // app data folder and then "user"; and a junction whose shown name points
   // somewhere harmless while Windows follows it into the identity folder.
   REQUIRE(make_junction(root.path / "ghost", identity / "nothing"));
-  CHECK((check_boiii_identity_path(root.path / "ghost" / "x", appdata) == inside));
+  CHECK((check_boiii_identity_path(root.path / "ghost" / "x", appdata) ==
+         inside));
   REQUIRE(make_junction(root.path / "up", appdata));
   CHECK((check_boiii_identity_path(root.path / "up" / "USER" / "k", appdata) ==
          inside));
   CHECK((check_boiii_identity_path(root.path / "up" / "cache" / "x.bin",
                                    appdata) == outside));
   REQUIRE(make_junction(root.path / "liar", identity, root.path / "elsewhere"));
-  CHECK((check_boiii_identity_path(root.path / "liar" / "x", appdata) == inside));
+  CHECK(
+      (check_boiii_identity_path(root.path / "liar" / "x", appdata) == inside));
 
   // A junction elsewhere is followed and read through.
   const fs::path other = root.path / "other";
@@ -192,7 +196,8 @@ TEST_CASE("first run: links into the identity folder are seen from outside it") 
   CHECK((check_boiii_identity_path(root.path / "loop_a" / "x", appdata) ==
          unknown));
   CHECK(is_boiii_identity_path(root.path / "loop_a" / "x", appdata));
-  CHECK((check_boiii_identity_path(root.path / "ga*e" / "x", appdata) == unknown));
+  CHECK((check_boiii_identity_path(root.path / "ga*e" / "x", appdata) ==
+         unknown));
   CHECK((check_boiii_identity_path(root.path / "game:s" / "x", appdata) ==
          unknown));
   const boiii_import looped =
@@ -202,8 +207,8 @@ TEST_CASE("first run: links into the identity folder are seen from outside it") 
 
   // Short (8.3) names reach the same folder; this needs them on the volume.
   std::wstring buffer(32768, L'\0');
-  const DWORD length = GetShortPathNameW(root.path.c_str(), buffer.data(),
-                                         DWORD(buffer.size()));
+  const DWORD length =
+      GetShortPathNameW(root.path.c_str(), buffer.data(), DWORD(buffer.size()));
   const fs::path short_root(buffer.substr(0, length));
   if (length > 0 && short_root.native() != root.path.native()) {
     CHECK((check_boiii_identity_path(short_root / "boiii" / "user" / "k",
@@ -216,7 +221,8 @@ TEST_CASE("first run: links into the identity folder are seen from outside it") 
   std::error_code ec;
   fs::create_directory_symlink(identity, root.path / "sym", ec);
   if (!ec) {
-    CHECK((check_boiii_identity_path(root.path / "sym" / "x", appdata) == inside));
+    CHECK((check_boiii_identity_path(root.path / "sym" / "x", appdata) ==
+           inside));
   }
   fs::create_directory_symlink("boiii\\user", root.path / "relsym", ec);
   if (!ec) {
@@ -302,7 +308,8 @@ TEST_CASE("first run: names") {
   CHECK_EQ(sanitize_boiii_player_name(std::string(100, 'x')).size(),
            std::size_t(64));
   CHECK((boiii_player_name_from_properties("[1,2]") == std::nullopt));
-  CHECK((boiii_player_name_from_properties("{\"playerName\":5}") == std::nullopt));
+  CHECK((boiii_player_name_from_properties("{\"playerName\":5}") ==
+         std::nullopt));
   CHECK((boiii_player_name_from_properties("{\"playerName\":\"Ok\"}") ==
          std::optional<std::string>("Ok")));
 }
@@ -359,8 +366,9 @@ TEST_CASE("first run: applying the import to the config") {
   std::size_t no_room = 0;
   CHECK_EQ(new_boiii_recent_servers(full, found, &no_room), std::size_t(0));
   CHECK_EQ(no_room, std::size_t(2));
-  CHECK_EQ(apply_boiii_import(full, found, boiii_import_choice{}).recent_servers,
-           std::size_t(0));
+  CHECK_EQ(
+      apply_boiii_import(full, found, boiii_import_choice{}).recent_servers,
+      std::size_t(0));
   CHECK_EQ(full.recent_servers.size(), max_recent_servers);
 
   // One place left: one is new, one does not fit, and after the import
@@ -368,8 +376,9 @@ TEST_CASE("first run: applying the import to the config") {
   full.recent_servers.pop_back();
   CHECK_EQ(new_boiii_recent_servers(full, found, &no_room), std::size_t(1));
   CHECK_EQ(no_room, std::size_t(1));
-  CHECK_EQ(apply_boiii_import(full, found, boiii_import_choice{}).recent_servers,
-           std::size_t(1));
+  CHECK_EQ(
+      apply_boiii_import(full, found, boiii_import_choice{}).recent_servers,
+      std::size_t(1));
   CHECK_EQ(new_boiii_recent_servers(full, found, &no_room), std::size_t(0));
   CHECK_EQ(no_room, std::size_t(1));
 }

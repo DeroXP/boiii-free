@@ -178,7 +178,8 @@ float ramp(float x, const ramp_point *points, const size_t N) {
     if (x <= points[i].metres) {
       const ramp_point &a = points[i - 1];
       const ramp_point &b = points[i];
-      return a.gain + (b.gain - a.gain) * (x - a.metres) / (b.metres - a.metres);
+      return a.gain +
+             (b.gain - a.gain) * (x - a.metres) / (b.metres - a.metres);
     }
   }
   return points[N - 1].gain;
@@ -369,9 +370,9 @@ bool read_camera(camera &out, int &client) {
   std::memcpy(tangents, base - 16, sizeof(tangents));
   std::memcpy(eye, base, sizeof(eye));
   std::memcpy(forward, base + 28, sizeof(forward));
-  const float length = std::sqrt(forward[0] * forward[0] +
-                                 forward[1] * forward[1] +
-                                 forward[2] * forward[2]);
+  const float length =
+      std::sqrt(forward[0] * forward[0] + forward[1] * forward[1] +
+                forward[2] * forward[2]);
   const auto &self = game::cg::cg_entitiesArray[0].entities[client];
   const float dx = eye[0] - self.pose.origin.x;
   const float dy = eye[1] - self.pose.origin.y;
@@ -424,13 +425,14 @@ constexpr int ENTITIES = 0x700;
 
 struct state {
   std::array<seen, ENTITIES> tracks{};
-  uint32_t frame = 1; // never 0: a zombie never seen has frame 0
+  uint32_t frame = 1;        // never 0: a zombie never seen has frame 0
   float client_pitch = 0.0f; // the client's own angles as this left them
   float client_yaw = 0.0f;
   bool have_client = false;
   float hip_tan_x = 0.0f; // the widest view seen in this level: from the hip
   bool warned = false;
-  int failed_frames = 0; // frames in a row the camera or the angles were not found
+  int failed_frames =
+      0; // frames in a row the camera or the angles were not found
   int64_t last_pad_ms = 0;
   int64_t last_qpc = 0;
   // what the last frame did, for xerces_aim_debug and the test log

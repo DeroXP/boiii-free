@@ -1732,8 +1732,8 @@ DWORD WINAPI late_fault_failsafe(const LPVOID code) {
   return 0;
 }
 
-[[noreturn]] void end_exit_after_late_fault(
-    const LPEXCEPTION_POINTERS exceptioninfo) {
+[[noreturn]] void
+end_exit_after_late_fault(const LPEXCEPTION_POINTERS exceptioninfo) {
   const auto code = xerces_runtime::exit_code().value_or(0);
   // A fault in what follows comes back here on the same thread: the second
   // time there is nothing left to try. (Per thread: two game threads can

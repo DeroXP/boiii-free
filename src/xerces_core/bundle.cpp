@@ -53,8 +53,8 @@ std::string utf8(const std::wstring &text) {
   if (text.empty()) {
     return {};
   }
-  const int size = WideCharToMultiByte(CP_UTF8, 0, text.data(), int(text.size()),
-                                       nullptr, 0, nullptr, nullptr);
+  const int size = WideCharToMultiByte(
+      CP_UTF8, 0, text.data(), int(text.size()), nullptr, 0, nullptr, nullptr);
   std::string out(std::size_t(size), '\0');
   WideCharToMultiByte(CP_UTF8, 0, text.data(), int(text.size()), out.data(),
                       size, nullptr, nullptr);
@@ -75,7 +75,8 @@ std::string log_role(const std::filesystem::path &file) {
                                    : stem.substr(time + 1, role - time - 1);
 }
 
-std::string registry_string(HKEY root, const wchar_t *key, const wchar_t *name) {
+std::string registry_string(HKEY root, const wchar_t *key,
+                            const wchar_t *name) {
   wchar_t buffer[512]{};
   DWORD size = sizeof(buffer);
   if (RegGetValueW(root, key, name, RRF_RT_REG_SZ, nullptr, buffer, &size) !=
@@ -173,8 +174,8 @@ std::string system_info_json() {
   // RtlGetVersion tells the truth where GetVersionEx is shimmed.
   using rtl_get_version = LONG(WINAPI *)(OSVERSIONINFOW *);
   HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-  if (auto get = reinterpret_cast<rtl_get_version>(reinterpret_cast<void *>(
-          GetProcAddress(ntdll, "RtlGetVersion")))) {
+  if (auto get = reinterpret_cast<rtl_get_version>(
+          reinterpret_cast<void *>(GetProcAddress(ntdll, "RtlGetVersion")))) {
     OSVERSIONINFOW info{};
     info.dwOSVersionInfoSize = sizeof(info);
     if (get(&info) == 0) {
@@ -191,14 +192,16 @@ std::string system_info_json() {
     json::set(doc, "wine", wine(), alloc); // Proton runs on Wine (17.2)
   }
 
-  json::set(doc, "cpu",
-            registry_string(HKEY_LOCAL_MACHINE,
-                            L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
-                            L"ProcessorNameString"),
-            alloc);
-  json::set(doc, "logical_processors",
-            static_cast<std::int64_t>(GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)),
-            alloc);
+  json::set(
+      doc, "cpu",
+      registry_string(HKEY_LOCAL_MACHINE,
+                      L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+                      L"ProcessorNameString"),
+      alloc);
+  json::set(
+      doc, "logical_processors",
+      static_cast<std::int64_t>(GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)),
+      alloc);
   MEMORYSTATUSEX memory{};
   memory.dwLength = sizeof(memory);
   if (GlobalMemoryStatusEx(&memory)) {
@@ -225,15 +228,16 @@ std::string system_info_json() {
       json::set(display, "hz",
                 static_cast<std::int64_t>(mode.dmDisplayFrequency), alloc);
       json::set(display, "primary",
-                (device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0, alloc);
+                (device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0,
+                alloc);
       displays.PushBack(display, alloc);
     }
     device = {};
     device.cb = sizeof(device);
   }
   json::set(doc, "gpus",
-            json::string_array(std::vector<std::string>(gpus.begin(), gpus.end()),
-                               alloc),
+            json::string_array(
+                std::vector<std::string>(gpus.begin(), gpus.end()), alloc),
             alloc);
   json::set(doc, "displays", std::move(displays), alloc);
   return json::pretty(doc);
@@ -326,7 +330,8 @@ bundle_result make_bundle(const std::filesystem::path &home,
   // of any role would let a few launcher sessions after a crash push out
   // the game log the report needs.
   std::vector<std::filesystem::directory_entry> logs;
-  for (const auto &file : std::filesystem::directory_iterator(home / "logs", ec)) {
+  for (const auto &file :
+       std::filesystem::directory_iterator(home / "logs", ec)) {
     if (file.path().extension() == ".jsonl") {
       logs.push_back(file);
     }

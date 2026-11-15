@@ -41,18 +41,19 @@ def rcss_block(themes):
 
 
 def lua_table(themes):
+    # Two-space indents, as .stylua.toml asks (CI runs stylua --check).
     out = [
         "-- C / Signal colours for the in-game Xerces menu (docs/DESIGN.md 7.2, 7.6).",
         "-- Generated from data/xerces/ui/tokens.json by tools/ui/tokens.py; do not edit.",
         "XercesTokens = {",
     ]
     for theme in SELECTORS:
-        out.append(f"\t{theme} = {{")
+        out.append(f"  {theme} = {{")
         for name, value in themes[theme].items():
             r, g, b = (int(value[i : i + 2], 16) / 255 for i in (1, 3, 5))
             key = name.replace("-", "_")
-            out.append(f"\t\t{key} = {{ {r:.4f}, {g:.4f}, {b:.4f} }},")
-        out.append("\t},")
+            out.append(f"    {key} = {{ {r:.4f}, {g:.4f}, {b:.4f} }},")
+        out.append("  },")
     out.append("}")
     return "\n".join(out) + "\n"
 

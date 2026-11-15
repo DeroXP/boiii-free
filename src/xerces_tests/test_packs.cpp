@@ -259,8 +259,9 @@ TEST_CASE("packs store: export file names get the pack extension") {
   CHECK_EQ(named("Weekend.xpack.json"), "Weekend.xpack.json");
   CHECK_EQ(named("Weekend.XPACK.JSON"), "Weekend.XPACK.JSON");
   CHECK_EQ(named("weekend.json"), "weekend.json");
-  CHECK_EQ(with_pack_extension(fs::path("C:/out") / "Zombies v1.2").parent_path(),
-           fs::path("C:/out"));
+  CHECK_EQ(
+      with_pack_extension(fs::path("C:/out") / "Zombies v1.2").parent_path(),
+      fs::path("C:/out"));
 }
 
 TEST_CASE("packs store: imports never overwrite a different pack") {
@@ -308,7 +309,8 @@ TEST_CASE("packs store: names") {
   CHECK(find_by_name(library, " weekend zombies ") != nullptr);
   CHECK(find_by_name(library, "Weekend") == nullptr);
 
-  CHECK_EQ(strip_colour_codes("^3[^5PZM^3] ^9PEGASUS^7 v0.2"), "[PZM] PEGASUS v0.2");
+  CHECK_EQ(strip_colour_codes("^3[^5PZM^3] ^9PEGASUS^7 v0.2"),
+           "[PZM] PEGASUS v0.2");
   CHECK_EQ(strip_colour_codes("50^ off"), "50^ off");
   CHECK_EQ(pack_file_stem("Weekend: Zombies/MP?"), "Weekend_ Zombies_MP_");
   CHECK_EQ(pack_file_stem("..\\..\\evil"), "_.._evil");

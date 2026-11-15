@@ -616,31 +616,23 @@ LUI.createMenu[MENU] = function(controller)
       { button = Enum.LUIButton.LUI_KEY_LB, key = "Q", step = -1 },
       { button = Enum.LUIButton.LUI_KEY_RB, key = "E", step = 1 },
     }) do
-      self:AddButtonCallbackFunction(
-        self,
-        controller,
-        turn.button,
-        turn.key,
-        function(element, menu, actionController)
-          local moved = pcall(function()
-            if turn.step < 0 then
-              tabs.Tabs.grid:navigateItemLeft()
-            else
-              tabs.Tabs.grid:navigateItemRight()
-            end
-          end)
-          if not moved then
-            local count = #shown[controller]
-            showGroup((current[controller] - 1 + turn.step) % count + 1)
+      self:AddButtonCallbackFunction(self, controller, turn.button, turn.key, function(element, menu, actionController)
+        local moved = pcall(function()
+          if turn.step < 0 then
+            tabs.Tabs.grid:navigateItemLeft()
+          else
+            tabs.Tabs.grid:navigateItemRight()
           end
-          return true
-        end,
-        function(element, menu)
-          CoD.Menu.SetButtonLabel(menu, turn.button, "")
-          return true
-        end,
-        false
-      )
+        end)
+        if not moved then
+          local count = #shown[controller]
+          showGroup((current[controller] - 1 + turn.step) % count + 1)
+        end
+        return true
+      end, function(element, menu)
+        CoD.Menu.SetButtonLabel(menu, turn.button, "")
+        return true
+      end, false)
     end
   end
   showGroup(1)

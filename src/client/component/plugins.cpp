@@ -33,7 +33,8 @@ struct component final : generic_component {
           count_dlls(game::get_appdata_path() / "plugins") +
           count_dlls(fs::path("boiii") / "plugins");
       log("Plugin loading is not part of Xerces builds (DESIGN.md 5.9); " +
-          std::to_string(skipped) + " DLL(s) in the plugin folders not loaded.");
+          std::to_string(skipped) +
+          " DLL(s) in the plugin folders not loaded.");
       return;
     }
 

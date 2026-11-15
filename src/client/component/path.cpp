@@ -67,8 +67,8 @@ const std::filesystem::path &boiii_players_directory() {
 }
 
 const std::filesystem::path &steam_workshop_content_directory() {
-  static const std::filesystem::path path = canonical_or_self(
-      cwd() / "../../workshop/content" / game::APP_ID_STR);
+  static const std::filesystem::path path =
+      canonical_or_self(cwd() / "../../workshop/content" / game::APP_ID_STR);
   return path;
 }
 
@@ -106,7 +106,8 @@ bool reparent(std::filesystem::path &path, const std::filesystem::path &current,
   // Xerces: the error_code overloads here and below; a path Windows will not
   // resolve is not under current.
   std::error_code ec;
-  const std::filesystem::path rel = std::filesystem::relative(path, current, ec);
+  const std::filesystem::path rel =
+      std::filesystem::relative(path, current, ec);
   if (!ec && !rel.empty() && rel.native()[0] != '.') {
     path = replacement / std::move(rel);
     return true;
@@ -136,8 +137,8 @@ bool try_replace_workshop_root(std::filesystem::path &path) {
 
     // Calculate relative path once to avoid duplicate reparent overhead
     std::error_code ec;
-    const std::filesystem::path rel = std::filesystem::relative(
-        path, steam_workshop_content_directory(), ec);
+    const std::filesystem::path rel =
+        std::filesystem::relative(path, steam_workshop_content_directory(), ec);
     // Check if path is a child of the Steam workshop content directory
     if (!ec && !rel.empty() && rel.native()[0] != '.') {
       const std::filesystem::path rel_zone_parented =

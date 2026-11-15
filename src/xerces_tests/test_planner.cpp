@@ -235,11 +235,12 @@ TEST_CASE("planner: a beta build meets requires.xerces as its release does") {
   }));
 
   // xerces_cli mod new writes a range the build that ran it meets.
-  for (const char *text : {"0.1.0-beta.21", "0.0.0-unknown", "1.4.2", "2.0.0"}) {
+  for (const char *text :
+       {"0.1.0-beta.21", "0.0.0-unknown", "1.4.2", "2.0.0"}) {
     const version running = *version::parse(text);
     const std::string range = scaffold_requires_xerces(running);
-    const std::vector<installed_content> scaffolded = {make(
-        mod("new.mod", "0.1.0", ",\"requires\":{\"xerces\":\"" + range + "\"}"))};
+    const std::vector<installed_content> scaffolded = {make(mod(
+        "new.mod", "0.1.0", ",\"requires\":{\"xerces\":\"" + range + "\"}"))};
     plan_request made = request_for({"new.mod"});
     made.xerces_version = running;
     CHECK(resolve_plan(scaffolded, made).ok());

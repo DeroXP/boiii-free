@@ -207,7 +207,7 @@ std::size_t bare_ipv6_length(std::string_view text, std::size_t at) {
 // these, so text that does is left as it is.
 bool file_ending(std::string_view label) {
   static constexpr std::string_view endings[] = {
-      "lua", "gsc", "csc", "gsh", "cpp", "hpp", "c",
+      "lua", "gsc", "csc",  "gsh", "cpp", "hpp", "c",
       "h",   "inl", "json", "cfg", "txt", "log"};
   for (const std::string_view ending : endings) {
     if (label.size() != ending.size()) {
@@ -467,10 +467,9 @@ bool read_hex4(std::string_view text, std::size_t at, std::uint32_t &value) {
     if (!is_hex(c)) {
       return false;
     }
-    value = value * 16 + static_cast<std::uint32_t>(
-                             is_digit(c)   ? c - '0'
-                             : c >= 'a'    ? c - 'a' + 10
-                                           : c - 'A' + 10);
+    value = value * 16 + static_cast<std::uint32_t>(is_digit(c) ? c - '0'
+                                                    : c >= 'a'  ? c - 'a' + 10
+                                                                : c - 'A' + 10);
   }
   return true;
 }

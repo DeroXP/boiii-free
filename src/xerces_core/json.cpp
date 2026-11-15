@@ -271,7 +271,7 @@ std::string valid_utf8(std::string_view text, std::size_t max_bytes) {
       min_value = 0x10000;
     }
     bool valid = length > 0 && i + length <= text.size();
-    std::uint32_t value = length == 1 ? lead
+    std::uint32_t value = length == 1   ? lead
                           : length == 2 ? (lead & 0x1Fu)
                           : length == 3 ? (lead & 0x0Fu)
                                         : (lead & 0x07u);
@@ -288,8 +288,7 @@ std::string valid_utf8(std::string_view text, std::size_t max_bytes) {
          (value >= 0xD800 && value <= 0xDFFF))) {
       valid = false; // overlong, out of range, or a surrogate
     }
-    const std::string_view piece =
-        valid ? text.substr(i, length) : replacement;
+    const std::string_view piece = valid ? text.substr(i, length) : replacement;
     if (out.size() + piece.size() > max_bytes) {
       break; // never cut inside a character
     }

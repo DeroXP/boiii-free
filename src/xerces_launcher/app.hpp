@@ -36,14 +36,14 @@ class SystemInterface;
 namespace xerces_launcher {
 struct options {
   std::optional<fs::path> home;
-  float scale = 0.f;        // 0: the config's UI scale, else Windows
+  float scale = 0.f;              // 0: the config's UI scale, else Windows
   int width = 1280, height = 800; // dp
-  double seconds = 0;       // quit after this long (checks)
-  std::string start_view;   // show this screen after boot
-  std::string script;       // scripted input for checks (app.cpp)
-  std::string language;     // overrides the config ("pseudo" for 7.5)
-  std::string theme;        // overrides the config
-  bool dry_launch = false;  // never start the game, log the command
+  double seconds = 0;             // quit after this long (checks)
+  std::string start_view;         // show this screen after boot
+  std::string script;             // scripted input for checks (app.cpp)
+  std::string language;           // overrides the config ("pseudo" for 7.5)
+  std::string theme;              // overrides the config
+  bool dry_launch = false;        // never start the game, log the command
   bool skip_boot = false;
   // An invite link to open in Friends (DESIGN.md 10.12): the code from
   // "--join-link <link>" or a bare "xerces://join/<code>" (how Windows
@@ -248,8 +248,8 @@ private:
   // launcher is not a press either.
   unsigned pad_ignored_ = ~0u;
   double pad_repeat_at_ = 0;
-  unsigned script_pad_ = 0; // held by a check script (padhold)
-  int script_front_ = -1;   // check script's front on (1) / off (0); -1 real
+  unsigned script_pad_ = 0;   // held by a check script (padhold)
+  int script_front_ = -1;     // check script's front on (1) / off (0); -1 real
   unsigned pad_slots_ = 0;    // XInput slots that answered (bit per slot)
   double pad_rescan_at_ = 0;  // when the empty slots are asked again
   int focus_lost_frames_ = 0; // frames the focus has been lost or hidden

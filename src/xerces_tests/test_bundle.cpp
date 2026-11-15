@@ -78,7 +78,8 @@ TEST_CASE("bundle: logs, journal, plan and report, scrubbed") {
   fs::remove_all(home);
   const std::string profile = "C:\\Users\\Someone";
   write(home / "logs" / "20261105-010000-launcher-1.jsonl",
-        R"({"msg":"C:\\Users\\Someone\\XercesHome"})" "\n");
+        R"({"msg":"C:\\Users\\Someone\\XercesHome"})"
+        "\n");
   write(home / "logs" / "20261105-010100-game-2.jsonl", "{\"msg\":\"ok\"}\n");
   const std::string id(64, 'a');
   write(home / "logs" / "journal.json",
@@ -87,8 +88,9 @@ TEST_CASE("bundle: logs, journal, plan and report, scrubbed") {
             "\"started\":\"\",\"updated\":\"\"}");
   write(home / "config" / "plans" / (id + ".json"), R"({"stack":[]})");
   write(home / "cache" / "signatures-report.json", R"({"entries":[]})");
-  write(home / "config" / "launcher.json",
-        R"({"game_dir":"C:\\Users\\Someone\\Games\\BO3","player_name":"Secret"})");
+  write(
+      home / "config" / "launcher.json",
+      R"({"game_dir":"C:\\Users\\Someone\\Games\\BO3","player_name":"Secret"})");
 
   const fs::path out = home / "crash" / "bundle.zip";
   const bundle_result result =
@@ -113,8 +115,9 @@ TEST_CASE("bundle: logs, journal, plan and report, scrubbed") {
   for (const auto &[name, text] : files) {
     CHECK(text.find("Someone") == std::string::npos);
   }
-  CHECK(files.at("logs/20261105-010000-launcher-1.jsonl").find("%USERPROFILE%") !=
-        std::string::npos);
+  CHECK(
+      files.at("logs/20261105-010000-launcher-1.jsonl").find("%USERPROFILE%") !=
+      std::string::npos);
   fs::remove_all(home);
 }
 
@@ -178,15 +181,16 @@ TEST_CASE("bundle: escaped and port-less addresses go too, lines stay JSON") {
   // Lines as a launcher writes them: a message with a newline before the
   // address, and the Servers screen naming a saved or recent server as it
   // was typed, without a port.
-  write(home / "logs" / "20261105-030000-launcher-4.jsonl",
-        R"({"event":"a","msg":"timed out\n203.0.113.9:27017"})"
-        "\n"
-        R"({"event":"b","msg":"a\nfriend.example.org:27017","data":{"n":1}})"
-        "\n"
-        R"({"event":"launcher.servers.favorite","msg":"join dave.ddns.example"})"
-        "\n"
-        R"({"event":"launcher.servers.recent","msg":"remove Lan-Box"})"
-        "\n");
+  write(
+      home / "logs" / "20261105-030000-launcher-4.jsonl",
+      R"({"event":"a","msg":"timed out\n203.0.113.9:27017"})"
+      "\n"
+      R"({"event":"b","msg":"a\nfriend.example.org:27017","data":{"n":1}})"
+      "\n"
+      R"({"event":"launcher.servers.favorite","msg":"join dave.ddns.example"})"
+      "\n"
+      R"({"event":"launcher.servers.recent","msg":"remove Lan-Box"})"
+      "\n");
   write(home / "config" / "launcher.json",
         R"({"favorites":[{"name":"Dave","address":"dave.ddns.example"}],)"
         R"("recent_servers":["lan-box:27017"]})");
@@ -201,8 +205,8 @@ TEST_CASE("bundle: escaped and port-less addresses go too, lines stay JSON") {
   }
   const auto files = unzip(bytes);
   for (const auto &[name, text] : files) {
-    for (const char *secret : {"203.0.113", "friend.example", "dave.ddns",
-                               "lan-box", "Lan-Box"}) {
+    for (const char *secret :
+         {"203.0.113", "friend.example", "dave.ddns", "lan-box", "Lan-Box"}) {
       if (text.find(secret) != std::string::npos) {
         CHECK_EQ(name + " holds " + secret, std::string());
       }

@@ -63,7 +63,7 @@ bool write_png_rgb(const std::filesystem::path &path, const unsigned char *rgb,
   if (!file) {
     return false;
   }
-  static const unsigned char signature[8] = {0x89, 'P', 'N', 'G',
+  static const unsigned char signature[8] = {0x89, 'P',  'N',  'G',
                                              '\r', '\n', 0x1A, '\n'};
   file.write(reinterpret_cast<const char *>(signature), 8);
 

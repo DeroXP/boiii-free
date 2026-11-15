@@ -52,7 +52,8 @@ std::vector<std::string> strings_of(const rapidjson::Value *array) {
   return out;
 }
 
-bool bool_of(const rapidjson::Value &root, std::string_view key, bool fallback) {
+bool bool_of(const rapidjson::Value &root, std::string_view key,
+             bool fallback) {
   const auto *value = json::member(root, key);
   return value != nullptr && value->IsBool() ? value->GetBool() : fallback;
 }
@@ -113,7 +114,8 @@ launcher_config_result parse_launcher_config(std::string_view text) {
           }
         }
       }
-      profile.pack_name = json::get_string(member.value, "pack_name").value_or("");
+      profile.pack_name =
+          json::get_string(member.value, "pack_name").value_or("");
       profile.pack_id = json::get_string(member.value, "pack_id").value_or("");
       if (const auto *pairs = json::member(member.value, "allowed_conflicts");
           pairs != nullptr && pairs->IsArray()) {
@@ -179,7 +181,8 @@ launcher_config_result parse_launcher_config(std::string_view text) {
   if (const auto *scale = json::member(root, "ui_scale_percent");
       scale != nullptr && scale->IsInt()) {
     const int value = scale->GetInt();
-    c.ui_scale_percent = value == 0 || (value >= 75 && value <= 200) ? value : 0;
+    c.ui_scale_percent =
+        value == 0 || (value >= 75 && value <= 200) ? value : 0;
   }
   c.reduced_motion = bool_of(root, "reduced_motion", false);
   if (const auto language = json::get_string(root, "language");

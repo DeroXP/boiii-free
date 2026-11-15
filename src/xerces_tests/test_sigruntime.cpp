@@ -323,8 +323,7 @@ TEST_CASE("handoff: a wait that is called off does not wait out its time") {
     return std::string("late");
   });
   const auto before = std::chrono::steady_clock::now();
-  const auto result = call.wait(
-      5000ms, [&] { return ++asked >= 3; }, 10ms);
+  const auto result = call.wait(5000ms, [&] { return ++asked >= 3; }, 10ms);
   const auto took = std::chrono::steady_clock::now() - before;
   CHECK(!result.has_value());
   CHECK(asked.load() >= 3);

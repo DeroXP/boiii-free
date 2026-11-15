@@ -39,8 +39,8 @@ TEST_CASE("backup: the saved sign-in stays out of config backups") {
   // config/account.dat holds the refresh token (account.cpp's
   // session_file); nothing in its name said "credential", so every config
   // backup took a copy of it.
-  CHECK(is_credential_file(
-      fs::relative(account::session_file("home"), fs::path("home") / "config")));
+  CHECK(is_credential_file(fs::relative(account::session_file("home"),
+                                        fs::path("home") / "config")));
   CHECK(is_credential_file("account.dat"));
   CHECK(is_credential_file("Account.DAT"));
   // Its temporary copies while it is written.

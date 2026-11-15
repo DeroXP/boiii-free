@@ -143,7 +143,8 @@ TEST_CASE("catalog: a failed read written down by an older build is dropped") {
   const auto line = [](const fs::path &path, std::uint64_t size) {
     const auto key = path.generic_u8string();
     return std::to_string(size) + "\t" +
-           std::to_string(fs::last_write_time(path).time_since_epoch().count()) +
+           std::to_string(
+               fs::last_write_time(path).time_since_epoch().count()) +
            "\t" + sha256::hex("") + "\t" +
            std::string(reinterpret_cast<const char *>(key.data()), key.size()) +
            "\n";

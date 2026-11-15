@@ -91,20 +91,18 @@ public:
     model.Bind("culprit_found", &culprit_found_);
     model.Bind("culprit_stop", &culprit_stop_);
     model.Bind("culprit_off", &culprit_off_);
-    model.BindEventCallback(
-        "pick", [this](Rml::DataModelHandle, Rml::Event &,
-                       const Rml::VariantList &args) {
-          if (!args.empty()) {
-            owner_->set_mode(args[0].Get<Rml::String>());
-          }
-        });
-    model.BindEventCallback(
-        "act", [this](Rml::DataModelHandle, Rml::Event &,
-                      const Rml::VariantList &args) {
-          if (!args.empty()) {
-            act(args[0].Get<Rml::String>());
-          }
-        });
+    model.BindEventCallback("pick", [this](Rml::DataModelHandle, Rml::Event &,
+                                           const Rml::VariantList &args) {
+      if (!args.empty()) {
+        owner_->set_mode(args[0].Get<Rml::String>());
+      }
+    });
+    model.BindEventCallback("act", [this](Rml::DataModelHandle, Rml::Event &,
+                                          const Rml::VariantList &args) {
+      if (!args.empty()) {
+        act(args[0].Get<Rml::String>());
+      }
+    });
     handle_ = model.GetModelHandle();
     return true;
   }
@@ -125,8 +123,8 @@ public:
   // With a crash to deal with, its box comes first.
   Rml::Element *default_focus() override {
     if (doc) {
-      for (const char *id : {"culprit-launch", "culprit-off", "culprit-stop",
-                             "safe-off"}) {
+      for (const char *id :
+           {"culprit-launch", "culprit-off", "culprit-stop", "safe-off"}) {
         if (Rml::Element *element = doc->GetElementById(id);
             element && element->IsVisible(true)) {
           return element;
@@ -172,10 +170,9 @@ private:
     const std::size_t shown = std::min<std::size_t>(plan.stack.size(), 6);
     for (std::size_t i = 0; i < shown; ++i) {
       const auto &entry = plan.stack[i];
-      rows_.push_back({two_digits(i + 1),
-                       entry.name.empty() ? entry.id : entry.name,
-                       entry.legacy ? std::string("legacy")
-                                    : entry.ver.to_string()});
+      rows_.push_back(
+          {two_digits(i + 1), entry.name.empty() ? entry.id : entry.name,
+           entry.legacy ? std::string("legacy") : entry.ver.to_string()});
     }
     more_ = plan.stack.size() > shown
                 ? "+" + std::to_string(plan.stack.size() - shown) + " " +
@@ -184,9 +181,9 @@ private:
     const std::size_t warnings =
         plan.diags.count(xerces_core::severity::warning);
     const std::size_t errors = plan.diags.count(xerces_core::severity::error);
-    const std::size_t requested =
-        config.profiles.contains(mode_) ? config.profiles.at(mode_).mods.size()
-                                        : 0;
+    const std::size_t requested = config.profiles.contains(mode_)
+                                      ? config.profiles.at(mode_).mods.size()
+                                      : 0;
     // The first scan of the mods has not ended: the plan of an empty catalog
     // calls every enabled mod missing, which is not so (Mods, Servers and
     // Packs wait for the scan too)
@@ -200,7 +197,8 @@ private:
               {count(warnings), owner_->tr("warnings")}};
 
     if (requested == 0) {
-      meta_ = owner_->tr("No mods enabled. Pick some in Mods, or launch vanilla.");
+      meta_ =
+          owner_->tr("No mods enabled. Pick some in Mods, or launch vanilla.");
       empty_text_ = owner_->tr("Nothing to load: this mode runs vanilla.");
     } else if (reading) {
       meta_ = owner_->tr("Reading your mods...");
@@ -244,10 +242,9 @@ private:
       game_detail_ = owner_->tr("Set the game folder");
     } else {
       game_value_ = owner_->tr("Found");
-      game_detail_ = game.steam_build
-                         ? owner_->tr("Build") + " " +
-                               std::to_string(*game.steam_build)
-                         : owner_->tr("Build unknown");
+      game_detail_ = game.steam_build ? owner_->tr("Build") + " " +
+                                            std::to_string(*game.steam_build)
+                                      : owner_->tr("Build unknown");
       if (game.preflight && !game.preflight->can_launch()) {
         game_value_ =
             owner_->tr(xerces_core::preflight_label(game.preflight->verdict));
@@ -258,20 +255,20 @@ private:
     if (sigs.known) {
       sig_value_ = std::to_string(sigs.matched) + "/" +
                    std::to_string(sigs.total) + " " + owner_->tr("matched");
-      sig_detail_ = sigs.multi_mod_off()
-                        ? owner_->tr("Multi-mod was off: only the main mod loaded")
-                    : sigs.missing.empty()
-                        ? owner_->tr("At the last launch")
-                        : owner_->tr("Missing:") + " " + sigs.missing.front();
+      sig_detail_ =
+          sigs.multi_mod_off()
+              ? owner_->tr("Multi-mod was off: only the main mod loaded")
+          : sigs.missing.empty()
+              ? owner_->tr("At the last launch")
+              : owner_->tr("Missing:") + " " + sigs.missing.front();
     } else {
       sig_value_ = owner_->tr("Not checked yet");
       sig_detail_ = owner_->tr("Checked when the game starts");
     }
     if (catalog.scanning) {
-      catalog_value_ = catalog.total
-                           ? std::to_string(catalog.done) + "/" +
-                                 std::to_string(catalog.total)
-                           : owner_->tr("Reading...");
+      catalog_value_ = catalog.total ? std::to_string(catalog.done) + "/" +
+                                           std::to_string(catalog.total)
+                                     : owner_->tr("Reading...");
       catalog_detail_ = catalog.current;
     } else {
       catalog_value_ = std::to_string(svc.mods_for(mode_).size()) + " " +
@@ -296,13 +293,12 @@ private:
     safe_ = decision.safe_mode && crash_ != dismissed_crash_;
     safe_text_ = xerces_core::safe_mode_text(
         decision, [this](const std::string &part) { return owner_->tr(part); });
-    safe_value_ = decision.safe_mode ? owner_->tr("Suggested")
-                                     : owner_->tr("Off");
-    safe_detail_ = decision.safe_mode
-                       ? owner_->tr("The last modded launch crashed")
-                       : "";
-    last_server_ = config.recent_servers.empty() ? ""
-                                                 : config.recent_servers.front();
+    safe_value_ =
+        decision.safe_mode ? owner_->tr("Suggested") : owner_->tr("Off");
+    safe_detail_ =
+        decision.safe_mode ? owner_->tr("The last modded launch crashed") : "";
+    last_server_ =
+        config.recent_servers.empty() ? "" : config.recent_servers.front();
     refresh_culprit(decision);
     handle_.DirtyAllVariables();
   }
@@ -562,32 +558,33 @@ private:
         return;
       }
       const auto &sigs = owner_->svc().signatures();
-      if (sigs.multi_mod_off() && owner_->svc().resolve(owner_->mode()).stack.size() > 1) {
+      if (sigs.multi_mod_off() &&
+          owner_->svc().resolve(owner_->mode()).stack.size() > 1) {
         // The game turned multi-mod off at its last start (a signature did
         // not resolve on this build, DESIGN.md 4.4): only fs_game loads.
-        owner_->dialog("Multi-mod was off last time",
-                       "At the last launch this game build was missing a "
-                       "signature Xerces needs for extra mods, so only the main "
-                       "mod loaded. Diagnostics shows which one. Launch anyway?",
-                       {"Launch anyway", "Cancel"}, [this](int choice) {
-                         if (choice == 0) {
-                           launch(true, false);
-                         }
-                       });
+        owner_->dialog(
+            "Multi-mod was off last time",
+            "At the last launch this game build was missing a "
+            "signature Xerces needs for extra mods, so only the main "
+            "mod loaded. Diagnostics shows which one. Launch anyway?",
+            {"Launch anyway", "Cancel"}, [this](int choice) {
+              if (choice == 0) {
+                launch(true, false);
+              }
+            });
         return;
       }
       if (safe_) {
-        owner_->dialog("The last modded launch crashed",
-                       safe_text_,
-                       {"Launch with mods off", "Launch with mods anyway",
-                        "Cancel"},
-                       [this](int choice) {
-                         if (choice == 0) {
-                           launch(true, true);
-                         } else if (choice == 1) {
-                           launch(true, false);
-                         }
-                       });
+        owner_->dialog(
+            "The last modded launch crashed", safe_text_,
+            {"Launch with mods off", "Launch with mods anyway", "Cancel"},
+            [this](int choice) {
+              if (choice == 0) {
+                launch(true, true);
+              } else if (choice == 1) {
+                launch(true, false);
+              }
+            });
         return;
       }
       launch(true, false);

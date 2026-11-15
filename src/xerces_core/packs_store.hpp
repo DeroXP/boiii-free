@@ -78,9 +78,9 @@ struct import_placement {
   pack value;
   import_kind kind = import_kind::added;
 };
-import_placement place_import(const pack_library &library, pack incoming,
-                              const std::function<std::string()> &make_id =
-                                  new_pack_id);
+import_placement
+place_import(const pack_library &library, pack incoming,
+             const std::function<std::string()> &make_id = new_pack_id);
 
 // Trims spaces at both ends.
 std::string trim_pack_name(std::string_view name);
@@ -114,7 +114,7 @@ const char *to_string(pack_item_state state);
 
 struct pack_item_check {
   std::string id;
-  std::string name;      // the installed title, else the id
+  std::string name; // the installed title, else the id
   bool is_map = false;
   std::string pinned;    // the pinned version ("" for the map)
   std::string installed; // the installed version, when it differs

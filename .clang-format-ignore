@@ -14,3 +14,6 @@ nul
 /**/*.aps
 # Copied from RmlUi with its own formatting (the file says what changed).
 src/xerces_rmlui_harfbuzz/*.cpp
+# Copied from RmlUi 6.3 for the launcher spike with its own formatting (the file
+# says what changed).
+src/xerces_launcher_spike/dx11/*.cpp

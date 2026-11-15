@@ -14,7 +14,8 @@ jobs:
         uses: JohnnyMorganz/stylua-action@v5.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          version: latest
+          # Pinned: a new StyLua under 'latest' can fail every push by itself.
+          version: 2.6.0
           # Use 'check' to fail if files aren't formatted correctly
           args: --check .
       - name: Run clang-format style check

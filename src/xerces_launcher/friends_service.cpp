@@ -781,9 +781,8 @@ friends_service::send_game_invite(const std::string &user_id,
   // address, or did not say its address, answers UPnP with an address no
   // friend can dial: the address the backend sees and the hole punch then
   // (review, 2026-11-13)
-  if (xerces_core::classify_ipv4(
-          xerces_core::join_password::endpoint_ip(address)) !=
-      xerces_core::ipv4_scope::public_net) {
+  if (xerces_core::classify_ipv4(xerces_core::join_password::endpoint_ip(
+          address)) != xerces_core::ipv4_scope::public_net) {
     address.clear();
   }
   if (address.empty()) {

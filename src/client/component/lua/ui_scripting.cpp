@@ -956,8 +956,9 @@ thread_local bool lobby_attempt = false;
 std::string rawfile_key(const std::string_view name) {
   std::string key(name);
   for (char &c : key) {
-    c = c == '\\' ? '/'
-                  : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    c = c == '\\'
+            ? '/'
+            : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   }
   if (!key.ends_with(".lua")) {
     key += ".lua";
@@ -967,10 +968,12 @@ std::string rawfile_key(const std::string_view name) {
 
 bool plain_module_name(const std::string_view module) {
   return !module.empty() && module.size() < 200 &&
-         std::ranges::all_of(module, [](const char c) {
-           return std::isalnum(static_cast<unsigned char>(c)) || c == '_' ||
-                  c == '.' || c == '/' || c == '-';
-         });
+         std::ranges::all_of(
+             module,
+             [](const char c) {
+               return std::isalnum(static_cast<unsigned char>(c)) || c == '_' ||
+                      c == '.' || c == '/' || c == '-';
+             });
 }
 
 // Runs a chunk in any of the game's Lua engines, protected; its string
@@ -1015,7 +1018,8 @@ const void *lobby_game_copy(const char *filename) {
     mod = found->second;
   }
   constexpr auto rawfile = static_cast<int32_t>(xasset::XAssetType::RAWFILE);
-  const std::optional<std::string> owner = mod_stack::asset_owner(rawfile, file);
+  const std::optional<std::string> owner =
+      mod_stack::asset_owner(rawfile, file);
   if (!owner || *owner != mod) {
     return nullptr;
   }
@@ -1031,7 +1035,8 @@ void try_mod_copy_in_lobby(lua_State *state, const char *module) {
   std::ranges::replace(path, '.', '/');
   const std::string file = rawfile_key(path);
   constexpr auto rawfile = static_cast<int32_t>(xasset::XAssetType::RAWFILE);
-  const std::optional<std::string> owner = mod_stack::asset_owner(rawfile, file);
+  const std::optional<std::string> owner =
+      mod_stack::asset_owner(rawfile, file);
   if (!owner) {
     return; // the game's own copy, or one Xerces itself ships
   }
@@ -1048,7 +1053,8 @@ void try_mod_copy_in_lobby(lua_State *state, const char *module) {
   // (seen on 2026-11-06: lua.shared.luareadonlytables = true after the error).
   const std::string quoted = "\"" + std::string(module) + "\"";
   const std::string code =
-      "local name = " + quoted + "\n"
+      "local name = " + quoted +
+      "\n"
       "local loaded = package and package.loaded\n"
       "if loaded and (loaded[name] or loaded[string.lower(name)]) then return "
       "\"\" end\n"
@@ -1069,10 +1075,10 @@ void try_mod_copy_in_lobby(lua_State *state, const char *module) {
   }
 
   const std::string error = result.substr(7);
-  const std::string data =
-      "{\"file\":" + xerces_core::json::quote(file) +
-      ",\"mod\":" + xerces_core::json::quote(*owner) +
-      ",\"error\":" + xerces_core::json::quote(error) + "}";
+  const std::string data = "{\"file\":" + xerces_core::json::quote(file) +
+                           ",\"mod\":" + xerces_core::json::quote(*owner) +
+                           ",\"error\":" + xerces_core::json::quote(error) +
+                           "}";
   if (!mod_stack::game_copy(rawfile, file)) {
     xerces_runtime::log_warn("lua.lobby.mod_copy_failed",
                              "A mod's copy of " + file +

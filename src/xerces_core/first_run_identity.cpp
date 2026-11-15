@@ -75,8 +75,8 @@ bool is_drive(std::wstring_view text) {
 // wildcard that would make the listing match some other name) is not checked.
 bool allowed_name(std::wstring_view name) {
   return !name.empty() && std::ranges::none_of(name, [](wchar_t c) {
-    return c < 32 || std::wstring_view(L"\\/:*?\"<>|").find(c) !=
-                         std::wstring_view::npos;
+    return c < 32 ||
+           std::wstring_view(L"\\/:*?\"<>|").find(c) != std::wstring_view::npos;
   });
 }
 
@@ -269,9 +269,9 @@ std::optional<link_text> read_link(const fs::path &link) {
   }
   std::vector<unsigned char> data(MAXIMUM_REPARSE_DATA_BUFFER_SIZE);
   DWORD size = 0;
-  const BOOL ok = DeviceIoControl(file, FSCTL_GET_REPARSE_POINT, nullptr, 0,
-                                  data.data(), DWORD(data.size()), &size,
-                                  nullptr);
+  const BOOL ok =
+      DeviceIoControl(file, FSCTL_GET_REPARSE_POINT, nullptr, 0, data.data(),
+                      DWORD(data.size()), &size, nullptr);
   CloseHandle(file);
   if (!ok || size < 16) {
     return std::nullopt;
@@ -343,8 +343,9 @@ struct walk_result {
 walk_result walk(const fs::path &path, const std::vector<fs::path> &identity) {
   using enum boiii_identity_check;
   const auto hit = [&](const fs::path &candidate) {
-    return std::ranges::any_of(
-        identity, [&](const fs::path &form) { return within(candidate, form); });
+    return std::ranges::any_of(identity, [&](const fs::path &form) {
+      return within(candidate, form);
+    });
   };
   std::optional<location> at = locate(path);
   if (!at) {
@@ -455,7 +456,8 @@ boiii_identity_check check_boiii_identity_path(const fs::path &path,
   return walk(path, identity_forms(boiii_appdata)).where;
 }
 
-bool is_boiii_identity_path(const fs::path &path, const fs::path &boiii_appdata) {
+bool is_boiii_identity_path(const fs::path &path,
+                            const fs::path &boiii_appdata) {
   return check_boiii_identity_path(path, boiii_appdata) !=
          boiii_identity_check::outside;
 }

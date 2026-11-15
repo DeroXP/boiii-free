@@ -82,8 +82,9 @@ bool write_minidump_file(const LPEXCEPTION_POINTERS exceptioninfo,
   MINIDUMP_EXCEPTION_INFORMATION info = {.ThreadId = GetCurrentThreadId(),
                                          .ExceptionPointers = exceptioninfo,
                                          .ClientPointers = FALSE};
-  const HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, nullptr,
-                                  CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  const HANDLE file =
+      CreateFileW(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                  FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) {
     return false;
   }

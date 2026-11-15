@@ -356,8 +356,8 @@ plan_request request_from(const arguments &args) {
   // the client's own defaults without --game-dir (or without the file).
   if (const auto game_dir = args.get("--game-dir")) {
     request.launcher_settings =
-        read_text(xerces_core::path_from_utf8(*game_dir) / "boiii_players" / "user" /
-                  "launcher_settings.json");
+        read_text(xerces_core::path_from_utf8(*game_dir) / "boiii_players" /
+                  "user" / "launcher_settings.json");
   }
   request.zone_budget =
       zone_budget_from(args, request.game_build, request.mode);
@@ -379,7 +379,8 @@ std::optional<catalog_scan> scan_from(const arguments &args) {
   // legacy items' kind
   options.folder_kind =
       folder_kind_of_directory(xerces_core::path_from_utf8(*dir));
-  catalog_scan scan = scan_mods_directory(xerces_core::path_from_utf8(*dir), options);
+  catalog_scan scan =
+      scan_mods_directory(xerces_core::path_from_utf8(*dir), options);
   if (scan.diags.has_errors() && !args.has("--json")) {
     print_diagnostics(scan.diags);
   }
@@ -481,7 +482,8 @@ int cmd_mod_new(const arguments &args) {
     std::cerr << "Modes are zm, mp and cp.\n";
     return exit_error;
   }
-  const fs::path folder = xerces_core::path_from_utf8(args.get("--dir").value_or(".")) / id;
+  const fs::path folder =
+      xerces_core::path_from_utf8(args.get("--dir").value_or(".")) / id;
   if (fs::exists(folder)) {
     std::cerr << utf8(folder) << " already exists.\n";
     return exit_error;
@@ -811,8 +813,8 @@ checked check(const catalog_scan &scan, const plan_request &request,
   }
   inputs.manifests = manifests;
   if (stock) {
-    inputs.stock =
-        index_loose_folder(std::string(stock_owner), xerces_core::path_from_utf8(*stock));
+    inputs.stock = index_loose_folder(std::string(stock_owner),
+                                      xerces_core::path_from_utf8(*stock));
   }
   if (decisions != nullptr) {
     inputs.allow_undeclared = decisions->allow_overrides;
@@ -1125,9 +1127,8 @@ int cmd_diag_bundle(const arguments &args) {
   }
   // As UTF-8, which the bundle's text is: getenv gives the ANSI code page,
   // and a profile folder such as C:\Users\Jos<e acute> was then not redacted.
-  const bundle_result result =
-      make_bundle(home, out, environment_utf8(L"USERPROFILE"),
-                  system_info_json());
+  const bundle_result result = make_bundle(
+      home, out, environment_utf8(L"USERPROFILE"), system_info_json());
   if (!result.ok) {
     std::cerr << result.error << "\n";
     return exit_error;
@@ -1482,8 +1483,8 @@ int main(int argc, char **argv) {
     int count = 0;
     if (LPWSTR *wide = CommandLineToArgvW(GetCommandLineW(), &count)) {
       for (int i = 0; i < count; ++i) {
-        utf8_args.push_back(
-            xerces_core::path_utf8(std::filesystem::path(std::wstring(wide[i]))));
+        utf8_args.push_back(xerces_core::path_utf8(
+            std::filesystem::path(std::wstring(wide[i]))));
       }
       LocalFree(wide);
     }

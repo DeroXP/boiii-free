@@ -162,8 +162,7 @@ TEST_CASE("logs: an address right after a JSON escape is still found") {
     CHECK(json::parse(scrubbed).ok);
   }
   // A string with nothing to scrub keeps its escapes byte for byte.
-  const std::string untouched =
-      R"({"m":"café\n\"q\"","n":1.5,"t":"12:34:56"})";
+  const std::string untouched = R"({"m":"café\n\"q\"","n":1.5,"t":"12:34:56"})";
   CHECK_EQ(redact_addresses_in_json(untouched), untouched);
   // JSON Lines, the last one cut short by a crash.
   CHECK_EQ(redact_addresses_in_json("{\"m\":\"a\\n10.1.2.3\"}\n{\"m\":\"b\"}\n"

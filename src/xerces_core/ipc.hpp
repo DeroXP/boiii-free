@@ -28,7 +28,7 @@ inline constexpr int invalid_request = -32600;
 inline constexpr int method_not_found = -32601;
 inline constexpr int invalid_params = -32602;
 inline constexpr int internal_error = -32603;
-inline constexpr int busy = -32000;  // the game cannot do it right now
+inline constexpr int busy = -32000;    // the game cannot do it right now
 inline constexpr int refused = -32001; // not allowed in this state
 
 // One <home>\run\ file.
@@ -125,9 +125,9 @@ private:
 bool same_image(std::string_view a, std::string_view b);
 
 struct call_result {
-  bool ok = false;        // a response arrived (it may still be an error)
-  std::string response;   // the raw response message
-  std::string error;      // why there is none
+  bool ok = false;      // a response arrived (it may still be an error)
+  std::string response; // the raw response message
+  std::string error;    // why there is none
 };
 
 // Connects, checks the server is the process the entry names, sends one

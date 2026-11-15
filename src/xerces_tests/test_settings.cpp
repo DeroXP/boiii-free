@@ -86,7 +86,8 @@ TEST_CASE("settings: the name goes into an existing properties file only") {
   CHECK_EQ(apply_player_name(game, "Dero").status, name_apply::no_file);
   CHECK(!fs::exists(file));
 
-  write_bytes(file, "{\"playerName\":\"Steam\",\"selectedVersion\":\"latest\"}");
+  write_bytes(file,
+              "{\"playerName\":\"Steam\",\"selectedVersion\":\"latest\"}");
   CHECK_EQ(apply_player_name(game, "Dero").status, name_apply::written);
   CHECK_EQ(read_player_name(read_bytes(file)).value_or(""),
            std::string("Dero"));
@@ -114,12 +115,14 @@ TEST_CASE("settings: the name goes into an existing properties file only") {
 
   // A file the new copy cannot be written next to (the temporary name is
   // taken by a folder) is left alone too.
-  write_bytes(file, "{\"playerName\":\"Steam\",\"selectedVersion\":\"latest\"}");
+  write_bytes(file,
+              "{\"playerName\":\"Steam\",\"selectedVersion\":\"latest\"}");
   fs::create_directories(fs::path(file).concat(".xerces-tmp"));
   const name_apply_result blocked = apply_player_name(game, "Dero");
   CHECK_EQ(blocked.status, name_apply::failed);
   CHECK(blocked.failure == name_failure::write_failed);
-  CHECK_EQ(read_player_name(read_bytes(file)).value_or(""), std::string("Steam"));
+  CHECK_EQ(read_player_name(read_bytes(file)).value_or(""),
+           std::string("Steam"));
   CHECK(read_bytes(file).find("selectedVersion") != std::string::npos);
   CHECK(apply_player_name(game, "Steam").failure == name_failure::none);
   fs::remove_all(game);
@@ -170,12 +173,12 @@ TEST_CASE("settings: the game's saved skip switches are read from config.cfg") {
   CHECK_EQ(game_config_file("C:/Game"),
            fs::path("C:/Game") / "boiii_players" / "user" / "config.cfg");
   // As the client writes it: set name "value", one per line.
-  const std::string config =
-      "set r_vsync \"0\"\r\n"
-      "set boiii_skipIntro \"1\"\r\n"
-      "set boiii_skipCinematics \"0\"\r\n"
-      "set boiii_skipCinematicsX \"1\"\r\n";
-  CHECK_EQ(read_saved_dvar(config, dvar_skip_intro).value_or("?"), std::string("1"));
+  const std::string config = "set r_vsync \"0\"\r\n"
+                             "set boiii_skipIntro \"1\"\r\n"
+                             "set boiii_skipCinematics \"0\"\r\n"
+                             "set boiii_skipCinematicsX \"1\"\r\n";
+  CHECK_EQ(read_saved_dvar(config, dvar_skip_intro).value_or("?"),
+           std::string("1"));
   CHECK(saved_dvar_on(config, dvar_skip_intro).value_or(false));
   CHECK(!saved_dvar_on(config, dvar_skip_cinematics).value_or(true));
   CHECK(!saved_dvar_on(config, "boiii_skipForestCinematic").has_value());
@@ -183,18 +186,18 @@ TEST_CASE("settings: the game's saved skip switches are read from config.cfg") {
 
   // The last line wins, names in any case, seta and unquoted values count,
   // other commands and lines without a value do not.
-  const std::string edited =
-      "seta BOIII_SKIPCINEMATICS 1\n"
-      "bind F1 \"set boiii_skipCinematics 0\"\n"
-      "set boiii_skipIntro \"1\"\n"
-      "set boiii_skipIntro false\n"
-      "set\n"
-      "set boiii_skipCinematics  ";
+  const std::string edited = "seta BOIII_SKIPCINEMATICS 1\n"
+                             "bind F1 \"set boiii_skipCinematics 0\"\n"
+                             "set boiii_skipIntro \"1\"\n"
+                             "set boiii_skipIntro false\n"
+                             "set\n"
+                             "set boiii_skipCinematics  ";
   CHECK_EQ(read_saved_dvar(edited, dvar_skip_cinematics).value_or("?"),
            std::string("1"));
   CHECK(saved_dvar_on(edited, dvar_skip_cinematics).value_or(false));
   CHECK(!saved_dvar_on(edited, dvar_skip_intro).value_or(true));
-  CHECK(!saved_dvar_on("set boiii_skipIntro \"\"", dvar_skip_intro).value_or(true));
+  CHECK(!saved_dvar_on("set boiii_skipIntro \"\"", dvar_skip_intro)
+             .value_or(true));
 }
 
 TEST_CASE("settings: launch flags are checked like the command line does") {
@@ -204,9 +207,11 @@ TEST_CASE("settings: launch flags are checked like the command line does") {
   CHECK((parsed.flags ==
          std::vector<std::string>{"-windowed", "--console", "-ultrawide"}));
   CHECK((parsed.invalid == std::vector<std::string>{"bad", "+set", "-a;b"}));
-  CHECK((parsed.reserved == std::vector<std::string>{"-launch", "-xerces-plan"}));
+  CHECK(
+      (parsed.reserved == std::vector<std::string>{"-launch", "-xerces-plan"}));
   CHECK(!parsed.too_many);
-  CHECK_EQ(join_flags(parsed.flags), std::string("-windowed --console -ultrawide"));
+  CHECK_EQ(join_flags(parsed.flags),
+           std::string("-windowed --console -ultrawide"));
   CHECK(parse_launch_flags("").flags.empty());
 
   std::string many;
@@ -236,7 +241,8 @@ TEST_CASE("settings: display mode and cinematics are client flags") {
   flags = with_display_mode(flags, "game");
   CHECK((flags == std::vector<std::string>{"-console"}));
   // The client checks borderless first, and accepts "--".
-  CHECK_EQ(display_mode({"-windowed", "--borderless"}), std::string("borderless"));
+  CHECK_EQ(display_mode({"-windowed", "--borderless"}),
+           std::string("borderless"));
   CHECK_EQ(display_mode({"--windowed"}), std::string("windowed"));
   CHECK_EQ(display_mode({"-windowedx"}), std::string("game"));
 
@@ -424,11 +430,12 @@ TEST_CASE("settings: Up and Down reach every control of the screen") {
   // so the keyboard and a controller jumped from Language to "Open folder".
   // The list and the document are compared here, as text: every control
   // with an id is in the list, in the document's order.
-  const fs::path repo = xerces_tests::fixtures_dir().parent_path().parent_path();
+  const fs::path repo =
+      xerces_tests::fixtures_dir().parent_path().parent_path();
   const std::string rml =
       read_bytes(repo / "data" / "xerces" / "ui" / "views" / "settings.rml");
-  const std::string source = read_bytes(repo / "src" / "xerces_launcher" /
-                                        "views" / "settings.cpp");
+  const std::string source =
+      read_bytes(repo / "src" / "xerces_launcher" / "views" / "settings.cpp");
   if (rml.empty() || source.empty()) {
     return; // run away from the repository: nothing to compare
   }

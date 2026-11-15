@@ -8,7 +8,8 @@
 
 using namespace xerces_core;
 
-TEST_CASE("diagnostics: sizes, counts, hex and times read the same everywhere") {
+TEST_CASE(
+    "diagnostics: sizes, counts, hex and times read the same everywhere") {
   CHECK_EQ(format_bytes(0), "0 bytes");
   CHECK_EQ(format_bytes(1), "1 byte");
   CHECK_EQ(format_bytes(1023), "1023 bytes");
@@ -40,20 +41,19 @@ TEST_CASE("diagnostics: the report aligns fields and hides the profile") {
   sigs.fields = {{"Matched", "11/12"}};
   sigs.lines = {"Missing: db.override_asset"};
   const std::string text = format_report({build, sigs}, "C:\\Users\\Ginld");
-  CHECK_EQ(text,
-           "Xerces diagnostics report\r\n"
-           "=========================\r\n"
-           "\r\n"
-           "Game\r\n"
-           "----\r\n"
-           "Folder       %USERPROFILE%\\Games\\BO3\r\n"
-           "Steam build  24784313\r\n"
-           "Error        -\r\n"
-           "\r\n"
-           "Signatures\r\n"
-           "----------\r\n"
-           "Matched  11/12\r\n"
-           "  Missing: db.override_asset\r\n");
+  CHECK_EQ(text, "Xerces diagnostics report\r\n"
+                 "=========================\r\n"
+                 "\r\n"
+                 "Game\r\n"
+                 "----\r\n"
+                 "Folder       %USERPROFILE%\\Games\\BO3\r\n"
+                 "Steam build  24784313\r\n"
+                 "Error        -\r\n"
+                 "\r\n"
+                 "Signatures\r\n"
+                 "----------\r\n"
+                 "Matched  11/12\r\n"
+                 "  Missing: db.override_asset\r\n");
   // Forward slashes and other letter case are the same folder.
   const std::string mixed =
       format_report({{"Logs", {{"File", "c:/users/GINLD/x/l.jsonl"}}, {}}},
@@ -97,9 +97,10 @@ TEST_CASE("diagnostics: crash bundles are listed newest first") {
   // Times are real seconds since 1970, about two days apart here.
   const std::int64_t span = entries[0].modified - entries[2].modified;
   CHECK(span > 47 * 3600 && span < 49 * 3600);
-  const std::int64_t wall = std::chrono::duration_cast<std::chrono::seconds>(
-                                std::chrono::system_clock::now().time_since_epoch())
-                                .count();
+  const std::int64_t wall =
+      std::chrono::duration_cast<std::chrono::seconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count();
   CHECK(entries[0].modified > wall - 600 && entries[0].modified < wall + 600);
   fs::remove_all(dir);
 }

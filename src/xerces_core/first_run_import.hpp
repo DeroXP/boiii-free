@@ -33,7 +33,8 @@ inline constexpr std::size_t boiii_favorite_limit = 500;
 
 // One place the import looked at, for the screen.
 struct boiii_place {
-  std::string kind; // "appdata" (%LOCALAPPDATA%\boiii) or "players" (boiii_players)
+  std::string
+      kind; // "appdata" (%LOCALAPPDATA%\boiii) or "players" (boiii_players)
   std::filesystem::path path;
   bool exists = false;
 };
@@ -110,14 +111,15 @@ std::string sanitize_boiii_player_name(std::string_view name);
 
 // The player name from upstream's properties.json text (a UTF-8 BOM is
 // allowed, as upstream's reader allows it).
-std::optional<std::string> boiii_player_name_from_properties(std::string_view text);
+std::optional<std::string>
+boiii_player_name_from_properties(std::string_view text);
 
 // "a.b.c.d:port" or "host:port" lines; blank lines are ignored, anything else
 // that is not host:port is counted in *skipped. Duplicates (ignoring case) are
 // dropped; at most `limit` addresses are kept.
-std::vector<std::string> parse_boiii_server_list(std::string_view text,
-                                                 std::size_t limit,
-                                                 std::size_t *skipped = nullptr);
+std::vector<std::string>
+parse_boiii_server_list(std::string_view text, std::size_t limit,
+                        std::size_t *skipped = nullptr);
 // An address Xerces can later join: launch's valid_server_address (launch.hpp),
 // with the port required, and without 0.0.0.0 (what upstream writes for an
 // address it could not parse).

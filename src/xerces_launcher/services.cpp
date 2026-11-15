@@ -153,8 +153,7 @@ void services::load_config() {
   if (!parsed.ok()) {
     // Keep the broken file for the player; start from defaults.
     std::error_code ec;
-    fs::copy_file(paths_.config_file(),
-                  paths_.config / "launcher.json.broken",
+    fs::copy_file(paths_.config_file(), paths_.config / "launcher.json.broken",
                   fs::copy_options::overwrite_existing, ec);
     config_load_problem_ = parsed.diags.items().empty()
                                ? "launcher.json could not be read"
@@ -199,8 +198,9 @@ void services::apply_detection(game_state next) {
                      : std::string("Black Ops III was not found"),
            "{\"verdict\":" +
                xerces_core::json::quote(
-                   game_.preflight ? xerces_core::to_string(game_.preflight->verdict)
-                                   : "none") +
+                   game_.preflight
+                       ? xerces_core::to_string(game_.preflight->verdict)
+                       : "none") +
                "}");
 }
 
@@ -458,8 +458,9 @@ xerces_core::pool_settings services::pool_settings() const {
   return xerces_core::parse_pool_settings(launcher_settings_text());
 }
 
-xerces_core::plan services::resolve(const std::string &mode,
-                                   const std::vector<std::string> *mods) const {
+xerces_core::plan
+services::resolve(const std::string &mode,
+                  const std::vector<std::string> *mods) const {
   const auto started = std::chrono::steady_clock::now();
   xerces_core::plan plan = xerces_core::resolve_profile(
       catalog_.items, config_, mode, game_.steam_build, mods,
@@ -522,18 +523,17 @@ services::inputs(const std::string &mode, bool modded, bool mods_off,
   return in;
 }
 
-launch_outcome services::preview_launch(
-    const std::string &mode, bool modded, bool mods_off,
-    const std::optional<std::string> &connect,
-    const std::vector<std::string> *mods) const {
+launch_outcome
+services::preview_launch(const std::string &mode, bool modded, bool mods_off,
+                         const std::optional<std::string> &connect,
+                         const std::vector<std::string> *mods) const {
   return xerces_core::preview_launch(
       inputs(mode, modded, mods_off, connect, mods));
 }
 
 bool services::game_running() const {
-  if (game_process_ &&
-      WaitForSingleObject(static_cast<HANDLE>(game_process_), 0) ==
-          WAIT_TIMEOUT) {
+  if (game_process_ && WaitForSingleObject(static_cast<HANDLE>(game_process_),
+                                           0) == WAIT_TIMEOUT) {
     return true;
   }
   // A game this launcher did not start (or started before it was closed and
@@ -561,8 +561,8 @@ launch_outcome services::start(const xerces_core::launch_inputs &in) {
                 xerces_core::game_process_running(paths_.client));
       },
       launcher_events(), &process);
-  if (!out.dry_run && (out.started || out.refusal ==
-                                          xerces_core::launch_refusal::start)) {
+  if (!out.dry_run &&
+      (out.started || out.refusal == xerces_core::launch_refusal::start)) {
     ++journal_rev_; // the journal was written; screens re-read it
   }
   if (process) {

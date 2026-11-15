@@ -24,7 +24,9 @@ namespace fs = std::filesystem;
 
 constexpr std::string_view name_key = "playerName";
 
-bool is_space(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+bool is_space(char c) {
+  return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
 
 std::string_view trim(std::string_view text) {
   while (!text.empty() && is_space(text.front())) {
@@ -157,21 +159,20 @@ properties_edit with_player_name(std::string_view properties_text,
     doc.Swap(parsed.document);
   }
   // The client removes every copy of a key before it adds it again.
-  const rapidjson::Value key(rapidjson::StringRef(name_key.data(),
-                                                  static_cast<rapidjson::SizeType>(
-                                                      name_key.size())));
+  const rapidjson::Value key(rapidjson::StringRef(
+      name_key.data(), static_cast<rapidjson::SizeType>(name_key.size())));
   while (doc.HasMember(key)) {
     doc.RemoveMember(key);
   }
   if (!name.empty()) {
     auto &alloc = doc.GetAllocator();
-    doc.AddMember(rapidjson::Value(name_key.data(),
-                                   static_cast<rapidjson::SizeType>(name_key.size()),
-                                   alloc),
-                  rapidjson::Value(name.data(),
-                                   static_cast<rapidjson::SizeType>(name.size()),
-                                   alloc),
-                  alloc);
+    doc.AddMember(
+        rapidjson::Value(name_key.data(),
+                         static_cast<rapidjson::SizeType>(name_key.size()),
+                         alloc),
+        rapidjson::Value(name.data(),
+                         static_cast<rapidjson::SizeType>(name.size()), alloc),
+        alloc);
   }
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
@@ -219,7 +220,8 @@ name_apply_result apply_player_name(const fs::path &game_dir,
   temporary += ".xerces-tmp";
   {
     std::ofstream write(temporary, std::ios::binary | std::ios::trunc);
-    write.write(edit.text.data(), static_cast<std::streamsize>(edit.text.size()));
+    write.write(edit.text.data(),
+                static_cast<std::streamsize>(edit.text.size()));
     // The text sits in the stream's buffer until it closes, and a full disk
     // only shows then: check after close, or a short file would replace the
     // game's and lose its other settings.
@@ -234,8 +236,8 @@ name_apply_result apply_player_name(const fs::path &game_dir,
   fs::rename(temporary, file, ec);
   if (ec) {
     out.failure = name_failure::replace_failed;
-    out.message = "boiii_players\\properties.json could not be replaced: " +
-                  ec.message();
+    out.message =
+        "boiii_players\\properties.json could not be replaced: " + ec.message();
     fs::remove(temporary, ec);
     return out;
   }
@@ -372,8 +374,7 @@ fs::path game_config_file(const fs::path &game_dir) {
 
 namespace {
 bool same_letters(std::string_view a, std::string_view b) {
-  return a.size() == b.size() &&
-         std::ranges::equal(a, b, [](char x, char y) {
+  return a.size() == b.size() && std::ranges::equal(a, b, [](char x, char y) {
            const auto lower = [](char c) {
              return c >= 'A' && c <= 'Z' ? char(c - 'A' + 'a') : c;
            };
@@ -445,9 +446,8 @@ number_input parse_number_input(std::string_view text, int min, int max) {
     return out;
   }
   out.state = number_input::kind::invalid;
-  if (text.size() > 7 || !std::ranges::all_of(text, [](char c) {
-        return c >= '0' && c <= '9';
-      })) {
+  if (text.size() > 7 ||
+      !std::ranges::all_of(text, [](char c) { return c >= '0' && c <= '9'; })) {
     return out;
   }
   const int value = std::atoi(std::string(text).c_str());

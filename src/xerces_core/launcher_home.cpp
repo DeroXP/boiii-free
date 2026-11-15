@@ -328,8 +328,8 @@ bool held_for_a_moment(DWORD error, const fs::path &target) {
   // while someone still has it open), which also clears by itself.
   const DWORD attributes = GetFileAttributesW(target.c_str());
   return attributes == INVALID_FILE_ATTRIBUTES ||
-         (attributes &
-          (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_READONLY)) == 0;
+         (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_READONLY)) ==
+             0;
 }
 } // namespace
 
@@ -370,8 +370,8 @@ bool write_text_file(const fs::path &path, std::string_view text,
     const DWORD part =
         DWORD(std::min<std::size_t>(text.size() - done, 1u << 20));
     DWORD wrote = 0;
-    written = WriteFile(file, text.data() + done, part, &wrote, nullptr) &&
-              wrote > 0;
+    written =
+        WriteFile(file, text.data() + done, part, &wrote, nullptr) && wrote > 0;
     done += wrote;
   }
   // On the disk before the rename: without this, a power cut just after the
@@ -427,9 +427,8 @@ std::string environment_utf8(const wchar_t *name) {
     return {};
   }
   const std::wstring &wide = value->native();
-  const int size = WideCharToMultiByte(CP_UTF8, 0, wide.data(),
-                                       int(wide.size()), nullptr, 0, nullptr,
-                                       nullptr);
+  const int size = WideCharToMultiByte(
+      CP_UTF8, 0, wide.data(), int(wide.size()), nullptr, 0, nullptr, nullptr);
   std::string out(size > 0 ? std::size_t(size) : 0, '\0');
   if (size > 0) {
     WideCharToMultiByte(CP_UTF8, 0, wide.data(), int(wide.size()), out.data(),

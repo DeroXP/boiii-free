@@ -31,7 +31,8 @@ struct player_name_result {
 player_name_result clean_player_name(std::string_view typed);
 
 // <game>\boiii_players\properties.json
-std::filesystem::path player_properties_file(const std::filesystem::path &game_dir);
+std::filesystem::path
+player_properties_file(const std::filesystem::path &game_dir);
 
 // The "playerName" member of the properties text, when it is a string.
 std::optional<std::string> read_player_name(std::string_view properties_text);
@@ -70,7 +71,7 @@ enum class name_apply {
 struct name_apply_result {
   name_apply status = name_apply::failed;
   name_failure failure = name_failure::none; // set when status is failed
-  std::string message; // English, for the log
+  std::string message;                       // English, for the log
 };
 // Puts the name into the game folder's properties file while holding the
 // client's own lock (the named mutex "boiii-properties-lock"), so a running

@@ -120,7 +120,7 @@ struct launch_inputs {
   const game_state *game = nullptr;
   const std::vector<installed_content> *catalog = nullptr;
   std::string mode = "zm";
-  bool modded = true;    // false: vanilla
+  bool modded = true; // false: vanilla
   // Safe mode: the last modded launch crashed, so mods are off. Implies
   // crash_followup.
   bool mods_off = false;

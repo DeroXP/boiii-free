@@ -59,10 +59,11 @@ TEST_CASE("launch: flags come before the mod dvars") {
   const launch_command cmd = build_launch_command(&p, options);
   REQUIRE(cmd.ok());
   const std::vector<std::string> expected = {
-      "-launch",      "-nointro",     "-safe",   "-windowed",
-      "-xerces-plan", std::string(64, 'a'),       "+set",
-      "fs_game",      "111",          "+set",    "fs_extramods",
-      "better hud",   "+set",         "name",    "Player One"};
+      "-launch",   "-nointro",     "-safe",
+      "-windowed", "-xerces-plan", std::string(64, 'a'),
+      "+set",      "fs_game",      "111",
+      "+set",      "fs_extramods", "better hud",
+      "+set",      "name",         "Player One"};
   CHECK(cmd.args == expected);
   CHECK_EQ(cmd.command_line,
            std::string("-launch -nointro -safe -windowed -xerces-plan ") +
@@ -96,14 +97,15 @@ TEST_CASE("launch: values that could inject commands are refused") {
 
   launch_options options;
   options.dvars = {{"name", "a +exec evil"}};
-  CHECK(build_launch_command(nullptr, options)
-            .diags.has("launch.dvar.invalid"));
+  CHECK(
+      build_launch_command(nullptr, options).diags.has("launch.dvar.invalid"));
   options.dvars = {{"bad name", "x"}};
-  CHECK(build_launch_command(nullptr, options)
-            .diags.has("launch.dvar.invalid"));
+  CHECK(
+      build_launch_command(nullptr, options).diags.has("launch.dvar.invalid"));
   options.dvars = {};
   options.extra_flags = {"+set"};
-  CHECK(build_launch_command(nullptr, options).diags.has("launch.flag.invalid"));
+  CHECK(
+      build_launch_command(nullptr, options).diags.has("launch.flag.invalid"));
   options.extra_flags = {"-a b"};
   const launch_command refused = build_launch_command(nullptr, options);
   CHECK(!refused.ok());
@@ -424,7 +426,8 @@ TEST_CASE("safe mode: the settings it crashed with survive between launches") {
 
 TEST_CASE("config: round trip keeps known and unknown keys") {
   launcher_config c;
-  c.game_dir = "D:\\SteamLibrary\\steamapps\\common\\Call of Duty Black Ops III";
+  c.game_dir =
+      "D:\\SteamLibrary\\steamapps\\common\\Call of Duty Black Ops III";
   c.first_run_done = true;
   c.mode = "mp";
   profile_for(c, "zm").mods = {"ws.1", "ws.2"};

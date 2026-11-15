@@ -171,7 +171,8 @@ public:
           if (!event.GetParameter<bool>("linebreak", false)) {
             return;
           }
-          const Rml::String value = event.GetParameter<Rml::String>("value", "");
+          const Rml::String value =
+              event.GetParameter<Rml::String>("value", "");
           if (which == "name") {
             owner_->post([this, value] {
               new_name_ = value;
@@ -256,8 +257,8 @@ public:
       return nullptr;
     }
     const std::string wanted = row_id_of(selected_id_);
-    for (const std::string &id : {wanted, std::string("pack-0"),
-                                  std::string("pack-save")}) {
+    for (const std::string &id :
+         {wanted, std::string("pack-0"), std::string("pack-save")}) {
       if (id.empty()) {
         continue;
       }
@@ -274,9 +275,8 @@ public:
     if (key != Rml::Input::KI_DELETE || modifiers != 0 || !doc) {
       return false;
     }
-    Rml::Element *focus = doc->GetContext()
-                              ? doc->GetContext()->GetFocusElement()
-                              : nullptr;
+    Rml::Element *focus =
+        doc->GetContext() ? doc->GetContext()->GetFocusElement() : nullptr;
     if (!focus || !focus->IsClassSet("pack-row")) {
       return false;
     }
@@ -353,10 +353,14 @@ private:
 
   std::string state_text(const core::pack_item_check &item) const {
     switch (item.state) {
-    case core::pack_item_state::installed: return owner_->tr("Installed");
-    case core::pack_item_state::missing: return owner_->tr("Not installed");
-    case core::pack_item_state::other_version: return owner_->tr("Other version");
-    case core::pack_item_state::changed: return owner_->tr("Files changed");
+    case core::pack_item_state::installed:
+      return owner_->tr("Installed");
+    case core::pack_item_state::missing:
+      return owner_->tr("Not installed");
+    case core::pack_item_state::other_version:
+      return owner_->tr("Other version");
+    case core::pack_item_state::changed:
+      return owner_->tr("Files changed");
     }
     return {};
   }
@@ -425,10 +429,10 @@ private:
       rows.push_back(std::move(row));
     }
     set_if_changed("packs", rows_, rows);
-    set_if_changed("count_text", count_text_,
-                   Rml::String(std::to_string(library_.packs.size()) + " " +
-                               owner_->tr(library_.packs.size() == 1 ? "pack"
-                                                                     : "packs")));
+    set_if_changed(
+        "count_text", count_text_,
+        Rml::String(std::to_string(library_.packs.size()) + " " +
+                    owner_->tr(library_.packs.size() == 1 ? "pack" : "packs")));
     set_if_changed("empty_text", empty_text_,
                    Rml::String(owner_->tr(
                        "No packs yet. Save the current plan as a pack, or "
@@ -437,10 +441,11 @@ private:
     if (const std::size_t skipped =
             library_.diags.count(core::severity::warning);
         skipped > 0) {
-      note = std::to_string(skipped) + " " +
-             owner_->tr(skipped == 1 ? "file in the packs folder was skipped"
-                                     : "files in the packs folder were skipped") +
-             ": " + library_.diags.items().front().message;
+      note =
+          std::to_string(skipped) + " " +
+          owner_->tr(skipped == 1 ? "file in the packs folder was skipped"
+                                  : "files in the packs folder were skipped") +
+          ": " + library_.diags.items().front().message;
     }
     set_if_changed("library_note", library_note_, Rml::String(note));
 
@@ -458,8 +463,8 @@ private:
         meta += " \xC2\xB7 " + owner_->tr("build") + " " + p.game_build;
       }
       if (!p.requires_xerces.empty()) {
-        meta += " \xC2\xB7 " + owner_->tr("needs Xerces") + " " +
-                p.requires_xerces;
+        meta +=
+            " \xC2\xB7 " + owner_->tr("needs Xerces") + " " + p.requires_xerces;
       }
       set_if_changed("sel_name", sel_name_, Rml::String(p.name));
       set_if_changed("sel_meta", sel_meta_, Rml::String(meta));
@@ -500,9 +505,8 @@ private:
     // (the Mods screen clears that when the load order is edited by hand).
     if (!result_pack_.empty()) {
       const core::library_entry *applied = library_.find(result_pack_);
-      const auto profile =
-          applied ? config.profiles.find(applied->value.mode)
-                  : config.profiles.end();
+      const auto profile = applied ? config.profiles.find(applied->value.mode)
+                                   : config.profiles.end();
       if (profile == config.profiles.end() ||
           profile->second.pack_id != result_pack_) {
         result_pack_.clear();
@@ -529,8 +533,7 @@ private:
       // usual Zombies setup) is a plan worth saving too.
       if (plan.stack.empty() && !plan.map && plan.ok()) {
         plan_text = owner_->tr("No mods or map are enabled for") + " " +
-                    owner_->tr(mode) + ". " +
-                    owner_->tr("Enable some first.");
+                    owner_->tr(mode) + ". " + owner_->tr("Enable some first.");
       } else if (!plan.ok()) {
         const std::size_t errors = plan.diags.count(core::severity::error);
         plan_text = owner_->tr("The") + " " + owner_->tr(mode) + " " +
@@ -667,9 +670,9 @@ private:
   void backup(const std::string &why) {
     const auto &paths = owner_->svc().paths();
     core::diagnostics diags;
-    const auto made = core::create_backup(paths.home / "backups",
-                                          {{"config", paths.config}},
-                                          backup_stamp(), {}, diags);
+    const auto made =
+        core::create_backup(paths.home / "backups", {{"config", paths.config}},
+                            backup_stamp(), {}, diags);
     if (made) {
       log_info("launcher.packs.backup", why, "");
     } else {
@@ -712,7 +715,8 @@ private:
     const std::string name = core::trim_pack_name(new_name_);
     if (const std::string problem = core::pack_name_problem(name);
         !problem.empty()) {
-      set_if_changed("name_error", name_error_, Rml::String(owner_->tr(problem)));
+      set_if_changed("name_error", name_error_,
+                     Rml::String(owner_->tr(problem)));
       focus_later("pack-name");
       return;
     }
@@ -725,9 +729,10 @@ private:
     const std::string mode = owner_->mode();
     const core::plan plan = svc.resolve(mode);
     if (!plan.ok()) {
-      set_if_changed("name_error", name_error_,
-                     Rml::String(owner_->tr("The plan has problems. Fix them "
-                                            "in Mods, then save it as a pack.")));
+      set_if_changed(
+          "name_error", name_error_,
+          Rml::String(owner_->tr("The plan has problems. Fix them "
+                                 "in Mods, then save it as a pack.")));
       return;
     }
     // A map with no mods is still a pack: pack_from_plan records the map.
@@ -783,9 +788,9 @@ private:
     backup(why + p.id);
     core::diagnostics diags;
     if (!core::write_pack(folder(), p, diags)) {
-      const std::string why =
-          diags.items().empty() ? owner_->tr("The pack could not be saved.")
-                                : diags.items().front().message;
+      const std::string why = diags.items().empty()
+                                  ? owner_->tr("The pack could not be saved.")
+                                  : diags.items().front().message;
       set_if_changed("name_error", name_error_, Rml::String(why));
       notify(owner_->tr("The pack was not saved."), true);
       log_warn("launcher.packs.save_failed", why);
@@ -816,30 +821,26 @@ private:
     const core::pack p = entry->value;
     const auto &config = owner_->svc().config();
     const auto it = config.profiles.find(p.mode);
-    const bool replaces = it != config.profiles.end() &&
-                          !it->second.mods.empty() &&
-                          !(it->second.pack_id == p.id &&
-                            it->second.mods == p.order);
+    const bool replaces =
+        it != config.profiles.end() && !it->second.mods.empty() &&
+        !(it->second.pack_id == p.id && it->second.mods == p.order);
     if (!replaces) {
       apply_now(p.id);
       return;
     }
     const std::size_t had = it->second.mods.size();
-    const std::string from =
-        it->second.pack_name.empty()
-            ? std::string()
-            : " (" + owner_->tr("from") + " " + quoted(it->second.pack_name) +
-                  ")";
+    const std::string from = it->second.pack_name.empty()
+                                 ? std::string()
+                                 : " (" + owner_->tr("from") + " " +
+                                       quoted(it->second.pack_name) + ")";
     owner_->dialog(
         "Replace this profile?",
         owner_->tr(mode_name(p.mode)) + " " + owner_->tr("has") + " " +
-            std::to_string(had) + " " +
-            owner_->tr(had == 1 ? "mod" : "mods") + " " +
-            owner_->tr("enabled") + from + ". " + owner_->tr("Applying") + " " +
-            quoted(p.name) + " " + owner_->tr("replaces them with its") + " " +
-            std::to_string(p.order.size()) + " " +
-            owner_->tr("pinned") + " " +
-            owner_->tr(p.order.size() == 1 ? "mod" : "mods") + ". " +
+            std::to_string(had) + " " + owner_->tr(had == 1 ? "mod" : "mods") +
+            " " + owner_->tr("enabled") + from + ". " + owner_->tr("Applying") +
+            " " + quoted(p.name) + " " + owner_->tr("replaces them with its") +
+            " " + std::to_string(p.order.size()) + " " + owner_->tr("pinned") +
+            " " + owner_->tr(p.order.size() == 1 ? "mod" : "mods") + ". " +
             owner_->tr("Your config is backed up first."),
         {"Apply pack", "Cancel"}, [this, id = p.id](int choice) {
           if (choice == 0) {
@@ -918,8 +919,8 @@ private:
       add(owner_->tr("The config could not be written, so this change is "
                      "lost when Xerces closes."));
     }
-    const bool ok = result_saved_ && plan.ok() && !verify.has_errors() &&
-                    check.ready();
+    const bool ok =
+        result_saved_ && plan.ok() && !verify.has_errors() && check.ready();
     result_problems_ = lines.size();
     constexpr std::size_t shown = 6;
     Rml::Vector<Rml::String> result_lines(
@@ -930,15 +931,17 @@ private:
     }
     const std::string mode = owner_->tr(mode_name(p.mode));
     set_if_changed("result_ok", result_ok_, ok);
-    set_if_changed("result_label", result_label_,
-                   Rml::String(owner_->tr(ok ? "Applied" : "Applied, not ready")));
+    set_if_changed(
+        "result_label", result_label_,
+        Rml::String(owner_->tr(ok ? "Applied" : "Applied, not ready")));
     set_if_changed(
         "result_title", result_title_,
-        Rml::String(ok ? mode + " " +
-                             owner_->tr("now uses this pack. Launch it from Home.")
-                       : mode + " " +
-                             owner_->tr("now uses this pack, but it will not "
-                                        "launch modded until these are fixed:")));
+        Rml::String(
+            ok ? mode + " " +
+                     owner_->tr("now uses this pack. Launch it from Home.")
+               : mode + " " +
+                     owner_->tr("now uses this pack, but it will not "
+                                "launch modded until these are fixed:")));
     set_if_changed("result_lines", result_lines_, result_lines);
   }
 
@@ -966,8 +969,7 @@ private:
         owner_->dialog("Replace the file?",
                        quoted(utf8(file.filename())) + " " +
                            owner_->tr("already exists. Replace it?"),
-                       {"Replace", "Cancel"},
-                       [this, file, p](int choice) {
+                       {"Replace", "Cancel"}, [this, file, p](int choice) {
                          if (choice == 0) {
                            write_export(file, p);
                          }
@@ -1084,10 +1086,11 @@ private:
                    const std::vector<std::string> &lines) {
     set_if_changed("import_show", import_show_, true);
     set_if_changed("import_ok", import_ok_, ok);
-    set_if_changed("import_label", import_label_, Rml::String(owner_->tr(label)));
+    set_if_changed("import_label", import_label_,
+                   Rml::String(owner_->tr(label)));
     set_if_changed("import_title", import_title_, Rml::String(title));
-    Rml::Vector<Rml::String> shown(lines.begin(),
-                                   lines.begin() + std::min<std::size_t>(lines.size(), 6));
+    Rml::Vector<Rml::String> shown(
+        lines.begin(), lines.begin() + std::min<std::size_t>(lines.size(), 6));
     if (lines.size() > 6) {
       shown.push_back("+" + std::to_string(lines.size() - 6) + " " +
                       owner_->tr("more"));
@@ -1164,8 +1167,7 @@ private:
   }
 
   void open_in_steam(const std::string &workshop_id) {
-    if (workshop_id.empty() ||
-        !std::ranges::all_of(workshop_id, [](char c) {
+    if (workshop_id.empty() || !std::ranges::all_of(workshop_id, [](char c) {
           return c >= '0' && c <= '9';
         })) {
       return;
@@ -1184,8 +1186,8 @@ private:
   std::uint64_t seen_[4] = {};
   core::pack_library library_;
   std::string selected_id_;
-  std::string result_pack_; // the pack the result box is about
-  bool result_saved_ = true;  // its apply wrote the config
+  std::string result_pack_;  // the pack the result box is about
+  bool result_saved_ = true; // its apply wrote the config
   std::size_t result_problems_ = 0;
   std::string focus_id_;
   int focus_tries_ = 0;

@@ -76,7 +76,8 @@ bool hex_id(std::string_view text) {
 } // namespace
 
 std::string quote_argument(std::string_view arg) {
-  if (!arg.empty() && arg.find_first_of(" \t\n\v\"") == std::string_view::npos) {
+  if (!arg.empty() &&
+      arg.find_first_of(" \t\n\v\"") == std::string_view::npos) {
     return std::string(arg);
   }
   std::string out = "\"";

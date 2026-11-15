@@ -33,8 +33,8 @@
 namespace xerces_launcher {
 namespace {
 std::string narrow(const wchar_t *text) {
-  const int size = WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0,
-                                       nullptr, nullptr);
+  const int size =
+      WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
   std::string out(size > 0 ? std::size_t(size - 1) : 0, '\0');
   if (size > 1) {
     WideCharToMultiByte(CP_UTF8, 0, text, -1, out.data(), size, nullptr,
@@ -44,7 +44,8 @@ std::string narrow(const wchar_t *text) {
 }
 
 std::wstring widen(const std::string &text) {
-  const int size = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+  const int size =
+      MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
   std::wstring out(size > 0 ? std::size_t(size - 1) : 0, L'\0');
   if (size > 1) {
     MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, out.data(), size);
@@ -108,15 +109,33 @@ std::string pseudo(const std::string &text) {
   std::size_t letters = 0;
   for (const char c : text) {
     switch (c) {
-    case 'a': out += "\xC3\xA1"; break;
-    case 'e': out += "\xC3\xA9"; break;
-    case 'i': out += "\xC3\xAD"; break;
-    case 'o': out += "\xC3\xB6"; break;
-    case 'u': out += "\xC3\xBC"; break;
-    case 'A': out += "\xC3\x85"; break;
-    case 'E': out += "\xC3\x89"; break;
-    case 'O': out += "\xC3\x96"; break;
-    default: out.push_back(c); break;
+    case 'a':
+      out += "\xC3\xA1";
+      break;
+    case 'e':
+      out += "\xC3\xA9";
+      break;
+    case 'i':
+      out += "\xC3\xAD";
+      break;
+    case 'o':
+      out += "\xC3\xB6";
+      break;
+    case 'u':
+      out += "\xC3\xBC";
+      break;
+    case 'A':
+      out += "\xC3\x85";
+      break;
+    case 'E':
+      out += "\xC3\x89";
+      break;
+    case 'O':
+      out += "\xC3\x96";
+      break;
+    default:
+      out.push_back(c);
+      break;
     }
     if (c != ' ') {
       ++letters;
@@ -240,14 +259,14 @@ std::optional<fs::path> window_program(HWND window) {
 
 Rml::Input::KeyIdentifier key_by_name(const std::string &name) {
   static const std::map<std::string, Rml::Input::KeyIdentifier> keys = {
-      {"up", Rml::Input::KI_UP},         {"down", Rml::Input::KI_DOWN},
-      {"left", Rml::Input::KI_LEFT},     {"right", Rml::Input::KI_RIGHT},
-      {"enter", Rml::Input::KI_RETURN},  {"esc", Rml::Input::KI_ESCAPE},
-      {"tab", Rml::Input::KI_TAB},       {"q", Rml::Input::KI_Q},
-      {"e", Rml::Input::KI_E},           {"slash", Rml::Input::KI_OEM_2},
-      {"space", Rml::Input::KI_SPACE},   {"delete", Rml::Input::KI_DELETE},
-      {"home", Rml::Input::KI_HOME},     {"end", Rml::Input::KI_END},
-      {"f5", Rml::Input::KI_F5},         {"z", Rml::Input::KI_Z},
+      {"up", Rml::Input::KI_UP},        {"down", Rml::Input::KI_DOWN},
+      {"left", Rml::Input::KI_LEFT},    {"right", Rml::Input::KI_RIGHT},
+      {"enter", Rml::Input::KI_RETURN}, {"esc", Rml::Input::KI_ESCAPE},
+      {"tab", Rml::Input::KI_TAB},      {"q", Rml::Input::KI_Q},
+      {"e", Rml::Input::KI_E},          {"slash", Rml::Input::KI_OEM_2},
+      {"space", Rml::Input::KI_SPACE},  {"delete", Rml::Input::KI_DELETE},
+      {"home", Rml::Input::KI_HOME},    {"end", Rml::Input::KI_END},
+      {"f5", Rml::Input::KI_F5},        {"z", Rml::Input::KI_Z},
   };
   const auto it = keys.find(name);
   return it == keys.end() ? Rml::Input::KI_UNKNOWN : it->second;
@@ -261,8 +280,7 @@ Rml::Input::KeyIdentifier key_by_name(const std::string &name) {
 class utf8_files final : public Rml::FileInterface {
 public:
   Rml::FileHandle Open(const Rml::String &path) override {
-    return reinterpret_cast<Rml::FileHandle>(
-        xerces_core::open_file_utf8(path));
+    return reinterpret_cast<Rml::FileHandle>(xerces_core::open_file_utf8(path));
   }
   void Close(Rml::FileHandle file) override {
     std::fclose(reinterpret_cast<std::FILE *>(file));
@@ -271,8 +289,7 @@ public:
     return std::fread(buffer, 1, size, reinterpret_cast<std::FILE *>(file));
   }
   bool Seek(Rml::FileHandle file, long offset, int origin) override {
-    return std::fseek(reinterpret_cast<std::FILE *>(file), offset, origin) ==
-           0;
+    return std::fseek(reinterpret_cast<std::FILE *>(file), offset, origin) == 0;
   }
   size_t Tell(Rml::FileHandle file) override {
     return size_t(std::ftell(reinterpret_cast<std::FILE *>(file)));
@@ -521,10 +538,18 @@ std::string app::escape(const std::string &text) {
   out.reserve(text.size());
   for (const char c : text) {
     switch (c) {
-    case '&': out += "&amp;"; break;
-    case '<': out += "&lt;"; break;
-    case '>': out += "&gt;"; break;
-    case '"': out += "&quot;"; break;
+    case '&':
+      out += "&amp;";
+      break;
+    case '<':
+      out += "&lt;";
+      break;
+    case '>':
+      out += "&gt;";
+      break;
+    case '"':
+      out += "&quot;";
+      break;
     // RmlUi reads "{{" in text as a data binding even after entities are
     // decoded, so a mod or server name holding it would become an
     // expression. A space between the braces keeps it text.
@@ -535,7 +560,9 @@ std::string app::escape(const std::string &text) {
       }
       out.push_back(c);
       break;
-    default: out.push_back(c); break;
+    default:
+      out.push_back(c);
+      break;
     }
   }
   return out;
@@ -562,7 +589,9 @@ std::string collapse_spaces(const std::string &text) {
   return out;
 }
 
-bool is_space(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+bool is_space(char c) {
+  return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
 } // namespace
 
 std::string app::tr(const std::string &english) const {
@@ -579,8 +608,9 @@ std::string app::tr(const std::string &english) const {
   if (it == strings_.end()) {
     return english;
   }
-  std::string out = language_ == "pseudo" ? pseudo(collapsed ? it->first : english)
-                                          : it->second;
+  std::string out = language_ == "pseudo"
+                        ? pseudo(collapsed ? it->first : english)
+                        : it->second;
   if (collapsed && !english.empty()) {
     if (is_space(english.front())) {
       out.insert(out.begin(), ' ');
@@ -593,8 +623,8 @@ std::string app::tr(const std::string &english) const {
 }
 
 void app::load_language() {
-  language_ = !opts_.language.empty() ? opts_.language
-                                      : services_->config().language;
+  language_ =
+      !opts_.language.empty() ? opts_.language : services_->config().language;
   strings_.clear();
   if (language_ == "en") {
     return;
@@ -619,7 +649,8 @@ void app::load_language() {
     // there is not translated yet and stays English.
     if (member.value.IsString() &&
         (keys_only || member.value.GetStringLength() > 0)) {
-      strings_[std::string(member.name.GetString(), member.name.GetStringLength())] =
+      strings_[std::string(member.name.GetString(),
+                           member.name.GetStringLength())] =
           std::string(member.value.GetString(), member.value.GetStringLength());
     }
   }
@@ -900,8 +931,7 @@ void app::dialog(const std::string &title, const std::string &body,
     return;
   }
   if (dialog_open_) {
-    dialog_queue_.push_back(
-        {title, body, std::move(buttons), std::move(done)});
+    dialog_queue_.push_back({title, body, std::move(buttons), std::move(done)});
     return;
   }
   dialog_doc_->GetElementById("dialog-title")->SetInnerRML(escape(tr(title)));
@@ -990,9 +1020,8 @@ bool app::open_url(const std::string &url) {
       (url.starts_with("https://") || url.starts_with("steam://")) &&
       url.size() < 2048 &&
       url.find_first_of(" \"'<>\\^`{|}") == std::string::npos &&
-      std::ranges::none_of(url, [](char c) {
-        return static_cast<unsigned char>(c) < 0x20;
-      });
+      std::ranges::none_of(
+          url, [](char c) { return static_cast<unsigned char>(c) < 0x20; });
   if (!allowed) {
     log_warn("launcher.url.refused", url);
     return false;
@@ -1008,9 +1037,9 @@ bool app::open_folder(const fs::path &dir) {
   if (!fs::is_directory(dir, ec)) {
     return false;
   }
-  const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(
-      nullptr, L"explore", dir.wstring().c_str(), nullptr, nullptr,
-      SW_SHOWNORMAL));
+  const auto result = reinterpret_cast<INT_PTR>(
+      ShellExecuteW(nullptr, L"explore", dir.wstring().c_str(), nullptr,
+                    nullptr, SW_SHOWNORMAL));
   return result > 32;
 }
 
@@ -1058,8 +1087,8 @@ bool app::on_key(Rml::Input::KeyIdentifier key, int modifiers, bool priority) {
   // RmlUi's modifier state includes Caps, Num and Scroll Lock; with Num Lock
   // on (the usual case) a plain Q would otherwise never count as unmodified.
   // Screens get the same masked value.
-  modifiers &= Rml::Input::KM_CTRL | Rml::Input::KM_SHIFT |
-               Rml::Input::KM_ALT | Rml::Input::KM_META;
+  modifiers &= Rml::Input::KM_CTRL | Rml::Input::KM_SHIFT | Rml::Input::KM_ALT |
+               Rml::Input::KM_META;
   if (!priority) {
     return after_key(key, modifiers);
   }
@@ -1263,15 +1292,18 @@ bool app::run_script(double seconds) {
       window_.capture_next_frame(fs::path(widen(step.arg)));
     } else if (step.verb == "click") {
       view *v = find(current_);
-      Rml::ElementDocument *doc = dialog_open_ ? dialog_doc_ : (v ? v->doc : nullptr);
-      if (Rml::Element *element = doc ? doc->GetElementById(step.arg) : nullptr) {
+      Rml::ElementDocument *doc =
+          dialog_open_ ? dialog_doc_ : (v ? v->doc : nullptr);
+      if (Rml::Element *element =
+              doc ? doc->GetElementById(step.arg) : nullptr) {
         element->Click();
       } else {
         log_warn("launcher.check.missing", step.arg);
       }
     } else if (step.verb == "focus") {
       view *v = find(current_);
-      if (Rml::Element *element = v && v->doc ? v->doc->GetElementById(step.arg) : nullptr) {
+      if (Rml::Element *element =
+              v && v->doc ? v->doc->GetElementById(step.arg) : nullptr) {
         element->Focus(true);
         element->ScrollIntoView(Rml::ScrollAlignment::Adaptive);
       }
@@ -1452,9 +1484,9 @@ int app::run() {
   install_font_engine();
   Rml::Initialise();
   rml_started_ = true;
-  context_ = Rml::CreateContext(
-      "main", Rml::Vector2i(std::max(1, window_.width()),
-                            std::max(1, window_.height())));
+  context_ =
+      Rml::CreateContext("main", Rml::Vector2i(std::max(1, window_.width()),
+                                               std::max(1, window_.height())));
   if (!context_) {
     log_error("launcher.rmlui.context", "RmlUi could not create a context.");
     shutdown();
@@ -1504,7 +1536,8 @@ int app::run() {
       return 1;
     }
   }
-  dialog_doc_ = context_->LoadDocument(generic(paths.data / "ui" / "dialog.rml"));
+  dialog_doc_ =
+      context_->LoadDocument(generic(paths.data / "ui" / "dialog.rml"));
   if (dialog_doc_) {
     listen(dialog_doc_->GetElementById("dialog-buttons"), "click",
            [this](Rml::Event &event) {
@@ -1720,16 +1753,37 @@ int app::run() {
         log_info("launcher.check.pad", pad_name(bit));
       }
       switch (bit) {
-      case pad_up: inject_key(Rml::Input::KI_UP); break;
-      case pad_down: inject_key(Rml::Input::KI_DOWN); break;
-      case pad_left: inject_key(Rml::Input::KI_LEFT); break;
-      case pad_right: inject_key(Rml::Input::KI_RIGHT); break;
-      case pad_a: inject_key(Rml::Input::KI_RETURN); break;
-      case pad_b: inject_key(Rml::Input::KI_ESCAPE); break;
-      case pad_y: inject_key(Rml::Input::KI_OEM_2); break;
-      case pad_lb: if (!dialog_open_) next_tab(-1); break;
-      case pad_rb: if (!dialog_open_) next_tab(+1); break;
-      default: break;
+      case pad_up:
+        inject_key(Rml::Input::KI_UP);
+        break;
+      case pad_down:
+        inject_key(Rml::Input::KI_DOWN);
+        break;
+      case pad_left:
+        inject_key(Rml::Input::KI_LEFT);
+        break;
+      case pad_right:
+        inject_key(Rml::Input::KI_RIGHT);
+        break;
+      case pad_a:
+        inject_key(Rml::Input::KI_RETURN);
+        break;
+      case pad_b:
+        inject_key(Rml::Input::KI_ESCAPE);
+        break;
+      case pad_y:
+        inject_key(Rml::Input::KI_OEM_2);
+        break;
+      case pad_lb:
+        if (!dialog_open_)
+          next_tab(-1);
+        break;
+      case pad_rb:
+        if (!dialog_open_)
+          next_tab(+1);
+        break;
+      default:
+        break;
       }
     };
     for (unsigned bit = 1; bit <= pad_rb; bit <<= 1) {

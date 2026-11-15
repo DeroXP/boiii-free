@@ -1,7 +1,7 @@
 #include <std_include.hpp>
 
-#include "signatures.hpp"
 #include "runtime.hpp"
+#include "signatures.hpp"
 
 #include <game/game.hpp>
 
@@ -86,9 +86,9 @@ bool readable(const std::uint8_t *start, std::size_t size) {
     if (VirtualQuery(at, &info, sizeof(info)) != sizeof(info) ||
         info.State != MEM_COMMIT ||
         (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0 ||
-        (info.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
-                         PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
-                         PAGE_EXECUTE_WRITECOPY)) == 0) {
+        (info.Protect &
+         (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ |
+          PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) == 0) {
       return false;
     }
     at = static_cast<const std::uint8_t *>(info.BaseAddress) + info.RegionSize;
@@ -157,7 +157,8 @@ state resolve() {
         s.base = game::get_engine_base();
         const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(s.base);
         const auto *base_bytes = reinterpret_cast<const std::uint8_t *>(s.base);
-        if (!readable(base_bytes, 0x1000) || dos->e_magic != IMAGE_DOS_SIGNATURE) {
+        if (!readable(base_bytes, 0x1000) ||
+            dos->e_magic != IMAGE_DOS_SIGNATURE) {
           s.problem = "the game's image header is not readable";
         } else {
           const auto *nt = reinterpret_cast<const IMAGE_NT_HEADERS64 *>(
@@ -170,9 +171,10 @@ state resolve() {
             s.problem = "the game's image could not be read: " + error;
           } else {
             s.checksum = layout->checksum;
-            const auto text = std::ranges::find_if(
-                layout->sections,
-                [](const auto &section) { return section.name == ".text"; });
+            const auto text =
+                std::ranges::find_if(layout->sections, [](const auto &section) {
+                  return section.name == ".text";
+                });
             if (text == layout->sections.end() ||
                 !readable(text->bytes.data(), text->bytes.size())) {
               s.problem = "the game's code section is not readable";
@@ -276,16 +278,15 @@ state resolve() {
     xerces_runtime::log_info("xerces.signatures.resolved",
                              "all signatures resolved", data);
   } else {
-    xerces_runtime::log_warn("xerces.signatures.missing",
-                             s.problem.empty() ? "some signatures did not resolve"
-                                               : s.problem,
-                             data);
+    xerces_runtime::log_warn(
+        "xerces.signatures.missing",
+        s.problem.empty() ? "some signatures did not resolve" : s.problem,
+        data);
     for (const auto &result : s.report.results) {
       if (!result.ok) {
-        xerces_runtime::log_warn("xerces.signatures.miss", result.id,
-                                 "{\"error\":" +
-                                     xerces_core::json::quote(result.error) +
-                                     "}");
+        xerces_runtime::log_warn(
+            "xerces.signatures.miss", result.id,
+            "{\"error\":" + xerces_core::json::quote(result.error) + "}");
       }
     }
   }

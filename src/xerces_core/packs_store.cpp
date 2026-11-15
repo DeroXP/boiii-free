@@ -99,8 +99,9 @@ const library_entry *pack_library::find(std::string_view id) const {
 }
 
 fs::path pack_library_file(const fs::path &folder, std::string_view id) {
-  return folder / fs::path(std::u8string(
-                      reinterpret_cast<const char8_t *>(id.data()), id.size()) +
+  return folder /
+         fs::path(std::u8string(reinterpret_cast<const char8_t *>(id.data()),
+                                id.size()) +
                   u8".json");
 }
 
@@ -161,8 +162,7 @@ pack_library read_pack_library(const fs::path &folder) {
   return library;
 }
 
-bool write_pack(const fs::path &folder, const pack &value,
-                diagnostics &diags) {
+bool write_pack(const fs::path &folder, const pack &value, diagnostics &diags) {
   const std::string text = pack_to_json(value);
   // What an importer would see: refuse to store a pack nobody could read back.
   const pack_result check = parse_pack(text);
@@ -395,10 +395,14 @@ fs::path with_pack_extension(const fs::path &file) {
 
 const char *to_string(pack_item_state state) {
   switch (state) {
-  case pack_item_state::installed: return "installed";
-  case pack_item_state::missing: return "missing";
-  case pack_item_state::other_version: return "other_version";
-  case pack_item_state::changed: return "changed";
+  case pack_item_state::installed:
+    return "installed";
+  case pack_item_state::missing:
+    return "missing";
+  case pack_item_state::other_version:
+    return "other_version";
+  case pack_item_state::changed:
+    return "changed";
   }
   return "missing";
 }
@@ -417,10 +421,17 @@ pack_check check_pack(const pack &value,
   };
   const auto count = [&](pack_item_state state) {
     switch (state) {
-    case pack_item_state::missing: ++out.missing; break;
-    case pack_item_state::other_version: ++out.other_version; break;
-    case pack_item_state::changed: ++out.changed; break;
-    case pack_item_state::installed: break;
+    case pack_item_state::missing:
+      ++out.missing;
+      break;
+    case pack_item_state::other_version:
+      ++out.other_version;
+      break;
+    case pack_item_state::changed:
+      ++out.changed;
+      break;
+    case pack_item_state::installed:
+      break;
     }
   };
 
@@ -429,8 +440,7 @@ pack_check check_pack(const pack &value,
   for (const auto &id : value.order) {
     const auto it = std::ranges::find_if(
         value.mods, [&](const pack_mod &m) { return m.id == id; });
-    if (it != value.mods.end() &&
-        std::ranges::find(mods, &*it) == mods.end()) {
+    if (it != value.mods.end() && std::ranges::find(mods, &*it) == mods.end()) {
       mods.push_back(&*it);
     }
   }
@@ -445,8 +455,8 @@ pack_check check_pack(const pack &value,
     item.id = mod->id;
     item.name = mod->id;
     item.pinned = mod->ver.to_string();
-    item.workshop_id = mod->workshop_id ? mod->workshop_id
-                                        : workshop_number(mod->id);
+    item.workshop_id =
+        mod->workshop_id ? mod->workshop_id : workshop_number(mod->id);
     const auto copies = copies_of(mod->id);
     if (copies.empty()) {
       item.state = pack_item_state::missing;

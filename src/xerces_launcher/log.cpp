@@ -21,9 +21,8 @@ std::string profile_dir() {
   if (size == 0 || size >= MAX_PATH) {
     return {};
   }
-  const int bytes =
-      WideCharToMultiByte(CP_UTF8, 0, buffer, int(size), nullptr, 0, nullptr,
-                          nullptr);
+  const int bytes = WideCharToMultiByte(CP_UTF8, 0, buffer, int(size), nullptr,
+                                        0, nullptr, nullptr);
   std::string out(std::size_t(bytes), '\0');
   WideCharToMultiByte(CP_UTF8, 0, buffer, int(size), out.data(), bytes, nullptr,
                       nullptr);
@@ -37,7 +36,7 @@ bool open_log(const std::string &logs_dir) {
       "launcher", std::to_string(GetCurrentProcessId()));
   file->set_profile_path(profile_dir());
   const std::u8string dir(reinterpret_cast<const char8_t *>(logs_dir.data()),
-                         logs_dir.size());
+                          logs_dir.size());
   if (!file->open(std::filesystem::path(dir))) {
     return false;
   }
@@ -82,9 +81,10 @@ double ms_since_process_start() {
   FILETIME creation{}, exit{}, kernel{}, user{};
   GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user);
   using precise_time = void(WINAPI *)(LPFILETIME);
-  static const auto get_precise_time = reinterpret_cast<precise_time>(
-      reinterpret_cast<void *>(GetProcAddress(
-          GetModuleHandleW(L"kernel32.dll"), "GetSystemTimePreciseAsFileTime")));
+  static const auto get_precise_time =
+      reinterpret_cast<precise_time>(reinterpret_cast<void *>(
+          GetProcAddress(GetModuleHandleW(L"kernel32.dll"),
+                         "GetSystemTimePreciseAsFileTime")));
   FILETIME now{};
   if (get_precise_time) {
     get_precise_time(&now);

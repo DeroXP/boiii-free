@@ -47,7 +47,7 @@ std::string short_hash(std::string_view hash, std::size_t length = 12);
 // A file or folder in <home>\crash.
 struct crash_entry {
   std::string name;
-  std::uint64_t size = 0; // a folder: the files inside it
+  std::uint64_t size = 0;    // a folder: the files inside it
   std::int64_t modified = 0; // seconds since 1970, UTC
   bool folder = false;
 };

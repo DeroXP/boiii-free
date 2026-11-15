@@ -2,13 +2,14 @@
 
 // Zombies character slots (docs/DESIGN.md 7.10 and 7.12).
 //
-// Priority: a player who picked a character in Xerces' CHARACTERS menu keeps it.
-// Another mod's own character script (DS4C's) calls SetCharacterBodyType,
+// Priority: a player who picked a character in Xerces' CHARACTERS menu keeps
+// it. Another mod's own character script (DS4C's) calls SetCharacterBodyType,
 // SetCharacterBodyStyle and SetCharacterHelmetStyle on the player, at spawn and
-// when its own menu is used. While the player's bit is set in the xerces_char_lock
-// dvar, those calls are skipped unless xerces_char_apply is 1, which Xerces' own
-// script (data/custom_scripts/zm/xerces_characters.gsc) holds while it makes the
-// same calls (no wait in between, so no other script runs meanwhile).
+// when its own menu is used. While the player's bit is set in the
+// xerces_char_lock dvar, those calls are skipped unless xerces_char_apply is 1,
+// which Xerces' own script (data/custom_scripts/zm/xerces_characters.gsc) holds
+// while it makes the same calls (no wait in between, so no other script runs
+// meanwhile).
 //
 // Looks: every character mod's characters as slots of their own. The game has
 // one character table per match (zm_character_customization, or its _zmhd
@@ -36,9 +37,9 @@
 // Trace: with XERCES_CHAR_TRACE=1 in the environment, every script call that
 // changes what a player wears (SetModel, Attach, DetachAll, SetPlayerCharacter,
 // SetCharacterBodyType, SetCharacterBodyStyle) is written to the game log with
-// the player and its first argument, so a mod's own character script can be told
-// apart from Xerces'. At most 600 lines of the character calls and 600 of the
-// rest. Off otherwise.
+// the player and its first argument, so a mod's own character script can be
+// told apart from Xerces'. At most 600 lines of the character calls and 600 of
+// the rest. Off otherwise.
 
 #include <component/command.hpp>
 #include <component/mod_stack.hpp>
@@ -85,8 +86,8 @@ void note(const char *what, scriptInstance_t inst, scr_entref_t *entref,
   }
   xerces_runtime::log_info(
       "char.call", std::string(what) + " " + arg,
-      "{\"call\":\"" + std::string(what) + "\",\"class\":" +
-          std::to_string(entref->classnum) + ",\"ent\":" +
+      "{\"call\":\"" + std::string(what) +
+          "\",\"class\":" + std::to_string(entref->classnum) + ",\"ent\":" +
           std::to_string(entref->u.entnum) + ",\"arg\":\"" + arg + "\"}");
 }
 
@@ -213,8 +214,9 @@ std::string plain(std::string text) {
 // A mesh's name without the number the game's tools end it with
 std::string clean(std::string name) {
   size_t cut = 0;
-  while (cut < 8 && cut < name.size() &&
-         std::isxdigit(static_cast<unsigned char>(name[name.size() - 1 - cut]))) {
+  while (
+      cut < 8 && cut < name.size() &&
+      std::isxdigit(static_cast<unsigned char>(name[name.size() - 1 - cut]))) {
     ++cut;
   }
   if (cut >= 6 && name.size() > cut) {
@@ -273,7 +275,8 @@ struct table_copy {
   std::vector<body_copy> bodies;
 };
 
-bool read_items(const uint8_t *items, uint32_t count, std::vector<item_t> &out) {
+bool read_items(const uint8_t *items, uint32_t count,
+                std::vector<item_t> &out) {
   if (count == 0 || count > MAX_STYLES) {
     return false;
   }
@@ -318,8 +321,8 @@ bool build(const uint8_t *in_use) {
   int dropped = 0;
 
   std::unordered_map<std::string, std::vector<mod_stack::asset_copy>> copies;
-  const auto copies_of =
-      [&](const std::string &name) -> const std::vector<mod_stack::asset_copy> & {
+  const auto copies_of = [&](const std::string &name)
+      -> const std::vector<mod_stack::asset_copy> & {
     const auto [entry, added] = copies.try_emplace(name);
     if (added) {
       entry->second = mod_stack::asset_copies(xmodel_type, name);
@@ -374,11 +377,9 @@ bool build(const uint8_t *in_use) {
           break;
         }
         if (i > 0) {
-          body.ok = read_items(field<const uint8_t *>(body.bytes.data(),
-                                                      BODY_STYLES),
-                               field<uint32_t>(body.bytes.data(),
-                                               BODY_NUM_STYLES),
-                               body.items);
+          body.ok = read_items(
+              field<const uint8_t *>(body.bytes.data(), BODY_STYLES),
+              field<uint32_t>(body.bytes.data(), BODY_NUM_STYLES), body.items);
         }
         any = true;
       }
@@ -584,8 +585,8 @@ bool build(const uint8_t *in_use) {
           // what the body is drawn from: two outfits of one name drawn from
           // the same are one character (a mod puts its Dempsey on each of the
           // game's Dempsey models)
-          std::string made_of = std::format(
-              "{:p}", static_cast<const void *>(model.meshes[0]));
+          std::string made_of =
+              std::format("{:p}", static_cast<const void *>(model.meshes[0]));
           xmodel::XModelMeshMaterials materials{};
           if (peek(model.meshMaterials, materials)) {
             for (int k = 0; k < materials.numMaterials && k < 4; ++k) {
@@ -629,9 +630,10 @@ bool build(const uint8_t *in_use) {
           if (peek(model.meshes[0], mesh_name)) {
             out.hint = clean(text_at(mesh_name));
           }
-          out.id = look_id(source + "|" + body_name + "|" +
-                           text_at(field<const char *>(item.data(), ITEM_NAME)) +
-                           "|" + std::to_string(j));
+          out.id =
+              look_id(source + "|" + body_name + "|" +
+                      text_at(field<const char *>(item.data(), ITEM_NAME)) +
+                      "|" + std::to_string(j));
           found.push_back(std::move(out));
         }
       }
@@ -804,9 +806,8 @@ std::string title_of(const std::string &source) {
 void list_looks() {
   ensure();
   std::scoped_lock lock(looks_mutex);
-  std::string text =
-      std::format("{} characters, {} left out, {:.1f} ms",
-                  looks.size(), dropped_looks, build_ms);
+  std::string text = std::format("{} characters, {} left out, {:.1f} ms",
+                                 looks.size(), dropped_looks, build_ms);
   std::string source = "\x01";
   for (const look &one : looks) {
     if (one.source != source) {
@@ -822,8 +823,8 @@ void list_looks() {
 
 // One call from a script: traced, skipped when the player is locked, else the
 // game's own
-void locked_call(const char *name, BuiltinMethod original, scriptInstance_t inst,
-                 scr_entref_t *entref) {
+void locked_call(const char *name, BuiltinMethod original,
+                 scriptInstance_t inst, scr_entref_t *entref) {
   if (tracing) {
     note(name, inst, entref, false);
   }
@@ -876,8 +877,8 @@ std::string looks_text() {
   }
   for (const look &one : looks) {
     out += std::format("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n", one.source,
-                       one.name, one.hint, one.icon, one.body, one.style, one.id,
-                       one.added ? 1 : 0, one.in_place ? 1 : 0);
+                       one.name, one.hint, one.icon, one.body, one.style,
+                       one.id, one.added ? 1 : 0, one.in_place ? 1 : 0);
   }
   return out;
 }
@@ -921,7 +922,8 @@ public:
     set_body_style_orig = player_methods->SetCharacterBodyStyle.actionFunc;
     player_methods->SetCharacterBodyStyle.actionFunc = SetCharacterBodyStyle;
     set_helmet_style_orig = player_methods->SetCharacterHelmetStyle.actionFunc;
-    player_methods->SetCharacterHelmetStyle.actionFunc = SetCharacterHelmetStyle;
+    player_methods->SetCharacterHelmetStyle.actionFunc =
+        SetCharacterHelmetStyle;
 
     scheduler::loop(frame, scheduler::main);
     command::add("xerces_char_looks", [] { list_looks(); });

@@ -204,20 +204,19 @@ public:
     model.Bind("crashes", &crashes_);
     model.Bind("crash_count", &crash_count_);
     model.Bind("crash_more", &crash_more_);
-    model.BindEventCallback(
-        "act", [this](Rml::DataModelHandle, Rml::Event &,
-                      const Rml::VariantList &args) {
-          if (!args.empty()) {
-            act(args[0].Get<Rml::String>());
-          }
-        });
-    model.BindEventCallback(
-        "copy_diag", [this](Rml::DataModelHandle, Rml::Event &,
-                            const Rml::VariantList &args) {
-          if (!args.empty()) {
-            copy_diag(args[0].Get<int>(-1));
-          }
-        });
+    model.BindEventCallback("act", [this](Rml::DataModelHandle, Rml::Event &,
+                                          const Rml::VariantList &args) {
+      if (!args.empty()) {
+        act(args[0].Get<Rml::String>());
+      }
+    });
+    model.BindEventCallback("copy_diag",
+                            [this](Rml::DataModelHandle, Rml::Event &,
+                                   const Rml::VariantList &args) {
+                              if (!args.empty()) {
+                                copy_diag(args[0].Get<int>(-1));
+                              }
+                            });
     handle_ = model.GetModelHandle();
     return true;
   }
@@ -226,7 +225,8 @@ public:
     // Focus goes back to Copy report at the top of the page, and focusing an
     // element does not scroll to it: start at the top too, so the focused
     // button is never off-screen after a tab round trip.
-    if (Rml::Element *content = doc ? doc->GetElementById("content") : nullptr) {
+    if (Rml::Element *content =
+            doc ? doc->GetElementById("content") : nullptr) {
       content->SetScrollTop(0);
     }
     // Files outside the services' counters: the journal, the logs and the
@@ -335,10 +335,9 @@ private:
     } else if (game.preflight) {
       build_value_ =
           owner_->tr(xerces_core::preflight_label(game.preflight->verdict));
-      build_detail_ =
-          game.steam_build
-              ? owner_->tr("Steam build") + " " + std::to_string(*game.steam_build)
-              : owner_->tr("Steam build unknown");
+      build_detail_ = game.steam_build ? owner_->tr("Steam build") + " " +
+                                             std::to_string(*game.steam_build)
+                                       : owner_->tr("Steam build unknown");
     } else {
       build_value_ = owner_->tr("Not checked");
       build_detail_ = game.error;
@@ -349,9 +348,8 @@ private:
       build_rows_.push_back({owner_->tr(name), std::move(value), mono, warn});
     };
     if (game.searched) {
-      row("Game folder",
-          game.dir ? utf8(*game.dir) : owner_->tr("Not found"), game.dir.has_value(),
-          !game.dir);
+      row("Game folder", game.dir ? utf8(*game.dir) : owner_->tr("Not found"),
+          game.dir.has_value(), !game.dir);
       if (game.dir) {
         row("Steam build",
             game.steam_build ? std::to_string(*game.steam_build)
@@ -449,25 +447,25 @@ private:
           "it starts; the result shows here after the next launch.");
       return;
     }
-    sig_value_ = std::to_string(sigs.matched) + "/" + std::to_string(sigs.total) +
-                 " " + owner_->tr("matched");
-    sig_detail_ = sigs.missing.empty()
-                      ? owner_->tr("All found at the last start")
-                      : std::to_string(sigs.missing.size()) + " " +
-                            owner_->tr("missing");
+    sig_value_ = std::to_string(sigs.matched) + "/" +
+                 std::to_string(sigs.total) + " " + owner_->tr("matched");
+    sig_detail_ =
+        sigs.missing.empty()
+            ? owner_->tr("All found at the last start")
+            : std::to_string(sigs.missing.size()) + " " + owner_->tr("missing");
     sig_count_ = sig_value_;
     sig_rows_.push_back({owner_->tr("Matched"),
                          std::to_string(sigs.matched) + " " + owner_->tr("of") +
                              " " + std::to_string(sigs.total),
                          true, !sigs.missing.empty()});
-    sig_rows_.push_back({owner_->tr("Game build"),
-                         sigs.game_build.empty() ? owner_->tr("Unknown")
-                                                 : sigs.game_build,
-                         true, false});
-    sig_rows_.push_back({owner_->tr("Checked"),
-                         sigs.checked.empty() ? owner_->tr("Unknown")
-                                              : sigs.checked,
-                         true, false});
+    sig_rows_.push_back(
+        {owner_->tr("Game build"),
+         sigs.game_build.empty() ? owner_->tr("Unknown") : sigs.game_build,
+         true, false});
+    sig_rows_.push_back(
+        {owner_->tr("Checked"),
+         sigs.checked.empty() ? owner_->tr("Unknown") : sigs.checked, true,
+         false});
     for (const std::string &name : sigs.missing) {
       missing_.push_back({name});
     }
@@ -506,23 +504,22 @@ private:
       catalog_detail_ = std::to_string(mods) + " " + owner_->tr("mods") + ", " +
                         std::to_string(maps) + " " + owner_->tr("maps");
     }
-    catalog_count_ = catalog.scanning ? owner_->tr("reading")
-                     : catalog.scanned
-                         ? std::to_string(catalog.items.size()) + " " +
-                               owner_->tr(catalog.items.size() == 1 ? "item"
-                                                                    : "items")
-                         : std::string();
+    catalog_count_ =
+        catalog.scanning ? owner_->tr("reading")
+        : catalog.scanned
+            ? std::to_string(catalog.items.size()) + " " +
+                  owner_->tr(catalog.items.size() == 1 ? "item" : "items")
+            : std::string();
 
     const auto row = [this](const std::string &name, std::string value,
                             bool mono = true, bool warn = false) {
       catalog_rows_.push_back({owner_->tr(name), std::move(value), mono, warn});
     };
     if (catalog.scanning) {
-      row("Reading",
-          (catalog.total ? std::to_string(catalog.done) + "/" +
-                               std::to_string(catalog.total) + "  "
-                         : std::string()) +
-              catalog.current);
+      row("Reading", (catalog.total ? std::to_string(catalog.done) + "/" +
+                                          std::to_string(catalog.total) + "  "
+                                    : std::string()) +
+                         catalog.current);
     }
     if (catalog.scanned) {
       row("Items", std::to_string(catalog.items.size()));
@@ -548,8 +545,9 @@ private:
                             owner_->tr("misses"));
       row("Hashed", xerces_core::format_bytes(catalog.bytes_hashed));
     } else if (!catalog.scanning) {
-      row("Items", owner_->tr(svc.game().dir ? "Not read yet"
-                                              : "No mod folders: the game was not found"),
+      row("Items",
+          owner_->tr(svc.game().dir ? "Not read yet"
+                                    : "No mod folders: the game was not found"),
           false);
     }
 
@@ -566,17 +564,17 @@ private:
     const std::size_t warnings =
         catalog.diags.count(xerces_core::severity::warning);
     const std::size_t infos = catalog.diags.count(xerces_core::severity::info);
-    diag_count_ = std::to_string(errors) + " " + owner_->tr("errors") + " \xC2\xB7 " +
-                  std::to_string(warnings) + " " + owner_->tr("warnings") +
-                  " \xC2\xB7 " + std::to_string(infos) + " " + owner_->tr("notes");
+    diag_count_ = std::to_string(errors) + " " + owner_->tr("errors") +
+                  " \xC2\xB7 " + std::to_string(warnings) + " " +
+                  owner_->tr("warnings") + " \xC2\xB7 " +
+                  std::to_string(infos) + " " + owner_->tr("notes");
     for (std::size_t i = 0; i < sorted.size() && i < max_diag_rows; ++i) {
       const auto &item = *sorted[i];
       diags_.push_back(
           {owner_->tr(item.level == xerces_core::severity::error     ? "Error"
                       : item.level == xerces_core::severity::warning ? "Warning"
                                                                      : "Info"),
-           item.code, item.message,
-           item.level == xerces_core::severity::error,
+           item.code, item.message, item.level == xerces_core::severity::error,
            item.level == xerces_core::severity::warning});
     }
     // Copies, not pointers: a finished scan replaces the catalog before
@@ -628,11 +626,11 @@ private:
                         ? owner_->tr("Crashed")
                         : owner_->tr(phase_label(journal->phase));
     launch_detail_ = journal->started;
-    launch_count_ = journal->stack.empty()
-                        ? owner_->tr("vanilla")
-                        : std::to_string(journal->stack.size()) + " " +
-                              owner_->tr(journal->stack.size() == 1 ? "mod"
-                                                                    : "mods");
+    launch_count_ =
+        journal->stack.empty()
+            ? owner_->tr("vanilla")
+            : std::to_string(journal->stack.size()) + " " +
+                  owner_->tr(journal->stack.size() == 1 ? "mod" : "mods");
     const auto row = [this](const std::string &name, std::string value,
                             bool mono = true, bool warn = false) {
       launch_rows_.push_back({owner_->tr(name), std::move(value), mono, warn});
@@ -647,7 +645,8 @@ private:
     }
     row("Phase",
         std::string(xerces_core::to_string(journal->phase)) +
-            (running ? "  (" + owner_->tr("game running") + ")" : std::string()),
+            (running ? "  (" + owner_->tr("game running") + ")"
+                     : std::string()),
         true, decision.safe_mode);
     row("Started", journal->started.empty() ? "-" : journal->started);
     row("Updated", journal->updated.empty() ? "-" : journal->updated);
@@ -690,16 +689,16 @@ private:
     log_count_ = std::to_string(sessions) + " " +
                  owner_->tr(sessions == 1 ? "session" : "sessions");
     const std::string current = native(log_path());
-    log_rows_.push_back({owner_->tr("This session"),
-                         current.empty() ? owner_->tr("Not written (no log file)")
-                                         : current,
-                         true, current.empty()});
-    log_rows_.push_back({owner_->tr("Folder"), utf8(paths.logs), true, false});
     log_rows_.push_back(
-        {owner_->tr("Journal"),
-         fs::exists(paths.journal_file(), ec) ? utf8(paths.journal_file())
-                                              : owner_->tr("None yet"),
-         true, false});
+        {owner_->tr("This session"),
+         current.empty() ? owner_->tr("Not written (no log file)") : current,
+         true, current.empty()});
+    log_rows_.push_back({owner_->tr("Folder"), utf8(paths.logs), true, false});
+    log_rows_.push_back({owner_->tr("Journal"),
+                         fs::exists(paths.journal_file(), ec)
+                             ? utf8(paths.journal_file())
+                             : owner_->tr("None yet"),
+                         true, false});
 
     crash_entries_ = xerces_core::list_crash_entries(paths.crash);
     for (std::size_t i = 0; i < crash_entries_.size() && i < max_crash_rows;
@@ -713,7 +712,8 @@ private:
                        ? owner_->tr("none")
                        : std::to_string(crash_entries_.size());
     if (crash_entries_.size() > max_crash_rows) {
-      crash_more_ = "+" + std::to_string(crash_entries_.size() - max_crash_rows) +
+      crash_more_ = "+" +
+                    std::to_string(crash_entries_.size() - max_crash_rows) +
                     " " + owner_->tr("more in the folder");
     }
   }
@@ -776,10 +776,9 @@ private:
     sections.push_back(std::move(xerces));
 
     report_section build{"Game", {}, {}};
-    build.fields.push_back(
-        {"Folder", !game.searched ? "not searched yet"
-                   : game.dir     ? utf8(*game.dir)
-                                  : "not found"});
+    build.fields.push_back({"Folder", !game.searched ? "not searched yet"
+                                      : game.dir     ? utf8(*game.dir)
+                                                     : "not found"});
     if (game.dir) {
       build.fields.push_back(
           {"Steam build",
@@ -787,20 +786,21 @@ private:
     }
     if (game.exe) {
       const auto &exe = *game.exe;
-      build.fields.push_back({"Exe size", xerces_core::format_count(exe.size) +
-                                              " bytes (" +
-                                              xerces_core::format_bytes(exe.size) +
-                                              ")"});
-      build.fields.push_back({"Checksum", xerces_core::format_hex32(exe.checksum)});
-      build.fields.push_back({"Link time",
-                              xerces_core::format_hex32(exe.link_time) + " (" +
-                                  xerces_core::format_unix_time(exe.link_time) +
-                                  ")"});
+      build.fields.push_back(
+          {"Exe size", xerces_core::format_count(exe.size) + " bytes (" +
+                           xerces_core::format_bytes(exe.size) + ")"});
+      build.fields.push_back(
+          {"Checksum", xerces_core::format_hex32(exe.checksum)});
+      build.fields.push_back(
+          {"Link time", xerces_core::format_hex32(exe.link_time) + " (" +
+                            xerces_core::format_unix_time(exe.link_time) +
+                            ")"});
       build.fields.push_back({"SHA-256", exe.sha256});
     }
     if (game.preflight) {
       const auto &check = *game.preflight;
-      build.fields.push_back({"Pre-flight", xerces_core::to_string(check.verdict)});
+      build.fields.push_back(
+          {"Pre-flight", xerces_core::to_string(check.verdict)});
       build.fields.push_back({"Message", check.message});
       build.fields.push_back(
           {"Matched build",
@@ -834,8 +834,8 @@ private:
           {"Report", "none yet (checked when the game starts)"});
     } else {
       signatures.fields = {
-          {"Matched", std::to_string(sigs.matched) + " of " +
-                          std::to_string(sigs.total)},
+          {"Matched",
+           std::to_string(sigs.matched) + " of " + std::to_string(sigs.total)},
           {"Game build", sigs.game_build},
           {"Checked", sigs.checked},
       };
@@ -849,14 +849,15 @@ private:
     report_section mods{"Mods found", {}, {}};
     std::size_t mod_count = 0, map_count = 0, legacy = 0, broken = 0;
     for (const auto &item : catalog.items) {
-      (item.info.kind == xerces_core::content_kind::map ? map_count : mod_count) +=
-          1;
+      (item.info.kind == xerces_core::content_kind::map ? map_count
+                                                        : mod_count) += 1;
       legacy += item.info.legacy ? 1 : 0;
       broken += item.valid_manifest ? 0 : 1;
     }
     mods.fields = {
-        {"State", catalog.scanning  ? "reading (" + std::to_string(catalog.done) +
-                                          "/" + std::to_string(catalog.total) + ")"
+        {"State", catalog.scanning
+                      ? "reading (" + std::to_string(catalog.done) + "/" +
+                            std::to_string(catalog.total) + ")"
                   : catalog.scanned ? "read"
                                     : "not read"},
         {"Items", std::to_string(catalog.items.size())},
@@ -874,7 +875,8 @@ private:
       mods.lines.push_back(
           (i < catalog.sources.size() ? catalog.sources[i] : std::string("?")) +
           "  " + item.info.id + "  " +
-          (item.info.legacy ? std::string("legacy") : item.info.ver.to_string()) +
+          (item.info.legacy ? std::string("legacy")
+                            : item.info.ver.to_string()) +
           "  " + xerces_core::to_string(item.info.kind) + "  " +
           xerces_core::short_hash(item.content_hash) + "  " + item.folder);
     }
@@ -934,9 +936,9 @@ private:
       launch.fields.push_back({"Journal", "none yet"});
     }
     const xerces_core::safe_mode_decision decision = svc.safe_mode();
-    launch.fields.push_back(
-        {"Safe mode", decision.safe_mode ? "suggested: " + decision.message
-                                         : "not needed"});
+    launch.fields.push_back({"Safe mode", decision.safe_mode
+                                              ? "suggested: " + decision.message
+                                              : "not needed"});
     sections.push_back(std::move(launch));
 
     report_section files{"Logs", {}, {}};
@@ -979,9 +981,8 @@ private:
       refresh_files();
       handle_.DirtyAllVariables();
       if (bundle.empty()) {
-        owner_->notify(owner_->tr("The bundle could not be written:") + " " +
-                           error,
-                       true);
+        owner_->notify(
+            owner_->tr("The bundle could not be written:") + " " + error, true);
         return;
       }
       owner_->dialog(
@@ -1008,7 +1009,8 @@ private:
       refresh_launch();
       refresh_files();
       handle_.DirtyAllVariables();
-      owner_->notify(owner_->tr("Checking the game and reading the mods again."));
+      owner_->notify(
+          owner_->tr("Checking the game and reading the mods again."));
     } else if (action == "verify") {
       std::string body = owner_->tr(
           "Steam will check every Black Ops III file and download any that "
@@ -1018,25 +1020,23 @@ private:
       if (svc.game_running()) {
         body += " " + owner_->tr("Close the game first: it is still running.");
       }
-      owner_->dialog("Verify with Steam", body,
-                     {"Verify with Steam", "Cancel"}, [this](int choice) {
-                       if (choice != 0) {
-                         log_info("launcher.diagnostics.verify", "cancelled");
-                         return;
-                       }
-                       const std::string url =
-                           "steam://validate/" +
-                           std::string(xerces_core::bo3_app_id);
-                       if (owner_->open_url(url)) {
-                         owner_->notify(owner_->tr(
-                             "Steam is checking the game files."));
-                       } else {
-                         owner_->notify(
-                             owner_->tr("Steam could not be opened. Is it "
+      owner_->dialog(
+          "Verify with Steam", body, {"Verify with Steam", "Cancel"},
+          [this](int choice) {
+            if (choice != 0) {
+              log_info("launcher.diagnostics.verify", "cancelled");
+              return;
+            }
+            const std::string url =
+                "steam://validate/" + std::string(xerces_core::bo3_app_id);
+            if (owner_->open_url(url)) {
+              owner_->notify(owner_->tr("Steam is checking the game files."));
+            } else {
+              owner_->notify(owner_->tr("Steam could not be opened. Is it "
                                         "installed?"),
                              true);
-                       }
-                     });
+            }
+          });
     } else if (action == "reread signatures") {
       // The game writes the report when it starts, also when it was started
       // without Xerces; the launcher otherwise reads it only at its own start
@@ -1048,14 +1048,16 @@ private:
                                       "once."));
     } else if (action == "open game") {
       if (!svc.game().dir || !owner_->open_folder(*svc.game().dir)) {
-        owner_->notify(owner_->tr("The game folder could not be opened."), true);
+        owner_->notify(owner_->tr("The game folder could not be opened."),
+                       true);
       }
     } else if (action == "rescan") {
       svc.start_scan();
       owner_->notify(owner_->tr("Reading the mods again."));
     } else if (action == "open logs") {
       if (!owner_->open_folder(svc.paths().logs)) {
-        owner_->notify(owner_->tr("The logs folder could not be opened."), true);
+        owner_->notify(owner_->tr("The logs folder could not be opened."),
+                       true);
       }
     } else if (action == "copy log path") {
       const std::string path = native(log_path());
@@ -1069,7 +1071,8 @@ private:
       std::error_code ec;
       fs::create_directories(svc.paths().crash, ec);
       if (!owner_->open_folder(svc.paths().crash)) {
-        owner_->notify(owner_->tr("The crash folder could not be opened."), true);
+        owner_->notify(owner_->tr("The crash folder could not be opened."),
+                       true);
       }
     }
   }
@@ -1078,8 +1081,8 @@ private:
     if (index < 0 || std::size_t(index) >= shown_diag_text_.size()) {
       return;
     }
-    owner_->copy_text(xerces_core::redact_profile(shown_diag_text_[index],
-                                                  xerces_core::profile_folder()));
+    owner_->copy_text(xerces_core::redact_profile(
+        shown_diag_text_[index], xerces_core::profile_folder()));
     log_info("launcher.diagnostics.copied_line", shown_diag_codes_[index]);
     owner_->notify(owner_->tr("Copied:") + " " + shown_diag_codes_[index]);
   }

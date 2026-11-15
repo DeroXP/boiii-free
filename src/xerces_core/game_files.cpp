@@ -69,7 +69,8 @@ std::vector<game_bind> parse_binds(std::string_view text) {
     }
     const std::string key = lower(trim(rest.substr(0, separator)));
     std::string command = trim(rest.substr(separator + 1));
-    if (command.size() >= 2 && command.front() == '"' && command.back() == '"') {
+    if (command.size() >= 2 && command.front() == '"' &&
+        command.back() == '"') {
       command = command.substr(1, command.size() - 2);
     }
     if (!key.empty() && !command.empty()) {
@@ -164,9 +165,8 @@ set_asset_pools_enabled(std::string_view launcher_settings_json, bool enabled) {
 pool_switch switch_asset_pools(const std::filesystem::path &file,
                                bool enabled) {
   std::error_code ec;
-  const bool missing =
-      std::filesystem::status(file, ec).type() ==
-      std::filesystem::file_type::not_found;
+  const bool missing = std::filesystem::status(file, ec).type() ==
+                       std::filesystem::file_type::not_found;
   std::string text;
   if (!missing) {
     // It is there (or cannot even be looked at): what cannot be read is not

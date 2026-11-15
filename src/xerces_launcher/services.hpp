@@ -123,8 +123,9 @@ public:
   // -------------------------------------------------------------- the plan
   // The current mode's profile resolved against the catalog; mods, when
   // given, replace the profile's list (a culprit-search test launch).
-  xerces_core::plan resolve(const std::string &mode,
-                            const std::vector<std::string> *mods = nullptr) const;
+  xerces_core::plan
+  resolve(const std::string &mode,
+          const std::vector<std::string> *mods = nullptr) const;
   // How long resolve() took, over every call so far (launcher.activity).
   struct resolve_timing {
     std::size_t count = 0;
@@ -156,10 +157,10 @@ public:
                         const std::vector<std::string> *mods = nullptr,
                         const std::optional<std::string> &join_ticket = {});
   // The command line the launch would use, without starting anything.
-  launch_outcome preview_launch(const std::string &mode, bool modded,
-                                bool mods_off,
-                                const std::optional<std::string> &connect = {},
-                                const std::vector<std::string> *mods = nullptr) const;
+  launch_outcome
+  preview_launch(const std::string &mode, bool modded, bool mods_off,
+                 const std::optional<std::string> &connect = {},
+                 const std::vector<std::string> *mods = nullptr) const;
   bool dry_launch() const { return dry_launch_; }
   // The game process started by the last launch is still running, or any
   // game announces itself in <home>\run (one this launcher did not start).

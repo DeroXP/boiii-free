@@ -297,7 +297,8 @@ std::vector<map_check_record> read_map_checks(const fs::path &root) {
     record.result = json::get_string(root_value, "result").value_or("");
     record.detail = json::get_string(root_value, "detail").value_or("");
     if (const auto console = json::get_string(root_value, "console")) {
-      record.folder = utf8(xerces_core::path_from_utf8(*console).parent_path().filename());
+      record.folder =
+          utf8(xerces_core::path_from_utf8(*console).parent_path().filename());
     }
     if (const auto *stack = json::member(root_value, "stack");
         stack && stack->IsArray()) {
@@ -1527,7 +1528,8 @@ int cmd_bench_analyze(const arguments &args) {
   }
   std::vector<capture> captures;
   for (std::size_t i = 2; i < args.words.size(); ++i) {
-    if (!collect_captures(xerces_core::path_from_utf8(args.words[i]), captures)) {
+    if (!collect_captures(xerces_core::path_from_utf8(args.words[i]),
+                          captures)) {
       return exit_error;
     }
   }
@@ -1616,7 +1618,8 @@ int cmd_bench_compare(const arguments &args) {
   const std::string side_paths[2] = {*a_path, *b_path};
   std::vector<capture> captures[2];
   for (int side = 0; side < 2; ++side) {
-    if (!collect_captures(xerces_core::path_from_utf8(side_paths[side]), captures[side])) {
+    if (!collect_captures(xerces_core::path_from_utf8(side_paths[side]),
+                          captures[side])) {
       return exit_error;
     }
     if (captures[side].empty()) {
