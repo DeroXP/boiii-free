@@ -417,11 +417,13 @@ def tested_body(tested):
     rows = []
     ok = 0
     for m in tested["maps"]:
-        good = m["result"] == "in_game"
+        # "played": loaded and played, though the run ended otherwise (its note says how)
+        good = m["result"] == "in_game" or m.get("played", False)
         ok += good
+        result = "Played" if m["result"] == "in_game" else (
+            ("%s" if good else "<strong>%s</strong>") % html.escape(m.get("note", m["result"])))
         rows.append("<tr><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>" % (
-            html.escape(m["name"]), html.escape(m["map"]),
-            "Played" if good else "<strong>%s</strong>" % html.escape(m.get("note", m["result"])),
+            html.escape(m["name"]), html.escape(m["map"]), result,
             ("%.1f s" % m["load_s"]) if good and m.get("load_s") else "&mdash;"))
     # With the sweep's pool readings: how much of the game's own model and
     # image tables the stack used at its most (in the menus, the same for

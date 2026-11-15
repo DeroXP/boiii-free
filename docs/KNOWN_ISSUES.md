@@ -269,12 +269,17 @@ worse.
   with mods or without. This build no longer crashes there that way and warns on
   Home, but it has not been tried in a OneDrive folder yet: unzip it to a folder
   such as `C:\Games\Xerces`.
-- **Shi No Numa froze once going back to the menu.** With the eight mods, one
-  game in eighteen (2026-11-15) stopped as it left the match for the menu: the game
-  was freeing its script strings and looped on one that was missing from its
+- **Shi No Numa can freeze going back to the menu.** With the eight mods, two
+  games in forty-two (2026-11-15) stopped as they left the match for the menu: the
+  game was freeing its script strings and looped on one that was missing from its
   table. Xerces wrote a freeze report and closed the game after 60 s; the next
   start is normal. The cause is not found yet. If it happens to you, send the
   `freeze-<time>.txt` (README.txt, Reporting bugs).
+- **A crash at the menu as the server list answered** (once in the night's
+  test games, 2026-11-15). The server browser's answers reach the game's menu code
+  from a network thread rather than the game's own; once, that ended in a crash at
+  the main menu. Start the game again. The code is upstream's and fenced (FENCED.md);
+  a fix (handing those answers to the game's main thread) waits for a review.
 - **Some crashes are not explained yet.** In our tests the game sometimes closed
   while a map was starting, with no crash report, and ran fine the next time.
   If it happens to you, report it (README.txt, Reporting bugs) and say what you

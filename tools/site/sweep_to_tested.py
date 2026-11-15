@@ -50,6 +50,9 @@ def main():
     p.add_argument('--out', default=str(ROOT / 'site' / 'tested.json'))
     p.add_argument('--note', action='append', default=[], metavar='MAP=TEXT',
                    help="the Result cell's text for a map that did not play, in words for players")
+    p.add_argument('--played', action='append', default=[], metavar='MAP',
+                   help='a map that loaded and played although its run ended otherwise (a freeze going back to '
+                        'the menu): it counts as played and keeps its load time, with its --note')
     a = p.parse_args()
     if not a.stack_name:
         p.error('--stack-name for each mod, in load order')
@@ -72,6 +75,8 @@ def main():
             entry['load_s'] = float(load)
         if result != 'in_game':
             entry['note'] = notes.get(name, detail.strip())
+        if name in a.played:
+            entry['played'] = True
         maps.append(entry)
     if not maps:
         print(f'{a.sweep}: no map lines')

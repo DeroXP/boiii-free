@@ -4396,3 +4396,18 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       Zip 9.9 MB, 243 files, SHA-256 618d5d5ff474f16a38d719e0f316f0808177dae9e4a3de1497ff5d475cc34247; source
       archive SHA-256 da334f6bfb4af591a45c9fb6df658e8437a4441c55a68529d2f8ae0d1e1b0bf0. Unzipped: every file matches
       SHA256SUMS.txt; the M1 vanilla (4) and modded (6) checks pass from its files.
+- [x] Shi No Numa, 24 more games (`sumpf-hunt.ps1`, 03:26 to 04:05): the eleventh froze going back to the menu
+      the same way (`freeze-2026-11-15-03-44-23`), so two in forty-two. Neither freeze showed a broken chain to
+      `watch_strings.py`; the dumps' main thread says why (`bench\20261114-night\dump_regs.py`): the loop stood on
+      an entry whose next is itself, a bucket of one string that is not the one being freed (03:44: node 0xAD0C,
+      36 bytes, bucket 0x7C8A; 01:55: node 0xB38A, 283 bytes, bucket 0x47, which for 256 bytes and up is the length
+      / 4). So the string being freed is not in the bucket its text and length give: its text changed after it went
+      into the table, or it was freed before. No Xerces code writes into a script string, and Shi No Numa with the
+      eight mods never shares a client system slot (no `xerces.client_systems` events), so neither is it.
+      `bench\20261114-night\freeze_strings.py` now reads, at the next freeze, that string's text, refcount and
+      user from the frozen game and every table entry that holds it.
+- [ ] A crash at the main menu (`crash-2026-11-15-03-02-33`, in the first Shi No Numa hunt, after the match, as
+      the check went to quit): a write to 0x2406ED at BlackOps3.exe+0x1556D9D65 on an auxiliary thread, called
+      from upstream's server browser (`src/client/steam/interfaces/matchmaking_servers.cpp`,
+      `handle_server_respone` -> the game's ServerResponded) while the game's own threads ran its menus. Fenced
+      code: handing those calls to the main thread needs the maintainer's word. First seen tonight.
