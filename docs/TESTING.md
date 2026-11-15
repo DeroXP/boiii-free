@@ -4345,3 +4345,25 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       Der Riese; the planner counts the same 30 for the eight mods. compat/zone_memory.json now has the stock count
       (38cccd01): the eight mods plan at 53 of 63; twelve (the eight, Solo Easter Eggs, the Wonder Weapon Pack,
       Zombie Counter, All-around Enhancement) at 62; all twenty installed non-map mods would need 70.
+- [x] More of the user's installed mods on top of their eight (`sweep-*.txt`, Shadows of Evil unless named):
+      twelve (with Solo Easter Eggs, the Wonder Weapon Pack, Zombie Counter, All-around Enhancement) crashed on every
+      map as it loaded (`sweep-max12.txt`); one at a time: Solo Easter Eggs and Zombie Counter played; All-around
+      Enhancement stopped with "Could not allocate asset - increase XASSET_ENTRY_POOL_SIZE" (the eight use about
+      85,000 of 156,671 entries in Shadows of Evil, `read-entries.py` on the running game); the Wonder Weapon Pack
+      crashed the texture streamer (BlackOps3.exe+0x141D05BF5, a float table read past its end, from the streaming
+      job) with DS4C and the four character mods, also on beta.27, also with `-xerces-stream-sort-engine` and with
+      `XERCES_CHAR_SLOTS=0`; it played alone, with DS4C alone, and with DS4C, Ascendance, im_oxo QOL and Classic
+      Viewmodel FOV. **Ten mods (the eight, Solo Easter Eggs, Zombie Counter)** on Shadows of Evil, Kino der Toten,
+      Town Reimagined, SHOOT HAUS and Die Rise: all loaded (14.1 to 18 s) and played (`sweep-max10.txt`).
+- [x] The eight mods on all 28 installed Zombies maps on the night's last build before 1.0.0-rc.1 (the code of
+      3fbb7199; `sweep-user8-final.txt`, 00:50 to 01:36): 27 loaded (12.9 to 17.8 s from the menus) and played 30 s
+      and went back to the menu; MW4 Shipment stopped at its own unsafe-Lua question (package.loadlib, KNOWN_ISSUES),
+      which the sweep cannot answer.
+- [x] The Wonder Weapon Pack crash, found (docs/research/engine-re.md, "Asset pools the game finds by slot"): the
+      table it read past is the streamer's float per XModel slot, 11264 of them, and the slot came from a model in
+      a block upstream's allocator had added to the full XModel pool on the heap (the slot in rax was
+      0xFFFFFFFFDE2642C2). The eight mods peak at 10880 of the 11264 models (`tools/dev/re/read_pools.py` on The
+      Giant as it loaded). After 0210ced3 (XModel kept at the game's size), DS4C, the four character mods and the
+      Wonder Weapon Pack on Shadows of Evil: a fatal report as the menus load, "The map or mods loaded more 'xmodel'
+      assets than the game allows (limit: 11264)" with its fix and the game's own "Exceeded limit of 11264 'xmodel'
+      assets.", and no crash (`sweep-wwp-fix.txt`, `fatal-2026-11-15-01-38-05.txt`).

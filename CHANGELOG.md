@@ -3,9 +3,15 @@
 Every Xerces release and what changed for players, newest first, in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) way. The website's
 changelog page is made from this file (tools/site/build_site.py). Betas went to
-testers by private link; the first stable release is in preparation.
+testers by private link; the first stable release is in preparation, and
+1.0.0-rc.1 is its first candidate.
 
 ## [Unreleased]
+
+## [1.0.0-rc.1] - 2026-11-15
+
+The first candidate for the first stable release: beta.27 and a night of
+fixes, checked with a real eight-mod stack on every installed Zombies map.
 
 ### Added
 
@@ -16,7 +22,16 @@ testers by private link; the first stable release is in preparation.
   instead of being left out.
 - **Mods' own client scripts run.** Xerces' custom client scripts were linked at
   a time the game never ran them; they now load with the client's own scripts.
+- **The Mods screen says when a stack is too big** for the game's 63 zone slots,
+  and by how many zones, before a launch would hang (the game's own count, read
+  from a running game: 23 for Zombies, most mods 4).
+- **The out-of-memory message says what helps**: turn on Larger zone memory, or
+  raise it to 8 GB, before removing a mod.
+- **The unsafe-Lua question names the function** a map or mod asked for and
+  what it does ("package.loadlib (loading a DLL into the game)").
 - A website, built from this repository's own documents.
+- NOTICE and CREDITS in the zip (what Xerces is made from, and everyone who
+  wrote it), and a source archive with the libraries for each release.
 
 ### Changed
 
@@ -36,6 +51,14 @@ testers by private link; the first stable release is in preparation.
 - A `map` typed in the console from inside a level no longer crashes the game's
   server going into Moon (from Kino der Toten): the game looked up Moon's
   character table before Moon had loaded and kept the empty answer.
+- Die Rise with eight mods disconnected with "Clientfield Mismatch" with
+  beta.27's `-xerces-fast-loads`: its 4x level start is a flag of its own now.
+- A stack with more models than the game holds (11,264; DS4C, four character
+  mods and the Wonder Weapon Pack) crashed the texture streamer as the menus
+  loaded. It now stops with the game's own "Exceeded limit of 11264 'xmodel'
+  assets" and what to do: the model pool no longer grows past the game's size,
+  as the image and mesh pools already did not, because the game finds models
+  by their place in its own pool.
 
 ## [0.1.0-beta.27] - 2026-11-14
 
