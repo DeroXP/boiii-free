@@ -416,13 +416,26 @@ def tested_body(tested):
     """site/tested.json: a mod stack on every map, as the release was checked."""
     rows = []
     ok = 0
+    # With the sweep's pool readings: the most of the game's own model and
+    # image tables the level used (a stack past 100 % stops with "Exceeded limit").
+    limits = tested.get("limits") or {}
+
+    def share(m, kind):
+        used = (m.get("pools") or {}).get(kind)
+        return "%d %%" % round(100.0 * used / limits[kind]) if used else "&mdash;"
+
     for m in tested["maps"]:
         good = m["result"] == "in_game"
         ok += good
-        rows.append("<tr><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>" % (
+        cells = "".join("<td>%s</td>" % share(m, k) for k in ("xmodel", "image") if limits)
+        rows.append("<tr><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td>%s</tr>" % (
             html.escape(m["name"]), html.escape(m["map"]),
             "Played" if good else "<strong>%s</strong>" % html.escape(m.get("note", m["result"])),
-            ("%.1f s" % m["load_s"]) if good and m.get("load_s") else "&mdash;"))
+            ("%.1f s" % m["load_s"]) if good and m.get("load_s") else "&mdash;", cells))
+    pool_heads = "<th>Models</th><th>Images</th>" if limits else ""
+    pool_note = (" Models and Images: the most of the game's own tables the level used (%s models, %s images); "
+                 "a stack that needs more stops with \"Exceeded limit\" and says to turn off some mods." % (
+                     "{:,}".format(limits["xmodel"]), "{:,}".format(limits["image"]))) if limits else ""
     mods = "".join("<li>%s</li>" % html.escape(n) for n in tested["stack"])
     return head("Tested", "Every map, eight mods.",
                 "Before a release, a real mod stack goes onto every installed Zombies map: one game per map, "
@@ -435,12 +448,13 @@ def tested_body(tested):
   <p>In this load order (the first is the main mod), with %s.</p>
   <ol>%s</ol>
   <h2 id="maps">The maps</h2>
-  <table><thead><tr><th>Map</th><th>Name in the game</th><th>Result</th><th>Load</th></tr></thead><tbody>%s</tbody></table>
-  <p>Load: from the console's <code>map</code> command to the player in the level, with Xerces' faster loads.</p>
+  <table><thead><tr><th>Map</th><th>Name in the game</th><th>Result</th><th>Load</th>%s</tr></thead><tbody>%s</tbody></table>
+  <p>Load: from the console's <code>map</code> command to the player in the level, with Xerces' faster loads.%s</p>
   <h2 id="how">How</h2>
   <p>%s</p>
   </article>
-</div>""" % (html.escape(tested["settings"]), mods, "".join(rows), html.escape(tested["how"]))
+</div>""" % (html.escape(tested["settings"]), mods, pool_heads, "".join(rows), html.escape(pool_note),
+             html.escape(tested["how"]))
 
 
 def page(layout, title, description, current, content, releases, root=""):

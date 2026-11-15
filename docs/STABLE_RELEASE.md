@@ -106,8 +106,19 @@ decide. The boxes are ticked as things are done.
 
 1. Freeze: only fixes on the release branch.
 2. `VERSION` to `1.0.0`, the `## [1.0.0] - <date>` section in CHANGELOG.md, the
-   DESIGN.md version line, `site/releases.json` (stable: `live`).
-3. `tools\release.ps1` on a clean tree that is on origin; the M1 cases on the
-   package's own files; the zip's SHA-256 written down.
-4. The maintainer tags `v1.0.0`, makes the GitHub Release with the zip,
-   SHA256SUMS.txt and the source archive, and publishes the website.
+   DESIGN.md version line, `site/releases.json` (stable: `live`). With no
+   pre-release part in VERSION, README.txt and KNOWN_ISSUES.txt take their
+   stable lines (`tools/release/flavour.py`); read both in the zip once.
+3. The maintainer's stack on every installed Zombies map on that commit's build
+   (`tools\dev\session\sweep.ps1 -PollPools`, which also records how full the
+   game's model, mesh, material and image tables get), and `site/tested.json`
+   from it (`tools/site/sweep_to_tested.py`; the Tested page shows each map's
+   load and how much of the model and image tables it used).
+4. `tools\release.ps1` on a clean tree that is on origin: it writes the zip,
+   the symbols zip, `xerces-<version>-source.zip` and `SHA256SUMS-<version>.txt`.
+   The M1 cases on the package's own files; the source archive built once from
+   its own files (with the Steamworks headers put in as SOURCE-ARCHIVE.txt
+   says); the zip's SHA-256 written down.
+5. The maintainer tags `v1.0.0`, makes the GitHub Release with the zip,
+   SHA256SUMS-<version>.txt and the source archive (never the symbols zip), its
+   notes from CHANGELOG.md, and publishes the website.
