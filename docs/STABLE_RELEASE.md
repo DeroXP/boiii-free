@@ -33,8 +33,11 @@ decide. The boxes are ticked as things are done.
       a second person; nothing else can stand in for it.
 - [ ] A week of the release candidate in testers' hands with no new crash in
       the reports (the crash backend shows them).
-- [ ] KNOWN_ISSUES.md gone over: each entry either fixed, or written for
-      players with what to do.
+- [x] KNOWN_ISSUES.md gone over (2026-11-15): entries for what a beta fixed
+      are beta-only (a stable zip and the website leave them out, as
+      flavour.py does for README.txt), the "since beta.N" notes are gone, and
+      the entry on what was tested says what each build now runs through. The
+      entries on two PCs and friends change with the two-PC test.
 
 ### The package
 

@@ -28,8 +28,9 @@
      LICENSE, NOTICE, CREDITS, THIRD_PARTY_NOTICES.txt and SOURCE.txt
      (tools\release\notices.py), README.txt (docs\TESTERS.md, its beta or
      stable lines by VERSION: tools\release\flavour.py) and
-     KNOWN_ISSUES.txt (docs\KNOWN_ISSUES.md), then SHA256SUMS.txt over every
-     file. No .lib, .pdb, spike or test programs go in.
+     KNOWN_ISSUES.txt (docs\KNOWN_ISSUES.md, the same way), then
+     SHA256SUMS.txt over every file. No .lib, .pdb, spike or test programs go
+     in.
   4. Zips the folder, zips the PDBs into symbols-<version>.zip (kept by the
      team, never handed out with the package), writes the source archive
      xerces-<version>-source.zip (the commit with its submodules and the
@@ -238,11 +239,14 @@ try {
       --source (Join-Path $stage 'SOURCE.txt') --downloads $DownloadsDir
   }
   # A beta's README.txt keeps the guide's beta lines (the private link, the
-  # tester channel), a stable release's its stable ones (flavour.py).
+  # tester channel), a stable release's its stable ones (flavour.py); so does
+  # KNOWN_ISSUES.txt (a beta's lists what earlier betas fixed).
   Invoke-Checked 'flavour.py' {
     python -I tools\release\flavour.py docs\TESTERS.md (Join-Path $stage 'README.txt') --version $version
   }
-  Write-Crlf (Join-Path $stage 'KNOWN_ISSUES.txt') (Read-Utf8 (Join-Path $root 'docs\KNOWN_ISSUES.md'))
+  Invoke-Checked 'flavour.py (known issues)' {
+    python -I tools\release\flavour.py docs\KNOWN_ISSUES.md (Join-Path $stage 'KNOWN_ISSUES.txt') --version $version
+  }
 
   $unwanted = @(Get-ChildItem -Recurse -File $stage | Where-Object {
       $_.Extension -in '.lib', '.pdb', '.ilk', '.exp', '.obj' -or $_.Name -like 'xerces_tests*' -or $_.Name -like 'xerces_spike*'

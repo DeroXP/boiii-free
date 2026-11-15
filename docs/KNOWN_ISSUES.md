@@ -1,7 +1,12 @@
+<!-- beta -->
 # Known issues in this Xerces beta
+<!-- stable -->
+# Known issues
+<!-- end -->
 
-What we already know about, from the tests in docs/TESTING.md. You do not need
-to report these again, but tell us if you see them somewhere else or worse.
+What we already know about, from our tests (docs/TESTING.md in the source). You
+do not need to report these again, but tell us if you see them somewhere else or
+worse.
 
 ## Mods and maps
 
@@ -11,7 +16,7 @@ to report these again, but tell us if you see them somewhere else or worse.
   English text); some add 2. Eight mods like DS4C, Ascendance, im_oxo QOL,
   Classic Viewmodel FOV, DBZ Villains, Girls' Frontline 2.0, Avali and Neptunia
   take 30: 53 of 63, read from the running game. A stack over 63 hangs while the
-  level loads. After beta.27 the Mods screen counts the zones and says before
+  level loads. The Mods screen counts the zones and says before
   you launch when a stack is over, and by how many; take off mods until it
   fits. The limit is the game's own (a table of 64 slots, and the engine stops
   at 64); Xerces does not raise it.
@@ -23,8 +28,8 @@ to report these again, but tell us if you see them somewhere else or worse.
     level loads. It runs with fewer mods.
   - The Black Ops 3 Wonder Weapon Pack with DS4C and four character mods (DBZ,
     Girls' Frontline 2.0, Avali, Neptunia) crashes the texture streamer as the
-    level loads (an index past one of its tables), on beta.27 too and with
-    Xerces' character screen off. It runs alone, with DS4C, and with DS4C,
+    level loads (an index past one of its tables), with older Xerces builds too
+    and with Xerces' character screen off. It runs alone, with DS4C, and with DS4C,
     Ascendance, im_oxo QOL and Classic Viewmodel FOV.
   - Solo Easter Eggs and Zombie Counter run with the eight.
 - **Shadows of Evil with DS4C drops you before the level.** When the 3.5 minute
@@ -61,7 +66,7 @@ to report these again, but tell us if you see them somewhere else or worse.
   in a match, PEGASUS's menus try to open a file; in MW4 Shipment's mode screen
   the map's own menu asks for package.loadlib, which loads a DLL into the game.
   The game asks whether to allow unsafe Lua functions and waits until you
-  answer; after beta.27 the question names the function and what it does. No
+  answer; the question names the function and what it does. No
   keeps them blocked; PEGASUS's menus and match played normally that way.
 - **A mod's menu file in the lobby.** When a mod's copy of a Lua file the menus
   and the lobby share fails in the lobby (Ascendance's), Xerces uses the game's
@@ -85,7 +90,8 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## Maps
 
-- **Before beta.28: with many mods stacked, a map's lights or sounds that its
+<!-- beta -->
+- **Up to beta.27: with many mods stacked, a map's lights or sounds that its
   scripts drive could stay off.** The game has room for eight "client systems"; a
   map and each mod take some (Kino der Toten four, DS4C three). The ones that found
   no room used to end the match with "ClientSysSetState - state index (-1) out of
@@ -94,24 +100,36 @@ to report these again, but tell us if you see them somewhere else or worse.
   the ones past seven share one of the game's slots (Zombies). A friend who joins
   with an older Xerces (or without it) misses the shared ones, the seventh
   included: on Kino with eight mods, the map's lights as well as the box's.
+<!-- stable -->
+- **With many mods stacked, a friend without Xerces misses some map effects.**
+  The game has room for eight "client systems", the channels a map's and a mod's
+  scripts use to tell each player's game something (Kino der Toten takes four,
+  DS4C three). With more than that, Xerces lets the ones past seven share one of
+  the game's slots (Zombies), and every player with Xerces gets them all. A
+  player who joins without Xerces, or with a beta before 1.0.0-rc.1, misses the
+  shared ones: on Kino der Toten with eight mods, the map's lights and the ones
+  that show where the mystery box is.
+<!-- end -->
 - **A long frame (about 140 ms) every third of a second on a large custom map.**
   Seen on TOWN REIMAGINED with eight mods, from about a minute into a match. The
   game re-sorts its list of loaded textures with a sort that is slow when the list
-  is far out of order, and the frame waits for it. Since beta.23 Xerces sorts that
+  is far out of order, and the frame waits for it. Xerces sorts that
   list another way (about a hundred times quicker in that case, into the same
   order). What puts the list that far out of order is not known, but it happens
-  in real matches: in eight minutes of MW2 Rust with a mod stack (beta.24) the
+  in real matches: in eight minutes of MW2 Rust with a mod stack the
   list of about 28,600 textures was that far out of order 14 times, each a sort
   of some 290 ms for the game's own way and about 2 ms for Xerces'. If you still
   see long frames, send the game's log: its `xerces.stream_sort.far` lines say
   how often the list was that far out of order and what the sorts cost. To
   compare with the game's own sort, type `-xerces-stream-sort-engine` into
   Settings > Launch, Extra launch flags.
+<!-- beta -->
 - **After beta.27: a `map` typed in the console from inside a level no longer
   crashes into Moon.** Kino der Toten to Moon by `map zm_moon` closed the game's
   server every time (it froze, then said the server stopped sending updates): the
   game looked up Moon's character table before Moon had loaded and kept the empty
   answer. Xerces now looks it up again. Moon from the menus was never affected.
+<!-- end -->
 
 ## Zombies characters (CHARACTERS)
 
@@ -153,11 +171,11 @@ to report these again, but tell us if you see them somewhere else or worse.
 - **The modern aim assist is off until you turn it on.** XERCES SETTINGS >
   CONTROLLER > Aim Assist (Zombies) starts on Game's Own, which is the game's own
   assist and nothing of Xerces'.
-- **Its feel was tuned by play once.** After a controller playtest of beta.24,
+- **Its feel was tuned by play once.** After a controller playtest,
   Modern was cut to about half of what it was at 1 to 3 m (50% rotation, 40%
   slowdown, all of it only from 3 m), dying and hidden zombies stopped being
   targets, and the view settles around the neck. Stronger is what Modern was
-  plus more (95% and 75%). Played again on beta.25 it felt right. Say what feels
+  plus more (95% and 75%). Played again, it felt right. Say what feels
   off: strength and ranges are single numbers.
 - **It needs an XInput controller.** A controller in another mode (DualShock or
   Switch mode without a wrapper) is not seen; `xerces_aim_debug` in a match says
@@ -209,6 +227,7 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## The game and Xerces
 
+<!-- beta -->
 - **Before beta.27: the game could close as the main menu came up.** Rarely, at
   the start, the game closed with a crash report naming `hksi_lua_getinfo`; and
   any error in something Xerces asked of the game's menu scripts, or in one of
@@ -220,22 +239,23 @@ to report these again, but tell us if you see them somewhere else or worse.
   map you started yourself from the lobby with a mod that ships the same scripts
   (DS4C) ended in "GSC LINK ERROR" until the game was restarted. Fixed in beta.26.
 
+<!-- end -->
 - **Crash files are never deleted.** Each crash leaves about 22 MB in
   `%LOCALAPPDATA%\boiii\minidumps` (a dump, a text report and a zip), each
   freeze about 0.6 MB. Delete old ones by hand when the folder grows.
 - **The launcher closes when the graphics driver resets.** After a driver update
-  or a GPU fault it says so in a message box and closes (since beta.25; before, its
-  window froze). Open it again.
+  or a GPU fault it says so in a message box and closes. Open it again.
 
 - **A Workshop mod installed twice** (through Steam and as an old manual copy in
-  the game's `mods` or `usermaps` folder): which copy loads is not settled. Since
-  beta.24 Mods says so on both rows; delete the copy you do not want and scan
+  the game's `mods` or `usermaps` folder): which copy loads is not settled. Mods
+  says so on both rows; delete the copy you do not want and scan
   again.
 
-- **Tested on one PC only.** This zip ran in the game on 2026-11-06 on one PC
-  (Windows 11, RTX 5070 Ti): without mods and with three Workshop mods, on a
-  custom map, with the recovery after a crash, and with a crash report sent. It
-  has not met other hardware, other mods or a person playing for long yet.
+- **Tested mostly on one PC.** Each build runs in the game on one PC (Windows
+  11, RTX 5070 Ti) before it goes out: the launch checks without mods, with mods,
+  on a custom map, the recovery after a crash and a crash report sent, and an
+  eight-mod stack on every installed Zombies map (the website's Tested page).
+  Other hardware, other mods and long play have met it only on testers' PCs.
 - **Keep Xerces out of OneDrive.** Unzipped into a folder OneDrive syncs
   (`...\OneDrive\Documents\...`), the first beta zip crashed at every start,
   with mods or without. This build no longer crashes there that way and warns on
@@ -245,6 +265,7 @@ to report these again, but tell us if you see them somewhere else or worse.
   while a map was starting, with no crash report, and ran fine the next time.
   If it happens to you, report it (README.txt, Reporting bugs) and say what you
   did just before.
+<!-- beta -->
 - **A crash while the game closes (up to beta.23).** Once in 12 quits with mods
   in the first betas, and once in the tests of beta.23 with Xerces closed and
   opened again while the game ran, the game crashed as it quit; the next start
@@ -253,12 +274,13 @@ to report these again, but tell us if you see them somewhere else or worse.
   table, while Xerces was still finishing its own shutdown. Builds after
   beta.23 finish that shutdown without the wait that made room for it, and end
   such a quit as the quit it was.
+<!-- end -->
 - **The two experimental display settings do not help yet.** In our tests on one
   PC, "Flip-model presentation (experimental)" changed nothing measurable in
   borderless, and "Precise FPS limit (experimental)" held about 235 FPS at a 240
   limit with slightly less even frames. Leave both off unless we ask you to test
   them.
-- **Joining another tester's game has been tried once.** On 2026-11-07 a second
+- **Joining another player's game has been tried once.** On 2026-11-07 a second
   PC joined a modded Zombies lobby (four mods) by typing `connect <address>` at
   its main menu and played a custom map. The host's router had no UPnP ("No UPnP
   router found"), so its UDP port was forwarded by hand, and the host had to
@@ -275,7 +297,12 @@ to report these again, but tell us if you see them somewhere else or worse.
   closes by itself when you leave the lobby for the main menu is not seen yet;
   closing the lobby or quitting the game closes it. After a crash with the lobby
   open the router keeps forwarding the port until the lobby is opened and closed
-  again (README.txt, Playing with other testers).
+  again (README.txt,
+<!-- beta -->
+  Playing with other testers).
+<!-- stable -->
+  Playing with friends).
+<!-- end -->
 - **Friends and invites are new and tested on one PC only.** Accounts, friend
   requests, presence, privacy, block, sign-out, the open lobby showing as
   joinable, the invite toast in the game, Join into a running game, invite links
@@ -314,4 +341,9 @@ to report these again, but tell us if you see them somewhere else or worse.
   stop with BOIII's "Missing required data" message, or, if BOIII was installed
   on this PC, show BOIII's old launcher with BOIII's options and links (which
   also leaves `%LOCALAPPDATA%\EZZ BOIII` behind). Close it and start Xerces.exe.
+<!-- beta -->
 - **Xerces does not update itself.** A new beta comes as a new zip.
+<!-- stable -->
+- **Xerces does not update itself.** A new version comes as a new zip; the
+  website's download page has the latest.
+<!-- end -->
