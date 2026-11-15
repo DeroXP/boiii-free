@@ -1,6 +1,6 @@
 {
   "schema": "xerces.site.tested/1",
-  "build": "4d3b9e14 (after beta.27)",
+  "build": "20f2cb6c (1.0.0-rc.1)",
   "settings": "Larger zone memory at 8 GB and the precise FPS limit, as the stack's owner plays it",
   "stack": [
     "DS4C Patched v0.85.1",
@@ -17,38 +17,180 @@
       "map": "zm_zod",
       "name": "Shadows of Evil",
       "result": "in_game",
-      "load_s": 14.0
+      "load_s": 17.1
     },
     {
       "map": "zm_tomb",
       "name": "Origins",
       "result": "in_game",
-      "load_s": 11.9
+      "load_s": 16.8
     },
     {
       "map": "zm_theater",
       "name": "Kino der Toten",
       "result": "in_game",
-      "load_s": 12.0
+      "load_s": 16.8
     },
     {
       "map": "zm_moon",
       "name": "Moon",
       "result": "in_game",
-      "load_s": 14.2
+      "load_s": 16.7
     },
     {
       "map": "zm_asylum",
       "name": "Verrückt",
       "result": "in_game",
-      "load_s": 12.0
+      "load_s": 13.0
     },
     {
       "map": "zm_cosmodrome",
       "name": "Ascension",
       "result": "in_game",
+      "load_s": 16.8
+    },
+    {
+      "map": "zm_prototype",
+      "name": "Nacht der Untoten",
+      "result": "in_game",
+      "load_s": 12.9
+    },
+    {
+      "map": "zm_sumpf",
+      "name": "Shi No Numa",
+      "result": "crash_disconnect",
+      "load_s": 13.9,
+      "note": "Played; froze going back to the menu once (1 of 4 runs on this build; known issue)"
+    },
+    {
+      "map": "zm_temple",
+      "name": "Shangri-La",
+      "result": "in_game",
+      "load_s": 14.1
+    },
+    {
+      "map": "zm_ccube",
+      "name": "Cheese Cube Unlimited",
+      "result": "in_game",
       "load_s": 13.1
+    },
+    {
+      "map": "zm_town",
+      "name": "Town Reimagined",
+      "result": "in_game",
+      "load_s": 14.1
+    },
+    {
+      "map": "zm_giant",
+      "name": "The Giant (Remastered)",
+      "result": "in_game",
+      "load_s": 13.0
+    },
+    {
+      "map": "zm_der_riese",
+      "name": "Der Riese: Declassified",
+      "result": "in_game",
+      "load_s": 16.9
+    },
+    {
+      "map": "zm_shoothouse",
+      "name": "Shoot Haus",
+      "result": "in_game",
+      "load_s": 16.9
+    },
+    {
+      "map": "zm_mw2rust",
+      "name": "Rust V5",
+      "result": "in_game",
+      "load_s": 14.2
+    },
+    {
+      "map": "zm_supermario64",
+      "name": "Super Mario 64",
+      "result": "in_game",
+      "load_s": 16.7
+    },
+    {
+      "map": "zm_prison",
+      "name": "Mob of the Dead",
+      "result": "in_game",
+      "load_s": 16.9
+    },
+    {
+      "map": "zm_chickenfila",
+      "name": "Chick-fil-A",
+      "result": "in_game",
+      "load_s": 13.1
+    },
+    {
+      "map": "zm_die",
+      "name": "Die Rise",
+      "result": "in_game",
+      "load_s": 16.8
+    },
+    {
+      "map": "zm_deepboom",
+      "name": "Project: Kaboom - Bazar",
+      "result": "in_game",
+      "load_s": 13.0
+    },
+    {
+      "map": "zm_blundeezy",
+      "name": "Project Blundeezy",
+      "result": "in_game",
+      "load_s": 17.7
+    },
+    {
+      "map": "zm_log_overunder",
+      "name": "Sanctum Obitus",
+      "result": "in_game",
+      "load_s": 16.8
+    },
+    {
+      "map": "zm_wizardcastle",
+      "name": "Return to Hogwartz",
+      "result": "in_game",
+      "load_s": 16.9
+    },
+    {
+      "map": "zm_backrooms",
+      "name": "Backroomz",
+      "result": "in_game",
+      "load_s": 17.6
+    },
+    {
+      "map": "zm_digital_circus",
+      "name": "The Amazing Digital Circus",
+      "result": "in_game",
+      "load_s": 16.8
+    },
+    {
+      "map": "zm_mw4_shipment",
+      "name": "MW4 Shipment Zombie",
+      "result": "crash_match",
+      "load_s": 16.8,
+      "note": "Stops at the map's own unsafe-Lua question (known issue)"
+    },
+    {
+      "map": "zm_big_bang_tower",
+      "name": "Big Bang Tower",
+      "result": "in_game",
+      "load_s": 16.9
+    },
+    {
+      "map": "zm_buriedchallenge",
+      "name": "The Buried Challenge",
+      "result": "in_game",
+      "load_s": 14.0
     }
   ],
-  "how": "tools/dev/session/map-check.ps1 -Live, one game per map: Xerces.exe launches the stack, the map is started from the console, the check waits for the player in the level, plays 30 s with the intro skipped, captures the screen, goes back to the menu and quits; a crash, a freeze, an error box or the time running out ends the run. Steam Workshop maps as installed on the test PC; The Giant from the DLC is not on it."
+  "how": "tools/dev/session/map-check.ps1 -Live, one game per map: Xerces.exe launches the stack, the map is started from the console, the check waits for the player in the level, plays 30 s with the intro skipped, captures the screen, goes back to the menu and quits; a crash, a freeze, an error box or the time running out ends the run. Workshop maps as installed on the test PC.",
+  "limits": {
+    "xmodel": 11264,
+    "image": 49152
+  },
+  "pools_peak": {
+    "xmodel": 10957,
+    "image": 48518
+  }
 }

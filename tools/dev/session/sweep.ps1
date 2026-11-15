@@ -2,7 +2,9 @@
 # -Live for each), with one line per map in <OutDir>\sweep-<Tag>.txt:
 #
 #   tools\dev\session\sweep.ps1 -Tag rc1 -Stack 3171632315,3000417367 `
-#     -Maps zm_zod,zm_tomb -ExtraFlags -borderless,-xerces-db-pool -PollPools
+#     -Maps zm_zod,zm_tomb -ExtraFlags '-borderless','-xerces-db-pool' -PollPools
+#
+# (Flags in quotes: PowerShell reads a bare -name in a list as a parameter.)
 #
 # -PollPools runs tools\dev\re\poll_pools.py beside it: the most of the model,
 # mesh, material and image pools each game used, in <OutDir>\pools-<Tag>.json

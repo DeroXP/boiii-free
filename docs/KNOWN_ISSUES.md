@@ -34,6 +34,12 @@ worse.
     10,900 of them as a level loads. The Wonder Weapon Pack runs alone, with
     DS4C, and with DS4C, Ascendance, im_oxo QOL and Classic Viewmodel FOV.
   - Solo Easter Eggs and Zombie Counter run with the eight.
+  - The eight mods come close to two more tables of the game's: in the menus
+    they use 10,957 of its 11,264 models and 48,518 of its 49,152 images (read
+    from the running game on every map, 2026-11-15). A mod that brings many
+    models or textures on top can stop the game as the menus load with
+    "Exceeded limit of ... 'xmodel' assets" (or 'image'), and Xerces says to
+    turn off some mods. The levels themselves use fewer.
 - **Shadows of Evil with DS4C drops you before the level.** When the 3.5 minute
   intro plays to the end, DS4C's scripts error on every frame and the game drops
   you before you are in the level. Skip the intro and it plays. This is DS4C's
@@ -263,6 +269,12 @@ worse.
   with mods or without. This build no longer crashes there that way and warns on
   Home, but it has not been tried in a OneDrive folder yet: unzip it to a folder
   such as `C:\Games\Xerces`.
+- **Shi No Numa froze once going back to the menu.** With the eight mods, one
+  game in six (2026-11-15) stopped as it left the match for the menu: the game
+  was freeing its script strings and looped on one that was missing from its
+  table. Xerces wrote a freeze report and closed the game after 60 s; the next
+  start is normal. The cause is not found yet. If it happens to you, send the
+  `freeze-<time>.txt` (README.txt, Reporting bugs).
 - **Some crashes are not explained yet.** In our tests the game sometimes closed
   while a map was starting, with no crash report, and ran fine the next time.
   If it happens to you, report it (README.txt, Reporting bugs) and say what you

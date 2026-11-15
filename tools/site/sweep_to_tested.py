@@ -5,9 +5,10 @@ website's site/tested.json, which build_site.py makes the Tested page from.
       --stack-name "DS4C Patched v0.85.1" --stack-name ... [--pools pools-<tag>.json] \
       [--results map-checks/results.jsonl] [--settings "..."]
 
---stack-name gives the mods' names in load order (the first is the main mod). With --pools, each map gets the
-most of the game's model and image tables its level used (results.jsonl ties a run's process to its map; the
-last run of a map counts).
+--stack-name gives the mods' names in load order (the first is the main mod). With --pools, tested.json gets
+the most of the game's model and image tables any of the games used ("pools_peak"): with a mod stack that is
+in the menus, the same for every map (2026-11-15: the eight mods, 10957 models and 48518 images on all 28),
+so it is the stack's figure, not a map's.
 """
 import argparse
 import json
@@ -47,21 +48,18 @@ def main():
     p.add_argument('--settings', default="Larger zone memory at 8 GB and the precise FPS limit, as the stack's "
                                          "owner plays it")
     p.add_argument('--out', default=str(ROOT / 'site' / 'tested.json'))
+    p.add_argument('--note', action='append', default=[], metavar='MAP=TEXT',
+                   help="the Result cell's text for a map that did not play, in words for players")
     a = p.parse_args()
     if not a.stack_name:
         p.error('--stack-name for each mod, in load order')
 
-    peaks = {}
+    notes = dict(n.split('=', 1) for n in a.note)
+    peak = {}
     if a.pools:
-        pools = json.load(open(a.pools, encoding='utf-8'))
-        for line in open(a.results, encoding='utf-8-sig'):
-            try:
-                r = json.loads(line.lstrip('\ufeff'))
-            except ValueError:
-                continue
-            pid = str(r.get('pid') or '')
-            if pid in pools and r.get('map'):
-                peaks[r['map']] = {t: pools[pid].get(t, [0, 0])[0] for t in LIMITS}
+        for per_game in json.load(open(a.pools, encoding='utf-8')).values():
+            for t in LIMITS:
+                peak[t] = max(peak.get(t, 0), per_game.get(t, [0, 0])[0])
 
     maps = []
     for line in open(a.sweep, encoding='utf-8-sig'):
@@ -73,9 +71,7 @@ def main():
         if load:
             entry['load_s'] = float(load)
         if result != 'in_game':
-            entry['note'] = detail.strip()
-        if name in peaks:
-            entry['pools'] = peaks[name]
+            entry['note'] = notes.get(name, detail.strip())
         maps.append(entry)
     if not maps:
         print(f'{a.sweep}: no map lines')
@@ -88,12 +84,13 @@ def main():
         'maps': maps,
         'how': HOW,
     }
-    if peaks:
+    if peak:
         out['limits'] = LIMITS
+        out['pools_peak'] = peak
     pathlib.Path(a.out).write_text(json.dumps(out, indent=2, ensure_ascii=False) + '\n', encoding='utf-8',
                                    newline='\n')
     print(f"{a.out}: {len(maps)} maps, {sum(1 for m in maps if m['result'] == 'in_game')} played, "
-          f"{len(peaks)} with pool peaks")
+          f"pools {peak or 'not read'}")
     return 0
 
 

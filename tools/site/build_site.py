@@ -416,26 +416,26 @@ def tested_body(tested):
     """site/tested.json: a mod stack on every map, as the release was checked."""
     rows = []
     ok = 0
-    # With the sweep's pool readings: the most of the game's own model and
-    # image tables the level used (a stack past 100 % stops with "Exceeded limit").
-    limits = tested.get("limits") or {}
-
-    def share(m, kind):
-        used = (m.get("pools") or {}).get(kind)
-        return "%d %%" % round(100.0 * used / limits[kind]) if used else "&mdash;"
-
     for m in tested["maps"]:
         good = m["result"] == "in_game"
         ok += good
-        cells = "".join("<td>%s</td>" % share(m, k) for k in ("xmodel", "image") if limits)
-        rows.append("<tr><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td>%s</tr>" % (
+        rows.append("<tr><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>" % (
             html.escape(m["name"]), html.escape(m["map"]),
             "Played" if good else "<strong>%s</strong>" % html.escape(m.get("note", m["result"])),
-            ("%.1f s" % m["load_s"]) if good and m.get("load_s") else "&mdash;", cells))
-    pool_heads = "<th>Models</th><th>Images</th>" if limits else ""
-    pool_note = (" Models and Images: the most of the game's own tables the level used (%s models, %s images); "
-                 "a stack that needs more stops with \"Exceeded limit\" and says to turn off some mods." % (
-                     "{:,}".format(limits["xmodel"]), "{:,}".format(limits["image"]))) if limits else ""
+            ("%.1f s" % m["load_s"]) if good and m.get("load_s") else "&mdash;"))
+    # With the sweep's pool readings: how much of the game's own model and
+    # image tables the stack used at its most (in the menus, the same for
+    # every map); a stack that needs more stops with "Exceeded limit".
+    limits = tested.get("limits") or {}
+    peak = tested.get("pools_peak") or {}
+    pool_note = ""
+    if limits and peak:
+        pool_note = ("At its most (in the menus) the stack used %s of the game's %s models (%d %%) and %s of its "
+                     "%s images (%d %%). A stack that needs more stops with \"Exceeded limit\" and says to "
+                     "turn off some mods." % (
+                         "{:,}".format(peak["xmodel"]), "{:,}".format(limits["xmodel"]),
+                         round(100.0 * peak["xmodel"] / limits["xmodel"]), "{:,}".format(peak["image"]),
+                         "{:,}".format(limits["image"]), round(100.0 * peak["image"] / limits["image"])))
     mods = "".join("<li>%s</li>" % html.escape(n) for n in tested["stack"])
     return head("Tested", "Every map, eight mods.",
                 "Before a release, a real mod stack goes onto every installed Zombies map: one game per map, "
@@ -447,13 +447,14 @@ def tested_body(tested):
   <h2 id="stack">The stack</h2>
   <p>In this load order (the first is the main mod), with %s.</p>
   <ol>%s</ol>
+  <p>%s</p>
   <h2 id="maps">The maps</h2>
-  <table><thead><tr><th>Map</th><th>Name in the game</th><th>Result</th><th>Load</th>%s</tr></thead><tbody>%s</tbody></table>
-  <p>Load: from the console's <code>map</code> command to the player in the level, with Xerces' faster loads.%s</p>
+  <table><thead><tr><th>Map</th><th>Name in the game</th><th>Result</th><th>Load</th></tr></thead><tbody>%s</tbody></table>
+  <p>Load: from the console's <code>map</code> command to the player in the level, with Xerces' faster loads.</p>
   <h2 id="how">How</h2>
   <p>%s</p>
   </article>
-</div>""" % (html.escape(tested["settings"]), mods, pool_heads, "".join(rows), html.escape(pool_note),
+</div>""" % (html.escape(tested["settings"]), mods, html.escape(pool_note), "".join(rows),
              html.escape(tested["how"]))
 
 

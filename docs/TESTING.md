@@ -4367,3 +4367,13 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       Wonder Weapon Pack on Shadows of Evil: a fatal report as the menus load, "The map or mods loaded more 'xmodel'
       assets than the game allows (limit: 11264)" with its fix and the game's own "Exceeded limit of 11264 'xmodel'
       assets.", and no crash (`sweep-wwp-fix.txt`, `fatal-2026-11-15-01-38-05.txt`).
+- [x] **1.0.0-rc.1 (20f2cb6c)**, the eight mods on all 28 maps with the pools read beside it
+      (`sweep-rc1.txt`, `pools-rc1.json`, 01:41 to 02:28): 26 loaded (12.9 to 17.7 s) and played; MW4 Shipment
+      at its unsafe-Lua question; Shi No Numa loaded and played, then froze going back to the menu: main thread in
+      `DB_FreeUnusedResources` -> the script string free (0x1412D7800), on the loop at 0x1412D7970 that walks a
+      string's hash chain for its entry and never finds it (`freeze-2026-11-15-01-55-13.txt`; the 600 KB dump has
+      no string table). Shi No Numa three more times on the same build (`tools\dev\session\sweep.ps1 -Tag
+      sumpf-x3`): all played and went back to the menu. So far one freeze in six runs of that map tonight; the
+      cause is open. Pools: every game peaked at the same 10957 models, 17106 to 19292 meshes, 23095 materials and
+      48518 images, so the peak is the menus with the eight mods, not a map; site/tested.json says so once for
+      the stack.
