@@ -92,6 +92,15 @@ Same network, no mods enabled on either PC (Xerces > Mods).
 5. Optional, only if J's Home shows a "Find the culprit" test from an earlier
    crash: start that test, join H, then quit. Expected: Home says the last test
    joined another player's game and did not count, and shows the same test.
+6. Client systems past eight (after beta.27): H with H's eight-mod stack (DS4C,
+   Ascendance, im_oxo QOL, Classic Viewmodel FOV, DBZ Villains, Girls' Frontline
+   2.0, Avali, Neptunia) and Larger zone memory at 8 GB, Kino der Toten with Power
+   On at Start (XERCES SETTINGS); J with the same mods joins. Expected: H's log
+   says "lsm and the ones after it share slot 7"; on both PCs the lights over the
+   mystery box's spot come on with the power, and no script error ends the match.
+   J's game log has "Loaded script 'custom_scripts/zm/xerces_client_systems.csc'
+   into the VM" (the client script that hands the shared states on, linked on a
+   game that joined).
 
 ## 4. Host on a custom map (map-first)
 
