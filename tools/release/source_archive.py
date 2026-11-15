@@ -11,6 +11,10 @@ GitHub's own archives of a tag leave the submodules out. This one holds:
   framework, none of which the build reads;
 - the RmlUi, FreeType and HarfBuzz source archives the launcher is built from,
   as downloaded (SOURCE.txt lists them with their SHA-256), in third_party/;
+- SOURCE_GIT.json: the answer of every `git ...` command premake5.lua runs, as
+  this commit gave them. With no .git, tools/build.ps1 puts tools/source-build
+  first on PATH, whose git.cmd answers from it, so the archive builds and names
+  the same commit;
 - SOURCE-ARCHIVE.txt, which says all this.
 
   python -I tools/release/source_archive.py --out dist/xerces-<version>-source.zip
@@ -21,7 +25,9 @@ downloads nothing.
 """
 import argparse
 import hashlib
+import json
 import pathlib
+import re
 import subprocess
 import sys
 import tarfile
@@ -62,6 +68,22 @@ def add_git_tree(zf, repo, commit, prefix, counts):
         raise notices.Problem(f"git archive {commit} in {repo} failed")
 
 
+def git_answers(commit):
+    """The output of every "git ..." command string in premake5.lua, run at the release commit (the tree is
+    clean, so `git status --porcelain` answers nothing)."""
+    text = (ROOT / "premake5.lua").read_text(encoding="utf-8")
+    commands = sorted(set(re.findall(r'"(git [^"]+)"', text)))
+    if not commands:
+        raise notices.Problem("premake5.lua runs no git command: the archive's SOURCE_GIT.json would be empty")
+    answers = {}
+    for command in commands:
+        run = subprocess.run(command.split(), cwd=ROOT, capture_output=True, text=True)
+        answers[command] = run.stdout if run.returncode == 0 else ""
+    if answers.get("git rev-parse HEAD", "").strip() != commit:
+        raise notices.Problem("git rev-parse HEAD does not answer the commit being archived")
+    return answers
+
+
 def tar_time(mtime):
     t = time.gmtime(max(mtime, 315532800))  # a zip cannot hold dates before 1980
     return t[:6]
@@ -91,6 +113,10 @@ def main():
         included, left_out, archives = [], [], []
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
             add_git_tree(zf, ROOT, commit, prefix, counts)
+            answers = git_answers(commit)
+            if dirty:
+                answers["git status --porcelain"] = ""
+            zf.writestr(prefix + "SOURCE_GIT.json", json.dumps(answers, indent=1, sort_keys=True) + "\n")
             for path in sorted(subs):
                 sub_commit, describe, url = subs[path]
                 if path in LEFT_OUT:
@@ -133,6 +159,11 @@ def main():
                 "  The submodules of deps/FidelityFX-FSR (sample/libs/Cauldron,",
                 "  sample/media/Cauldron-Media) and of deps/rapidjson (thirdparty/gtest):",
                 "  a sample program, its media and a test framework the build does not read.",
+                "",
+                "It builds without Git: with no .git, tools\\build.ps1 skips the submodule update",
+                "and puts tools\\source-build first on PATH, whose git.cmd answers premake's git",
+                "commands from SOURCE_GIT.json (this commit's answers), so the programs name the",
+                "same commit.",
                 "",
                 "Library source archives (unpack them into one folder and pass it to premake",
                 "with --xerces-third-party, as README.md, Building, says):",

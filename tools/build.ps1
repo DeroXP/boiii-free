@@ -65,8 +65,17 @@ if ($Spike -or $Launcher) {
 
 Push-Location $root
 try {
-  git submodule update --init --recursive
-  if ($LASTEXITCODE -ne 0) { throw 'git submodule update failed' }
+  # A release's source archive has no .git and holds the submodules already
+  # (tools\release\source_archive.py); a checkout gets them here. In the
+  # archive, premake's git commands are answered from its SOURCE_GIT.json
+  # (tools\source-build\git.cmd, first on PATH), so the build names the
+  # release commit.
+  if (Test-Path (Join-Path $root '.git')) {
+    git submodule update --init --recursive
+    if ($LASTEXITCODE -ne 0) { throw 'git submodule update failed' }
+  } elseif (Test-Path (Join-Path $root 'SOURCE_GIT.json')) {
+    $env:PATH = (Join-Path $root 'tools\source-build') + ';' + $env:PATH
+  }
   premake5 ninja
   if ($LASTEXITCODE -ne 0) { throw 'premake5 failed' }
 
