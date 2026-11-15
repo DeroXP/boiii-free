@@ -1358,7 +1358,7 @@ void lobby_launch_command() {
   if (!game::is_legacy_client() &&
       game::lobby::LobbyHost_IsHost(game::lobby::LobbyType::GAME)) {
     use_own_map_scripts_first();
-    // -xerces-fast-loads: alone in the lobby, no wait for others
+    // Faster loads: alone in the lobby, no wait for others
     xerces_fast_loads::before_lobby_launch();
   }
   if (engine_lobby_launch) {

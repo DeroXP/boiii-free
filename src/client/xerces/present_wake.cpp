@@ -9,7 +9,7 @@
 // sent message is only taken by PeekMessage: every frame's Present waits for
 // that Sleep to end, up to a millisecond and a bit.
 //
-// With -xerces-present-wake the game's import of Sleep (a pointer in its
+// The game's import of Sleep (a pointer in its
 // import table, as main.cpp does for ExitProcess) goes to a stub. On the
 // Window thread a wait of 1 ms becomes a wait of at most 1 ms that ends as
 // soon as a message is sent to that thread (MsgWaitForMultipleObjectsEx with
@@ -20,15 +20,19 @@
 // many waits there were, how long those a sent message ended had lasted, and
 // how long the others did (what a Sleep(1) lasts with this PC's timer).
 //
-// -xerces-input-wake does the same for the Input thread (0x1422BB4A0), which
+// The same is done for the Input thread (0x1422BB4A0), which
 // takes the raw mouse input with GetRawInputBuffer and then calls Sleep(1):
 // its wait ends as soon as raw input comes (QS_RAWINPUT), so a mouse
 // movement counts at once instead of after up to a millisecond.
 //
 // Earlier detours of kernel32's Sleep code crashed the game in loads
 // (docs/research/upstream-render.md); this changes only the game's own
-// import pointer, takes no lock and asks for no memory. Opt-in until it has
-// been played through map changes.
+// import pointer, takes no lock and asks for no memory.
+//
+// Both are on unless -xerces-no-present-wake or -xerces-no-input-wake is given
+// (xerces_core/default_features.hpp; opt-in with -xerces-present-wake and
+// -xerces-input-wake until 2026-11-14, after map changes, mod stacks and the
+// soak had been played with them; those flags change nothing now).
 
 #include <component/scheduler.hpp>
 #include <game/game.hpp>
@@ -37,14 +41,13 @@
 #include <utils/hook.hpp>
 #include <utils/nt.hpp>
 
+#include <xerces_core/default_features.hpp>
 #include <xerces_core/launch.hpp>
 
 #include "runtime.hpp"
 
 namespace xerces_present_wake {
 namespace {
-constexpr std::string_view present_flag = "-xerces-present-wake";
-constexpr std::string_view input_flag = "-xerces-input-wake";
 // The Window and Input contexts in the engine's thread table
 // (xerces_core::engine_thread_name)
 constexpr std::size_t window_context = 21;
@@ -179,11 +182,6 @@ void report() {
   }
 }
 
-bool flag_given(const std::vector<std::string> &args,
-                const std::string_view name) {
-  return xerces_core::has_launch_flag(args, name) ||
-         xerces_core::has_launch_flag(args, "-" + std::string(name));
-}
 } // namespace
 
 class component final : public client_component {
@@ -195,9 +193,20 @@ public:
     if (!game::is_new_client()) {
       return;
     }
+    namespace features = xerces_core::default_features;
     const auto args = xerces_runtime::command_line_args();
-    present_on = flag_given(args, present_flag);
-    input_on = flag_given(args, input_flag);
+    present_on = features::on(args, features::no_present_wake);
+    input_on = features::on(args, features::no_input_wake);
+    if (!present_on) {
+      xerces_runtime::log_info("xerces.present_wake.opted_out",
+                               "Present waits as the game always did "
+                               "(-xerces-no-present-wake)");
+    }
+    if (!input_on) {
+      xerces_runtime::log_info("xerces.input_wake.opted_out",
+                               "Raw mouse input waits as the game always did "
+                               "(-xerces-no-input-wake)");
+    }
     if (!present_on && !input_on) {
       return;
     }
@@ -222,13 +231,13 @@ public:
       xerces_runtime::log_info(
           "xerces.present_wake.on",
           "The game's Window thread wakes for Present as soon as it is sent "
-          "(-xerces-present-wake)");
+          "(-xerces-no-present-wake turns it off)");
     }
     if (input_on) {
       xerces_runtime::log_info(
           "xerces.input_wake.on",
           "The game's Input thread wakes for raw mouse input as soon as it "
-          "comes (-xerces-input-wake)");
+          "comes (-xerces-no-input-wake turns it off)");
     }
     scheduler::loop(report, scheduler::async, 30s);
   }

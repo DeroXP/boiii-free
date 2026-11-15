@@ -1,6 +1,8 @@
 #include <std_include.hpp>
 
-// -xerces-fast-loads (opt-in; docs/research/engine-re.md, "A map's load"):
+// Faster loads (docs/research/engine-re.md, "A map's load"), on unless
+// -xerces-no-fast-loads is given (xerces_core/default_features.hpp; opt-in
+// with -xerces-fast-loads until 2026-11-14, a flag that changes nothing now):
 //
 // 1. The loading screen draws every frame. The engine's screen update
 //    (SCR_UpdateScreen, 0x1413E1570) draws a frame only once 16 ms have passed
@@ -70,13 +72,13 @@
 #include <utils/hook.hpp>
 #include <utils/nt.hpp>
 
+#include <xerces_core/default_features.hpp>
 #include <xerces_core/launch.hpp>
 
 #include "runtime.hpp"
 
 namespace xerces_fast_loads {
 namespace {
-constexpr std::string_view flag = "-xerces-fast-loads";
 constexpr std::uintptr_t wait_loading = 0x1413E15A4; // mov ebx, 0x10
 constexpr std::uintptr_t wait_late = 0x1413E15A9;    // mov ecx, 0x21
 
@@ -370,10 +372,10 @@ void level_start_frame() {
                          "it is"));
 }
 
-bool flag_given() {
-  const auto args = xerces_runtime::command_line_args();
-  return xerces_core::has_launch_flag(args, flag) ||
-         xerces_core::has_launch_flag(args, "-" + std::string(flag));
+bool turned_off() {
+  return !xerces_core::default_features::on(
+      xerces_runtime::command_line_args(),
+      xerces_core::default_features::no_fast_loads);
 }
 
 class component final : public client_component {
@@ -381,7 +383,9 @@ class component final : public client_component {
 
 public:
   void post_load() override {
-    if (flag_given()) {
+    // The game client's start only (the WMI call was measured there); the
+    // dedicated server's is left as it is
+    if (game::is_client() && !turned_off()) {
       hook_wmi_locator();
     }
   }
@@ -390,9 +394,9 @@ public:
     if (!game::is_new_client()) {
       return;
     }
-    const auto args = xerces_runtime::command_line_args();
-    if (!xerces_core::has_launch_flag(args, flag) &&
-        !xerces_core::has_launch_flag(args, "-" + std::string(flag))) {
+    if (turned_off()) {
+      xerces_runtime::log_info("xerces.fast_loads.opted_out",
+                               "Faster loads are off (-xerces-no-fast-loads)");
       return;
     }
     enabled = true;
@@ -406,9 +410,10 @@ public:
         level_start_enabled
             ? "The loading screen draws every frame, a launch alone does not "
               "wait for others and a Zombies level's start runs 4x while the "
-              "client waits for it (-xerces-fast-loads)"
+              "client waits for it (faster loads; -xerces-no-fast-loads turns "
+              "them off)"
             : "A launch alone does not wait for others; the loading screen "
-              "and the level's start are as they were (-xerces-fast-loads)");
+              "and the level's start are as they were (faster loads)");
     xerces_runtime::log_info(
         "xerces.fast_loads.wmi",
         !wmi_hooked ? "The game's import of CoCreateInstance was not found: "

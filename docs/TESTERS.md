@@ -107,8 +107,8 @@ hash, sent with the link, shows that the zip is the one we made.
   into the same order. Nothing to turn on. If a map still stutters like that,
   send the game's log; to compare with the game's own sort, type
   `-xerces-stream-sort-engine` into Settings > Launch, Extra launch flags.
-- **Faster map loads** (experimental, off unless you turn it on): type
-  `-xerces-fast-loads` into Settings > Launch, Extra launch flags. The game draws its
+- **Faster map loads** (on by default after beta.27; with beta.27 type
+  `-xerces-fast-loads` into Settings > Launch, Extra launch flags). The game draws its
   loading screen only about 57 times a second, and it streams a level's textures in
   step with that, so a big custom map waited on the loading screen rather than on the
   disk. With the flag the loading screen draws every frame and, when nobody else is in
@@ -120,8 +120,16 @@ hash, sent with the link, shows that the zip is the one we made.
   (about 1 s), before you are in the level. Shadows of Evil from the menus: 9 s instead of
   15. It also takes about 5 s off every start: the game
   asks Windows about BitLocker as it starts, and Windows, unless the game runs as
-  administrator, says no only after 5 s; with the flag the game gets that same no at once.
-  Tell us how your loads feel, and turn it off if a load goes wrong.
+  administrator, says no only after 5 s; now the game gets that same no at once.
+  Tell us how your loads feel. If a load goes wrong, turn it off in Settings > Launch,
+  "Faster loads" (safe mode always turns it off).
+- **Frames and mouse input without the 1 ms wait** (on by default after beta.27). The
+  game's window thread and its mouse thread each sleep a millisecond between looks at
+  their queues, so every frame waited up to a millisecond to be shown and every mouse
+  movement up to a millisecond to count. Now each wakes as soon as its frame or mouse
+  input comes: in a level the graphics card held back, frame times were about a third
+  steadier here, and mouse input reached the game in about 0.3 ms instead of 1.1 ms. Settings > Display, "Frames and mouse input
+  without the 1 ms wait", turns it off.
 - **CHARACTERS (Zombies).** The pause menu of a Zombies match has a CHARACTERS
   entry: every character the game or DS4C lists (DS4C's portraits and outfits),
   and DEFAULT. Since beta.25 the character the list is on also has its portrait

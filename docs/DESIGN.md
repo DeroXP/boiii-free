@@ -3717,7 +3717,7 @@ The game presents from its Window thread: the render backend sends the game's
 window message 0x8043 and waits, the window procedure calls
 `IDXGISwapChain::Present`, and the Window thread only takes a sent message after
 each `Sleep(1)` of its message loop (docs/research/engine-re.md, Threads). The
-launch flag `-xerces-present-wake` (`src/client/xerces/present_wake.cpp`) points
+client (`src/client/xerces/present_wake.cpp`) points
 the game's import of `Sleep` at a stub: on the Window thread a wait of 1 ms ends
 as soon as a message is sent to it (`MsgWaitForMultipleObjectsEx` with
 `QS_SENDMESSAGE`, at most the same millisecond); every other thread and wait is
@@ -3726,17 +3726,22 @@ does for `ExitProcess`, and no code (earlier detours of kernel32's `Sleep` code
 crashed in loads, docs/research/upstream-render.md). `xerces.present_wake.stats`
 every 30 s: the waits, how many a sent message ended and how long those had
 lasted, and how long the others lasted (a whole `Sleep(1)` with the PC's timer).
-Off unless the flag is given: in a level where the GPU's queue held the frame
-rate it gave the same frame rate with frame times about a third steadier
-(docs/TESTING.md); whether it becomes the default is the user's call.
+In a level where the GPU's queue held the frame rate it gave the same frame
+rate with frame times about a third steadier (docs/TESTING.md). On by default
+since 2026-11-14 (the user's call; opt-in with `-xerces-present-wake` before,
+a flag that changes nothing now): `-xerces-no-present-wake` turns it off
+(Settings > Display, "Frames and mouse input without the 1 ms wait", turns off
+both waits), and safe mode and the culprit search's tests always do
+(`xerces_core/default_features.hpp`, `preview_launch`).
 
-`-xerces-input-wake` does the same for the game's Input thread, which takes the raw
+The same is done for the game's Input thread, which takes the raw
 mouse input with `GetRawInputBuffer` and then sleeps a millisecond: its wait ends as
 soon as raw input comes (`QS_RAWINPUT`). A mouse movement reached the game's own
 counters in about 0.26 ms instead of 1.1 ms on average (docs/TESTING.md); with a
 mouse that reports thousands of times a second the thread wakes about once for each
 report (6.4% of a core at about 4,000 a second, against 1.0%). `xerces.input_wake.stats`
-every 30 s, as for Present. Off unless given.
+every 30 s, as for Present. On by default too (`-xerces-no-input-wake` turns it
+off; `-xerces-input-wake` changes nothing now).
 
 #### Faster loads (2026-11-14)
 
@@ -3746,12 +3751,12 @@ passed since its last while the local client's connection is not active (33 ms i
 whatever the frame cap. The texture streamer asks for its next reads from that screen
 update, so the last seconds of a map's load, when the level's images stream in behind
 the loading screen, go at that pace and not at the disk's (docs/research/engine-re.md,
-"A map's load"). The launch flag `-xerces-fast-loads`
-(`src/client/xerces/fast_loads.cpp`) sets both waits to 0 after checking the two
+"A map's load"). Faster loads
+(`src/client/xerces/fast_loads.cpp`) set both waits to 0 after checking the two
 instructions, so the loading screen draws every frame the main loop makes (under
 `com_maxfps` there; the engine's own wait loops that draw, such as the zone loader's
 draw-and-sleep, go at the renderer's pace, since a draw still needs the renderer's frame
-to be ready). It also lets a match launched from a lobby with no other player in it
+to be ready). They also let a match launched from a lobby with no other player in it
 start without waiting for the others' acknowledgements: `lobbyLaunch_waitForClientAckDelay`
 (2,000 ms) and `lobbyLaunch_gameLaunchDelay` (700 ms) are 0 for that launch (set in the
 `lobbyLaunchGame` wrapper, `mod_stack.cpp`) and what they were for a launch with others
@@ -3776,7 +3781,7 @@ against the client's last connect, and the client sends the join again only ever
 its own clock, so the first one past the limit is taken (docs/research/engine-re.md, "A
 map's load"). The limit
 is left as it is: at 0 the host was in at level.time 150 to 1,950, sooner than the game
-ever lets anyone in, and the level's scripts may count on that. So the flag also runs a Zombies level's start
+ever lets anyone in, and the level's scripts may count on that. So faster loads also run a Zombies level's start
 4x on our own server while the local client waits for it: while client 0 is in
 `CONFIRMLOADING`, `sv.state` is `GAME` and the server is a level's (not the menus'
 `isUILevel`), the session mode is Zombies, no remote client is in
@@ -3785,13 +3790,16 @@ its cheat flag off), and it is 1 again the frame any of that ends (20 s at most,
 wait, and left as it is if something else changed it meanwhile). The server still steps
 50 ms of game time a frame, only more frames a second, and nobody is in the level yet.
 Shadows of Evil from the menus came 3.3 to 4.1 s sooner (8.8 to 9.6 s from `map` to the
-client's `in_game` phase, 12.9 s with the rest of the flag; 14.6 s without the flag) and
+client's `in_game` phase, 12.9 s with the rest of faster loads; 14.6 s without them) and
 looked the same 6 and 12 s in; Town Reimagined and MW2 Rust 2.3 s sooner with mods off (with
-the three-mod stack 8.7 and 9.8 s, against 33.8 and 39.3 s without the flag). Only with the every-frame loading screen: without it
+the three-mod stack 8.7 and 9.8 s, against 33.8 and 39.3 s without faster loads). Only with the every-frame loading screen: without it
 the texture streaming that hid in the wait came after it instead (`LOADING` took 5.9 s)
 and the level started 2 s later. A `map` from inside a level has no such wait and is
-unchanged. Off unless the flag is given (Settings, launch flags); whether it becomes the
-default is the user's call.
+unchanged. On by default since 2026-11-14 (the user's call, after the tests in
+docs/TESTING.md; opt-in with `-xerces-fast-loads` before, a flag that changes nothing now):
+`-xerces-no-fast-loads` turns them off (Settings > Launch, "Faster loads"), and safe mode
+and the culprit search's tests always do (`xerces_core/default_features.hpp`,
+`preview_launch`), so those launches run the engine's own loads and waits.
 
 #### Precise frame limiter (item 4)
 

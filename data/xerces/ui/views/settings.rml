@@ -95,6 +95,14 @@
 
 			<div class="field">
 				<div class="field-text">
+					<div class="field-name">Frames and mouse input without the 1 ms wait</div>
+					<div class="field-help">The game's window and input threads sleep a millisecond between looks at their queues; with this on, each wakes as soon as a frame is ready to show or the mouse moves. Off passes -xerces-no-present-wake and -xerces-no-input-wake. Safe mode always turns it off.</div>
+				</div>
+				<button id="quick-wake" class="toggle" data-class-on="quick_wake" data-event-click="toggle('quick_wake')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="quick_wake">On</span><span class="toggle-state" data-if="!quick_wake">Off</span></button>
+			</div>
+
+			<div class="field">
+				<div class="field-text">
 					<div class="field-name">FPS limit</div>
 					<div class="field-help">com_maxfps, 0 to 1000; 0 means no limit. Type a number and press Enter, or use the slider. Empty: the game's setting.</div>
 					<div class="field-note">{{fps_note}}</div>
@@ -194,6 +202,14 @@
 					<div class="field-note" data-if="cinematics_note != ''">{{cinematics_note}}</div>
 				</div>
 				<button id="nocinematics" class="toggle" data-class-on="nocinematics" data-event-click="toggle('nocinematics')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="nocinematics">On</span><span class="toggle-state" data-if="!nocinematics">Off</span></button>
+			</div>
+
+			<div class="field">
+				<div class="field-text">
+					<div class="field-name">Faster loads</div>
+					<div class="field-help">The loading screen draws every frame, so textures stream in sooner; a match you start alone skips the lobby's waits for other players; and a Zombies level's first seconds run 4x while the game holds you at the start, when nobody else is in your lobby. Off passes -xerces-no-fast-loads. Safe mode always turns it off.</div>
+				</div>
+				<button id="fast-loads" class="toggle" data-class-on="fast_loads" data-event-click="toggle('fast_loads')"><span class="track"><span class="knob"></span></span><span class="toggle-state" data-if="fast_loads">On</span><span class="toggle-state" data-if="!fast_loads">Off</span></button>
 			</div>
 
 			<div class="field">

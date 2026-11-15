@@ -14,6 +14,7 @@
 #include <cwctype>
 
 #include "db_pool.hpp"
+#include "default_features.hpp"
 #include "flip_model.hpp"
 #include "frame_pacing.hpp"
 #include "ipc.hpp"
@@ -149,11 +150,17 @@ launch_outcome preview_launch(const launch_inputs &in) {
     // compare like with like, and a crash or a black screen a setting causes
     // is never blamed on a mod (DESIGN.md 5.6). The plan is checked against
     // the stock pool, and they run the engine's own frame pacing and swap
-    // chain.
+    // chain. The features on by default (default_features.hpp: faster loads,
+    // the Window and Input threads' waits) are off in them for the same
+    // reason: these launches run the engine's own loads and waits.
     followup = *in.config;
     for (const auto &flag : suspect_settings()) {
       followup->extra_flags =
           with_flag(std::move(followup->extra_flags), flag, false);
+    }
+    for (const std::string_view off : default_features::off_names) {
+      followup->extra_flags =
+          with_flag(std::move(followup->extra_flags), off, true);
     }
   }
   const launcher_config &config = followup ? *followup : *in.config;

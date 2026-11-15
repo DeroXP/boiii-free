@@ -22,6 +22,10 @@
 // - Flip-model presentation (experimental): the client's -xerces-flip-model
 //   (src/client/xerces/flip_model.cpp), also in config.extra_flags. Safe
 //   mode and the culprit search's tests leave it out.
+// - Faster loads, and Present and mouse input without the 1 ms wait: on by
+//   default in the client (xerces_core/default_features.hpp); Off adds its
+//   -xerces-no-... flag(s) to config.extra_flags. Safe mode and the culprit
+//   search's tests always turn them off (xerces_core::preview_launch).
 // - FPS limit, FOV, V-Sync, FPS counter: dvars confirmed in the client
 //   (com_maxfps, cg_fov_default, r_vsync, com_drawFPS_PC), kept in
 //   config.dvars and passed as "+set <dvar> <value>".
@@ -45,6 +49,7 @@
 
 #include <xerces_core/crash_report.hpp>
 #include <xerces_core/db_pool.hpp>
+#include <xerces_core/default_features.hpp>
 #include <xerces_core/flip_model.hpp>
 #include <xerces_core/frame_pacing.hpp>
 #include <xerces_core/settings_options.hpp>
@@ -147,6 +152,8 @@ public:
     model.Bind("drawfps", &drawfps_);
     model.Bind("others", &others_);
     model.Bind("flip_model", &flip_model_);
+    model.Bind("quick_wake", &quick_wake_);
+    model.Bind("fast_loads", &fast_loads_);
 
     model.Bind("nointro", &nointro_);
     model.Bind("intro_note", &intro_note_);
@@ -316,6 +323,7 @@ private:
         {"game-files"},
         {"display-game", "display-windowed", "display-borderless"},
         {"flip-model"},
+        {"quick-wake"},
         {"fps-field", "fps-slider"},
         {"precise-limiter"},
         {"record-frames"},
@@ -329,6 +337,7 @@ private:
     const std::vector<std::vector<std::string>> rest = {
         {"nointro"},
         {"nocinematics"},
+        {"fast-loads"},
         {"db-pool-off", "db-pool-4", "db-pool-6", "db-pool-8"},
         {"close-on-launch"},
         {"flags-field"},
@@ -663,6 +672,12 @@ private:
     precise_limiter_ =
         core::has_flag(c.extra_flags, core::frame_pacing::flag_name);
     flip_model_ = core::has_flag(c.extra_flags, core::flip_model::flag_name);
+    fast_loads_ =
+        !core::has_flag(c.extra_flags, core::default_features::no_fast_loads);
+    quick_wake_ =
+        !core::has_flag(c.extra_flags,
+                        core::default_features::no_present_wake) &&
+        !core::has_flag(c.extra_flags, core::default_features::no_input_wake);
     record_frames_ = core::has_flag(c.extra_flags, "xerces-record-frames");
     close_on_launch_ = c.close_on_launch;
     if (keep(text_field::flags)) {
@@ -1093,6 +1108,32 @@ private:
                           "Turn it off if the picture freezes, goes black or "
                           "the game crashes.")
              : owner_->tr("Xerces no longer passes -xerces-flip-model."));
+    } else if (key == "fast_loads") {
+      const bool on =
+          core::has_flag(c.extra_flags, core::default_features::no_fast_loads);
+      set_flags(
+          core::with_flag(c.extra_flags, core::default_features::no_fast_loads,
+                          !on),
+          std::string("fast_loads ") + (on ? "on" : "off"),
+          on ? owner_->tr("Faster loads are on.")
+             : owner_->tr("Faster loads are off (-xerces-no-fast-loads)."));
+    } else if (key == "quick_wake") {
+      // Both waits together; on only when neither off flag is there
+      const bool on =
+          core::has_flag(c.extra_flags,
+                         core::default_features::no_present_wake) ||
+          core::has_flag(c.extra_flags, core::default_features::no_input_wake);
+      std::vector<std::string> flags = core::with_flag(
+          c.extra_flags, core::default_features::no_present_wake, !on);
+      flags = core::with_flag(std::move(flags),
+                              core::default_features::no_input_wake, !on);
+      set_flags(std::move(flags),
+                std::string("quick_wake ") + (on ? "on" : "off"),
+                on ? owner_->tr("Frames and mouse input no longer wait for "
+                                "the game's 1 ms sleep.")
+                   : owner_->tr("Frames and mouse input wait as the game "
+                                "always did (-xerces-no-present-wake, "
+                                "-xerces-no-input-wake)."));
     } else if (key == "close") {
       c.close_on_launch = !c.close_on_launch;
       save(std::string("close_on_launch ") + (c.close_on_launch ? "on" : "off"),
@@ -1509,6 +1550,7 @@ private:
   bool nointro_ = true, nocinematics_ = false, close_on_launch_ = false;
   int db_pool_gb_ = 0; // 0 off, else 4, 6 or 8
   bool precise_limiter_ = false, flip_model_ = false, record_frames_ = false;
+  bool fast_loads_ = true, quick_wake_ = true;
   // The game's own config.cfg has boiii_skipIntro / boiii_skipCinematics on.
   bool game_skips_intro_ = false, game_skips_cinematics_ = false;
   Rml::String intro_note_, cinematics_note_;

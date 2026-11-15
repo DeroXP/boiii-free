@@ -51,8 +51,9 @@ Same network, no mods enabled on either PC (Xerces > Mods).
 7. H: open the lobby again, then leave it for the game's main menu. Note whether
    a "Closed to direct connect" toast appears within about 15 s (it should when
    the game no longer has a lobby for H).
-8. Optional, with faster loads (after beta.26): both type `-xerces-fast-loads` into
-   Settings > Launch, Extra launch flags, start again, and repeat steps 1 to 3.
+8. With faster loads (on by default after beta.27; with beta.27 both type
+   `-xerces-fast-loads` into Settings > Launch, Extra launch flags, and start again):
+   repeat steps 1 to 3.
    Expected: J still goes along when H starts the match (with J in the lobby H's
    game keeps the lobby's usual waits: its log says "Other players in the lobby: the
    launch waits for them as usual", and has no "The level's start ran 4x" line: the
