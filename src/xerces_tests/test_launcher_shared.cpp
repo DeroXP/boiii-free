@@ -418,8 +418,8 @@ TEST_CASE("shared launcher: culprit tests leave the larger zone memory off") {
   out = launch_game(in, [] { return false; }, {});
   REQUIRE(out.dry_run);
   CHECK(!out.db_pool);
-  CHECK(out.command_line.starts_with("-launch -nointro -windowed" +
-                                     defaults_off + " -xerces-plan "));
+  CHECK(
+      out.command_line.starts_with("-launch -nointro -windowed -xerces-plan "));
   CHECK(out.command_line.find("xerces-db-pool") == std::string::npos);
   CHECK(out.command_line.ends_with(
       "+set fs_game fixture.alpha +set fs_extramods fixture.probe"));
@@ -518,8 +518,8 @@ TEST_CASE("shared launcher: crash follow-ups leave flip model off") {
   REQUIRE(out.dry_run);
   CHECK(out.command_line.find("xerces-flip-model") == std::string::npos);
   CHECK(out.command_line.find("xerces-db-pool") == std::string::npos);
-  CHECK(out.command_line.starts_with("-launch -nointro -windowed" +
-                                     defaults_off + " -xerces-plan "));
+  CHECK(
+      out.command_line.starts_with("-launch -nointro -windowed -xerces-plan "));
   CHECK(!out.flip_model);
 
   in.mods = nullptr;
@@ -556,10 +556,11 @@ TEST_CASE("default features: on unless their off flag comes first") {
   CHECK(features::on({"-xerces-present-wake"}, features::no_present_wake));
 }
 
-TEST_CASE("shared launcher: crash follow-ups turn the default features off") {
+TEST_CASE("shared launcher: safe mode turns the default features off") {
   // Faster loads and the quick waits are on in the client unless their off
-  // flags are given: safe mode and the culprit tests give all three, so they
-  // run the engine's own loads and waits; an ordinary launch gives none.
+  // flags are given: safe mode gives all three, so it runs the engine's own
+  // loads and waits; an ordinary launch gives none, and the culprit search's
+  // tests none either (they run as the crashed launch did).
   const std::string &off = defaults_off;
   fake_setup setup("default_features", true);
   setup.config.extra_flags = {"-windowed"};
@@ -576,8 +577,8 @@ TEST_CASE("shared launcher: crash follow-ups turn the default features off") {
   in.crash_followup = true;
   out = launch_game(in, [] { return false; }, {});
   REQUIRE(out.dry_run);
-  CHECK(out.command_line.starts_with("-launch -nointro -windowed" + off +
-                                     " -xerces-plan "));
+  CHECK(
+      out.command_line.starts_with("-launch -nointro -windowed -xerces-plan "));
 
   in.mods = nullptr;
   in.crash_followup = false;
@@ -623,8 +624,8 @@ TEST_CASE("shared launcher: crash follow-ups leave every experimental "
   in.crash_followup = true;
   out = launch_game(in, [] { return false; }, {});
   REQUIRE(out.dry_run);
-  CHECK(out.command_line.starts_with("-launch -nointro -windowed" +
-                                     defaults_off + " -xerces-plan "));
+  CHECK(
+      out.command_line.starts_with("-launch -nointro -windowed -xerces-plan "));
   for (const auto &flag : suspect_settings()) {
     CHECK(out.command_line.find(flag) == std::string::npos);
   }

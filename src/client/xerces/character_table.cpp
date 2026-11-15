@@ -22,12 +22,17 @@
 // lookup comes after the zones.
 //
 // So an empty Zombies table is not kept: after the loader, an entry whose
-// table has no bodies gets a null table, which the cache's own check takes
-// as "not loaded" (0x1400AD690), so the next use looks it up again, until
-// the map's table is in. Nothing else changes: a table with bodies is kept
-// as the engine keeps it, and other modes are left alone. The loader's
-// first bytes and its reference to the cache are checked before the hook;
-// anything else there is left alone and logged.
+// table has no bodies gets a null map, which the cache's own check takes as
+// "not loaded" (0x1400AD716), so the next use looks it up again, until the
+// map's table is in. The table itself stays as the loader left it: about 40
+// callers read the cached table without a null check (a review, 2026-11-14),
+// and they see the same empty table as before. The map is cleared only if
+// the entry still holds the table this call looked at, so a good table
+// another thread's lookup stored meanwhile is not thrown away (were it, the
+// next use would only look it up once more). Nothing else changes: a table
+// with bodies is kept as the engine keeps it, and other modes are left
+// alone. The loader's first bytes and its reference to the cache are checked
+// before the hook; anything else there is left alone and logged.
 
 #include <game/game.hpp>
 #include <loader/component_loader.hpp>
@@ -47,10 +52,11 @@ constexpr int zombies = 0;
 struct cache_entry {
   std::int32_t mode;
   std::int32_t state;
-  const char *map;
-  const std::uint8_t *table; // its body count is at +8
+  std::atomic<const char *> map;
+  std::atomic<const std::uint8_t *> table; // its body count is at +8
 };
 static_assert(sizeof(cache_entry) == 24);
+static_assert(std::atomic<const char *>::is_always_lock_free);
 
 utils::hook::detour loader_hook;
 // Lookups that found the table empty since it was last found with bodies
@@ -84,20 +90,26 @@ void loader_stub(const int mode) {
     return;
   }
   auto *entry = reinterpret_cast<cache_entry *>(game::relocate(table_cache));
-  const std::uint8_t *table = entry->table;
-  if (!table) {
+  const std::uint8_t *table = entry->table.load();
+  const char *map = entry->map.load();
+  if (!table || !map) {
     return;
   }
   std::uint32_t bodies = 0;
   std::memcpy(&bodies, table + 8, sizeof(bodies));
   if (bodies == 0) {
-    entry->table = nullptr; // looked up again at its next use
+    const std::string name = map;
+    // Looked up again at its next use, unless another lookup has stored a
+    // table since
+    if (entry->table.load() == table) {
+      entry->map.compare_exchange_strong(map, nullptr);
+    }
     if (empty_lookups.fetch_add(1) == 0) {
       xerces_runtime::log_info(
           "xerces.character_table.empty",
           std::format("The Zombies character table for {} is not loaded yet; "
                       "it is looked up again at its next use",
-                      entry->map ? entry->map : "?"));
+                      name));
     }
     return;
   }
@@ -106,7 +118,7 @@ void loader_stub(const int mode) {
         "xerces.character_table.found",
         std::format("The Zombies character table for {} is in ({} bodies) "
                     "after {} empty lookup(s)",
-                    entry->map ? entry->map : "?", bodies, empty));
+                    map, bodies, empty));
   }
 }
 } // namespace

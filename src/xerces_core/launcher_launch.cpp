@@ -150,17 +150,23 @@ launch_outcome preview_launch(const launch_inputs &in) {
     // compare like with like, and a crash or a black screen a setting causes
     // is never blamed on a mod (DESIGN.md 5.6). The plan is checked against
     // the stock pool, and they run the engine's own frame pacing and swap
-    // chain. The features on by default (default_features.hpp: faster loads,
-    // the Window and Input threads' waits) are off in them for the same
-    // reason: these launches run the engine's own loads and waits.
+    // chain.
     followup = *in.config;
     for (const auto &flag : suspect_settings()) {
       followup->extra_flags =
           with_flag(std::move(followup->extra_flags), flag, false);
     }
-    for (const std::string_view off : default_features::off_names) {
-      followup->extra_flags =
-          with_flag(std::move(followup->extra_flags), off, true);
+    // Safe mode also turns off the features on by default
+    // (default_features.hpp: faster loads, the Window and Input threads'
+    // waits), so a crash they cause is not met again with mods off. The
+    // culprit search's tests keep them as the crashed launch had them, so
+    // they compare like with like (a review, 2026-11-14): those features are
+    // not suspects the search tests on their own.
+    if (in.mods_off) {
+      for (const std::string_view off : default_features::off_names) {
+        followup->extra_flags =
+            with_flag(std::move(followup->extra_flags), off, true);
+      }
     }
   }
   const launcher_config &config = followup ? *followup : *in.config;

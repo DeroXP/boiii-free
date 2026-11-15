@@ -3731,8 +3731,8 @@ rate with frame times about a third steadier (docs/TESTING.md). On by default
 since 2026-11-14 (the user's call; opt-in with `-xerces-present-wake` before,
 a flag that changes nothing now): `-xerces-no-present-wake` turns it off
 (Settings > Display, "Frames and mouse input without the 1 ms wait", turns off
-both waits), and safe mode and the culprit search's tests always do
-(`xerces_core/default_features.hpp`, `preview_launch`).
+both waits), and safe mode always does (`xerces_core/default_features.hpp`,
+`preview_launch`; the culprit search's tests keep it as the crashed launch had it).
 
 The same is done for the game's Input thread, which takes the raw
 mouse input with `GetRawInputBuffer` and then sleeps a millisecond: its wait ends as
@@ -3798,8 +3798,10 @@ and the level started 2 s later. A `map` from inside a level has no such wait an
 unchanged. On by default since 2026-11-14 (the user's call, after the tests in
 docs/TESTING.md; opt-in with `-xerces-fast-loads` before, a flag that changes nothing now):
 `-xerces-no-fast-loads` turns them off (Settings > Launch, "Faster loads"), and safe mode
-and the culprit search's tests always do (`xerces_core/default_features.hpp`,
-`preview_launch`), so those launches run the engine's own loads and waits.
+always does (`xerces_core/default_features.hpp`, `preview_launch`), so it runs the
+engine's own loads and waits; the culprit search's tests keep faster loads as the crashed
+launch had them, so they compare like with like (they are not a suspect the search tests
+on its own).
 
 #### Precise frame limiter (item 4)
 

@@ -288,7 +288,8 @@ base 0x140000000 that upstream's symbol tables use.
   0)` and 0x8044 `SetFullscreenState(wParam, lParam)`. So every frame's Present waits
   until the Window thread's `Sleep(1)` ends and its `PeekMessage` takes the sent
   message: up to a millisecond and a bit.
-- `-xerces-present-wake` (`src/client/xerces/present_wake.cpp`, off unless given)
+- `-xerces-present-wake` (`src/client/xerces/present_wake.cpp`; opt-in until
+  2026-11-14, on by default since, `-xerces-no-present-wake` turns it off)
   points the game's import of `Sleep` at a stub that, on the Window thread and for a
   wait of 1 ms only, waits at most the same millisecond but wakes as soon as a
   message is sent to the thread (`MsgWaitForMultipleObjectsEx`, `QS_SENDMESSAGE`),
@@ -316,7 +317,8 @@ base 0x140000000 that upstream's symbol tables use.
   into two counters (0x157DF7498, 0x157DF749C) with locked adds, then `Sleep(1)`. The
   game takes the sums once a frame, so mouse movement can sit up to about a
   millisecond in the raw input queue before it counts.
-- `-xerces-input-wake` (same file as `-xerces-present-wake`, off unless given) ends the
+- `-xerces-input-wake` (same file as `-xerces-present-wake`; on by default since
+  2026-11-14, `-xerces-no-input-wake` turns it off) ends the
   Input thread's `Sleep(1)` as soon as raw input comes (`QS_RAWINPUT`; `GetQueueStatus`
   first, since `GetRawInputBuffer` is no look at the queue). Measured from outside
   (`tools/dev/re/input_latency.py`: a one-count mouse move with `SendInput`, then the
@@ -428,8 +430,9 @@ cache (each load ran after others), 3840x2160, `MaxFPS` 240. Tools: `sample_thre
   last draw (0x145778C7C), 33 ms (`mov ecx, 0x21` at 0x1413E15A9) in states 9 and 10
   (`PRIMED`, `LOADING`);
   otherwise it calls 0x14212B350 with 0 and returns. A first scan for compares near the
-  clock missed it: the 16 is loaded into a register first. `-xerces-fast-loads`
-  (opt-in, `src/client/xerces/fast_loads.cpp`) sets both waits to 0 after checking
+  clock missed it: the 16 is loaded into a register first. Faster loads
+  (`src/client/xerces/fast_loads.cpp`; opt-in with `-xerces-fast-loads` until 2026-11-14,
+  on by default since) set both waits to 0 after checking
   the two instructions.
   `CL_CheckKeepDrawingConnectScreen` (0x1413CCB00) is flattened by the protection.
   (Stack scans of the main thread in that part also pass through 0x14133D3F0: that is
@@ -743,7 +746,8 @@ CustomizationTable *table; the table's body count at +8, its bodies of 0x1C0 byt
 It returns null only when the table is missing or has no bodies; an index past the end gives
 the first body. The cache's check (0x1400AD690) takes a Zombies entry as good while the name
 it keeps equals the `mapname` dvar (0x157736848), and the loader (0x1400AD8E0) looks the
-table up with `DB_FindXAssetHeader` (type 0x22, allowing a default) under a name it derives
+table up with `DB_FindXAssetHeader` (type 0x22; its last two arguments 1 and -1, the -1
+a wait that sleeps and tries again while a zone is loading) under a name it derives
 from `mapname` (0x1400ADDB0), keeping `mapname`'s own string pointer as the entry's map.
 Watched from outside the process (`tools/dev/re/watch_chartable.py`): `mapname`
 became `zm_moon` while Kino's level was still up, the loader ran within 50 ms, before Moon's
@@ -752,8 +756,14 @@ table, so it was never looked up again, and the spawn read it. From the menus th
 lookup comes after the zones.
 
 Xerces (`src/client/xerces/character_table.cpp`) hooks the loader: a Zombies table with no
-bodies is not kept (the entry's table is set to null, which the check takes as not loaded),
-so the next use looks it up again. With it, Kino der Toten to Moon: one empty lookup, the
-table found with 9 bodies 3 s later, the level up, no crash; eight map changes in one game
-(Shadows of Evil, Origins, Kino, Moon, Shadows of Evil, Asylum, Ascension, Shi No Numa)
-all came up.
+bodies is not kept (the entry's map is set to null, which the check at 0x1400AD716 takes as
+not loaded), so the next use looks it up again. The table itself is left as the loader
+stored it: about 40 callers read the cached table through 0x1400ADD80 without a null check
+(`cmp eax, [rsi+8]` at 0x141730D9C and 0x1417328AC, `[rsi+0x18]` at 0x140CBAF54, among
+others; the built-ins that set a character raise "invalid character customization table" on
+null), so they see the same empty table as before. The map is cleared only while the entry
+still holds the table that lookup saw, so a good table another thread stored meanwhile is
+kept (a review, 2026-11-14, found both: the first version nulled the table). With it, Kino
+der Toten to Moon: one empty lookup, the table found with 9 bodies 3 s later, the level up,
+no crash; eight map changes in one game (Shadows of Evil, Origins, Kino, Moon, Shadows of
+Evil, Asylum, Ascension, Shi No Numa) all came up.

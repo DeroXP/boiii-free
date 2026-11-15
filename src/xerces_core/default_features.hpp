@@ -6,8 +6,9 @@
 // that end as soon as what they wait for comes (present_wake.cpp). Each is
 // off when its flag is on the game's command line before the first "+"
 // command, spelled "-name" or "--name": the launcher's Settings switches add
-// them, and safe mode and the culprit search's tests always do
-// (preview_launch). The flags that turned them on while they were opt-in
+// them, and safe mode always does (preview_launch; the culprit search's tests
+// keep the features as the crashed launch had them). The flags that turned them
+// on while they were opt-in
 // (-xerces-fast-loads, -xerces-present-wake, -xerces-input-wake) change
 // nothing now.
 

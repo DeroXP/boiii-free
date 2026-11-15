@@ -383,9 +383,9 @@ class component final : public client_component {
 
 public:
   void post_load() override {
-    // The game client's start only (the WMI call was measured there); the
-    // dedicated server's is left as it is
-    if (game::is_client() && !turned_off()) {
+    // This game client's start only (the WMI call was measured there); the
+    // legacy client's and the dedicated server's are left as they are
+    if (game::is_new_client() && !turned_off()) {
       hook_wmi_locator();
     }
   }

@@ -111,12 +111,12 @@ hash, sent with the link, shows that the zip is the one we made.
   `-xerces-fast-loads` into Settings > Launch, Extra launch flags). The game draws its
   loading screen only about 57 times a second, and it streams a level's textures in
   step with that, so a big custom map waited on the loading screen rather than on the
-  disk. With the flag the loading screen draws every frame and, when nobody else is in
+  disk. Now the loading screen draws every frame and, when nobody else is in
   your lobby, the launch also skips the 2.7 s the lobby waits for other players. Tested
   here with a three-mod stack: Town Reimagined 9 s instead of 34, MW2 Rust 10 s instead
   of 39. A Zombies map also no longer sits about 5 s on a finished loading screen: the
   game makes you wait until the new level's own clock has run about 5 s (3 on Origins);
-  with the flag, and nobody else in your lobby, that clock runs 4x for those seconds
+  now, with nobody else in your lobby, that clock runs 4x for those seconds
   (about 1 s), before you are in the level. Shadows of Evil from the menus: 9 s instead of
   15. It also takes about 5 s off every start: the game
   asks Windows about BitLocker as it starts, and Windows, unless the game runs as

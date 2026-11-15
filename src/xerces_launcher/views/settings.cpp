@@ -24,8 +24,8 @@
 //   mode and the culprit search's tests leave it out.
 // - Faster loads, and Present and mouse input without the 1 ms wait: on by
 //   default in the client (xerces_core/default_features.hpp); Off adds its
-//   -xerces-no-... flag(s) to config.extra_flags. Safe mode and the culprit
-//   search's tests always turn them off (xerces_core::preview_launch).
+//   -xerces-no-... flag(s) to config.extra_flags. Safe mode always turns
+//   them off (xerces_core::preview_launch).
 // - FPS limit, FOV, V-Sync, FPS counter: dvars confirmed in the client
 //   (com_maxfps, cg_fov_default, r_vsync, com_drawFPS_PC), kept in
 //   config.dvars and passed as "+set <dvar> <value>".
