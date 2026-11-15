@@ -125,9 +125,11 @@ function Finish {
 }
 
 # The log of one launcher process (several can run in the reopen case).
+# Process ids come back, so only a log written since this one started.
 function Launcher-Log($process) {
   Get-ChildItem (Join-Path $HomeDir 'logs') -Filter "*-launcher-$($process.Id).jsonl" -ErrorAction SilentlyContinue |
-    Select-Object -First 1
+    Where-Object { $_.LastWriteTime -ge $process.StartTime.AddSeconds(-1) } |
+    Sort-Object LastWriteTime | Select-Object -Last 1
 }
 
 # The launcher's launch.started event, or a fail with its refusal.

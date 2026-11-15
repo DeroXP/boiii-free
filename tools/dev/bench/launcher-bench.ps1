@@ -89,7 +89,10 @@ function Start-Launcher([string]$homeDir, [string[]]$extra, [double]$seconds, [s
   if ($until) {
     while (-not $process.HasExited -and $watch.Elapsed.TotalSeconds -lt $seconds) {
       Start-Sleep -Milliseconds 500
-      $log = Get-ChildItem $logs -Filter "*-launcher-$($process.Id).jsonl" -ErrorAction SilentlyContinue | Select-Object -First 1
+      # Process ids come back: only a log written since this launcher started.
+      $log = Get-ChildItem $logs -Filter "*-launcher-$($process.Id).jsonl" -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $process.StartTime.AddSeconds(-1) } |
+        Sort-Object LastWriteTime | Select-Object -Last 1
       if ($log -and (& $until $log.FullName)) { [void]$process.CloseMainWindow(); break }
     }
   }
@@ -98,7 +101,9 @@ function Start-Launcher([string]$homeDir, [string[]]$extra, [double]$seconds, [s
     throw "Xerces.exe (pid $($process.Id)) did not exit"
   }
   $wall = $watch.Elapsed.TotalMilliseconds
-  $log = Get-ChildItem $logs -Filter "*-launcher-$($process.Id).jsonl" | Select-Object -First 1
+  $log = Get-ChildItem $logs -Filter "*-launcher-$($process.Id).jsonl" -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTime -ge $process.StartTime.AddSeconds(-1) } |
+    Sort-Object LastWriteTime | Select-Object -Last 1
   if (-not $log) { throw "no log for pid $($process.Id) in $logs" }
   $events = @(Get-Content $log.FullName | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json })
   [pscustomobject]@{ wall_ms = $wall; events = $events; log = $log.FullName }

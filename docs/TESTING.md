@@ -4431,3 +4431,10 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       with the DLSS DLLs: every file matches SHA256SUMS.txt; the M1 cases from its files 60 of 60
       (`bench\20261114-night\m1-pkg-rc1-49a1aac1`). This is the rc.1 package; the 7eab256c and 3b283505 zips
       above are superseded.
+- [x] The two `not_started` lines (`sweep-sumpf-hunt.txt` at 04:04:35, `sweep-sumpf-hunt4.txt` at 05:28:08) were the
+      check's, not the launcher's: the journal each next run saved (`journal.json.20261115-040834`, `-052855` in
+      the home's logs) shows a game started 4 s into each run and ended `clean_exit` 43 s later, when the check gave
+      up. The check finds the launcher's log by process id (`*-launcher-<pid>.jsonl`) and took the first such file
+      by name; process ids come back, and an older log of the same id (with no `launch.started`) came first. The
+      lookups in map-check.ps1, m1-check.ps1, launcher-bench.ps1 and launcher-idle.ps1 now take only a log written
+      since that launcher started, as check-idle.ps1 already did. The M1 `modded` case (dry launch) passes with it.

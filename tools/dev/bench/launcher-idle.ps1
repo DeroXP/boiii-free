@@ -61,7 +61,10 @@ for ($i = 0; $i -lt 100 -and $window -eq [IntPtr]::Zero; $i++) {
 $log = $null
 for ($i = 0; $i -lt 100 -and -not $log; $i++) {
   Start-Sleep -Milliseconds 100
-  $log = Get-ChildItem (Join-Path $HomeDir 'logs') -Filter "*-launcher-$($process.Id).jsonl" -ErrorAction SilentlyContinue | Select-Object -First 1
+  # Process ids come back: only a log written since this launcher started.
+  $log = Get-ChildItem (Join-Path $HomeDir 'logs') -Filter "*-launcher-$($process.Id).jsonl" -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTime -ge $process.StartTime.AddSeconds(-1) } |
+    Sort-Object LastWriteTime | Select-Object -Last 1
 }
 if ($window -eq [IntPtr]::Zero -or -not $log) { $process.Kill(); throw 'the launcher window or its log did not appear' }
 

@@ -109,8 +109,13 @@ function Find-Event([string]$path, [string]$name) {
   return $null
 }
 
+# Process ids come back: an older log of the same id (a warm launcher's, with
+# no launch.started) was taken twice on 2026-11-15 and the run called
+# not_started while its game ran. Only a log written since this one started.
 function Launcher-Log($process) {
-  Get-ChildItem (Join-Path $HomeDir 'logs') -Filter "*-launcher-$($process.Id).jsonl" -ErrorAction SilentlyContinue | Select-Object -First 1
+  Get-ChildItem (Join-Path $HomeDir 'logs') -Filter "*-launcher-$($process.Id).jsonl" -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTime -ge $process.StartTime.AddSeconds(-1) } |
+    Sort-Object LastWriteTime | Select-Object -Last 1
 }
 
 function Write-Config {
