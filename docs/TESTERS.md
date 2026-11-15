@@ -1,4 +1,8 @@
+<!-- beta -->
 # Xerces beta: read this first
+<!-- stable -->
+# Xerces: read this first
+<!-- end -->
 
 Xerces is a launcher for Call of Duty: Black Ops III that loads several Steam
 Workshop mods at once, in the order you choose, and helps when a mix of mods
@@ -6,7 +10,11 @@ breaks the game. It is for people who own Black Ops III on Steam. It plays
 offline and on games players host themselves; it never touches official
 matchmaking.
 
+<!-- beta -->
 This is a beta. Things will go wrong, and telling us about them is the point.
+<!-- stable -->
+If something goes wrong, please tell us (Reporting bugs, below).
+<!-- end -->
 KNOWN_ISSUES.txt lists what we already know about.
 
 ## What you need
@@ -20,11 +28,21 @@ KNOWN_ISSUES.txt lists what we already know about.
 
 ## Install
 
-1. Check the zip before you unzip it. The private link comes with the zip's
-   SHA-256. In PowerShell, in the folder with the zip, run
+1. Check the zip before you unzip it.
+<!-- beta -->
+   The private link comes with the zip's SHA-256.
+<!-- stable -->
+   The download page shows the zip's SHA-256.
+<!-- end -->
+   In PowerShell, in the folder with the zip, run
    `Get-FileHash .\xerces-<version>.zip` (with your zip's name) and compare the
-   hash it prints with the one sent with the link. If they differ, do not use
-   the zip, and tell us.
+   hash it prints with the one
+<!-- beta -->
+   sent with the link.
+<!-- stable -->
+   on the download page.
+<!-- end -->
+   If they differ, do not use the zip, and tell us.
 2. Unzip the whole zip into a folder of its own, for example `C:\Games\Xerces`.
    Not into the Black Ops III folder, and not into a folder OneDrive syncs
    (Documents and Desktop often are: their path then has `OneDrive` in it),
@@ -33,9 +51,9 @@ KNOWN_ISSUES.txt lists what we already know about.
    Xerces first: only one Xerces runs at a time.
 3. Start **Xerces.exe**, and only Xerces.exe. It starts the game (boiii.exe)
    itself, with the mods you picked. Do not start boiii.exe or BlackOps3.exe
-   yourself while you test: boiii.exe started on its own does not find Xerces'
+   yourself: boiii.exe started on its own does not find Xerces'
    data and behaves like BOIII (KNOWN_ISSUES.txt).
-4. Windows SmartScreen may say "Windows protected your PC", because the beta is
+4. Windows SmartScreen may say "Windows protected your PC", because Xerces is
    not signed yet. Choose "More info", then "Run anyway".
 5. The first start reads your whole Workshop folder to learn your mods. From an
    SSD that takes seconds; from a hard disk with a big Workshop folder it can
@@ -43,7 +61,7 @@ KNOWN_ISSUES.txt lists what we already know about.
 
 SHA256SUMS.txt in the folder lists the SHA-256 of every file in it, to check
 later that no file has changed. It came in the same zip, so only the zip's own
-hash, sent with the link, shows that the zip is the one we made.
+hash (step 1) shows that the zip is the one we made.
 
 ## Playing
 
@@ -100,21 +118,20 @@ hash, sent with the link, shows that the zip is the one we made.
   ten minutes of frame times, from 20 seconds into its first level, to a `bench`
   folder next to Xerces.exe (four small files, one listing what the game was doing during each long frame); leaving the level writes them early. Play as usual, then send those
   files to show where a map stutters. Turn it off afterwards.
-- **Long frames on large custom maps** (since beta.23). On a big map with many
+- **Long frames on large custom maps.** On a big map with many
   mods the game could show a frame of about 140 ms several times a second: it
   re-sorted its list of loaded textures with a sort that is slow when the list
   is far out of order. Xerces now sorts that list about a hundred times quicker,
   into the same order. Nothing to turn on. If a map still stutters like that,
   send the game's log; to compare with the game's own sort, type
   `-xerces-stream-sort-engine` into Settings > Launch, Extra launch flags.
-- **Every mod's map effects, however many mods** (after beta.27). The game has room
+- **Every mod's map effects, however many mods.** The game has room
   for eight "client systems", the channels a map's and a mod's scripts use to tell your
   game something (Kino der Toten's mystery box lights, DS4C's messages); with a big stack
   Xerces used to leave the ones past eight out. Now they share one of the game's slots,
   so none is left out. If a map's lights or a mod's on-screen text stay missing with many
   mods, send the game's log (`xerces.client_systems` lines).
-- **Faster map loads** (on by default after beta.27; with beta.27 type
-  `-xerces-fast-loads` into Settings > Launch, Extra launch flags). The game draws its
+- **Faster map loads** (on by default). The game draws its
   loading screen only about 57 times a second, and it streams a level's textures in
   step with that, so a big custom map waited on the loading screen rather than on the
   disk. Now the loading screen draws every frame and, when nobody else is in
@@ -133,7 +150,7 @@ hash, sent with the link, shows that the zip is the one we made.
   next steps in the same frame, about 1 s off every start.
   Tell us how your loads feel. If a load goes wrong, turn it off in Settings > Launch,
   "Faster loads" (safe mode always turns it off).
-- **Frames and mouse input without the 1 ms wait** (on by default after beta.27). The
+- **Frames and mouse input without the 1 ms wait** (on by default). The
   game's window thread and its mouse thread each sleep a millisecond between looks at
   their queues, so every frame waited up to a millisecond to be shown and every mouse
   movement up to a millisecond to count. Now each wakes as soon as its frame or mouse
@@ -142,14 +159,14 @@ hash, sent with the link, shows that the zip is the one we made.
   without the 1 ms wait", turns it off.
 - **CHARACTERS (Zombies).** The pause menu of a Zombies match has a CHARACTERS
   entry: every character the game or DS4C lists (DS4C's portraits and outfits),
-  and DEFAULT. Since beta.25 the character the list is on also has its portrait
+  and DEFAULT. The character the list is on also has its portrait
   beside the live view, when it has one (the game's own and DS4C's do). Your pick stays on you: another mod's own character screen
   (DS4C's) cannot change it until you pick DEFAULT. A character whose look a
   character mod has replaced (Hyperdimension Neptunia gives the first four their
   looks) says which mod. When you host, your last pick is put on again in the next
   match; other players pick again.
 - **Every character mod's characters, on one screen with a live view (Zombies).**
-  Since beta.22 CHARACTERS is one screen with a tab for each character mod (LB/RB
+  CHARACTERS is one screen with a tab for each character mod (LB/RB
   or Q/E change tab): your main mod's characters first, then DBZ VILLAIN
   CHARACTERS, GIRLS' FRONTLINE and so on, and ORIGINAL CHARACTERS for the game's
   own where a mod replaced them. Moving over a name shows that character on you,
@@ -166,8 +183,7 @@ hash, sent with the link, shows that the zip is the one we made.
   Stronger. It is on Game's Own until you change it. Modern slows your look speed
   while a zombie is near the crosshair and turns the view with a zombie as it moves
   or you strafe; like those games it needs stick input and has no snap. Modern
-  is a little under those games' own strength (since beta.25: beta.21 to beta.24
-  had it much stronger, which is what Stronger still is). It takes only live
+  is a little under those games' own strength; Stronger is well above it. It takes only live
   zombies you can see, and it settles the view between a zombie's torso and head,
   around the neck, leaving the height inside that to you. It needs an Xbox-style
   (XInput) controller, works in Zombies only and never with a mouse. In a match the
@@ -198,7 +214,7 @@ hash, sent with the link, shows that the zip is the one we made.
   you do not have to end it in Task Manager. If it comes back on its own, the
   report is taken back. A message box waiting for your answer (a mod's unsafe-Lua
   question, the error dialog) is not a freeze, and neither is the time the PC
-  slept (since beta.24).
+  slept.
 - **A load that never ends is reported too.** While the loading screen shows, the game
   keeps drawing it, so a load stuck inside the game was not a freeze and left nothing.
   After five minutes on one load the game writes `load-<time>.txt` next to its crash
@@ -209,8 +225,8 @@ hash, sent with the link, shows that the zip is the one we made.
   says DirectX failed.
 - **If Xerces itself crashes**, it leaves `launcher-<time>.txt` and a small dump in
   its crash folder (Diagnostics lists them), and says so the next time it starts.
-- **Every crash, freeze and fatal error leaves a report you can read** (since
-  beta.22): `crash-<time>.txt`, `freeze-<time>.txt` or `fatal-<time>.txt` in
+- **Every crash, freeze and fatal error leaves a report you can read**:
+  `crash-<time>.txt`, `freeze-<time>.txt` or `fatal-<time>.txt` in
   `%LOCALAPPDATA%\boiii\minidumps`, next to the dump. It starts with what
   happened in a sentence, then the Xerces version, the map, your mods in load
   order, the scripts that were running, where the game was in its code, how
@@ -254,11 +270,15 @@ hash, sent with the link, shows that the zip is the one we made.
 
 ## Reporting bugs
 
+<!-- beta -->
 Open an issue at <https://github.com/DeroXP/boiii-free/issues>, or tell us in
 the tester channel. Please include:
+<!-- stable -->
+Open an issue at <https://github.com/DeroXP/boiii-free/issues>. Please include:
+<!-- end -->
 
 - the Xerces version (About, or the top of the game's main menu), for example
-  `Xerces 0.1.0-beta.14 (3f09512d)`;
+  `Xerces 1.0.0 (3f09512d)`;
 - what you did, what you expected and what happened;
 - the mods you had on, in their order, the mode and the map;
 - Diagnostics > Copy report, pasted in;
@@ -268,11 +288,18 @@ the tester channel. Please include:
 
 Never attach game files or files from the Workshop folder.
 
+<!-- beta -->
 ## Playing with other testers
 
 Joining another tester's game has been tried once, on two PCs on 2026-11-07: a
 modded Zombies game, with the host's port forwarded by hand (KNOWN_ISSUES.txt).
 If you try it, tell us how it went.
+<!-- stable -->
+## Playing with friends
+
+One player hosts and the others join by address. When the host's router does not
+open the game's port by itself, the host forwards it by hand (KNOWN_ISSUES.txt).
+<!-- end -->
 
 - **Hosting.** Launch the game from Home. In the Zombies or Multiplayer online
   lobby (not Play Local), press the button under the map button that reads
@@ -424,7 +451,7 @@ To remove Xerces, delete its folder and `%LOCALAPPDATA%\Xerces`. Leave
 
 ## Updating
 
-Xerces does not update itself in this beta. When a new zip comes out, close
+Xerces does not update itself yet. When a new zip comes out, close
 Xerces and the game, delete the files in the old Xerces folder, and unzip the
 new zip there (or into a new folder). Your settings stay in
 `%LOCALAPPDATA%\Xerces`.
@@ -433,7 +460,13 @@ new zip there (or into a new folder). Your settings stay in
 
 Xerces only starts game builds it knows. After a Steam update it says so on Home
 and does not launch. Play through Steam until a Xerces zip supports the new
-build; the tester channel will say when. Do not try to keep or restore an older
+build;
+<!-- beta -->
+the tester channel will say when.
+<!-- stable -->
+the website's download page will say when.
+<!-- end -->
+Do not try to keep or restore an older
 game build for Xerces.
 
 ## Licence and source

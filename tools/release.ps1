@@ -26,7 +26,8 @@
      "No Steam" option and Ezz links, is replaced by
      tools\release\launcher\main.html, which only says to start Xerces.exe),
      LICENSE, NOTICE, CREDITS, THIRD_PARTY_NOTICES.txt and SOURCE.txt
-     (tools\release\notices.py), README.txt (docs\TESTERS.md) and
+     (tools\release\notices.py), README.txt (docs\TESTERS.md, its beta or
+     stable lines by VERSION: tools\release\flavour.py) and
      KNOWN_ISSUES.txt (docs\KNOWN_ISSUES.md), then SHA256SUMS.txt over every
      file. No .lib, .pdb, spike or test programs go in.
   4. Zips the folder, zips the PDBs into symbols-<version>.zip (kept by the
@@ -162,6 +163,7 @@ try {
   Invoke-Checked 'notices.py --licences' { python -I tools\release\notices.py --licences }
   # CREDITS names every author in the Git history (DESIGN.md 16.5).
   Invoke-Checked 'credits.py --check' { python -I tools\release\credits.py --check }
+  Invoke-Checked 'flavour.py --self-test' { python -I tools\release\flavour.py --self-test }
 
   # README.txt (docs\TESTERS.md) must describe what this build does. It says
   # crash reports are sent, can be turned off in Settings > Privacy and deleted
@@ -233,7 +235,11 @@ try {
     python -I tools\release\notices.py --notices (Join-Path $stage 'THIRD_PARTY_NOTICES.txt') `
       --source (Join-Path $stage 'SOURCE.txt') --downloads $DownloadsDir
   }
-  Write-Crlf (Join-Path $stage 'README.txt') (Read-Utf8 (Join-Path $root 'docs\TESTERS.md'))
+  # A beta's README.txt keeps the guide's beta lines (the private link, the
+  # tester channel), a stable release's its stable ones (flavour.py).
+  Invoke-Checked 'flavour.py' {
+    python -I tools\release\flavour.py docs\TESTERS.md (Join-Path $stage 'README.txt') --version $version
+  }
   Write-Crlf (Join-Path $stage 'KNOWN_ISSUES.txt') (Read-Utf8 (Join-Path $root 'docs\KNOWN_ISSUES.md'))
 
   $unwanted = @(Get-ChildItem -Recurse -File $stage | Where-Object {

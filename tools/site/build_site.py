@@ -23,6 +23,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SITE = ROOT / "site"
+sys.path.insert(0, str(ROOT / "tools" / "release"))
+import flavour  # noqa: E402  (the guide's beta and stable lines, as in README.txt)
 
 
 
@@ -490,8 +492,11 @@ def build(out_dir):
         "docs.html": page(layout, "Docs - Xerces", "Xerces' documentation for players, mod authors and server "
                           "hosts.", "docs.html", docs_index_body(), releases),
     }
+    # The guide says what README.txt in the zip on the download page says: the
+    # stable wording once a stable release is live.
+    stable_live = (releases.get("stable") or {}).get("state") == "live"
     for name, source, title, eyebrow, line, shift in DOCS_PLAYERS + DOCS_AUTHORS:
-        text = (ROOT / source).read_text(encoding="utf-8").replace("\r\n", "\n").split("\n")
+        text = flavour.pick((ROOT / source).read_text(encoding="utf-8"), stable_live).split("\n")
         if text and text[0].startswith("# "):
             text = text[1:]
         headings = []
