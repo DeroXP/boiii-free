@@ -45,10 +45,12 @@ to report these again, but tell us if you see them somewhere else or worse.
   two mods share). The Zombies camos in the weapon kits are tagged PEGASUS,
   whose copies of those icons win. In a match you get DS4C's pause menu, and
   PEGASUS's own menu is under "PEGASUS MENU" there.
-- **PEGASUS asks for unsafe Lua.** As the main menu loads and in a match, the
-  game asks whether to allow unsafe Lua functions (file access): PEGASUS tries
-  to open a file. The menu waits until you answer. No keeps it blocked; the
-  menus and the match played normally in our tests that way.
+- **PEGASUS and MW4 Shipment ask for unsafe Lua.** As the main menu loads and
+  in a match, PEGASUS's menus try to open a file; in MW4 Shipment's mode screen
+  the map's own menu asks for package.loadlib, which loads a DLL into the game.
+  The game asks whether to allow unsafe Lua functions and waits until you
+  answer; after beta.27 the question names the function and what it does. No
+  keeps them blocked; PEGASUS's menus and match played normally that way.
 - **A mod's menu file in the lobby.** When a mod's copy of a Lua file the menus
   and the lobby share fails in the lobby (Ascendance's), Xerces uses the game's
   own copy there and the mod's copy in the menus, and the game log says so

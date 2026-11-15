@@ -55,7 +55,7 @@ static std::atomic<bool> ui_initialized = false;
 static std::atomic<bool> unsafe_function_called_message_shown = false;
 static std::atomic<bool> unsafe_lua_approved_for_session = false;
 
-bool show_unsafe_lua_dialog() {
+bool show_unsafe_lua_dialog(const char *function) {
   if (game::allow_unsafe_lua()) {
     return true;
   }
@@ -65,12 +65,47 @@ bool show_unsafe_lua_dialog() {
     return unsafe_lua_approved_for_session.load(std::memory_order_acquire);
   }
 
-  // Xerces: the question waits for the player; no freeze meanwhile
+  // Xerces: the question waits for the player; no freeze meanwhile. It names
+  // the function asked for (2026-11-15: MW4 Shipment's own menu asks, as
+  // PEGASUS does), so a player can tell what they are answering.
+  // "package_loadlib" (the hook's key, quoted by its macro) as Lua writes it,
+  // package.loadlib, and what it does in plain words
+  std::string name = function ? function : "";
+  std::erase(name, '"');
+  std::string what;
+  if (name.starts_with("package_loadlib")) {
+    what = "loading a DLL into the game";
+  } else if (name == "os_execute" || name == "io_popen") {
+    what = "running a program or system command";
+  } else if (name == "os_getenv") {
+    what = "reading environment variables";
+  } else if (name == "os_remove" || name == "os_rename" ||
+             name == "os_tmpname") {
+    what = "deleting, renaming or making files";
+  } else if (name == "os_exit") {
+    what = "closing the game";
+  } else if (name.starts_with("io_")) {
+    what = "reading or writing files";
+  } else if (name.starts_with("base_load") || name == "string_dump") {
+    what = "loading Lua code from outside the game";
+  }
+  if (const auto underscore = name.find('_'); underscore != std::string::npos) {
+    name = name.starts_with("base_") ? name.substr(underscore + 1)
+                                     : name.replace(underscore, 1, ".");
+  }
+  const std::string asked =
+      name.empty()
+          ? std::string()
+          : "It asked for " + name +
+                (what.empty() ? std::string() : " (" + what + ")") + ".\n\n";
+  xerces_runtime::log_info("lua.unsafe.asked",
+                           "A map's or mod's Lua asked for an unsafe function" +
+                               (name.empty() ? std::string() : ": " + name));
   const exception::modal_box waiting;
-  const int32_t result = MessageBoxA(
-      nullptr,
-      "The map/mod you are playing tried to run code that can be "
-      "unsafe.\n\n"
+  const std::string text =
+      "The map or a mod you are playing tried to run code that can be "
+      "unsafe.\n\n" +
+      asked +
       "This can include:\n"
       "  - Writing or reading files on your system\n"
       "  - Accessing environment variables\n"
@@ -83,10 +118,16 @@ bool show_unsafe_lua_dialog() {
       "Do you want to enable unsafe lua functions for this session?\n\n"
       "Click 'Yes' to enable for this session only.\n"
       "Click 'No' to keep them blocked (recommended if you don't trust "
-      "this mod).",
-      "Unsafe Lua Function Called",
-      MB_YESNO | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND);
+      "this mod).";
+  const int32_t result =
+      MessageBoxA(nullptr, text.c_str(), "Unsafe Lua Function Called",
+                  MB_YESNO | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND);
 
+  xerces_runtime::log_info(
+      "lua.unsafe.answer",
+      result == IDYES ? "The player allowed unsafe Lua functions for "
+                        "this session"
+                      : "The player kept unsafe Lua functions blocked");
   if (result == IDYES) {
     unsafe_lua_approved_for_session.store(true, std::memory_order_release);
     return true;
@@ -1141,7 +1182,7 @@ luaReturnCount_e lua_stub_func([[maybe_unused]] lua_State *l) {
 template <ConstString Name>
 luaReturnCount_e lua_unsafe_function_require_permissions(lua_State *luaVM) {
   if (unsafe_lua_approved_for_session.load(std::memory_order_acquire) ||
-      show_unsafe_lua_dialog()) {
+      show_unsafe_lua_dialog(Name.c_str())) {
     return unsafe_function_detours[Name].template invoke<luaReturnCount_e>(
         luaVM);
   }

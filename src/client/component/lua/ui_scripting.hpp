@@ -15,7 +15,9 @@ extern std::atomic<bool> ui_initialized;
 
 extern std::atomic<bool> unsafe_function_called_message_shown;
 extern std::atomic<bool> unsafe_lua_approved_for_session;
-bool show_unsafe_lua_dialog();
+// `function`: the Lua function asked for ("io.open"), named in the question
+// and the game log when known
+bool show_unsafe_lua_dialog(const char *function = nullptr);
 
 void start_hot_reload(const std::string &path);
 void check_hot_reload();
