@@ -4438,3 +4438,8 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       by name; process ids come back, and an older log of the same id (with no `launch.started`) came first. The
       lookups in map-check.ps1, m1-check.ps1, launcher-bench.ps1 and launcher-idle.ps1 now take only a log written
       since that launcher started, as check-idle.ps1 already did. The M1 `modded` case (dry launch) passes with it.
+- [x] Shi No Numa, 120 more games with the eight mods and `freeze_strings.py` waiting (`sumpf-hunt4`, 05:26 to
+      07:03, and `sumpf-hunt5` on the fixed check, 07:07 to 08:45): 119 loaded (12.8 to 14.2 s, median 14.0 s),
+      played 30 s and went back to the menu; the one other line is the check's `not_started` above (its game ran).
+      No freeze and no crash report, so two freezes in 190 games of that map tonight (about one in a hundred), and
+      the reader still has not had one to read. KNOWN_ISSUES.md and site/tested.json carry the new count.
