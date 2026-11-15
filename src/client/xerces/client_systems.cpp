@@ -6,9 +6,10 @@
 // util::registerClientSys(name) calls the built-in ClientSysRegister, which
 // writes "\n\<name>" into the first empty config string of 0xCAA to 0xCB1 and
 // returns its index; util::setClientSysState calls ClientSysSetState(index,
-// state), which sends the server command "0 <index> <that config string with
-// \s\<state> set>" (spaces as '!'), and each client hands the state to the
-// client script registered under the config string's name. ClientSysRegister
+// state), which sends the server command "0 <index> \s\<state>" (spaces as
+// '!'; the info string's '\', ';' and '"' left out), and each client hands
+// the state to the client script registered under its copy of that slot's
+// config string's name. ClientSysRegister
 // has eight slots (0 to 7); a ninth system gets -1, and the first state set on
 // it ends the match ("state index (-1) out of bounds"). A map and a stack of
 // mods need more: Kino der Toten four, DS4C three, two more from other mods.
@@ -22,8 +23,21 @@
 // (data/custom_scripts/zm/xerces_client_systems.csc) hands each to the client
 // script registered under that name. Later systems get ids from 64 up, which
 // only these built-ins read. A level with eight or fewer systems is
-// unchanged. A friend's game without this client script misses the shared
-// systems' states only (as it missed the left-out systems before).
+// unchanged. A friend whose game lacks this client script (an older Xerces,
+// or none) misses the states of the shared ones, the one moved out of slot 7
+// included (on Kino with eight mods: lsm, the map's lights, as well as
+// box_indicator, the one left out before).
+//
+// Zombies only (the client script is there), and only while Xerces' custom
+// client scripts are linked (script::client_scripts_hooked): otherwise the
+// engine's own built-ins, as before.
+//
+// The player method is never handed back to the engine's: its code is
+// protected and stops in a loop when called from outside the game's image
+// (seen 2026-11-15 as a frozen server on Ascension with eight mods, where
+// Girls' Frontline sends a slot's state to a player as they connect). So the
+// method is Xerces' for every id, doing what the engine's does: the same
+// checks and script errors, and the same command to that player.
 //
 // The built-ins are swapped in the game's own built-in tables (as
 // character_slots.cpp does); the config string reader is the one
@@ -31,6 +45,7 @@
 // built-ins run on the server's script thread only, so the state here needs
 // no lock.
 
+#include <component/script.hpp>
 #include <game/game.hpp>
 #include <loader/component_loader.hpp>
 
@@ -48,19 +63,19 @@ constexpr std::uintptr_t get_config_string_address = 0x1421F4930;
 constexpr std::size_t config_string_size = 0x400;
 // The engine's client numbers (character_slots.cpp keeps to the same bound)
 constexpr std::int32_t max_clients = 32;
+// ClientSysSetState takes 0 to 8 (one more than registration hands out)
+constexpr std::int32_t engine_last_index = 8;
 
 using get_config_string_fn = void (*)(std::int32_t, char *, std::int32_t);
 get_config_string_fn get_config_string = nullptr;
 
 game::scr::builtin::BuiltinFunction register_orig = nullptr;
 game::scr::builtin::BuiltinFunction set_state_orig = nullptr;
-game::scr::builtin::BuiltinMethod set_state_method_orig = nullptr;
 
 // This level's shared systems (server script thread only)
 bool sharing = false;
 std::string evicted;                     // the system that had the shared slot
 std::vector<std::string> shared_systems; // ids first_virtual + i
-bool warned_value = false;
 
 bool same_name(const std::string_view a, const std::string_view b) {
   return a.size() == b.size() && _strnicmp(a.data(), b.data(), a.size()) == 0;
@@ -84,7 +99,6 @@ void check_level() {
     sharing = false;
     evicted.clear();
     shared_systems.clear();
-    warned_value = false;
   }
 }
 
@@ -104,27 +118,73 @@ std::optional<std::string> shared_system(const std::int32_t id) {
   return std::nullopt;
 }
 
-void send_shared(const std::int32_t client, const std::string &system,
-                 const char *state) {
-  std::string value = system + "|" + (state ? state : "");
-  // As ClientSysSetState: no spaces in a config string's value
-  std::ranges::replace(value, ' ', '!');
-  // What the engine's Info_SetValueForKey refuses
-  if (value.find_first_of("\\\";") != std::string::npos) {
-    if (!warned_value) {
-      warned_value = true;
-      xerces_runtime::log_warn(
-          "xerces.client_systems.value",
-          "A shared client system's state has a character a config string "
-          "cannot carry; not sent",
-          std::format("{{\"system\":\"{}\"}}", system));
+// What ClientSysSetState sends: "0 <index> \s\<state>", the state's spaces
+// as '!' and the characters an info string's value cannot hold left out, as
+// the engine's Info_SetValueForKey leaves them out
+void send_state(const std::int32_t client, const std::int32_t index,
+                const std::string_view state) {
+  std::string value;
+  value.reserve(state.size());
+  for (const char c : state) {
+    if (c == '\\' || c == ';' || c == '"') {
+      continue;
     }
-    return;
+    value.push_back(c == ' ' ? '!' : c);
   }
-  const std::string command =
-      std::format("0 {} \\n\\{}\\s\\{}", shared_slot, shared_name, value);
+  const std::string command = std::format("0 {} \\s\\{}", index, value);
   game::sv::SV_GameSendServerCommand(static_cast<game::ClientNum_t>(client),
                                      game::net::RELIABLE, command.c_str());
+}
+
+void send_shared(const std::int32_t client, const std::string &system,
+                 const char *state) {
+  send_state(client, shared_slot, system + "|" + (state ? state : ""));
+}
+
+// The engine's checks and script errors, for the player method
+bool index_ok(const game::scr::scriptInstance_t inst, const std::int32_t id) {
+  if (id < 0 || id > engine_last_index) {
+    game::scr::Scr_Error(
+        inst,
+        std::format("ClientSysSetState - state index ({}) out of bounds (0 - "
+                    "{})",
+                    id, engine_last_index)
+            .c_str(),
+        true);
+    return false;
+  }
+  if (name_in_slot(id).empty()) {
+    game::scr::Scr_Error(
+        inst,
+        std::format("ClientSysSetState - state index ({}) unregistered.  Use "
+                    "ClientSysRegister first.",
+                    id)
+            .c_str(),
+        true);
+    return false;
+  }
+  return true;
+}
+
+// A player's entity (its number is the player's client number), as the
+// engine's player methods require
+bool is_player(const game::scr::scr_entref_t *entref) {
+  if (!entref || entref->classnum != 0 || entref->u.entnum < 0 ||
+      entref->u.entnum >= max_clients) {
+    return false;
+  }
+  const game::level::gentity_pool *pool = game::level::get_g_entities();
+  if (!pool) {
+    return false;
+  }
+  const game::level::gentity_t &ent = pool->pool[entref->u.entnum];
+  return ent.r.inuse && ent.client != nullptr;
+}
+
+// Sharing is set up (Zombies, Xerces' client scripts linked)
+bool sharing_possible() {
+  return game::com::Com_SessionMode_IsMode(game::eModes::ZOMBIES) &&
+         script::client_scripts_hooked();
 }
 
 void ClientSysRegister(const game::scr::scriptInstance_t inst) {
@@ -148,7 +208,12 @@ void ClientSysRegister(const game::scr::scriptInstance_t inst) {
       }
     }
   }
-  // Room left, or the name already has a slot: the engine's own
+  // Room left, or the name already has a slot, or no sharing here: the
+  // engine's own
+  if (!sharing_possible()) {
+    register_orig(inst);
+    return;
+  }
   bool room = false;
   for (std::int32_t slot = 0; slot < engine_slots; ++slot) {
     const std::string in_slot = name_in_slot(slot);
@@ -195,14 +260,24 @@ void ClientSysSetState(const game::scr::scriptInstance_t inst) {
 
 void ClientSysSetStateMethod(const game::scr::scriptInstance_t inst,
                              game::scr::scr_entref_t *entref) {
-  if (entref && entref->classnum == 0 && entref->u.entnum >= 0 &&
-      entref->u.entnum < max_clients) {
-    if (const auto system = shared_system(game::scr::Scr_GetInt(inst, 0))) {
-      send_shared(entref->u.entnum, *system, game::scr::Scr_GetString(inst, 1));
-      return;
-    }
+  if (!is_player(entref)) {
+    game::scr::Scr_Error(
+        inst,
+        std::format("entity {} is not a player", entref ? entref->u.entnum : -1)
+            .c_str(),
+        true);
+    return;
   }
-  set_state_method_orig(inst, entref);
+  const std::int32_t id = game::scr::Scr_GetInt(inst, 0);
+  const char *state = game::scr::Scr_GetString(inst, 1);
+  if (const auto system = shared_system(id)) {
+    send_shared(entref->u.entnum, *system, state);
+    return;
+  }
+  if (!index_ok(inst, id)) {
+    return;
+  }
+  send_state(entref->u.entnum, id, state ? state : "");
 }
 
 bool reader_is_expected() {
@@ -238,7 +313,6 @@ public:
     gscr::builtin_functions->ClientSysRegister.actionFunc = ClientSysRegister;
     set_state_orig = gscr::builtin_functions->ClientSysSetState.actionFunc;
     gscr::builtin_functions->ClientSysSetState.actionFunc = ClientSysSetState;
-    set_state_method_orig = player_methods->ClientSysSetState.actionFunc;
     player_methods->ClientSysSetState.actionFunc = ClientSysSetStateMethod;
   }
 };

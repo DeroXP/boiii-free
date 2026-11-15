@@ -728,7 +728,14 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   is `kernel32!Sleep` itself, called through a pointer the protection keeps in the game's
   data (0x15AA69D74, read from a running game), not through the import table: shortening
   only that call would mean changing that slot or hooking `Sleep` for the whole process,
-  both a change to what the protection watches, so it is left.
+  both a change to what the protection watches, so it is left. What could be done without
+  it (2026-11-15): `SND_BankUpdate` (0x1425123A0) walks the 32 banks (0x158075EE0, 0x1278
+  bytes each, the state at +0x1270, 7 and 8 done) and lets `SND_BankLoadUpdateState` move
+  the first one in progress one step (header read, header check, table of contents, its
+  check, enqueue, loaded); a step that changes a state prints and returns "not done", so
+  it is one step a call, a call a frame. Faster loads now call it again in the same frame
+  while the last call moved a bank on (and no level is being played): 56 extra steps at a
+  start, 7 or 14 per later zone, and the start about 1 s sooner (docs/DESIGN.md 12.4).
 
 ## The character table after a map change (2026-11-14 night)
 
@@ -778,10 +785,16 @@ through the config strings 0xCAA to 0xCB1 (`SV_GetConfigstring`, 0x1421F4930) fo
 `SV_SetConfigString` and returns the slot, 0 to 7; with all eight taken it returns -1.
 `ClientSysSetState` (0x141A79900; the player method at 0x1416DF828 sends to that player only)
 takes slot 0 to 8 (`cmp 8; ja`: one more than registration gives, an off-by-one; 0xCB2 and
-0xCB3 are used by other code, 0xCB3 by the level's worldspawn), reads the slot's config
-string, sets key `s` to the state with spaces as `!`, and sends the server command
-`%c %i %s` with `'0'`; -1 is a terminal script error ("state index (-1) out of bounds (0 -
-8)"). The client (the server-command handler at 0x140F83C40, flattened by the protection)
+0xCB3 are used by other code, 0xCB3 by the level's worldspawn), checks the slot's config
+string is not empty ("unregistered.  Use ClientSysRegister first."), sets key `s` in an
+empty info string to the state with spaces as `!` (`Info_SetValueForKey` leaves `\`, `;`
+and `"` out of a value), and sends the server command `%c %i %s` with `'0'`: `0 <slot>
+\s\<state>`; -1 is a terminal script error ("state index (-1) out of bounds (0 - 8)"). The
+player method's code (0x1416DDB08 on) is flattened by the protection and compares a value
+with the image's end (0x1416DDB77): called from outside the game's image it loops for good.
+A wrapper that handed it back to the engine's froze the server on Ascension with eight mods,
+where Girls' Frontline's `clientsystem.gsc` sends a slot's state to a player as they connect
+(a review, then the sweep of 2026-11-15). The client (the server-command handler at 0x140F83C40, flattened by the protection)
 takes `s` from the command, turns `!` back into spaces, takes the name from its own copy of
 config string 0xCAA + slot and calls the client scripts' code callback with (local client,
 name, state); the client scripts hand it to the callback `util::registerSystem` stored under
@@ -795,7 +808,9 @@ becomes the shared system `xerces_mux` (its config string rewritten), and the sy
 had it and every later one (ids 64 up) are sent through it as `<name>|<state>`; Xerces'
 client script (`data/custom_scripts/zm/xerces_client_systems.csc`) hands each to the
 callback registered under the name. A new level clears the config strings, which ends the
-sharing. Tested: with the test switch (`xerces_cs_test 1`), ten test systems on Shadows of
+sharing. Zombies only, and only while the client's custom scripts are linked; the player
+method is Xerces' own for every id (the engine's checks, script errors and command), never
+the engine's (above). Tested: with the test switch (`xerces_cs_test 1`), ten test systems on Shadows of
 Evil, four in the engine's slots, one moved out of slot 7 and five more shared: all ten
 states reached the client scripts; Kino with the eight mods and Power On at Start: lsm and
 box_indicator share slot 7, the match runs.

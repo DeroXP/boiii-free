@@ -126,7 +126,9 @@ hash, sent with the link, shows that the zip is the one we made.
   (about 1 s), before you are in the level. Shadows of Evil from the menus: 9 s instead of
   15. It also takes about 5 s off every start: the game
   asks Windows about BitLocker as it starts, and Windows, unless the game runs as
-  administrator, says no only after 5 s; now the game gets that same no at once.
+  administrator, says no only after 5 s; now the game gets that same no at once. And
+  the game loads its sound banks a step at a time, one step a frame; now it takes the
+  next steps in the same frame, about 1 s off every start.
   Tell us how your loads feel. If a load goes wrong, turn it off in Settings > Launch,
   "Faster loads" (safe mode always turns it off).
 - **Frames and mouse input without the 1 ms wait** (on by default after beta.27). The

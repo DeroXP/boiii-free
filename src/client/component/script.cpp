@@ -1386,10 +1386,15 @@ void begin_load_scripts_stub(scriptInstance_t inst, int32_t user) {
   }
 }
 
+bool client_hook_installed = false;
+
 // The client's own Scr_BeginLoadScripts (CG, 0x1408BFC42 on this client):
 // custom client scripts (.csc) are linked here, as the client's scripts load.
 // On the host the server's load has just read and compiled them (above); a
-// game that joined someone else's has no server here, so it reads them now.
+// game that joined someone else's has no server here, so it reads them now:
+// the custom_scripts tree only. The "scripts" tree's overrides of stock
+// scripts are left out there, as they always were for a joiner (a client
+// script override the host lacks could make the two disagree).
 void client_begin_load_scripts_stub(scriptInstance_t inst, int32_t user) {
   scr::Scr_BeginLoadScripts(inst, user);
 
@@ -1403,7 +1408,11 @@ void client_begin_load_scripts_stub(scriptInstance_t inst, int32_t user) {
     if (!sv::SV_Loaded()) {
       load_global_hash_table();
       execution_queue.clear();
-      load_scripts();
+      {
+        std::scoped_lock paths_lock(script_paths_mutex);
+        script_paths.clear();
+      }
+      load_tree("custom_scripts", true);
       rebuild_script_gdb();
     }
     for (const queued_script &script : execution_queue) {
@@ -1663,6 +1672,10 @@ struct component final : generic_component {
                   scr::Scr_BeginLoadScripts.get())) {
         utils::hook::call(reinterpret_cast<size_t>(site),
                           client_begin_load_scripts_stub);
+        client_hook_installed = true;
+      } else {
+        print_script_log("The client's script load is not the expected code: "
+                         "custom client scripts are not linked");
       }
     }
 
@@ -1682,6 +1695,7 @@ struct component final : generic_component {
                                       Scr_GetFileAndLineNum_Impl);
   }
 };
+bool client_scripts_hooked() { return client_hook_installed; }
 } // namespace script
 
 REGISTER_COMPONENT(script::component)

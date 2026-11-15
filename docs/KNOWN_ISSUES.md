@@ -67,8 +67,9 @@ to report these again, but tell us if you see them somewhere else or worse.
   no room used to end the match with "ClientSysSetState - state index (-1) out of
   bounds"; from beta.22 Xerces left such a system out, so on Kino with eight mods
   the lights that show where the mystery box is stayed dark. Now none is left out:
-  the ones past eight share one of the game's slots. A friend who joins with an
-  older Xerces (or without it) still misses the shared ones.
+  the ones past seven share one of the game's slots (Zombies). A friend who joins
+  with an older Xerces (or without it) misses the shared ones, the seventh
+  included: on Kino with eight mods, the map's lights as well as the box's.
 - **A long frame (about 140 ms) every third of a second on a large custom map.**
   Seen on TOWN REIMAGINED with eight mods, from about a minute into a match. The
   game re-sorts its list of loaded textures with a sort that is slow when the list

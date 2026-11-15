@@ -3797,6 +3797,14 @@ the texture streaming that hid in the wait came after it instead (`LOADING` took
 and the level started 2 s later. A `map` from inside a level has no such wait and is
 unchanged. On by default since 2026-11-14 (the user's call, after the tests in
 docs/TESTING.md; opt-in with `-xerces-fast-loads` before, a flag that changes nothing now):
+And the sound banks: `SND_BankUpdate`, called once a sound frame, moves at most one of
+the 32 bank loads one step and returns whether all are done (the flag the start's wait
+for the menus' banks reads), so the menus' banks took about 66 frames at the start loop's
+pace. While the local client is not `ACTIVE` (the start, a loading screen) the step is
+taken again in the same call as long as the last one moved a bank on, at most 32 times; a
+step that only waits for a read ends it. Starts came about 1 s sooner (vanilla, launch to
+the menus: 18.6 s three times against 19.4 to 19.8 s; with the user's eight mods 22.5 and
+23.3 s against 23.9 and 24.4 s). `XERCES_BANK_STEPS=0` (test only) keeps the engine's pace.
 `-xerces-no-fast-loads` turns them off (Settings > Launch, "Faster loads"), and safe mode
 always does (`xerces_core/default_features.hpp`, `preview_launch`), so it runs the
 engine's own loads and waits; the culprit search's tests keep faster loads as the crashed

@@ -6,6 +6,10 @@ using namespace game::db::xasset;
 using namespace game::scr;
 void load_rawfiles();
 
+// Whether custom client scripts (.csc in custom_scripts) are linked as the
+// client's own scripts load (this client's call site was found and hooked).
+bool client_scripts_hooked();
+
 ScriptParseTree *get_loaded_script(const std::string &name);
 RawFile *get_loaded_rawfile(const std::string &name);
 

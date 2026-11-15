@@ -57,6 +57,10 @@
 //    14.6 s without the flag); Town Reimagined and MW2 Rust 2.3 s sooner
 //    with mods off. Not without 1.: the streaming then takes its time after
 //    the wait instead, and the level started 2 s later.
+// 5. The sound banks load more than one step a frame while no level is being
+//    played (below, "sound banks"): about 1 s off every start (18.6 s to the
+//    menus against 19.4 to 19.8 s; with the user's eight mods 22.5 to 23.3 s
+//    against 23.9 to 24.4 s), and each later zone's banks in a frame or two.
 
 #include "fast_loads.hpp"
 
@@ -372,6 +376,98 @@ void level_start_frame() {
                          "it is"));
 }
 
+// ------------------------------------------------------- sound banks (5.)
+// SND_BankUpdate (0x1425123A0), called once a sound frame from SNDL_Update,
+// moves at most one of the 32 bank loads one step (header read, its check,
+// the table of contents, ..., loaded) and returns whether all are done;
+// SNDL_Update keeps that in the flag the start's wait for the menus' banks
+// reads (0x1434BF5FC). One step a frame at the start loop's pace is what most
+// of the start's quiet 2.7 s was (docs/research/engine-re.md, "A start").
+// While no level is being played (the local client is not ACTIVE: the start,
+// a loading screen), the step is taken again in the same call as long as the
+// last one moved a bank on, at most 32 times; a step that only waits (a read
+// still in flight) ends it, so nothing spins. A level in play keeps the
+// engine's pace.
+constexpr std::uintptr_t bank_update = 0x1425123A0;
+constexpr std::uintptr_t bank_table = 0x158075EE0; // 32 x 0x1278 bytes
+constexpr std::size_t bank_count = 32;
+constexpr std::size_t bank_size = 0x1278;
+constexpr std::size_t bank_state = 0x1270; // int; 7 and 8: done
+constexpr int bank_steps_most = 32;
+
+utils::hook::detour bank_update_hook;
+bool banks_hooked = false;
+// Steps taken beyond the engine's one a frame, since the banks were last done
+// (main thread only)
+std::uint32_t extra_steps = 0;
+bool banks_were_done = true;
+
+std::array<std::int32_t, bank_count> bank_states() {
+  std::array<std::int32_t, bank_count> out{};
+  const std::uintptr_t table = game::relocate(bank_table);
+  for (std::size_t i = 0; i < bank_count; ++i) {
+    std::memcpy(
+        &out[i],
+        reinterpret_cast<const void *>(table + i * bank_size + bank_state),
+        sizeof(std::int32_t));
+  }
+  return out;
+}
+
+bool bank_steps_allowed() {
+  return game::cg::clientUIActives->actives[0].connectionState !=
+         game::connstate_t::ACTIVE;
+}
+
+bool bank_update_stub() {
+  std::array<std::int32_t, bank_count> before = bank_states();
+  bool done = bank_update_hook.invoke<bool>();
+  for (int step = 1; !done && step < bank_steps_most && bank_steps_allowed();
+       ++step) {
+    const std::array<std::int32_t, bank_count> now = bank_states();
+    if (now == before) {
+      break; // that step waited: the next frame looks again
+    }
+    before = now;
+    done = bank_update_hook.invoke<bool>();
+    ++extra_steps;
+  }
+  if (done && !banks_were_done && extra_steps != 0) {
+    xerces_runtime::log_info(
+        "xerces.fast_loads.banks",
+        std::format("The sound banks loaded with {} step(s) taken beside the "
+                    "engine's one a frame",
+                    extra_steps));
+  }
+  if (done) {
+    extra_steps = 0;
+  }
+  banks_were_done = done;
+  return done;
+}
+
+bool hook_bank_update() {
+  // mov rax, rsp; push rdi; push r12; push r13; push r14; push r15;
+  // sub rsp, 0x60
+  static constexpr std::uint8_t start[] = {0x48, 0x8B, 0xC4, 0x57, 0x41, 0x54,
+                                           0x41, 0x55, 0x41, 0x56, 0x41, 0x57,
+                                           0x48, 0x83, 0xEC, 0x60};
+  const auto *code =
+      reinterpret_cast<const std::uint8_t *>(game::relocate(bank_update));
+  if (std::memcmp(code, start, sizeof(start)) != 0) {
+    return false;
+  }
+  try {
+    bank_update_hook.create(
+        reinterpret_cast<void *>(game::relocate(bank_update)),
+        reinterpret_cast<void *>(&bank_update_stub));
+  } catch (const std::exception &) {
+    bank_update_hook.clear();
+    return false;
+  }
+  return true;
+}
+
 bool turned_off() {
   return !xerces_core::default_features::on(
       xerces_runtime::command_line_args(),
@@ -404,6 +500,22 @@ public:
     level_start_enabled = draw_every_frame();
     if (level_start_enabled) {
       scheduler::loop(level_start_frame, scheduler::main);
+    }
+    // Test only: XERCES_BANK_STEPS=0 leaves the banks at the engine's pace
+    // (for timing this part on its own)
+    wchar_t bank_switch[4] = {};
+    const bool banks_off =
+        GetEnvironmentVariableW(L"XERCES_BANK_STEPS", bank_switch, 4) > 0 &&
+        bank_switch[0] == L'0';
+    banks_hooked = !banks_off && hook_bank_update();
+    if (banks_off) {
+      xerces_runtime::log_info("xerces.fast_loads.banks_test_off",
+                               "XERCES_BANK_STEPS=0: the sound banks load at "
+                               "the engine's pace");
+    } else if (!banks_hooked) {
+      xerces_runtime::log_warn("xerces.fast_loads.banks_off",
+                               "The sound banks' update is not the expected "
+                               "code; they load at the engine's pace");
     }
     xerces_runtime::log_info(
         "xerces.fast_loads.on",
