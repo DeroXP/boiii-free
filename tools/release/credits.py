@@ -4,6 +4,9 @@
                                                history is not in CREDITS
   python -I tools/release/credits.py --write   rewrites the three lists in
                                                CREDITS from the Git history
+  python -I tools/release/credits.py --package FILE
+                                               writes CREDITS for the zip:
+                                               without the list markers, CRLF
 
 The lists are the author names Git records (`git log --format=%an`), without
 bots (names ending in "[bot]"), in three groups by the date of their first
@@ -66,10 +69,15 @@ def write(text, groups):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--check", action="store_true")
+    p.add_argument("--package", metavar="FILE")
     p.add_argument("--write", action="store_true")
     a = p.parse_args()
     text = CREDITS.read_text(encoding="utf-8").replace("\r\n", "\n")
     groups = authors()
+    if a.package:
+        lines = [line for line in text.split("\n") if not line.startswith("<!-- ")]
+        pathlib.Path(a.package).write_bytes("\r\n".join(lines).encode("utf-8"))
+        return 0
     if a.write:
         CREDITS.write_text(write(text, groups), encoding="utf-8", newline="\n")
         print("CREDITS:", ", ".join(f"{g} {len(groups[g])}" for g in GROUPS))

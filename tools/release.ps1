@@ -231,8 +231,12 @@ try {
   }
   New-Item -ItemType Directory -Force (Join-Path $stage 'data\launcher') | Out-Null
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'release\launcher\main.html') -Destination (Join-Path $stage 'data\launcher\main.html')
-  foreach ($legal in 'LICENSE', 'NOTICE', 'CREDITS') {
-    Copy-Item -LiteralPath (Join-Path $root $legal) -Destination $stage
+  # LICENSE as it is; NOTICE and CREDITS with Windows line ends like the other
+  # texts, CREDITS without its list markers (credits.py --package).
+  Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $stage
+  Write-Crlf (Join-Path $stage 'NOTICE') (Read-Utf8 (Join-Path $root 'NOTICE'))
+  Invoke-Checked 'credits.py --package' {
+    python -I tools\release\credits.py --package (Join-Path $stage 'CREDITS')
   }
   Invoke-Checked 'notices.py' {
     python -I tools\release\notices.py --notices (Join-Path $stage 'THIRD_PARTY_NOTICES.txt') `
