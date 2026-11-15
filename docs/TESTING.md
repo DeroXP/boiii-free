@@ -4391,3 +4391,8 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       broken-looking chains in three of the twelve games, none of which hung: torn reads (the 512 KB table copied
       while a level load changes it). The watcher now reports a chain only when three more reads over 1.5 s show
       it the same, which a frozen game's table does; the cause is still open.
+- [x] **The 1.0.0-rc.1 package as it stands** (xerces-main at 3b283505, local): after 7eab256c only the package's
+      NOTICE and CREDITS (CRLF, no list markers) and docs changed, so the programs' code is the one checked above.
+      Zip 9.9 MB, 243 files, SHA-256 618d5d5ff474f16a38d719e0f316f0808177dae9e4a3de1497ff5d475cc34247; source
+      archive SHA-256 da334f6bfb4af591a45c9fb6df658e8437a4441c55a68529d2f8ae0d1e1b0bf0. Unzipped: every file matches
+      SHA256SUMS.txt; the M1 vanilla (4) and modded (6) checks pass from its files.
