@@ -260,9 +260,18 @@ int32_t DB_GetXAssetTypeSize_Impl(XAssetType type) {
 
 namespace pool {
 static std::mutex reallocation_mutex;
+// Pools the game finds entries of by their place in its own table, so a block
+// added on the heap breaks it. Xerces: XMODEL too. The texture streamer turns
+// a model into a slot as (model - the game's own pool) / 0x188 and keeps a
+// float per slot in a table of 11264 (0x141D05BEA, 0x141D08F1B), and its
+// records hold models as that slot; a model in an added block gave a slot far
+// outside the table and a crash (DS4C, four character mods and the Wonder
+// Weapon Pack, as the menus load). Full, the pool now ends in the game's own
+// "Exceeded limit of 11264 'xmodel' assets", which error_help explains.
 constexpr bool is_fixed_pool(const XAssetType type) {
   switch (type) {
   case XAssetType::IMAGE:
+  case XAssetType::XMODEL:
   case XAssetType::XMODELMESH:
   case XAssetType::GFXWORLD:
   case XAssetType::COMWORLD:

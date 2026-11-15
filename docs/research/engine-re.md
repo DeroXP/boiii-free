@@ -829,3 +829,40 @@ The loader now links each VM's custom scripts as that VM's own scripts load: the
 one at 0x141AA255F that was hooked already) gets the same stub, which on the host takes the
 scripts the server's load just read and, on a game that joined someone else's, reads them
 itself.
+
+## Asset pools the game finds by slot (2026-11-15)
+
+The game keeps each asset type in a pool of fixed size (`s_assetPools` at 0x1493883F0, one
+`XAssetPool` of 0x20 bytes per type: pool, item size, item count, singleton, items in use at
++0x14, free list). Upstream's `DB_AssetPoolAlloc` replacement adds a block on the heap when a
+pool is full (`reallocate_asset_pool`, which also takes the sizes of `assetlimits.txt` lists
+in mods and of the old launcher's settings). For some types the game does not take an asset
+by its pointer alone but by its place in its own pool:
+
+- XModel (0x188 bytes, 11264 = 0x2C00, the game's pool at 0x145DCB900): 32 instructions
+  address that pool's start. The texture streamer turns a model into a slot as
+  `(model - 0x145DCB900) / 0x188` (0x141D05A2C: a multiply by 0x5397829CBC14E5E1 and a shift)
+  and keeps a float per slot in a table of 11264 at 0x1506A3100, read and written with no
+  bounds check (0x141D05BF5 and 0x141D05C12, 0x141D08F1B and 0x141D08F39); its records hold
+  models as a 16-bit slot that it turns back into `0x145DCB900 + slot * 0x188`
+  (0x141C74088, 0x141C7A790). A model in a heap block gives a slot far outside the table:
+  with DS4C, four character mods and the Wonder Weapon Pack, a read of 0x7FF600AC3C08 at
+  BlackOps3.exe+0x141D05BF5 on a streaming worker as the menus load (the slot in rax was
+  0xFFFFFFFFDE2642C2).
+- Images (0x108 bytes, 49152, at 0x1474A9100; 35 instructions address it) and XModel meshes
+  (0x78 bytes, 35840, at 0x146201900; 30) the same way. Upstream already kept those two at
+  the game's size (`is_fixed_pool`).
+- Materials (0x2A0 bytes, 22528, at 0x14661B900; 10 instructions): the streamer's
+  per-material table checks the slot against 0x57FF and leaves later materials out
+  (0x141D0594E). The eight-mod stack grew this pool to 45056 on The Giant and played; it
+  stays growable.
+
+Read from a running game with the eight mods (`tools/dev/re/read_pools.py`, outside the
+game, read-only): XModels 10880 of 11264 in use at the peak of a level load (The Giant),
+images 48369 of 49152, meshes 17064 of 35840, materials 23034 (grown). XModel is now in
+`is_fixed_pool`: a full pool ends in the game's own `Exceeded limit of 11264 'xmodel'
+assets.` (0x14141F740, the Com_Error at 0x14141F84B), which `error_help`'s
+`Com_Error_AssetLimit` explains (checked 2026-11-15 with that stack on Shadows of Evil: the
+game stops as the menus load with that message and its fix, in a fatal report, no crash). Making more models fit would need the pool and every
+per-slot table moved to memory near the image and those 32 instructions, and every table
+access, changed.

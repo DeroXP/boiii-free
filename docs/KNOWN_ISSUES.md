@@ -26,11 +26,13 @@ worse.
     156,700 entries; the eight mods use about 85,000 in Shadows of Evil): "Could
     not allocate asset - increase XASSET_ENTRY_POOL_SIZE", or a crash as the
     level loads. It runs with fewer mods.
-  - The Black Ops 3 Wonder Weapon Pack with DS4C and four character mods (DBZ,
-    Girls' Frontline 2.0, Avali, Neptunia) crashes the texture streamer as the
-    level loads (an index past one of its tables), with older Xerces builds too
-    and with Xerces' character screen off. It runs alone, with DS4C, and with DS4C,
-    Ascendance, im_oxo QOL and Classic Viewmodel FOV.
+  - The game holds 11,264 models. The Black Ops 3 Wonder Weapon Pack with DS4C
+    and four character mods (DBZ, Girls' Frontline 2.0, Avali, Neptunia) needs
+    more: the game stops as the menus load with "Exceeded limit of 11264
+    'xmodel' assets" and says to turn off some mods (up to beta.27 the texture
+    streamer crashed there instead). The eight mods above take up to about
+    10,900 of them as a level loads. The Wonder Weapon Pack runs alone, with
+    DS4C, and with DS4C, Ascendance, im_oxo QOL and Classic Viewmodel FOV.
   - Solo Easter Eggs and Zombie Counter run with the eight.
 - **Shadows of Evil with DS4C drops you before the level.** When the 3.5 minute
   intro plays to the end, DS4C's scripts error on every frame and the game drops
