@@ -4454,3 +4454,9 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       programs compiles and the 629 unit tests pass. The Prettier step runs `yarn check`, which is Yarn 1's own
       lockfile check, not the package script, so Prettier has never run in CI; with `proseWrap: always` at 80
       columns it would rewrap most of docs/.
+- [x] Pushed (3365429a): StyLua passed on GitHub, and CI's clang-format 22.1.2 failed on two spots that 23 accepts
+      and that the reformat had not touched: the `continue_execution:` label's block in exception.cpp (upstream's
+      layout) and the nested `expected` list in test_db_pool.cpp. Both sit between `// clang-format off` and
+      `// clang-format on` now, which every version honours; clang-format 23 is clean on them, and the tests and
+      boiii.exe build, 629/629 pass. There is no clang-format 22 on this PC (Visual Studio's 19 cannot read the
+      repo's .clang-format), so GitHub's run is the only 22 check.

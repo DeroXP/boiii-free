@@ -278,6 +278,8 @@ TEST_CASE("signature registry: the shipped file has both db pool helpers") {
         registry.signatures, [&](const signature &s) { return s.id == id; });
     return it == registry.signatures.end() ? nullptr : &*it;
   };
+  // clang-format 22 (CI) and 23 end this nested list differently.
+  // clang-format off
   const std::vector<std::pair<std::string_view, std::vector<std::uint8_t>>>
       expected = {
           {db_pool_signatures::create_pool,
@@ -286,6 +288,7 @@ TEST_CASE("signature registry: the shipped file has both db pool helpers") {
            {pool::init_page_budget_entry.begin(),
             pool::init_page_budget_entry.end()}},
   };
+  // clang-format on
   for (const auto &[id, entry] : expected) {
     const signature *sig = entry_of(id);
     REQUIRE(sig != nullptr);

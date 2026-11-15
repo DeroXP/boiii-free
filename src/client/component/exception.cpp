@@ -1451,6 +1451,8 @@ long WINAPI crash_fix_exception_handler(PEXCEPTION_POINTERS exception_info) {
       default: {
         break;
       }
+      // clang-format 22 (CI) and 23 lay out a label's block differently.
+      // clang-format off
       continue_execution:
         {
           result = EXCEPTION_CONTINUE_EXECUTION;
@@ -1459,6 +1461,7 @@ long WINAPI crash_fix_exception_handler(PEXCEPTION_POINTERS exception_info) {
       }
     }
 
+    // clang-format on
 #ifndef NDEBUG
     if (patch_name) {
       exception_log(true, "^3[Exception] Known crash patched: %s (base+0x%llX)",
