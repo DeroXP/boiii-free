@@ -23,9 +23,7 @@
     <a class="brand" href="{{root}}index.html" aria-label="Xerces, home">
       <svg viewBox="0 0 22 22" aria-hidden="true"><rect x="0" y="0" width="9" height="9" fill="currentColor"/><rect x="13" y="0" width="9" height="9" fill="#FF4A1C"/><rect x="0" y="13" width="9" height="9" fill="currentColor"/><rect x="13" y="13" width="9" height="9" fill="currentColor"/></svg>
       <span class="word">xerces</span>
-      <span class="ver">{{header_version}}</span>
     </a>
-    <span class="badge">{{header_badge}}</span>
     <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav">MENU</button>
     <nav class="nav" id="nav" aria-label="Site">
 {{nav}}
@@ -38,12 +36,12 @@
 <footer class="site-footer">
   <div class="wrap">
     <div class="cols">
-      <div>
+      <div class="about">
         <a class="brand" href="{{root}}index.html" aria-label="Xerces, home">
           <svg viewBox="0 0 22 22" aria-hidden="true"><rect x="0" y="0" width="9" height="9" fill="currentColor"/><rect x="13" y="0" width="9" height="9" fill="#FF4A1C"/><rect x="0" y="13" width="9" height="9" fill="currentColor"/><rect x="13" y="13" width="9" height="9" fill="currentColor"/></svg>
           <span class="word">xerces</span>
         </a>
-        <p>A launcher for Call of Duty: Black Ops III that loads your Steam Workshop mods together, in your order.</p>
+        <p>A launcher for Call of Duty: Black Ops III that loads your Steam Workshop mods together, in your order. {{header_version}}.</p>
         <div class="theme-switch" role="group" aria-label="Theme">
           <button type="button" data-theme-pick="auto">Auto</button>
           <button type="button" data-theme-pick="dark">Dark</button>
@@ -52,22 +50,27 @@
         </div>
       </div>
       <div>
-        <h4>Get it</h4>
+        <h4>Xerces</h4>
         <a href="{{root}}download.html">Download</a>
-        <a href="{{root}}download.html#verify">Check a download</a>
         <a href="{{root}}changelog.html">Changelog</a>
-      </div>
-      <div>
-        <h4>Help</h4>
-        <a href="{{root}}guide.html">Guide</a>
-        <a href="{{root}}known-issues.html">Known issues</a>
-        <a href="{{root}}guide.html#when-the-game-crashes">When the game crashes</a>
-      </div>
-      <div>
-        <h4>Source</h4>
-        <a href="{{repo}}">GitHub</a>
+        <a href="{{root}}tested.html">Tested</a>
+        <a href="{{repo}}">Source on GitHub</a>
         <a href="{{repo}}/blob/xerces-main/LICENSE">GPL-3.0 licence</a>
+      </div>
+      <div>
+        <h4>Support</h4>
+        <a href="{{root}}guide.html#install">Install and first start</a>
+        <a href="{{root}}guide.html#when-the-game-crashes">When the game crashes</a>
+        <a href="{{root}}guide.html#playing-with-other-testers">Playing with friends</a>
+        <a href="{{root}}known-issues.html">Known issues</a>
         <a href="{{repo}}/issues">Report a bug</a>
+      </div>
+      <div>
+        <h4>Mod authors</h4>
+        <a href="{{root}}mod-stacking.html">Mod stacking</a>
+        <a href="{{root}}gsc-scripting.html">GSC scripting</a>
+        <a href="{{root}}asset-overrides.html">Asset overrides</a>
+        <a href="{{root}}fastdl.html">FastDL for servers</a>
       </div>
     </div>
     <p class="legal">Xerces is free software under the GNU General Public License, version 3, with no warranty. It is a modified version of Ezz BOIII, itself based on BOIII by momo5502. You need your own copy of Black Ops III on Steam; Xerces plays offline and on games players host themselves, never official matchmaking. Xerces is not made, endorsed or supported by Activision or Treyarch. Call of Duty and Black Ops are trademarks of Activision Publishing, Inc.</p>

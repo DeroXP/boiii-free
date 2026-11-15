@@ -21,9 +21,18 @@ To look at it, serve `build/site` with any static server, for example
 | --- | --- |
 | `index.html` | `site/templates/index.html`, with the release data below |
 | `download.html` | `tools/site/build_site.py` (`download_body`) and `site/releases.json` |
+| `docs.html` | the docs below, for players and for mod authors and server hosts |
 | `guide.html` | `docs/TESTERS.md` (the zip's README.txt) |
 | `known-issues.html` | `docs/KNOWN_ISSUES.md` (the zip's KNOWN_ISSUES.txt) |
+| `mod-stacking.html`, `gsc-scripting.html`, `asset-overrides.html`, `fastdl.html` | `docs/mod-stack.md`, `docs/gsc-scripting.md`, `docs/asset-override.md`, `docs/fastdl.md` |
 | `changelog.html` | `CHANGELOG.md` |
+| `tested.html` | `site/tested.json`: a mod stack on every installed map before a release (made from a `map-check` sweep) |
+| `releases.json` | each live channel's version, date, file, size, SHA-256, URL and notes link, for programs (an update notice in the launcher could read it) |
+
+The landing page is a project page, not an advert (the user's call, 2026-11-15,
+after Plutonium's): a slim bar, a short centred heading with Download and
+Documentation, then plain sections that each say one thing and link to the
+docs, a real mod manifest, and an "And more" list.
 
 Every page shares `site/templates/layout.html` (header, navigation, footer, the
 theme switch). `site/assets/site.css` is the launcher's look, C / Signal

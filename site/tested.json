@@ -1,0 +1,54 @@
+{
+  "schema": "xerces.site.tested/1",
+  "build": "4d3b9e14 (after beta.27)",
+  "settings": "Larger zone memory at 8 GB and the precise FPS limit, as the stack's owner plays it",
+  "stack": [
+    "DS4C Patched v0.85.1",
+    "[ Ascendance ] 0.9.9.8.5 Aesthetic oJumpy",
+    "im_oxo Zombies QOL",
+    "Classic Viewmodel FOV (Console-Style) V1.1",
+    "DBZ Villain Characters",
+    "Girls' Frontline: Black Ops III 2.0",
+    "Avali: Solspace - Character Pack",
+    "Hyperdimension Neptunia [Character Mod]"
+  ],
+  "maps": [
+    {
+      "map": "zm_zod",
+      "name": "Shadows of Evil",
+      "result": "in_game",
+      "load_s": 14.0
+    },
+    {
+      "map": "zm_tomb",
+      "name": "Origins",
+      "result": "in_game",
+      "load_s": 11.9
+    },
+    {
+      "map": "zm_theater",
+      "name": "Kino der Toten",
+      "result": "in_game",
+      "load_s": 12.0
+    },
+    {
+      "map": "zm_moon",
+      "name": "Moon",
+      "result": "in_game",
+      "load_s": 14.2
+    },
+    {
+      "map": "zm_asylum",
+      "name": "Verrückt",
+      "result": "in_game",
+      "load_s": 12.0
+    },
+    {
+      "map": "zm_cosmodrome",
+      "name": "Ascension",
+      "result": "in_game",
+      "load_s": 13.1
+    }
+  ],
+  "how": "tools/dev/session/map-check.ps1 -Live, one game per map: Xerces.exe launches the stack, the map is started from the console, the check waits for the player in the level, plays 30 s with the intro skipped, captures the screen, goes back to the menu and quits; a crash, a freeze, an error box or the time running out ends the run. Steam Workshop maps as installed on the test PC; The Giant from the DLC is not on it."
+}

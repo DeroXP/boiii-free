@@ -14,7 +14,7 @@ can mix styles when it helps.
 - [Date and time helpers](#date-and-time-helpers)
 - [Player helpers](#player-helpers)
 - [HUD text](#hud-text)
-- [Small helpers](#small-helpers)
+- [Misc utilities](#misc-utilities)
 
 ## Where scripts can live
 

@@ -1,140 +1,131 @@
 <section class="hero">
   <div class="wrap">
-    <div class="label">Black Ops III &middot; Multi-mod launcher &middot; Free and open source</div>
-    <h1>Every mod.<br>At <span class="accent">once.</span></h1>
-    <p class="lede">Xerces loads your <strong>Steam Workshop mods together, in the order you choose</strong>, checks which ones fit, and has your back when a mix breaks the game. Zombies, Multiplayer and Campaign. Offline and on games you host.</p>
-    <div class="actions">
-      <a class="btn-launch" href="download.html">
-        <span><span class="big">{{cta_title}}</span><span class="small">{{cta_detail}}</span></span>
-        <span class="arrow" aria-hidden="true">&rarr;</span>
-      </a>
-      <a class="btn" href="guide.html">Read the guide</a>
+    <h1>Black Ops III, <span class="accent">stacked.</span></h1>
+    <div class="facts">Load your Steam Workshop mods <strong>together, in the order you choose</strong>. Zombies, Multiplayer and Campaign, offline and on games you host.</div>
+    <div class="buttons">
+      <a class="button primary" href="download.html">Download</a>
+      <a class="button" href="docs.html">Documentation</a>
     </div>
+    <div class="meta-line">{{latest_label}} &middot; Windows 10 and 11, 64-bit &middot; Free and open source (GPL-3.0)</div>
   </div>
 </section>
 
-<section class="wrap stats" aria-label="In numbers">
-  <div class="stat"><div class="num">08</div><div class="what">Workshop mods in one match, the stack this site's numbers come from</div></div>
-  <div class="stat"><div class="num">{{maps_checked}}</div><div class="what">Zombies maps loaded with that stack before this release</div></div>
-  <div class="stat"><div class="num">8.8<small>s</small></div><div class="what">Shadows of Evil from the menus (14.6 s without Xerces' faster loads)</div></div>
-  <div class="stat"><div class="num">{{checks}}</div><div class="what">automatic checks every build passes, in the game and out</div></div>
-</section>
-
-<section class="section" id="features">
+<section class="band">
   <div class="wrap">
-    <div class="section-head">
-      <div class="label"><span class="n">01</span>What it does</div>
-      <div>
-        <h2>Built for big mod stacks.</h2>
-        <p>BOIII runs one mod at a time. Xerces runs the whole stack, keeps the game steady while it does, and tells you plainly when something does not fit.</p>
+    <div class="eyebrow">Mod stacking</div>
+    <h2>Your whole Workshop, in one game.</h2>
+    <p class="lead">Turn your mods on, put them in order, launch. Xerces loads them together and checks which mods and maps fit before you launch, not after the game falls over.</p>
+    <a class="more-link" href="mod-stacking.html">How stacking works</a>
+    <div class="trio">
+      <div class="item">
+        <h3>Your load order.</h3>
+        <p>The top mod is the main mod; where two mods ship the same file, the higher one wins. Every mod's entry script still runs, so mod menus work side by side.</p>
+      </div>
+      <div class="item">
+        <h3>Nothing left out.</h3>
+        <p>The game has room for eight of the channels maps and mods use for lights, sounds and on-screen text. Big stacks need more, so Xerces shares one and every mod keeps its effects.</p>
+      </div>
+      <div class="item">
+        <h3>Friends join the same stack.</h3>
+        <p>Players who join get the host's mods in the host's order, and are told which ones they are missing, with the Workshop page for each.</p>
       </div>
     </div>
-    <div class="grid">
-      <article class="card">
-        <span class="n">01</span>
-        <h3>Mods, stacked</h3>
-        <p>Turn your Workshop mods on and put them in order; the top one is the main mod. Xerces works out a plan, says which mods or maps will not go together, and the game loads them all.</p>
-        <span class="fact">Load order &middot; conflicts &middot; packs to share</span>
-      </article>
-      <article class="card">
-        <span class="n">02</span>
-        <h3>Nothing left out</h3>
-        <p>The game has room for eight of the channels maps and mods use to drive lights, sounds and on-screen text. A big stack needs more; Xerces shares a slot so every one still works.</p>
-        <span class="fact">Kino der Toten + eight mods: all nine delivered</span>
-      </article>
-      <article class="card">
-        <span class="n">03</span>
-        <h3>When a mix breaks</h3>
-        <p>Xerces notices a crash, offers the next launch with mods off, and can narrow the stack down to the mod that caused it. Every crash and freeze leaves a report you can read.</p>
-        <span class="fact">Safe mode &middot; find the culprit &middot; text reports</span>
-      </article>
-      <article class="card">
-        <span class="n">04</span>
-        <h3>Faster loads</h3>
-        <p>The loading screen keeps up with your PC instead of the game's own pace, solo matches skip the lobby's waits, and the game starts about five seconds sooner.</p>
-        <span class="fact">Town Reimagined, three mods: 9 s, was 34 s</span>
-      </article>
-      <article class="card">
-        <span class="n">05</span>
-        <h3>Zombies, your way</h3>
-        <p>XERCES SETTINGS in the lobby: start round, points, self-revives, round skips and more. CHARACTERS puts every character mod's characters on one screen, with a live view.</p>
-        <span class="fact">Controller aim assist and no hip-fire spread, Zombies only</span>
-      </article>
-      <article class="card">
-        <span class="n">06</span>
-        <h3>A sharper picture</h3>
-        <p>Render the scene below your screen's resolution and let AMD FSR 1 bring it back up with the edges kept. Frames and mouse input skip the game's millisecond waits.</p>
-        <span class="fact">FSR 1 built in &middot; NVIDIA DLSS with NVIDIA's own file</span>
-      </article>
-      <article class="card">
-        <span class="n">07</span>
-        <h3>Play together</h3>
-        <p>Host from the lobby, join by address, browse servers, or add friends and invite them. Friends who join with missing mods are told which ones, with their Workshop pages.</p>
-        <span class="fact">Friends &middot; invites &middot; Discord &middot; direct connect</span>
-      </article>
-      <article class="card">
-        <span class="n">08</span>
-        <h3>Nothing hidden</h3>
-        <p>Everything Xerces sends, and why, is written down. Crash reports can be turned off and deleted. The source is public under the GPL.</p>
-        <span class="fact">No installer &middot; no admin rights &middot; no runtimes</span>
-      </article>
-      <article class="card">
-        <span class="n">09</span>
-        <h3>See what it sees</h3>
-        <p>Diagnostics shows the game, its build and whether Xerces supports it, your mods, the logs and the crash bundles. Copy report puts all of it on the clipboard for a bug report.</p>
-        <span class="fact">Build check &middot; logs &middot; Copy report</span>
-      </article>
-    </div>
+    <a class="more-link" href="tested.html">Checked with an eight-mod stack on every installed map</a>
   </div>
 </section>
 
-<section class="section" id="install">
+<section class="band alt">
   <div class="wrap">
-    <div class="section-head">
-      <div class="label"><span class="n">02</span>Install</div>
-      <div>
-        <h2>Four steps, no installer.</h2>
-        <p>Xerces is a folder you unzip. Your settings live in <code>%LOCALAPPDATA%\Xerces</code>, so a new version is a new folder.</p>
+    <div class="eyebrow">When something breaks</div>
+    <h2>It tells you what happened.</h2>
+    <p class="lead">A crash or a freeze leaves a report you can read: what the game was doing, your mods in load order, and the script that was running. The next launch offers safe mode.</p>
+    <a class="more-link" href="guide.html#when-the-game-crashes">When the game crashes</a>
+    <div class="trio">
+      <div class="item">
+        <h3>Safe mode.</h3>
+        <p>After a crash, Home offers the next launch with mods off, so you are back in the game while you sort the stack out.</p>
+      </div>
+      <div class="item">
+        <h3>Find the culprit.</h3>
+        <p>Xerces can launch halves of the crashed stack in turn and narrow it down to the mod, or the setting, that caused it.</p>
+      </div>
+      <div class="item">
+        <h3>Your reports, your call.</h3>
+        <p>Crash reports help fix things and are on by default. Settings &gt; Privacy turns them off and deletes the ones already sent.</p>
       </div>
     </div>
-    <ol class="steps">
-      <li><div><h3>Own Black Ops III on Steam</h3><p>Windows 10 or 11, 64-bit, with the game installed and Steam signed in. Your mods come from your Workshop subscriptions.</p></div></li>
-      <li><div><h3>Download and check it</h3><p>Get the zip from the <a href="download.html">download page</a> and compare its SHA-256 with the one printed there: <code>Get-FileHash .\{{latest_file}}</code> in PowerShell.</p></div></li>
-      <li><div><h3>Unzip into a folder of its own</h3><p>For example <code>C:\Games\Xerces</code>. Not inside the Black Ops III folder, and not in a folder OneDrive syncs, where the game can fail to start.</p></div></li>
-      <li><div><h3>Start Xerces.exe</h3><p>Only Xerces.exe: it starts the game itself, with the mods you picked. The first start reads your Workshop folder once; later starts are quick.</p></div></li>
-    </ol>
   </div>
 </section>
 
-<section class="section" id="download">
+<section class="band">
+  <div class="wrap split">
+    <div>
+      <div class="eyebrow">Modding support</div>
+      <h2>Power to mod authors.</h2>
+      <p class="lead">Workshop mods work as they are. A mod that wants more says so in a small manifest: what it adds, what it needs, and what it may do. GSC scripts get hooks, console commands, and file and data helpers.</p>
+      <a class="more-link" href="gsc-scripting.html">GSC scripting additions</a>
+    </div>
+<pre class="code" aria-label="An example mod manifest"><span class="file">my.mod/xerces.mod.json</span>{
+  <span class="k">"schema"</span>: 1,
+  <span class="k">"id"</span>: <span class="s">"my.mod"</span>,
+  <span class="k">"name"</span>: <span class="s">"My Mod"</span>,
+  <span class="k">"version"</span>: <span class="s">"0.1.0"</span>,
+  <span class="k">"requires"</span>: { <span class="k">"modes"</span>: [<span class="s">"zm"</span>] },
+  <span class="k">"scripts"</span>: {
+    <span class="k">"entry"</span>: [<span class="s">"scripts/zm/my_mod.gsc"</span>]
+  },
+  <span class="k">"capabilities"</span>: {
+    <span class="k">"gsc"</span>: { <span class="k">"replacefunc"</span>: false },
+    <span class="k">"native_code"</span>: false
+  }
+}
+<span class="c">// xerces_cli mod new my.mod   makes one
+// xerces_cli mod lint my.mod  checks it</span></pre>
+  </div>
+</section>
+
+<section class="band alt">
   <div class="wrap">
-    <div class="section-head">
-      <div class="label"><span class="n">03</span>Releases</div>
-      <div>
-        <h2>Stable, or the newest.</h2>
-        <p>Stable releases have been played for a while and get fixes. Betas get every change first and are how those fixes are found.</p>
+    <div class="eyebrow">Enhanced client</div>
+    <h2>The game you know, smoother.</h2>
+    <p class="lead">Built on BOIII, with loads that keep up with your PC, a sharper picture, and Zombies options for the way you play. On by default where they have been played through; a switch away where they have not.</p>
+    <a class="more-link" href="guide.html#playing">What is in it</a>
+    <div class="trio">
+      <div class="item">
+        <h3>Faster loads.</h3>
+        <p>The loading screen keeps up with your PC, solo matches skip the lobby's waits, and the game starts about six seconds sooner. Town Reimagined with three mods: 9 s, was 34 s.</p>
+      </div>
+      <div class="item">
+        <h3>A sharper picture.</h3>
+        <p>Render below your screen's resolution and let AMD FSR 1 bring it back up with the edges kept. NVIDIA DLSS and DLAA with NVIDIA's own file.</p>
+      </div>
+      <div class="item">
+        <h3>Zombies, your way.</h3>
+        <p>XERCES SETTINGS in the lobby: start round, points, self-revives, round skips. CHARACTERS: every character mod's characters on one screen, with a live view.</p>
       </div>
     </div>
-    <div class="channels">
-{{channel_cards}}
-    </div>
-  </div>
-</section>
-
-<section class="section" id="faq">
-  <div class="wrap">
-    <div class="section-head">
-      <div class="label"><span class="n">04</span>Questions</div>
-      <div><h2>Before you ask.</h2></div>
-    </div>
-    <div class="faq">
-      <details><summary>Do I need to own the game?</summary><div class="answer"><p>Yes. Xerces starts your own Steam copy of Black Ops III, at a build it supports, with Steam running and signed in to the account that owns it. It does not include or download the game.</p></div></details>
-      <details><summary>Does it touch official matchmaking?</summary><div class="answer"><p>No. Xerces plays offline and on games players host themselves. It never connects to official Call of Duty matchmaking.</p></div></details>
-      <details><summary>Windows says it protected my PC. Is that right?</summary><div class="answer"><p>Windows SmartScreen warns about programs that are not code-signed yet. Check the zip's SHA-256 against the one on the download page first; if they match, choose "More info", then "Run anyway". Signed releases are planned.</p></div></details>
-      <details><summary>Steam updated Black Ops III. Now what?</summary><div class="answer"><p>Xerces only starts game builds it knows, and says so on Home when the build is new. Play through Steam until a Xerces release supports the new build. Do not keep or restore an older game build for Xerces.</p></div></details>
-      <details><summary>What does Xerces send over the network?</summary><div class="answer"><p>Crash reports while they are on (Settings &gt; Privacy turns them off and deletes the ones sent), the public server list, your Steam client's usual traffic, and your friends list once you sign in. The <a href="guide.html#what-goes-over-the-network">guide</a> lists all of it.</p></div></details>
-      <details><summary>A mod or map does not work with my stack.</summary><div class="answer"><p>Check <a href="known-issues.html">Known issues</a> first. Then send the game's log from Diagnostics, or the crash report if it crashed: they name the mods, the map and what the game was doing.</p></div></details>
-      <details><summary>Is it open source?</summary><div class="answer"><p>Yes, under the GNU GPL version 3. Every release says which commit it was built from, and anyone can rebuild it from the <a href="{{repo}}">source</a>.</p></div></details>
+    <div class="and-more">
+      <h3>And more.</h3>
+      <ul>
+        <li>Friends and invites</li>
+        <li>Join from Discord</li>
+        <li>Server list and direct connect</li>
+        <li>UPnP when you host</li>
+        <li>Missing-mod prompts with Workshop pages</li>
+        <li>Mod tags on camos and characters</li>
+        <li>Larger zone memory for big custom maps</li>
+        <li>Precise FPS limit</li>
+        <li>Flip-model presentation</li>
+        <li>Frames and mouse input without the 1 ms wait</li>
+        <li>Frame-time recording</li>
+        <li>Controller aim assist (Zombies)</li>
+        <li>No hip-fire spread (Zombies)</li>
+        <li>Freeze and stuck-load reports</li>
+        <li>Diagnostics with Copy report</li>
+        <li>Packs to share a stack</li>
+        <li>Dark, light and high-contrast launcher themes</li>
+        <li>Keyboard and controller navigation in the launcher</li>
+      </ul>
     </div>
   </div>
 </section>
