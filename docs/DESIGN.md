@@ -3801,7 +3801,12 @@ looked the same 6 and 12 s in; Town Reimagined and MW2 Rust 2.3 s sooner with mo
 the three-mod stack 8.7 and 9.8 s, against 33.8 and 39.3 s without faster loads). Only with the every-frame loading screen: without it
 the texture streaming that hid in the wait came after it instead (`LOADING` took 5.9 s)
 and the level started 2 s later. A `map` from inside a level has no such wait and is
-unchanged. On by default since 2026-11-14 (the user's call, after the tests in
+unchanged. **The 4x start is opt-in, `-xerces-fast-level-start` (2026-11-15):** Die Rise
+with the user's eight mods ended every load with "Server Disconnected - Clientfield
+Mismatch" with it on, and loaded (16.9 s) and played with only it off, as on beta.27 where
+it was off; the other 27 installed maps with the same mods were fine with it. Which
+clientfield, and why the speed matters, is not known yet. The rest of faster loads is on
+by default since 2026-11-14 (the user's call, after the tests in
 docs/TESTING.md; opt-in with `-xerces-fast-loads` before, a flag that changes nothing now):
 And the sound banks: `SND_BankUpdate`, called once a sound frame, moves at most one of
 the 32 bank loads one step and returns whether all are done (the flag the start's wait

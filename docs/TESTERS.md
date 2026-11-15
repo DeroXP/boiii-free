@@ -119,12 +119,14 @@ hash, sent with the link, shows that the zip is the one we made.
   step with that, so a big custom map waited on the loading screen rather than on the
   disk. Now the loading screen draws every frame and, when nobody else is in
   your lobby, the launch also skips the 2.7 s the lobby waits for other players. Tested
-  here with a three-mod stack: Town Reimagined 9 s instead of 34, MW2 Rust 10 s instead
-  of 39. A Zombies map also no longer sits about 5 s on a finished loading screen: the
-  game makes you wait until the new level's own clock has run about 5 s (3 on Origins);
-  now, with nobody else in your lobby, that clock runs 4x for those seconds
-  (about 1 s), before you are in the level. Shadows of Evil from the menus: 9 s instead of
-  15. It also takes about 5 s off every start: the game
+  here with a three-mod stack: Town Reimagined 11 s instead of 34, MW2 Rust 10 s instead
+  of 39. A Zombies map then still sits about 5 s on a finished loading screen: the game
+  makes you wait until the new level's own clock has run about 5 s (3 on Origins). To
+  run that clock at 4x when nobody else is in your lobby, type
+  `-xerces-fast-level-start` into Settings > Launch, Extra launch flags (Shadows of Evil
+  from the menus: 9 s instead of 13). It is not on by default: with one map and mod
+  stack (Die Rise with eight mods) it made the game disconnect with "Clientfield
+  Mismatch". It also takes about 5 s off every start: the game
   asks Windows about BitLocker as it starts, and Windows, unless the game runs as
   administrator, says no only after 5 s; now the game gets that same no at once. And
   the game loads its sound banks a step at a time, one step a frame; now it takes the

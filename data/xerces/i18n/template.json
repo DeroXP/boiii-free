@@ -823,7 +823,7 @@
   "The launcher never fetches a list or pings a server. Joining passes the address to the game, nothing more.": "",
   "The licence": "",
   "The list of servers you joined is emptied. Favourites stay.": "",
-  "The loading screen draws every frame, so textures stream in sooner; a match you start alone skips the lobby's waits for other players; and a Zombies level's first seconds run 4x while the game holds you at the start, when nobody else is in your lobby. Off passes -xerces-no-fast-loads. Safe mode always turns it off.": "",
+  "The loading screen draws every frame, so textures stream in sooner; a match you start alone skips the lobby's waits for other players; the game starts about 6 s sooner. Off passes -xerces-no-fast-loads. Safe mode always turns it off.": "",
   "The log says why.": "",
   "The logs folder could not be opened.": "",
   "The look could not be saved.": "",

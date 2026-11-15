@@ -21,9 +21,11 @@ testers by private link; the first stable release is in preparation.
 ### Changed
 
 - **Faster loads are on by default**: the loading screen draws every frame, a
-  match you start alone skips the lobby's waits, a Zombies level's first
-  seconds run 4x while the game holds you at the start, and the game starts
-  about 5 s sooner. Settings > Launch, "Faster loads", turns them off.
+  match you start alone skips the lobby's waits, the sound banks load more than
+  a step a frame, and the game starts about 6 s sooner. Settings > Launch,
+  "Faster loads", turns them off. Running a Zombies level's first seconds at 4x
+  is opt-in (`-xerces-fast-level-start`): it made Die Rise with eight mods
+  disconnect ("Clientfield Mismatch").
 - **Frames and mouse input skip the game's millisecond waits by default.**
   Settings > Display turns it off.
 - Safe mode turns both off, so a crash they caused is not met again with mods

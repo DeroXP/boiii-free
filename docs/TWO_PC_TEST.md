@@ -56,7 +56,7 @@ Same network, no mods enabled on either PC (Xerces > Mods).
    repeat steps 1 to 3.
    Expected: J still goes along when H starts the match (with J in the lobby H's
    game keeps the lobby's usual waits: its log says "Other players in the lobby: the
-   launch waits for them as usual", and has no "The level's start ran 4x" line: the
+   launch waits for them as usual", and, with `-xerces-fast-level-start` on H, no "The level's start ran 4x" line: the
    level's clock runs as usual with J in the lobby), and both loading screens move
    smoothly.
 

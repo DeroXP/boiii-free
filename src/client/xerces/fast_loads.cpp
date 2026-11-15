@@ -57,6 +57,13 @@
 //    14.6 s without the flag); Town Reimagined and MW2 Rust 2.3 s sooner
 //    with mods off. Not without 1.: the streaming then takes its time after
 //    the wait instead, and the level started 2 s later.
+//    Opt-in only, with -xerces-fast-level-start (2026-11-15): Die Rise with
+//    the user's eight mods ended every load with "Server Disconnected -
+//    Clientfield Mismatch" with it, and loaded and played with everything
+//    else in faster loads on and only this off (and on beta.27, where it was
+//    off); 26 other maps with the same mods were fine with it. Which
+//    clientfield and why the speed matters is not known, so it is not on by
+//    default.
 // 5. The sound banks load more than one step a frame while no level is being
 //    played (below, "sound banks"): about 1 s off every start (18.6 s to the
 //    menus against 19.4 to 19.8 s; with the user's eight mods 22.5 to 23.3 s
@@ -293,6 +300,7 @@ void before_lobby_launch() {
 
 // ---------------------------------------------------------- level start (4.)
 constexpr float level_start_speed = 4.0f;
+constexpr std::string_view level_start_flag = "-xerces-fast-level-start";
 constexpr auto level_start_longest = std::chrono::seconds(20);
 bool level_start_enabled = false;
 // What timescale was before our 4 (set while it is in), main thread only
@@ -498,17 +506,24 @@ public:
       return;
     }
     enabled = true;
-    // 4. only with 1.: without it the streaming comes after the wait instead
-    level_start_enabled = draw_every_frame();
+    // Test only: XERCES_BANK_STEPS=0 leaves the banks at the engine's pace
+    // (for timing that part on its own)
+    const auto test_off = [](const wchar_t *name) {
+      wchar_t value[4] = {};
+      return GetEnvironmentVariableW(name, value, 4) > 0 && value[0] == L'0';
+    };
+    // 4. only with 1. (without it the streaming comes after the wait
+    // instead), and only when asked for (above)
+    const auto args = xerces_runtime::command_line_args();
+    const bool level_start_asked =
+        xerces_core::has_launch_flag(args, level_start_flag) ||
+        xerces_core::has_launch_flag(args, "-" + std::string(level_start_flag));
+    const bool screen = draw_every_frame();
+    level_start_enabled = screen && level_start_asked;
     if (level_start_enabled) {
       scheduler::loop(level_start_frame, scheduler::main);
     }
-    // Test only: XERCES_BANK_STEPS=0 leaves the banks at the engine's pace
-    // (for timing this part on its own)
-    wchar_t bank_switch[4] = {};
-    const bool banks_off =
-        GetEnvironmentVariableW(L"XERCES_BANK_STEPS", bank_switch, 4) > 0 &&
-        bank_switch[0] == L'0';
+    const bool banks_off = test_off(L"XERCES_BANK_STEPS");
     banks_hooked = !banks_off && hook_bank_update();
     if (banks_off) {
       xerces_runtime::log_info("xerces.fast_loads.banks_test_off",
@@ -521,13 +536,17 @@ public:
     }
     xerces_runtime::log_info(
         "xerces.fast_loads.on",
-        level_start_enabled
-            ? "The loading screen draws every frame, a launch alone does not "
-              "wait for others and a Zombies level's start runs 4x while the "
-              "client waits for it (faster loads; -xerces-no-fast-loads turns "
-              "them off)"
-            : "A launch alone does not wait for others; the loading screen "
-              "and the level's start are as they were (faster loads)");
+        std::format("{}a launch alone does not wait for others{}{} (faster "
+                    "loads; -xerces-no-fast-loads turns them off)",
+                    screen ? "The loading screen draws every frame, "
+                           : "The loading screen is as it was, ",
+                    banks_hooked ? ", the sound banks load more than a step a "
+                                   "frame"
+                                 : "",
+                    level_start_enabled
+                        ? ", and a Zombies level's start runs 4x while the "
+                          "client waits for it (-xerces-fast-level-start)"
+                        : ""));
     xerces_runtime::log_info(
         "xerces.fast_loads.wmi",
         !wmi_hooked ? "The game's import of CoCreateInstance was not found: "
