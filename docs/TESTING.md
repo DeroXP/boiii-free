@@ -4330,3 +4330,18 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
 - [x] The website (03a73536, 77375627): `build_site.py --check` passes; seen in the browser pane at desktop and
       phone width (no sideways scroll, the menu opens, the light theme applies) and rendered by Edge headless
       (`bench\20261114-night\site`).
+- [x] The user's stack on every installed Zombies map, on 4d3b9e14 (`sweep-user8-4d3b9e14.txt`, map-check.ps1 -Live,
+      one game per map, their flags `-xerces-precise-limiter -xerces-db-pool -xerces-db-pool-8gb`): 26 of 28 loaded
+      (11.9 to 17.2 s from `map`), played 30 s and went back to the menu, Ascension included. **Die Rise** ended
+      every load with "Server Disconnected - Clientfield Mismatch" and the lobby relaunched it until 480 s ran out.
+      The same stack on Die Rise: played on the packaged beta.27 (51.1 s, the 4x start off there), with
+      `-xerces-no-fast-loads` (49.3 s), and with only the 4x level start off (16.9 s); with no mods it played with
+      the 4x on. The 4x start is now opt-in (95d883e5); on the new defaults Die Rise and the eight mods: 16.8 s,
+      played. **MW4 Shipment** stopped on the unsafe-Lua question in its mode screen (the map's own menu asks for
+      `package.loadlib`, loading a DLL); a question by design, the check counts any dialog as a failure. The
+      question now names the function and what it does (04b0497d, `dialog-match.png`).
+- [x] The zone table, read from the running game (`tools/dev/re/read_zones.py`): with the eight mods, 53 of 64
+      slots at a Zombies load's peak (23 the game's own, 30 the mods'), the same on Shadows of Evil, The Giant and
+      Der Riese; the planner counts the same 30 for the eight mods. compat/zone_memory.json now has the stock count
+      (38cccd01): the eight mods plan at 53 of 63; twelve (the eight, Solo Easter Eggs, the Wonder Weapon Pack,
+      Zombie Counter, All-around Enhancement) at 62; all twenty installed non-map mods would need 70.
