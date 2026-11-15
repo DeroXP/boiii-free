@@ -5,6 +5,16 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## Mods and maps
 
+- **About nine or ten mods fit in one game.** The game has a table of 63 zones
+  (packs of loaded content). In Zombies it takes 23 of them itself as a level
+  loads, and most mods add 4 (2 for the menus, 2 for Zombies, each with its
+  English text); some add 2. Eight mods like DS4C, Ascendance, im_oxo QOL,
+  Classic Viewmodel FOV, DBZ Villains, Girls' Frontline 2.0, Avali and Neptunia
+  take 30: 53 of 63, read from the running game. A stack over 63 hangs while the
+  level loads. After beta.27 the Mods screen counts the zones and says before
+  you launch when a stack is over, and by how many; take off mods until it
+  fits. The limit is the game's own (a table of 64 slots, and the engine stops
+  at 64); Xerces does not raise it.
 - **Shadows of Evil with DS4C drops you before the level.** When the 3.5 minute
   intro plays to the end, DS4C's scripts error on every frame and the game drops
   you before you are in the level. Skip the intro and it plays. This is DS4C's

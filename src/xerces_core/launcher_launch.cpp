@@ -56,6 +56,13 @@ profile_request(const launcher_config &config, const std::string &mode,
         *zone_memory, mode, pool_gib != 0,
         db_pool::pool_bytes_for(pool_gib != 0 ? pool_gib
                                               : db_pool::default_size_gib));
+    // The zone table's budget (DESIGN.md 5.3 step 5), where the mode's stock
+    // count is measured
+    if (const auto it = zone_memory->stock_zones.find(mode);
+        it != zone_memory->stock_zones.end()) {
+      request.stock_zones = static_cast<std::size_t>(it->second);
+      request.map_zones_free = zone_memory->frontend_zones;
+    }
   }
   request.xerces_version =
       version::parse(xerces_version_text).value_or(version{});

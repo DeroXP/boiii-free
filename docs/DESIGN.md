@@ -681,7 +681,13 @@ All in `xerces_core`:
 5. Budget: count the zones the plan adds from the files actually present (each
    stacked zone, its language variant and `_patch` variant) on top of the stock
    zones of the plan's mode and map, against the engine's 64-slot table (63
-   usable). Also check script and pool limits (500 linked script objects per VM;
+   usable). The stock count is measured per build and mode in
+   compat/zone_memory.json (`stock_zones`, `frontend_zones`; Zombies on the
+   September 2026 build: 23 at a level load's peak, read from a running game's
+   `g_zoneNames` on 2026-11-15, and a custom map's first 4 zones take the slots
+   the menus' zones free); the launcher passes it to the planner
+   (`profile_request`), so the Mods screen says when a stack is over before a
+   launch hangs, and by how many zones. Also check script and pool limits (500 linked script objects per VM;
    pool sizes from `assetlimits.txt`). Over budget is an error with the numbers.
 
    Zone memory sits next to the slot budget (built 2026-11-05, headless). When a

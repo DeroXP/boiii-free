@@ -12,8 +12,9 @@
 namespace xerces_core {
 namespace {
 const std::set<std::string, std::less<>> known_keys = {
-    "name",         "steam_build",  "checksum",         "db_main_pool_mib",
-    "baseline_mib", "prt_pool_mib", "prt_baseline_mib", "note"};
+    "name",         "steam_build",   "checksum",         "db_main_pool_mib",
+    "baseline_mib", "prt_pool_mib",  "prt_baseline_mib", "note",
+    "stock_zones",  "frontend_zones"};
 
 // "baseline_mib" or "prt_baseline_mib": mode -> MiB, null when not measured.
 void parse_baselines(const rapidjson::Value &entry, const std::string &path,
@@ -131,6 +132,17 @@ void parse_build(const rapidjson::Value &entry, const std::string &path,
   }
   parse_baselines(entry, path, "prt_baseline_mib", build.prt_baseline_mib,
                   diags);
+  parse_baselines(entry, path, "stock_zones", build.stock_zones, diags);
+  if (const rapidjson::Value *frontend =
+          json::member(entry, "frontend_zones")) {
+    if (!frontend->IsUint()) {
+      diags.error("zone_memory.frontend_zones",
+                  json::pointer(path, "frontend_zones"),
+                  "frontend_zones is a whole number.");
+    } else {
+      build.frontend_zones = frontend->GetUint();
+    }
+  }
   out.builds.push_back(std::move(build));
 }
 

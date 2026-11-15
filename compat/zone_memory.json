@@ -1,6 +1,6 @@
 {
   "schema": "xerces.zone_memory/1",
-  "_comment": "Zone memory per game build (docs/DESIGN.md 5.3 step 5), named by the keys compat/builds.json uses. When a custom map loads, the engine takes blocks 5 and 6 of every loaded zone (u64 block sizes at +0xA8 in a .ff header) from one fixed pool, the DB stack's main pool: db_main_pool_mib, and block 8 (the zone's streamed images) from the DB stack's streamed-texture pool: prt_pool_mib. A map that does not fit either makes the engine's out-of-memory handler exit the game while the map loads. baseline_mib and prt_baseline_mib are what each pool holds when a custom map's own zones start loading with no mods. Measured on 2026-11-05 from memory dumps of the September 2026 build: with DS4C (Workshop 3171632315, core_mod + zm_mod, 450.5 MiB of blocks 5 and 6) the main pool was at about 1299.3 MiB before a custom map's main zone loaded, so the stock Zombies baseline is about 849 MiB. Measured on 2026-11-07 from the engine's own shortfall when MW4 Shipment (Workshop 3829169329, 10653.1 MiB of block 8) did not fit: 1322 MiB short with DS4C (2762.5 MiB of block 8) and 5950 MiB short with six mods (7392 MiB), so the stock Zombies texture baseline is about 6338 MiB (the six-mod run predicts 5951.5). Only Zombies is measured; mp and cp are null, and Xerces skips the check for them until someone measures them.",
+  "_comment": "Zone memory per game build (docs/DESIGN.md 5.3 step 5), named by the keys compat/builds.json uses. When a custom map loads, the engine takes blocks 5 and 6 of every loaded zone (u64 block sizes at +0xA8 in a .ff header) from one fixed pool, the DB stack's main pool: db_main_pool_mib, and block 8 (the zone's streamed images) from the DB stack's streamed-texture pool: prt_pool_mib. A map that does not fit either makes the engine's out-of-memory handler exit the game while the map loads. baseline_mib and prt_baseline_mib are what each pool holds when a custom map's own zones start loading with no mods. Measured on 2026-11-05 from memory dumps of the September 2026 build: with DS4C (Workshop 3171632315, core_mod + zm_mod, 450.5 MiB of blocks 5 and 6) the main pool was at about 1299.3 MiB before a custom map's main zone loaded, so the stock Zombies baseline is about 849 MiB. Measured on 2026-11-07 from the engine's own shortfall when MW4 Shipment (Workshop 3829169329, 10653.1 MiB of block 8) did not fit: 1322 MiB short with DS4C (2762.5 MiB of block 8) and 5950 MiB short with six mods (7392 MiB), so the stock Zombies texture baseline is about 6338 MiB (the six-mod run predicts 5951.5). Only Zombies is measured; mp and cp are null, and Xerces skips the check for them until someone measures them. stock_zones: the engine zone table slots a mode takes at a level load's peak with no mods (read from a running game on 2026-11-15 with the user's eight-mod stack, g_zoneNames at 0x149910B80: 14 core zones, the title update, the menus' 4 still in the table, zm_patch and zm_common with their language variants = 23; the eight mods took 30 more, 53 in all, the same peak on Shadows of Evil, The Giant and Der Riese). frontend_zones: the menus' zones, freed before a map's own zones load, so a map's first frontend_zones zones take no slot of their own at that peak.",
   "builds": [
     {
       "name": "September 2026 Steam client",
@@ -9,7 +9,9 @@
       "db_main_pool_mib": 2048,
       "baseline_mib": { "zm": 849, "mp": null, "cp": null },
       "prt_pool_mib": 18432,
-      "prt_baseline_mib": { "zm": 6338, "mp": null, "cp": null }
+      "prt_baseline_mib": { "zm": 6338, "mp": null, "cp": null },
+      "stock_zones": { "zm": 23, "mp": null, "cp": null },
+      "frontend_zones": 4
     }
   ]
 }

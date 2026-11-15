@@ -339,6 +339,24 @@ TEST_CASE("zone memory: the repository's figures match a listed build") {
   CHECK_EQ(zm->baseline_mib, 849.0);
   CHECK(!find_zone_budget(table, "24784313", "mp").has_value());
   CHECK(!find_zone_budget(table, "24784313", "cp").has_value());
+
+  // The zone table's stock count (read from a running game, 2026-11-15)
+  // reaches the plan request for Zombies only
+  const auto build = std::ranges::find_if(table.builds, [](const auto &b) {
+    return b.steam_build == std::uint64_t{24784313};
+  });
+  REQUIRE(build != table.builds.end());
+  CHECK_EQ(build->stock_zones.at("zm"), 23.0);
+  CHECK(!build->stock_zones.contains("mp"));
+  CHECK_EQ(build->frontend_zones, std::size_t{4});
+  launcher_config config;
+  const plan_request request =
+      profile_request(config, "zm", 24784313, {}, *build);
+  REQUIRE(request.stock_zones.has_value());
+  CHECK_EQ(*request.stock_zones, std::size_t{23});
+  CHECK_EQ(request.map_zones_free, std::size_t{4});
+  CHECK(!profile_request(config, "mp", 24784313, {}, *build)
+             .stock_zones.has_value());
 }
 
 // -------------------------------------------------- a mod's or map's zones

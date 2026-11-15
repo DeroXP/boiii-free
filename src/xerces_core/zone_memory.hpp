@@ -47,6 +47,11 @@ struct zone_memory_build {
   std::map<std::string, double> baseline_mib;     // measured modes only
   double prt_pool_mib = 0;                        // 0: not known
   std::map<std::string, double> prt_baseline_mib; // measured modes only
+  // Zone table slots a mode takes at a load's peak, no mods (measured modes
+  // only), and how many of a map's own zones fit in the slots the menus'
+  // zones free first
+  std::map<std::string, double> stock_zones;
+  std::size_t frontend_zones = 0;
 };
 
 struct zone_memory_table {

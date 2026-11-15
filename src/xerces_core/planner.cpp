@@ -1342,15 +1342,27 @@ plan resolve_plan(const std::vector<installed_content> &catalog,
     out.zones_added += out.map->zones;
   }
   if (request.stock_zones) {
-    out.zones_total = *request.stock_zones + out.zones_added;
+    // A custom map's own zones load after the menus' are freed: only those
+    // past the freed slots count (2026-11-15, read from a running game)
+    const std::size_t map_zones = out.map ? out.map->zones : 0;
+    const std::size_t map_free = std::min(map_zones, request.map_zones_free);
+    out.zones_total = *request.stock_zones + out.zones_added - map_free;
     if (*out.zones_total > zone_slot_limit) {
+      const std::size_t over = *out.zones_total - zone_slot_limit;
       diags.error("plan.budget.zones", "",
                   "This plan needs " + std::to_string(*out.zones_total) +
                       " zone slots (" + std::to_string(*request.stock_zones) +
-                      " for the mode and map, " +
-                      std::to_string(out.zones_added) +
-                      " for mods); the engine has " +
-                      std::to_string(zone_slot_limit) + ".");
+                      " for the game, " +
+                      std::to_string(out.zones_added - map_zones) +
+                      " for mods" +
+                      (map_zones > map_free
+                           ? ", " + std::to_string(map_zones - map_free) +
+                                 " for the map"
+                           : std::string()) +
+                      "); the engine has " + std::to_string(zone_slot_limit) +
+                      ". Turn off mods that add " + std::to_string(over) +
+                      " or more zones (most add 2 to 4), or the game hangs "
+                      "loading.");
     }
   } else if (out.zones_added > 0) {
     diags.info("plan.budget.stock_unknown", "",

@@ -56,6 +56,10 @@ struct plan_request {
   version xerces_version;
   std::uint32_t protocol_version = 1;
   std::optional<std::size_t> stock_zones; // zones the mode and map use
+  // Of a custom map's own zones, how many take the slots the menus' zones
+  // free before it loads (compat/zone_memory.json frontend_zones): only the
+  // rest count on top of stock_zones
+  std::size_t map_zones_free = 0;
   // <game>\boiii_players\user\launcher_settings.json, for the pool report's
   // defaults; empty when there is none (the client's defaults). In no hash.
   std::string launcher_settings;

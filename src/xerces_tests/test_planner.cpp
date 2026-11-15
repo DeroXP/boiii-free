@@ -302,6 +302,21 @@ TEST_CASE("planner: the zone budget counts the files that are present") {
   CHECK(over.diags.has("plan.budget.zones"));
   REQUIRE(over.zones_total.has_value());
   CHECK_EQ(*over.zones_total, 65u);
+  // The message says how many zones to take off
+  bool says = false;
+  for (const auto &item : over.diags.items()) {
+    if (item.code == "plan.budget.zones") {
+      says = item.message.find("Turn off mods that add 2 or more zones") !=
+             std::string::npos;
+    }
+  }
+  CHECK(says);
+
+  request.stock_zones = 58;
+  plan fits = resolve_plan(catalog, request);
+  CHECK(!fits.diags.has("plan.budget.zones"));
+  REQUIRE(fits.zones_total.has_value());
+  CHECK_EQ(*fits.zones_total, 63u);
 }
 
 TEST_CASE("planner: Workshop folders keep fastfiles at their root") {
