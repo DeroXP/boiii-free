@@ -4411,3 +4411,8 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       from upstream's server browser (`src/client/steam/interfaces/matchmaking_servers.cpp`,
       `handle_server_respone` -> the game's ServerResponded) while the game's own threads ran its menus. Fenced
       code: handing those calls to the main thread needs the maintainer's word. First seen tonight.
+- [x] Shi No Numa, 30 more games with `freeze_strings.py` waiting for a freeze report (`sumpf-hunt3`, 04:08 to
+      04:55): 29 loaded, played and went back to the menu; the thirtieth line is the check's own mix-up (it took
+      the previous game, then closing cleanly, for this run's and saw it end: that game's log ends in
+      `clean_exit`, and there is no report). No freeze, so two in 71 games of that map tonight, and the reader has
+      not had one to read yet. site/tested.json counts Shi No Numa as played (`--played`), with that note.

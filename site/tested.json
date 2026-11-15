@@ -60,7 +60,8 @@
       "name": "Shi No Numa",
       "result": "crash_disconnect",
       "load_s": 13.9,
-      "note": "Played; froze going back to the menu once (1 of 4 runs on this build; known issue)"
+      "note": "Played; froze going back to the menu (2 of 71 games that night; known issue)",
+      "played": true
     },
     {
       "map": "zm_temple",

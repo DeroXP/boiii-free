@@ -270,7 +270,7 @@ worse.
   Home, but it has not been tried in a OneDrive folder yet: unzip it to a folder
   such as `C:\Games\Xerces`.
 - **Shi No Numa can freeze going back to the menu.** With the eight mods, two
-  games in forty-two (2026-11-15) stopped as they left the match for the menu: the
+  games in seventy-one (2026-11-15) stopped as they left the match for the menu: the
   game was freeing its script strings and looped on one that was missing from its
   table. Xerces wrote a freeze report and closed the game after 60 s; the next
   start is normal. The cause is not found yet. If it happens to you, send the
