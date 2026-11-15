@@ -59,7 +59,8 @@ function __init__()
 // other mods, so the map's box lights (box_indicator) had none, and the match ended when the power came on. The game's
 // own util::setClientSysState leaves out a system that is not in the list, so the ones without an id are taken out of
 // it: that map's lights then do not show where the box is, and the match goes on. This script is here for every Zombies
-// level, which is why it lives in this file.
+// level, which is why it lives in this file. Since 2026-11-14 the ones past eight share a slot instead
+// (src/client/xerces/client_systems.cpp) and none gets -1; this stays for a game where that could not be set up.
 function drop_failed_client_systems()
 {
 	// after every script registered its own, before anything is turned on; and once more for a late one

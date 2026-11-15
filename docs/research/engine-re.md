@@ -767,3 +767,44 @@ kept (a review, 2026-11-14, found both: the first version nulled the table). Wit
 der Toten to Moon: one empty lookup, the table found with 9 bodies 3 s later, the level up,
 no crash; eight map changes in one game (Shadows of Evil, Origins, Kino, Moon, Shadows of
 Evil, Asylum, Ascension, Shi No Numa) all came up.
+
+## Client systems (2026-11-14 night)
+
+A client system is a named channel a level's server scripts use to tell its client scripts
+something (`util::registerClientSys` / `util::setClientSysState` on the server,
+`util::registerSystem` on the client). The built-in `ClientSysRegister` (0x141A79830) looks
+through the config strings 0xCAA to 0xCB1 (`SV_GetConfigstring`, 0x1421F4930) for the name
+(key `n` of the info string) or the first empty one, writes `\n\<name>` there with
+`SV_SetConfigString` and returns the slot, 0 to 7; with all eight taken it returns -1.
+`ClientSysSetState` (0x141A79900; the player method at 0x1416DF828 sends to that player only)
+takes slot 0 to 8 (`cmp 8; ja`: one more than registration gives, an off-by-one; 0xCB2 and
+0xCB3 are used by other code, 0xCB3 by the level's worldspawn), reads the slot's config
+string, sets key `s` to the state with spaces as `!`, and sends the server command
+`%c %i %s` with `'0'`; -1 is a terminal script error ("state index (-1) out of bounds (0 -
+8)"). The client (the server-command handler at 0x140F83C40, flattened by the protection)
+takes `s` from the command, turns `!` back into spaces, takes the name from its own copy of
+config string 0xCAA + slot and calls the client scripts' code callback with (local client,
+name, state); the client scripts hand it to the callback `util::registerSystem` stored under
+that name (`level._systemStates`).
+
+Kino der Toten needs four (musicCmd, levelNotify, lsm, box_indicator), DS4C three, two more
+mods one each: nine with the user's eight-mod stack. Xerces
+(`src/client/xerces/client_systems.cpp`) swaps the three built-ins in the game's built-in
+tables: while there is room nothing changes; when a system finds all eight taken, slot 7
+becomes the shared system `xerces_mux` (its config string rewritten), and the system that
+had it and every later one (ids 64 up) are sent through it as `<name>|<state>`; Xerces'
+client script (`data/custom_scripts/zm/xerces_client_systems.csc`) hands each to the
+callback registered under the name. A new level clears the config strings, which ends the
+sharing. Tested: with the test switch (`xerces_cs_test 1`), ten test systems on Shadows of
+Evil, four in the engine's slots, one moved out of slot 7 and five more shared: all ten
+states reached the client scripts; Kino with the eight mods and Power On at Start: lsm and
+box_indicator share slot 7, the match runs.
+
+Custom client scripts had never run before this: Xerces' script loader linked every custom
+script while the server's scripts loaded, the client's (`.csc`) into the client's VM at a
+time it does not run their `autoexec` functions, so `REGISTER_SYSTEM` never registered them.
+The loader now links each VM's custom scripts as that VM's own scripts load: the client's
+`Scr_BeginLoadScripts` call at 0x1408BFC42 (in the client game's start; the server's is the
+one at 0x141AA255F that was hooked already) gets the same stub, which on the host takes the
+scripts the server's load just read and, on a game that joined someone else's, reads them
+itself.

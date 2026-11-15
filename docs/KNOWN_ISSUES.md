@@ -61,13 +61,14 @@ to report these again, but tell us if you see them somewhere else or worse.
 
 ## Maps
 
-- **With many mods stacked, a map's lights or sounds that its scripts drive may
-  not work.** The game has room for eight "client systems"; a map and each mod
-  take some (Kino der Toten four, DS4C three). The ones that find no room used to
-  end the match with "ClientSysSetState - state index (-1) out of bounds": Kino
-  with the eight-mod test stack, when the power came on. Since beta.22 Xerces
-  leaves such a system out instead, so the match goes on; on Kino the lights
-  that show where the mystery box is then stay dark. Fewer mods bring them back.
+- **Before beta.28: with many mods stacked, a map's lights or sounds that its
+  scripts drive could stay off.** The game has room for eight "client systems"; a
+  map and each mod take some (Kino der Toten four, DS4C three). The ones that found
+  no room used to end the match with "ClientSysSetState - state index (-1) out of
+  bounds"; from beta.22 Xerces left such a system out, so on Kino with eight mods
+  the lights that show where the mystery box is stayed dark. Now none is left out:
+  the ones past eight share one of the game's slots. A friend who joins with an
+  older Xerces (or without it) still misses the shared ones.
 - **A long frame (about 140 ms) every third of a second on a large custom map.**
   Seen on TOWN REIMAGINED with eight mods, from about a minute into a match. The
   game re-sorts its list of loaded textures with a sort that is slow when the list

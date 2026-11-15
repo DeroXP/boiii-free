@@ -107,6 +107,12 @@ hash, sent with the link, shows that the zip is the one we made.
   into the same order. Nothing to turn on. If a map still stutters like that,
   send the game's log; to compare with the game's own sort, type
   `-xerces-stream-sort-engine` into Settings > Launch, Extra launch flags.
+- **Every mod's map effects, however many mods** (after beta.27). The game has room
+  for eight "client systems", the channels a map's and a mod's scripts use to tell your
+  game something (Kino der Toten's mystery box lights, DS4C's messages); with a big stack
+  Xerces used to leave the ones past eight out. Now they share one of the game's slots,
+  so none is left out. If a map's lights or a mod's on-screen text stay missing with many
+  mods, send the game's log (`xerces.client_systems` lines).
 - **Faster map loads** (on by default after beta.27; with beta.27 type
   `-xerces-fast-loads` into Settings > Launch, Extra launch flags). The game draws its
   loading screen only about 57 times a second, and it streams a level's textures in

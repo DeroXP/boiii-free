@@ -1369,14 +1369,51 @@ void begin_load_scripts_stub(scriptInstance_t inst, int32_t user) {
     rebuild_script_gdb();
   }
 
+  // Only this VM's scripts: a client script linked while the server's
+  // scripts load is not run (Xerces, 2026-11-14 night; its autoexec never
+  // ran). The client scripts are linked by client_begin_load_scripts_stub
+  // as the client's own scripts load.
   for (const queued_script &script : execution_queue) {
-    execute_queued_script(script);
+    if (script.inst == inst) {
+      execute_queued_script(script);
+    }
   }
 
   std::scoped_lock lock(script_load_mutex);
   if (!pending_detours.access<bool>(
           [](auto &pending_detours) { return pending_detours.empty(); })) {
     apply_pending_detours();
+  }
+}
+
+// The client's own Scr_BeginLoadScripts (CG, 0x1408BFC42 on this client):
+// custom client scripts (.csc) are linked here, as the client's scripts load.
+// On the host the server's load has just read and compiled them (above); a
+// game that joined someone else's has no server here, so it reads them now.
+void client_begin_load_scripts_stub(scriptInstance_t inst, int32_t user) {
+  scr::Scr_BeginLoadScripts(inst, user);
+
+  if (!com::Com_IsInGame() || com::Com_IsRunningUILevel()) {
+    return;
+  }
+
+  std::vector<queued_script> client_scripts;
+  {
+    std::scoped_lock lock(script_load_mutex);
+    if (!sv::SV_Loaded()) {
+      load_global_hash_table();
+      execution_queue.clear();
+      load_scripts();
+      rebuild_script_gdb();
+    }
+    for (const queued_script &script : execution_queue) {
+      if (script.inst == inst) {
+        client_scripts.push_back(script);
+      }
+    }
+  }
+  for (const queued_script &script : client_scripts) {
+    execute_queued_script(script);
   }
 }
 
@@ -1613,6 +1650,21 @@ struct component final : generic_component {
     // Load our custom/overriding scripts
     utils::hook::call(select(0x141AA255F, 0x141AAE92F, 0x1402D81FF),
                       begin_load_scripts_stub);
+    // And the client's custom scripts as the client's own load (this
+    // client's address only; the call is checked first)
+    if (game::is_new_client()) {
+      const auto *site =
+          reinterpret_cast<const std::uint8_t *>(game::relocate(0x1408BFC42));
+      std::int32_t relative = 0;
+      std::memcpy(&relative, site + 1, sizeof(relative));
+      if (site[0] == 0xE8 &&
+          reinterpret_cast<std::uintptr_t>(site) + 5 + relative ==
+              reinterpret_cast<std::uintptr_t>(
+                  scr::Scr_BeginLoadScripts.get())) {
+        utils::hook::call(reinterpret_cast<size_t>(site),
+                          client_begin_load_scripts_stub);
+      }
+    }
 
     // Force GSC checksums to be valid
     CG_TestServerScriptChecksum_hook.create(
