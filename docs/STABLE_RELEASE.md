@@ -45,12 +45,16 @@ decide. The boxes are ticked as things are done.
       notices and the zip with SHA256SUMS; the SHA-256 of the zip goes out apart
       from it.
 - [x] SOURCE.txt names the exact commit and every submodule.
-- [ ] A source archive with the submodules attached to each release (GitHub's
-      own archives leave them out; GPL, DESIGN.md 16.1). Made: release.ps1
-      writes `xerces-<version>-source.zip` (`tools/release/source_archive.py`:
-      the commit, 25 submodules at their pinned commits, the RmlUi, FreeType
-      and HarfBuzz archives; 84 MB) and its SHA-256. Left: a build from the
-      archive's own files, and the Steamworks question below.
+- [x] A source archive with the submodules attached to each release (GitHub's
+      own archives leave them out; GPL, DESIGN.md 16.1): release.ps1 writes
+      `xerces-<version>-source.zip` (`tools/release/source_archive.py`: the
+      commit, 25 submodules at their pinned commits, the RmlUi, FreeType and
+      HarfBuzz archives, 84 MB) and its SHA-256. It builds from its own files
+      with no Git (2026-11-15, b7c3ef86: `tools\build.ps1 -Client -Launcher`
+      in the unpacked archive, its SOURCE_GIT.json answering premake's git
+      commands; every program built, named "Xerces 1.0.0-rc.1 (b7c3ef86)",
+      not dirty), with the Steamworks headers put in by hand: the question
+      below.
 - [x] NOTICE and CREDITS, and an About and Legal page (DESIGN.md 16.5): the
       launcher's About page, and NOTICE and CREDITS in the repository and the
       zip; `tools/release/credits.py --check` fails a release when an author in

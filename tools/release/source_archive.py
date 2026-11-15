@@ -170,6 +170,10 @@ def main():
                 "",
                 *archives,
                 "",
+                "On Windows, tar stops at a symbolic link in the HarfBuzz archive (CLAUDE.md,",
+                "documentation the build does not read); 7-Zip, or Python's tarfile without its",
+                "links, unpacks it.",
+                "",
                 "To put the left-out Steamworks headers in place:",
                 "",
                 *[f"  git clone {subs[pth][2]} {pth}\n  git -C {pth} checkout {subs[pth][0]}"
