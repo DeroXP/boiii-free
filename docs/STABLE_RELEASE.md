@@ -81,6 +81,9 @@ decide. The boxes are ticked as things are done.
       staged swap with rollback) are not built. 1.0.0 can go out without them
       (players replace the folder, as with the betas); the launcher then needs
       at least a "a newer version is out" notice, or the website says to check.
+      The website's download page now says so (Updating), and releases.json
+      is there for a launcher notice; the notice itself needs the website's
+      address, so it waits for where the website lives.
 
 ## What only the maintainer can decide
 

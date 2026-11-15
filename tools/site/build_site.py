@@ -327,7 +327,7 @@ def download_body(releases, repo):
   <p class="notice"><strong>Not code-signed yet.</strong> Windows SmartScreen may say it protected your PC. Check the zip's SHA-256 first; if it matches, choose "More info", then "Run anyway".</p>
 </div></section>
 <div class="wrap doc">
-  <nav class="toc" aria-label="On this page"><a href="#install">Install</a><a href="#verify">Check a download</a><a href="#need">What you need</a><a href="#earlier">Earlier releases</a><a href="#source">Build it yourself</a></nav>
+  <nav class="toc" aria-label="On this page"><a href="#install">Install</a><a href="#verify">Check a download</a><a href="#need">What you need</a><a href="#updating">Updating</a><a href="#earlier">Earlier releases</a><a href="#source">Build it yourself</a></nav>
   <article class="prose">
   <h2 id="install">Install</h2>
   <ol class="steps">
@@ -347,11 +347,14 @@ def download_body(releases, repo):
     <li>Steam running and signed in with the account that owns the game.</li>
     <li>Nothing else: no installer, no runtimes, no admin rights.</li>
   </ul>
+  <h2 id="updating">Updating</h2>
+  <p>Xerces does not update itself yet: a new version is a new zip on this page (programs can read <a href="releases.json">releases.json</a>). Close Xerces and the game, delete the files in your Xerces folder, and unzip the new zip there. Your settings stay in <code>%%LOCALAPPDATA%%\\Xerces</code>.</p>
+  <p>After Steam updates Black Ops III, Xerces launches the game again once a version that knows the new game build is out (until then, play through Steam); this page has it when it is.</p>
   <h2 id="earlier">Earlier releases</h2>
   <table><thead><tr><th>Version</th><th>Date</th><th>SHA-256</th></tr></thead><tbody>%s</tbody></table>
   <p>The list for programs is <a href="releases.json">releases.json</a>.</p>
   <h2 id="source">Build it yourself</h2>
-  <p>Every release names the commit it was built from in its SOURCE.txt. The <a href="%s">source</a> builds with the pinned tools in its README, and the result can be compared file by file.</p>
+  <p>Every release names the commit it was built from in its SOURCE.txt, and comes with <code>xerces-&lt;version&gt;-source.zip</code>: that commit with the libraries it is built from (GitHub's own archives leave them out). The <a href="%s">source</a> builds with the pinned tools in its README, and the result can be compared file by file.</p>
   </article>
 </div>""" % (cards, zip_name, "".join(hist), html.escape(repo))
 
