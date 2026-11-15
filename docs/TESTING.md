@@ -4424,4 +4424,4 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       Checked on that build: 629 of 629 unit tests, the M1 cases 60 of 60 (`bench\20261114-night\m1-dev-party`),
       and the eight mods on Shadows of Evil, Kino der Toten, Shi No Numa, Town Reimagined, Die Rise and MW2 Rust:
       all six loaded (13.2 to 16.9 s), played and went back to the menu (`sweep-party-fix.txt`). The crash itself
-      came once in about 120 games tonight, so these runs show the change does no harm, not that it is gone.
+      came once in well over a hundred games tonight, so these runs show the change does no harm, not that it is gone.
