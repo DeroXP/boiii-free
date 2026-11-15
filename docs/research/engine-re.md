@@ -726,3 +726,34 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   data (0x15AA69D74, read from a running game), not through the import table: shortening
   only that call would mean changing that slot or hooking `Sleep` for the whole process,
   both a change to what the protection watches, so it is left.
+
+## The character table after a map change (2026-11-14 night)
+
+A `map` from inside a level, Kino der Toten (`zm_theater`) to Moon (`zm_moon`), crashed the
+server thread every time, with or without faster loads and the quick waits and with every
+XERCES SETTINGS option off: a null read at 0x1415DF0F0 in
+`G_CharacterCustomization_SetupRenderOptionsFromClientStats_Internal`, spawning the player
+(`zm_gametype::onspawnplayer` the innermost script). It reads `BG_GetCharacterBodyType(mode,
+character - 1)` and then the body type's count at +0xA8, and the body type was null.
+Shadows of Evil to Moon, and Moon from the menus, were fine; so was every other change tried.
+
+`BG_GetCharacterBodyType` (0x1400ADD00) reads the session mode's character table from a cache
+of one 24-byte entry per mode at 0x143EC4E40 (int mode, int state, const char *map,
+CustomizationTable *table; the table's body count at +8, its bodies of 0x1C0 bytes at +0x10).
+It returns null only when the table is missing or has no bodies; an index past the end gives
+the first body. The cache's check (0x1400AD690) takes a Zombies entry as good while the name
+it keeps equals the `mapname` dvar (0x157736848), and the loader (0x1400AD8E0) looks the
+table up with `DB_FindXAssetHeader` (type 0x22, allowing a default) under a name it derives
+from `mapname` (0x1400ADDB0), keeping `mapname`'s own string pointer as the entry's map.
+Watched from outside the process (`tools/dev/re/watch_chartable.py`): `mapname`
+became `zm_moon` while Kino's level was still up, the loader ran within 50 ms, before Moon's
+zones were in, and got a table with 0 bodies; the entry then said `zm_moon` with that empty
+table, so it was never looked up again, and the spawn read it. From the menus the first
+lookup comes after the zones.
+
+Xerces (`src/client/xerces/character_table.cpp`) hooks the loader: a Zombies table with no
+bodies is not kept (the entry's table is set to null, which the check takes as not loaded),
+so the next use looks it up again. With it, Kino der Toten to Moon: one empty lookup, the
+table found with 9 bodies 3 s later, the level up, no crash; eight map changes in one game
+(Shadows of Evil, Origins, Kino, Moon, Shadows of Evil, Asylum, Ascension, Shi No Numa)
+all came up.

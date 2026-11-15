@@ -81,6 +81,11 @@ to report these again, but tell us if you see them somewhere else or worse.
   how often the list was that far out of order and what the sorts cost. To
   compare with the game's own sort, type `-xerces-stream-sort-engine` into
   Settings > Launch, Extra launch flags.
+- **After beta.27: a `map` typed in the console from inside a level no longer
+  crashes into Moon.** Kino der Toten to Moon by `map zm_moon` closed the game's
+  server every time (it froze, then said the server stopped sending updates): the
+  game looked up Moon's character table before Moon had loaded and kept the empty
+  answer. Xerces now looks it up again. Moon from the menus was never affected.
 
 ## Zombies characters (CHARACTERS)
 
