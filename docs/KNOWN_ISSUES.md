@@ -275,11 +275,6 @@ worse.
   table. Xerces wrote a freeze report and closed the game after 60 s; the next
   start is normal. The cause is not found yet. If it happens to you, send the
   `freeze-<time>.txt` (README.txt, Reporting bugs).
-- **A crash at the menu as the server list answered** (once in the night's
-  test games, 2026-11-15). The server browser's answers reach the game's menu code
-  from a network thread rather than the game's own; once, that ended in a crash at
-  the main menu. Start the game again. The code is upstream's and fenced (FENCED.md);
-  a fix (handing those answers to the game's main thread) waits for a review.
 - **Some crashes are not explained yet.** In our tests the game sometimes closed
   while a map was starting, with no crash report, and ran fine the next time.
   If it happens to you, report it (README.txt, Reporting bugs) and say what you

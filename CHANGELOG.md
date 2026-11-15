@@ -59,6 +59,9 @@ fixes, checked with a real eight-mod stack on every installed Zombies map.
   assets" and what to do: the model pool no longer grows past the game's size,
   as the image and mesh pools already did not, because the game finds models
   by their place in its own pool.
+- A rare crash at the main menu: a server that did not answer the server list
+  within a second was reported to the game's menu code from a background
+  thread; it is now reported on the game's own thread, as answers are.
 
 ## [0.1.0-beta.27] - 2026-11-14
 

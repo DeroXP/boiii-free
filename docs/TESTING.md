@@ -4406,7 +4406,7 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       eight mods never shares a client system slot (no `xerces.client_systems` events), so neither is it.
       `bench\20261114-night\freeze_strings.py` now reads, at the next freeze, that string's text, refcount and
       user from the frozen game and every table entry that holds it.
-- [ ] A crash at the main menu (`crash-2026-11-15-03-02-33`, in the first Shi No Numa hunt, after the match, as
+- [x] A crash at the main menu (`crash-2026-11-15-03-02-33`, in the first Shi No Numa hunt, after the match, as
       the check went to quit): a write to 0x2406ED at BlackOps3.exe+0x1556D9D65 on an auxiliary thread, called
       from upstream's server browser (`src/client/steam/interfaces/matchmaking_servers.cpp`,
       `handle_server_respone` -> the game's ServerResponded) while the game's own threads ran its menus. Fenced
@@ -4416,3 +4416,12 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       the previous game, then closing cleanly, for this run's and saw it end: that game's log ends in
       `clean_exit`, and there is no report). No freeze, so two in 71 games of that map tonight, and the reader has
       not had one to read yet. site/tested.json counts Shi No Numa as played (`--played`), with that note.
+- [x] The menu crash, fixed outside the fenced file: its deeper frames show the call came from
+      `party::cleanup_queried_servers` (src/client/component/party.cpp, not fenced), the scheduler's async loop
+      that times out server queries after 1 s and called their callbacks there, while answers
+      (`handle_info_response`) run from the game's packet handling. The timeouts' callbacks now run on the main
+      pipeline (the server browser's ServerFailedToRespond, the connect failure's toast, the Workshop query).
+      Checked on that build: 629 of 629 unit tests, the M1 cases 60 of 60 (`bench\20261114-night\m1-dev-party`),
+      and the eight mods on Shadows of Evil, Kino der Toten, Shi No Numa, Town Reimagined, Die Rise and MW2 Rust:
+      all six loaded (13.2 to 16.9 s), played and went back to the menu (`sweep-party-fix.txt`). The crash itself
+      came once in about 120 games tonight, so these runs show the change does no harm, not that it is gone.

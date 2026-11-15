@@ -870,9 +870,20 @@ void cleanup_queried_servers() {
       }
     });
 
-    const utils::info_string empty{};
-    for (const server_query &query : removed_queries) {
-      query.callback(false, query.host, empty, 0);
+    // Xerces: the timeouts' callbacks run on the main pipeline, as the
+    // answers' do (handle_info_response, from the game's packet handling).
+    // This loop is async, and the server browser hands a timeout to the
+    // game's menu code (ServerFailedToRespond), which crashed once when it
+    // came from here (2026-11-15, docs/TESTING.md).
+    if (!removed_queries.empty()) {
+      scheduler::once(
+          [removed = std::move(removed_queries)] {
+            const utils::info_string empty{};
+            for (const server_query &query : removed) {
+              query.callback(false, query.host, empty, 0);
+            }
+          },
+          scheduler::main);
     }
   }
 }
