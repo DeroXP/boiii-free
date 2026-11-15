@@ -4279,3 +4279,38 @@ load"). `-xerces-fast-loading-screen` (new, opt-in; since folded into `-xerces-f
       folder. `xerces-main` pushed to GitHub on the user's word (052a6ae1..86f9832c, no tags).
 - [ ] The packaged build itself not started: the user was at the PC. The same commit's
       development build passed the M1 cases, the fast-loads soak and the Lua error tests.
+
+## The night after beta.27 (2026-11-14 to 15): defaults on, Moon, client systems, the package
+
+The user's word at 21:00: "verify and run all of those", "make fast loads and wake flags default", and the PC
+until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
+
+- [x] Faster loads and the quick waits on by default (4b200258, review fixes e93a188d): a vanilla launch with no
+      feature flag logs `xerces.fast_loads.on`, `.wmi` (answered at once 1 time), `xerces.present_wake.on` and
+      `xerces.input_wake.on`; Shadows of Evil from the menus 9.3 to 9.4 s with the 4x start (1,154 ms, level.time
+      200 to 4,900), then Origins 5.5 s, Kino 4.6 to 7.5 s, Moon 5.1 s by `map` (`soak.ps1`). With the three
+      `-xerces-no-...` flags each logs `opted_out` and Shadows of Evil took 15.6 s. A safe-mode launch passes all
+      three off flags (`m1-e06e36a0\safeoff.txt`).
+- [x] The M1 cases on e06e36a0: 60 pass, none fail (`m1-e06e36a0`).
+- [x] **The packaged beta.27** (`C:\Games\xerces-0.1.0-beta.27`; its three programs are byte-identical to
+      `xerces-main\build`): the nine M1 cases run from the unpacked zip's own files (`m1-check-pkg27.ps1`, data
+      from the package): 60 pass, none fail (`m1-pkg27`).
+- [x] A crash found and fixed (e06e36a0): `map zm_moon` from inside Kino der Toten crashed the server thread every
+      time (null read at 0x1415DF0F0, spawning the player), with or without the new defaults and with every XERCES
+      SETTINGS option off; Shadows of Evil to Moon and Moon from the menus were fine. Watched from outside
+      (`tools/dev/re/watch_chartable.py`): the Zombies character table was looked up as `mapname` changed, before
+      Moon's zones, and the empty answer kept. With the fix: one empty lookup, the table in 3 s later with 9 bodies,
+      the level up; eight map changes in one game (Shadows of Evil, Origins, Kino, Moon, Shadows of Evil, Asylum,
+      Ascension, Shi No Numa) all came up (`soak-fixed.txt`). A second read moved the fix from the table to the
+      entry's map (e93a188d).
+- [x] Client systems past eight share a slot (68f788cc). `xerces_cs_test 1` on Shadows of Evil: ten test systems,
+      four in the engine's slots, one moved out of slot 7 and five shared; every one's state reached the client
+      script (the ten dvars changed, `cs-test-zod*.txt`). The first tries showed custom client scripts never ran
+      at all (linked during the server's load); fixed in the loader in the same commit. Kino der Toten with the
+      user's eight-mod stack (their own launcher.json), larger zone memory and Power On at Start: "lsm and the ones
+      after it share slot 7", box_indicator shared, the match runs (`kino8-shared.png`). The console's script
+      errors there come from DS4C's `fr_commands.gsc` through the game's HUD helpers, not from this.
+- [x] Without larger zone memory the same eight mods on Kino run out of zone memory at the load
+      (`loader.out_of_memory`); the user's own settings have `-xerces-db-pool -xerces-db-pool-8gb`.
+- [ ] A Windows Security prompt ("allow public networks to access BOIII") came up over a test game with the
+      rebuilt boiii.exe. Left for the user, as always.

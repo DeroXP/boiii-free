@@ -164,7 +164,8 @@ std::string out_of_memory_map(std::string_view active_usermap,
 }
 
 out_of_memory_message out_of_memory_text(std::string_view zone,
-                                         std::span<const std::string> mods) {
+                                         std::span<const std::string> mods,
+                                         const int pool_gib) {
   out_of_memory_message out;
   out.title = "Black Ops III ran out of memory";
 
@@ -180,15 +181,32 @@ out_of_memory_message out_of_memory_text(std::string_view zone,
                "while loading " +
                std::string(zone) + ".\n\nMods loaded: " + mod_list + "\n\n";
     out.summary += " while loading " + std::string(zone);
+    // What makes it fit, before what to give up (the largest size is 8 GB,
+    // db_pool::size_options_gib)
+    if (pool_gib == 0) {
+      out.body += "Turn on Larger zone memory in Xerces' Settings > Launch "
+                  "(8 GB fits the biggest stacks), then launch again. ";
+    } else if (pool_gib > 0 && pool_gib < 8) {
+      out.body += "Larger zone memory is at " + std::to_string(pool_gib) +
+                  " GB: set it to 8 GB in Xerces' Settings > Launch, then "
+                  "launch again. ";
+    }
+    const bool hint = pool_gib >= 0 && pool_gib < 8;
     if (mods.empty()) {
-      out.body += "No mods are loaded, so this map alone needs more of that "
-                  "memory than the game has. Play another map.";
+      out.body += hint ? "Otherwise play another map: no mods are loaded, so "
+                         "this map alone needs more of that memory than the "
+                         "game has."
+                       : "No mods are loaded, so this map alone needs more of "
+                         "that memory than the game has. Play another map.";
     } else {
       // The planner's zone-memory check (DESIGN.md 5.3 step 5) names the
       // installed custom maps that do not fit with the mods on Mods.
-      out.body += "Maps and mods share that memory, so remove a mod or play "
-                  "another map. Xerces' Mods screen lists the custom maps that "
-                  "do not fit with your mods.";
+      out.body += hint ? "Otherwise remove a mod or play another map: maps "
+                         "and mods share that memory."
+                       : "Maps and mods share that memory, so remove a mod or "
+                         "play another map.";
+      out.body += " Xerces' Mods screen lists the custom maps that do not fit "
+                  "with your mods.";
     }
   }
   out.summary += mods.empty() ? " (no mods)" : " (mods: " + mod_list + ")";

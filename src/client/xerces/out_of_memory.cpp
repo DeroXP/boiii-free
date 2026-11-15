@@ -190,8 +190,9 @@ xerces_core::out_of_memory_message report(const void *return_address) {
   }
   const std::vector<std::string> mods =
       xerces_core::loaded_mods(fs_game, fs_extramods, names);
-  xerces_core::out_of_memory_message text =
-      xerces_core::out_of_memory_text(zone, mods);
+  xerces_core::out_of_memory_message text = xerces_core::out_of_memory_text(
+      zone, mods,
+      xerces_core::db_pool::requested_gib(xerces_runtime::command_line_args()));
 
   namespace json = xerces_core::json;
   std::string console = "[";

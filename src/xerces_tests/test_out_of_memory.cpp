@@ -168,6 +168,34 @@ TEST_CASE("out of memory: what the player reads with mods loaded") {
                  "Mods loaded: Solo Easter Eggs, DS4C\n"));
 }
 
+TEST_CASE("out of memory: larger zone memory first, when it is off or small") {
+  const std::vector<std::string> mods = {"DS4C"};
+  const auto off = out_of_memory_text("zm_theater", mods, 0);
+  CHECK(contains(off.body, "Turn on Larger zone memory in Xerces' Settings > "
+                           "Launch (8 GB fits the biggest stacks), then launch "
+                           "again. Otherwise remove a mod or play another "
+                           "map: maps and mods share that memory."));
+  const auto four = out_of_memory_text("zm_theater", mods, 4);
+  CHECK(contains(four.body, "Larger zone memory is at 4 GB: set it to 8 GB in "
+                            "Xerces' Settings > Launch"));
+  CHECK(!contains(four.body, "Turn on"));
+  const auto eight = out_of_memory_text("zm_theater", mods, 8);
+  CHECK(!contains(eight.body, "Larger zone memory"));
+  CHECK(!contains(eight.body, "Otherwise"));
+  CHECK(contains(eight.body, "Maps and mods share that memory, so remove a "
+                             "mod or play another map."));
+  // Not known: as before
+  CHECK_EQ(out_of_memory_text("zm_theater", mods, -1).body,
+           out_of_memory_text("zm_theater", mods).body);
+  CHECK(!contains(out_of_memory_text("zm_theater", mods).body, "Larger"));
+  // No mods: the map alone, the setting still first
+  const auto alone = out_of_memory_text("zm_huge", {}, 0);
+  CHECK(contains(alone.body, "then launch again. Otherwise play another map: "
+                             "no mods are loaded"));
+  // No zone loading: nothing about the content memory at all
+  CHECK(!contains(out_of_memory_text("", mods, 0).body, "zone memory"));
+}
+
 TEST_CASE("out of memory: no mods, or no zone known") {
   const auto alone = out_of_memory_text("zm_huge", {});
   CHECK(contains(alone.body, "Mods loaded: none\n"));

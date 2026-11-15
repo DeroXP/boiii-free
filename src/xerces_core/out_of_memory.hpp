@@ -60,12 +60,17 @@ std::string out_of_memory_map(std::string_view active_usermap,
 // gives: with one, the text names it and the mods and says to remove a mod
 // (or, with none, to play another map); without one (no zone is loading, or
 // it is not known), it only says the game ran out of memory. `mods` are the
-// names loaded_mods gives, empty when none are loaded.
+// names loaded_mods gives, empty when none are loaded. `pool_gib` is the
+// larger zone memory the game has (db_pool::requested_gib: 0 when off, 4, 6
+// or 8), or -1 when not known: below the largest size the text first says to
+// turn it on or up in Settings > Launch, which is what makes a big stack fit
+// (2026-11-15: eight mods on Kino der Toten needed it).
 struct out_of_memory_message {
   std::string title;
   std::string body;
   std::string summary; // one line, for the log
 };
 out_of_memory_message out_of_memory_text(std::string_view zone,
-                                         std::span<const std::string> mods);
+                                         std::span<const std::string> mods,
+                                         int pool_gib = -1);
 } // namespace xerces_core
