@@ -44,7 +44,10 @@ decide. The boxes are ticked as things are done.
 - [x] SOURCE.txt names the exact commit and every submodule.
 - [ ] A source archive with the submodules attached to each release (GitHub's
       own archives leave them out; GPL, DESIGN.md 16.1).
-- [ ] NOTICE and CREDITS, and an About and Legal page (DESIGN.md 16.5).
+- [x] NOTICE and CREDITS, and an About and Legal page (DESIGN.md 16.5): the
+      launcher's About page, and NOTICE and CREDITS in the repository and the
+      zip; `tools/release/credits.py --check` fails a release when an author in
+      the Git history is not in CREDITS.
 - [ ] README.txt for players, not testers: docs/TESTERS.md speaks of a private
       link and "this beta"; a stable zip needs a version of it without that.
 - [ ] Code signing for Xerces.exe, xerces_cli.exe and boiii.exe (DESIGN.md

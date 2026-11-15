@@ -25,7 +25,7 @@
      files Git tracks; data\launcher, upstream's old launcher page with its
      "No Steam" option and Ezz links, is replaced by
      tools\release\launcher\main.html, which only says to start Xerces.exe),
-     LICENSE, THIRD_PARTY_NOTICES.txt and SOURCE.txt
+     LICENSE, NOTICE, CREDITS, THIRD_PARTY_NOTICES.txt and SOURCE.txt
      (tools\release\notices.py), README.txt (docs\TESTERS.md) and
      KNOWN_ISSUES.txt (docs\KNOWN_ISSUES.md), then SHA256SUMS.txt over every
      file. No .lib, .pdb, spike or test programs go in.
@@ -160,6 +160,8 @@ try {
   # No code GPL-3.0 cannot take in (DESIGN.md 16.5; src\common\str.hpp held
   # kernel code until its rewrite).
   Invoke-Checked 'notices.py --licences' { python -I tools\release\notices.py --licences }
+  # CREDITS names every author in the Git history (DESIGN.md 16.5).
+  Invoke-Checked 'credits.py --check' { python -I tools\release\credits.py --check }
 
   # README.txt (docs\TESTERS.md) must describe what this build does. It says
   # crash reports are sent, can be turned off in Settings > Privacy and deleted
@@ -224,7 +226,9 @@ try {
   }
   New-Item -ItemType Directory -Force (Join-Path $stage 'data\launcher') | Out-Null
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'release\launcher\main.html') -Destination (Join-Path $stage 'data\launcher\main.html')
-  Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $stage
+  foreach ($legal in 'LICENSE', 'NOTICE', 'CREDITS') {
+    Copy-Item -LiteralPath (Join-Path $root $legal) -Destination $stage
+  }
   Invoke-Checked 'notices.py' {
     python -I tools\release\notices.py --notices (Join-Path $stage 'THIRD_PARTY_NOTICES.txt') `
       --source (Join-Path $stage 'SOURCE.txt') --downloads $DownloadsDir

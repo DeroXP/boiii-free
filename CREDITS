@@ -1,0 +1,79 @@
+Credits
+
+Xerces is the work of everyone below. The names are the ones the Git history
+records, in the group of each person's first commit (some people appear under
+more than one name). tools/release/credits.py keeps the lists in step with the
+history, and a release fails if someone is missing.
+
+BOIII, by momo5502 and its contributors (2022-2023)
+
+<!-- BOIII -->
+- Brentdevent
+- BrentVL-1952840
+- counter185
+- Diavolo
+- Edo
+- efinst0rm
+- FutureRave
+- Hosseinpourziyaie
+- ineed bots
+- Jari van der Kaap
+- jazzwolf
+- Joel Colby
+- joseupp
+- Liam
+- Lierrmm
+- m
+- Maurice Heumann
+- Michael
+- Mike
+- mjkzy
+- momo5502
+- project-bo4
+- Sergio Brighenti
+- Vlad Loktionov
+- WantedDV
+<!-- end -->
+
+Ezz BOIII, by Ezz and its contributors (2023-2026), including the mod-stack
+branch that loads several mods at once
+
+<!-- Ezz BOIII -->
+- Adam Killam
+- Alex Hey
+- FragsAreUs
+- Frozedy
+- Jax#0001
+- Level
+- level-checker
+- Likeicareaboutit
+- mb-bztf
+- misterbubb
+- PedroAugustoMorgadoVentura
+- Rocco Phoenix-Morrison
+- ryan
+- sirchico
+- Skwll
+- ViktorSMI
+- XFrozedyX
+<!-- end -->
+
+Xerces (since November 2026)
+
+<!-- Xerces -->
+- DeroXP
+<!-- end -->
+
+Most Xerces changes were written with Claude, Anthropic's AI model, as
+co-author; the commits that were say so.
+
+Built with
+
+Xerces is built with RmlUi, HarfBuzz, FreeType, MinHook, curl, zstd, RapidJSON
+and other libraries, and ships fonts under the SIL Open Font License,
+unmodified. Their authors, notices and licence texts are in
+THIRD_PARTY_NOTICES.txt, and their sources in SOURCE.txt (next to Xerces.exe in
+a release).
+
+Call of Duty: Black Ops III is a game by Treyarch, published by Activision.
+Xerces is not made, endorsed or supported by them.

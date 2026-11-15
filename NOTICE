@@ -1,0 +1,29 @@
+Xerces
+Copyright (C) 2022-2026 momo5502 and the BOIII contributors, Ezz and the Ezz
+BOIII contributors, and the Xerces contributors.
+
+Xerces is a modified version of Ezz BOIII
+(https://github.com/Ezz-lol/boiii-free), itself based on BOIII by momo5502 and
+its contributors:
+
+- BOIII was started by momo5502 in May 2022.
+- Ezz BOIII continued it from April 2023.
+- Xerces is Ezz BOIII as of commit f8f7b7353addb4e3f3c0ac4a9d162bb5615b3b56,
+  changed by the Xerces contributors since 4 November 2026. The Git history
+  of the Xerces repository shows every change and who made it.
+
+The people who wrote it are listed in CREDITS.
+
+Xerces is free software: you can redistribute it and change it under the terms
+of the GNU General Public License, version 3, as published by the Free Software
+Foundation (the file LICENSE). It comes with ABSOLUTELY NO WARRANTY, to the
+extent permitted by law.
+
+Xerces is built with other software under its own licences. Their notices and
+licence texts are in THIRD_PARTY_NOTICES.txt, and the source of each, with its
+version, is listed in SOURCE.txt (both next to Xerces.exe in a release; the
+release script, tools/release/notices.py, writes them).
+
+Call of Duty and Black Ops III are trademarks of Activision Publishing, Inc.
+Xerces is not made, endorsed or supported by Activision or Treyarch, and adds
+no game data: it needs your own copy of Black Ops III on Steam.
