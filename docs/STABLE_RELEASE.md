@@ -43,7 +43,11 @@ decide. The boxes are ticked as things are done.
       from it.
 - [x] SOURCE.txt names the exact commit and every submodule.
 - [ ] A source archive with the submodules attached to each release (GitHub's
-      own archives leave them out; GPL, DESIGN.md 16.1).
+      own archives leave them out; GPL, DESIGN.md 16.1). Made: release.ps1
+      writes `xerces-<version>-source.zip` (`tools/release/source_archive.py`:
+      the commit, 25 submodules at their pinned commits, the RmlUi, FreeType
+      and HarfBuzz archives; 84 MB) and its SHA-256. Left: a build from the
+      archive's own files, and the Steamworks question below.
 - [x] NOTICE and CREDITS, and an About and Legal page (DESIGN.md 16.5): the
       launcher's About page, and NOTICE and CREDITS in the repository and the
       zip; `tools/release/credits.py --check` fails a release when an author in
@@ -87,6 +91,10 @@ decide. The boxes are ticked as things are done.
    private-link way the betas went out.
 5. **When**: after the two-PC test and a week of a release candidate, at the
    earliest.
+6. **The Steamworks headers in the source archive**: `deps/SteamworkSDK` holds
+   Valve's headers with no licence, so the archive leaves them out and says
+   where to get them at the pinned commit (DESIGN.md 16.5 asks for advice on
+   this). Keep it that way, or put them in.
 
 ## How a release is cut (once the gates are ticked)
 

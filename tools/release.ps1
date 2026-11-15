@@ -31,8 +31,10 @@
      KNOWN_ISSUES.txt (docs\KNOWN_ISSUES.md), then SHA256SUMS.txt over every
      file. No .lib, .pdb, spike or test programs go in.
   4. Zips the folder, zips the PDBs into symbols-<version>.zip (kept by the
-     team, never handed out with the package), and writes
-     dist\SHA256SUMS-<version>.txt for the two zips. The package zip's SHA-256
+     team, never handed out with the package), writes the source archive
+     xerces-<version>-source.zip (the commit with its submodules and the
+     library archives: tools\release\source_archive.py), and writes
+     dist\SHA256SUMS-<version>.txt for the three zips. The package zip's SHA-256
      goes out with the private link: README.txt asks testers to check it.
 
   Never launches anything it builds, downloads nothing and pushes nothing.
@@ -281,12 +283,20 @@ try {
   New-Zip $symbolsDir $symbols ''
   Remove-Item -Recurse -Force -LiteralPath $symbolsDir
 
-  $zipSums = foreach ($file in $zip, $symbols) { "$(Get-Sha256 $file)  $(Split-Path -Leaf $file)" }
+  # GitHub's archives of a tag leave the submodules out; this one goes with
+  # every release (GPL-3.0 section 6, DESIGN.md 16.1).
+  $sourceZip = Join-Path $OutDir "$name-source.zip"
+  Invoke-Checked 'source_archive.py' {
+    python -I tools\release\source_archive.py --out $sourceZip --downloads $DownloadsDir
+  }
+
+  $zipSums = foreach ($file in $zip, $symbols, $sourceZip) { "$(Get-Sha256 $file)  $(Split-Path -Leaf $file)" }
   Write-Crlf (Join-Path $OutDir "SHA256SUMS-$version.txt") (($zipSums -join "`n") + "`n")
 
   Step 'Done'
   Write-Host "  $zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB, $($files.Count + 1) files)"
   Write-Host "  $symbols"
+  Write-Host "  $sourceZip"
   $zipSums | ForEach-Object { Write-Host "  $_" }
   # SHA256SUMS.txt inside the zip cannot vouch for the zip; this hash, sent apart
   # from it, can (README.txt, Install).
