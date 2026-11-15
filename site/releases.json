@@ -1,0 +1,29 @@
+{
+  "schema": "xerces.site.releases/1",
+  "note": "The website's release data (site/README.md): each channel's current release and the list of older ones. tools/release.ps1 prints what to put here; tools/site/build_site.py renders it.",
+  "repo": "https://github.com/DeroXP/boiii-free",
+  "checks": 688,
+  "maps_checked": "28",
+  "stable": {
+    "state": "planned",
+    "version": "1.0.0",
+    "summary": "The first stable release: the betas' features, once they have been played through and fixed."
+  },
+  "beta": {
+    "state": "live",
+    "version": "0.1.0-beta.27",
+    "date": "2026-11-14",
+    "file": "xerces-0.1.0-beta.27.zip",
+    "size_bytes": 10341879,
+    "sha256": "bbc7447009572adc6571985de840564bdfebb6965b10ea175c452d21ae99a9ea",
+    "url": "",
+    "access": "Testers get the beta by private link, with its SHA-256."
+  },
+  "history": [
+    {"version": "0.1.0-beta.27", "date": "2026-11-14", "sha256": "bbc7447009572adc6571985de840564bdfebb6965b10ea175c452d21ae99a9ea"},
+    {"version": "0.1.0-beta.26", "date": "2026-11-13"},
+    {"version": "0.1.0-beta.25", "date": "2026-11-13"},
+    {"version": "0.1.0-beta.24", "date": "2026-11-13"},
+    {"version": "0.1.0-beta.23", "date": "2026-11-12", "sha256": "521abe45ae3788ed7188d9c591bb2b7560f859226d93afc8000882b5f0ef5eaf"}
+  ]
+}

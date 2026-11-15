@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" role="img" aria-label="Xerces">
+  <rect x="0" y="0" width="9" height="9" fill="currentColor"/>
+  <rect x="13" y="0" width="9" height="9" fill="#FF4A1C"/>
+  <rect x="0" y="13" width="9" height="9" fill="currentColor"/>
+  <rect x="13" y="13" width="9" height="9" fill="currentColor"/>
+</svg>

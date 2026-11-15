@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}}</title>
+<meta name="description" content="{{description}}">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="{{root}}assets/mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="{{root}}assets/site.css">
+<script>
+  // The theme picked in the footer (per browser; the page works without it)
+  try {
+    var t = localStorage.getItem("xerces-theme");
+    if (t === "dark" || t === "light" || t === "contrast") document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="{{root}}index.html" aria-label="Xerces, home">
+      <svg viewBox="0 0 22 22" aria-hidden="true"><rect x="0" y="0" width="9" height="9" fill="currentColor"/><rect x="13" y="0" width="9" height="9" fill="#FF4A1C"/><rect x="0" y="13" width="9" height="9" fill="currentColor"/><rect x="13" y="13" width="9" height="9" fill="currentColor"/></svg>
+      <span class="word">xerces</span>
+      <span class="ver">{{header_version}}</span>
+    </a>
+    <span class="badge">{{header_badge}}</span>
+    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav">MENU</button>
+    <nav class="nav" id="nav" aria-label="Site">
+{{nav}}
+    </nav>
+  </div>
+</header>
+<main id="main">
+{{content}}
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <a class="brand" href="{{root}}index.html" aria-label="Xerces, home">
+          <svg viewBox="0 0 22 22" aria-hidden="true"><rect x="0" y="0" width="9" height="9" fill="currentColor"/><rect x="13" y="0" width="9" height="9" fill="#FF4A1C"/><rect x="0" y="13" width="9" height="9" fill="currentColor"/><rect x="13" y="13" width="9" height="9" fill="currentColor"/></svg>
+          <span class="word">xerces</span>
+        </a>
+        <p>A launcher for Call of Duty: Black Ops III that loads your Steam Workshop mods together, in your order.</p>
+        <div class="theme-switch" role="group" aria-label="Theme">
+          <button type="button" data-theme-pick="auto">Auto</button>
+          <button type="button" data-theme-pick="dark">Dark</button>
+          <button type="button" data-theme-pick="light">Light</button>
+          <button type="button" data-theme-pick="contrast">High contrast</button>
+        </div>
+      </div>
+      <div>
+        <h4>Get it</h4>
+        <a href="{{root}}download.html">Download</a>
+        <a href="{{root}}download.html#verify">Check a download</a>
+        <a href="{{root}}changelog.html">Changelog</a>
+      </div>
+      <div>
+        <h4>Help</h4>
+        <a href="{{root}}guide.html">Guide</a>
+        <a href="{{root}}known-issues.html">Known issues</a>
+        <a href="{{root}}guide.html#when-the-game-crashes">When the game crashes</a>
+      </div>
+      <div>
+        <h4>Source</h4>
+        <a href="{{repo}}">GitHub</a>
+        <a href="{{repo}}/blob/xerces-main/LICENSE">GPL-3.0 licence</a>
+        <a href="{{repo}}/issues">Report a bug</a>
+      </div>
+    </div>
+    <p class="legal">Xerces is free software under the GNU General Public License, version 3, with no warranty. It is a modified version of Ezz BOIII, itself based on BOIII by momo5502. You need your own copy of Black Ops III on Steam; Xerces plays offline and on games players host themselves, never official matchmaking. Xerces is not made, endorsed or supported by Activision or Treyarch. Call of Duty and Black Ops are trademarks of Activision Publishing, Inc.</p>
+  </div>
+</footer>
+<script>
+  (function () {
+    var toggle = document.querySelector(".menu-toggle");
+    var nav = document.getElementById("nav");
+    if (toggle && nav) {
+      toggle.addEventListener("click", function () {
+        var open = nav.classList.toggle("open");
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+    }
+    var root = document.documentElement;
+    var buttons = document.querySelectorAll("[data-theme-pick]");
+    function mark() {
+      var now = root.getAttribute("data-theme") || "auto";
+      buttons.forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-theme-pick") === now ? "true" : "false"); });
+    }
+    buttons.forEach(function (b) {
+      b.addEventListener("click", function () {
+        var pick = b.getAttribute("data-theme-pick");
+        if (pick === "auto") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", pick);
+        try { if (pick === "auto") localStorage.removeItem("xerces-theme"); else localStorage.setItem("xerces-theme", pick); } catch (e) {}
+        mark();
+      });
+    });
+    mark();
+  })();
+</script>
+</body>
+</html>
