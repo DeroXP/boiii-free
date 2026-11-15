@@ -866,3 +866,20 @@ assets.` (0x14141F740, the Com_Error at 0x14141F84B), which `error_help`'s
 game stops as the menus load with that message and its fix, in a fatal report, no crash). Making more models fit would need the pool and every
 per-slot table moved to memory near the image and those 32 instructions, and every table
 access, changed.
+
+## Script strings: the free that hung Shi No Numa (2026-11-15)
+
+The script string table is a pointer at 0x143267000 to 0x10000 entries of 8 bytes: `u32
+status_next` (the next entry in the low 16 bits, the status in bits 16-17) and `u32 str`, the
+string's node in the memory tree (`gScrMemTreePub` at 0x14505D2D0; nodes of 0x1C bytes, a
+`RefString` at each: refCount:16, user:8, byteLen:8, then the text). A string's bucket is a hash
+of its text (0x1412D7860: `h = h * 31 + c` over the bytes, or the length / 4 from 256 bytes up,
+then `% 0xFFFF + 1`); the bucket's chain starts at
+the bucket's entry and comes back to it. Freeing a string (0x1412D7800) walks the chain for the
+entry holding it (the loop at 0x1412D7970 to 0x1412D797F) with no other end: an entry missing from
+its chain loops for ever. That froze Shi No Numa once in eighteen games with the eight mods, as it
+went back to the menu: `DB_FreeUnusedResources` (0x141421590) ends by releasing the strings the
+zones held (the call at 0x141421869 with user 8). What took the entry out of its chain is not
+known. `tools/dev/re/watch_strings.py` checks every chain from outside every 2 s and reports one
+that is broken in four reads over 1.5 s (a read while a level loads can tear); a frozen game's
+table holds still, so the next freeze names the strings on the broken chain.
