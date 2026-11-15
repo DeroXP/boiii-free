@@ -4425,3 +4425,9 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       and the eight mods on Shadows of Evil, Kino der Toten, Shi No Numa, Town Reimagined, Die Rise and MW2 Rust:
       all six loaded (13.2 to 16.9 s), played and went back to the menu (`sweep-party-fix.txt`). The crash itself
       came once in well over a hundred games tonight, so these runs show the change does no harm, not that it is gone.
+- [x] **The 1.0.0-rc.1 package with the timeout fix** (xerces-main fast-forwarded to 49a1aac1, local): zip 9.9 MB,
+      243 files, SHA-256 4c6b8aaba6df5ece81a6c4e7c135deddc05f57b000a7d522cacdda7cd47a0016; source archive
+      3d133e8c6eaa28dcd44928fe520dc395e1bc8a87cf824652c14666d332db912f. Unzipped to `C:\Games\xerces-1.0.0-rc.1`
+      with the DLSS DLLs: every file matches SHA256SUMS.txt; the M1 cases from its files 60 of 60
+      (`bench\20261114-night\m1-pkg-rc1-49a1aac1`). This is the rc.1 package; the 7eab256c and 3b283505 zips
+      above are superseded.
