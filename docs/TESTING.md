@@ -4377,3 +4377,17 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       cause is open. Pools: every game peaked at the same 10957 models, 17106 to 19292 meshes, 23095 materials and
       48518 images, so the peak is the menus with the eight mods, not a map; site/tested.json says so once for
       the stack.
+- [x] **The 1.0.0-rc.1 package** (xerces-main fast-forwarded to 7eab256c, local; `tools\release.ps1`): zip 9.9 MB,
+      243 files, SHA-256 51b0c70c1d6e6da0f2aee8507893dbb089b468b1c855e1c5792563e9993cd04c; source archive 84 MB.
+      Unzipped to `C:\Games\xerces-1.0.0-rc.1` with the DLSS DLLs added: every file matches SHA256SUMS.txt;
+      README.txt and KNOWN_ISSUES.txt have their beta lines (VERSION has a pre-release part). The M1 cases from the
+      package's own files (`bench\20261114-night\m1-all-pkg-rc1.ps1`): 60 of 60 pass in the nine cases. Beside
+      them, `watch_strings.py` (the script string table's chains, read from outside every 2 s) found no broken
+      chain in any of the nine games. The source archive of b7c3ef86 built from its own files with no Git (every
+      program, "Xerces 1.0.0-rc.1 (b7c3ef86)", not dirty).
+- [x] Shi No Numa's freeze, hunted: twelve more games of it with the eight mods on 20f2cb6c's build
+      (`bench\20261114-night\sumpf-hunt.ps1`, 02:59 to 03:19): all twelve loaded (13 to 14.2 s), played and went
+      back to the menu. So one freeze in eighteen runs of that map tonight. `watch_strings.py` beside them reported
+      broken-looking chains in three of the twelve games, none of which hung: torn reads (the 512 KB table copied
+      while a level load changes it). The watcher now reports a chain only when three more reads over 1.5 s show
+      it the same, which a frozen game's table does; the cause is still open.

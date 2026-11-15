@@ -22,7 +22,8 @@ decide. The boxes are ticked as things are done.
 ### The game
 
 - [x] The M1 cases (launcher to game, nine cases, 60 checks) pass on every build;
-      the packaged beta.27 passes them from its own unzipped files.
+      the packaged beta.27 and the packaged 1.0.0-rc.1 (7eab256c, zip SHA-256
+      51b0c70c...cd04c) pass them from their own unzipped files.
 - [x] The maintainer's own stack (eight mods: DS4C, Ascendance, im_oxo QOL,
       Classic Viewmodel FOV, DBZ Villains, Girls' Frontline 2.0, Avali,
       Neptunia) with their own settings on every installed Zombies map: the
