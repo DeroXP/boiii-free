@@ -736,6 +736,12 @@ exists (found by the name the client gives it, `tools/dev/re/find_thread.py`).
   it is one step a call, a call a frame. Faster loads now call it again in the same frame
   while the last call moved a bank on (and no level is being played): 56 extra steps at a
   start, 7 or 14 per later zone, and the start about 1 s sooner (docs/DESIGN.md 12.4).
+  Which thread: a review read `SND_Frame`'s only caller as the `updatesound` job callback
+  (0x142217520), which skips `SND_Frame` on the main thread and runs it on a worker, one
+  run at a time under the spin lock `SND_UpdateWait` takes (0x1578883B0); the "main
+  thread" above came from a test build's log and is in doubt. Each extra call takes and
+  releases the bank code's own lock, and every step waits on its own flags (the reader
+  slot, the pending reads at +0x1268), so a call in the same frame never skips a wait.
 
 ## The character table after a map change (2026-11-14 night)
 

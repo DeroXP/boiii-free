@@ -377,7 +377,9 @@ void level_start_frame() {
 }
 
 // ------------------------------------------------------- sound banks (5.)
-// SND_BankUpdate (0x1425123A0), called once a sound frame from SNDL_Update,
+// SND_BankUpdate (0x1425123A0), called once a sound frame from SNDL_Update
+// (SND_Frame, run by the updatesound job on a worker thread, one run at a time
+// under the sound update's spin lock; and SNDL_GameReset),
 // moves at most one of the 32 bank loads one step (header read, its check,
 // the table of contents, ..., loaded) and returns whether all are done;
 // SNDL_Update keeps that in the flag the start's wait for the menus' banks
@@ -385,7 +387,7 @@ void level_start_frame() {
 // of the start's quiet 2.7 s was (docs/research/engine-re.md, "A start").
 // While no level is being played (the local client is not ACTIVE: the start,
 // a loading screen), the step is taken again in the same call as long as the
-// last one moved a bank on, at most 32 times; a step that only waits (a read
+// last one moved a bank on, up to 31 more calls; a step that only waits (a read
 // still in flight) ends it, so nothing spins. A level in play keeps the
 // engine's pace.
 constexpr std::uintptr_t bank_update = 0x1425123A0;
@@ -398,7 +400,7 @@ constexpr int bank_steps_most = 32;
 utils::hook::detour bank_update_hook;
 bool banks_hooked = false;
 // Steps taken beyond the engine's one a frame, since the banks were last done
-// (main thread only)
+// (the sound update's runs are one at a time; these only feed a log line)
 std::uint32_t extra_steps = 0;
 bool banks_were_done = true;
 

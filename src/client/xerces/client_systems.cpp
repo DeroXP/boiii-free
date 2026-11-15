@@ -81,6 +81,14 @@ bool same_name(const std::string_view a, const std::string_view b) {
   return a.size() == b.size() && _strnicmp(a.data(), b.data(), a.size()) == 0;
 }
 
+// The slot's config string is empty (the engine's "unregistered" test)
+bool slot_empty(const std::int32_t slot) {
+  std::array<char, config_string_size> buffer{};
+  get_config_string(first_config_string + slot, buffer.data(),
+                    static_cast<std::int32_t>(buffer.size()));
+  return buffer[0] == '\0';
+}
+
 // The name in a slot's config string, empty when the slot is free
 std::string name_in_slot(const std::int32_t slot) {
   std::array<char, config_string_size> buffer{};
@@ -118,20 +126,26 @@ std::optional<std::string> shared_system(const std::int32_t id) {
   return std::nullopt;
 }
 
-// What ClientSysSetState sends: "0 <index> \s\<state>", the state's spaces
-// as '!' and the characters an info string's value cannot hold left out, as
-// the engine's Info_SetValueForKey leaves them out
+// What ClientSysSetState sends: "0 <index> \s\<state>", the state cut to
+// 1023 characters (its 0x400 buffer), spaces as '!', the characters an info
+// string's value cannot hold left out as the engine's Info_SetValueForKey
+// leaves them out, and nothing at all when the info string would pass 1024
+// characters (Info_SetValueForKey refuses it and the engine sends "0 <index> ")
 void send_state(const std::int32_t client, const std::int32_t index,
                 const std::string_view state) {
+  constexpr std::size_t info_string_max = 1024;
+  const std::string_view cut = state.substr(0, info_string_max - 1);
   std::string value;
-  value.reserve(state.size());
-  for (const char c : state) {
+  value.reserve(cut.size());
+  for (const char c : cut) {
     if (c == '\\' || c == ';' || c == '"') {
       continue;
     }
     value.push_back(c == ' ' ? '!' : c);
   }
-  const std::string command = std::format("0 {} \\s\\{}", index, value);
+  const std::string info = std::format("\\s\\{}", value);
+  const std::string command =
+      std::format("0 {} {}", index, info.size() < info_string_max ? info : "");
   game::sv::SV_GameSendServerCommand(static_cast<game::ClientNum_t>(client),
                                      game::net::RELIABLE, command.c_str());
 }
@@ -153,7 +167,7 @@ bool index_ok(const game::scr::scriptInstance_t inst, const std::int32_t id) {
         true);
     return false;
   }
-  if (name_in_slot(id).empty()) {
+  if (slot_empty(id)) {
     game::scr::Scr_Error(
         inst,
         std::format("ClientSysSetState - state index ({}) unregistered.  Use "
@@ -261,22 +275,25 @@ void ClientSysSetState(const game::scr::scriptInstance_t inst) {
 void ClientSysSetStateMethod(const game::scr::scriptInstance_t inst,
                              game::scr::scr_entref_t *entref) {
   if (!is_player(entref)) {
+    // Scr_ObjectError in the engine: not a terminal error (a review,
+    // 2026-11-15)
     game::scr::Scr_Error(
         inst,
         std::format("entity {} is not a player", entref ? entref->u.entnum : -1)
             .c_str(),
-        true);
+        false);
     return;
   }
   const std::int32_t id = game::scr::Scr_GetInt(inst, 0);
-  const char *state = game::scr::Scr_GetString(inst, 1);
   if (const auto system = shared_system(id)) {
-    send_shared(entref->u.entnum, *system, state);
+    send_shared(entref->u.entnum, *system, game::scr::Scr_GetString(inst, 1));
     return;
   }
   if (!index_ok(inst, id)) {
     return;
   }
+  // The state after the checks, as the engine reads it
+  const char *state = game::scr::Scr_GetString(inst, 1);
   send_state(entref->u.entnum, id, state ? state : "");
 }
 
