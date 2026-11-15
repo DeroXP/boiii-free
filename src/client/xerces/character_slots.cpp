@@ -732,7 +732,14 @@ void fix_saved() {
 // The looks are worked out again whenever the game has linked an asset since
 // (a level or a mod loaded) or uses another table
 void ensure() {
-  if (!game::com::Com_SessionMode_IsMode(game::eModes::ZOMBIES) ||
+  // Test only: XERCES_CHAR_SLOTS=0 leaves the character table as the game
+  // has it (for telling a mod mix's trouble from this feature's)
+  static const bool test_off = [] {
+    wchar_t value[4] = {};
+    return GetEnvironmentVariableW(L"XERCES_CHAR_SLOTS", value, 4) > 0 &&
+           value[0] == L'0';
+  }();
+  if (test_off || !game::com::Com_SessionMode_IsMode(game::eModes::ZOMBIES) ||
       !game::sys::Sys_IsDatabaseReady()) {
     return;
   }

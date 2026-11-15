@@ -15,6 +15,18 @@ to report these again, but tell us if you see them somewhere else or worse.
   you launch when a stack is over, and by how many; take off mods until it
   fits. The limit is the game's own (a table of 64 slots, and the engine stops
   at 64); Xerces does not raise it.
+- **Two more limits of the game's own, met with big stacks** (2026-11-15, the
+  eight mods above plus each of the others installed on the test PC):
+  - All-around Enhancement fills the game's table of loaded assets (about
+    156,700 entries; the eight mods use about 85,000 in Shadows of Evil): "Could
+    not allocate asset - increase XASSET_ENTRY_POOL_SIZE", or a crash as the
+    level loads. It runs with fewer mods.
+  - The Black Ops 3 Wonder Weapon Pack with DS4C and four character mods (DBZ,
+    Girls' Frontline 2.0, Avali, Neptunia) crashes the texture streamer as the
+    level loads (an index past one of its tables), on beta.27 too and with
+    Xerces' character screen off. It runs alone, with DS4C, and with DS4C,
+    Ascendance, im_oxo QOL and Classic Viewmodel FOV.
+  - Solo Easter Eggs and Zombie Counter run with the eight.
 - **Shadows of Evil with DS4C drops you before the level.** When the 3.5 minute
   intro plays to the end, DS4C's scripts error on every frame and the game drops
   you before you are in the level. Skip the intro and it plays. This is DS4C's
