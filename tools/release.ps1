@@ -159,6 +159,11 @@ try {
   Invoke-Checked 'check_licences.py' { python -I tools\ci\check_licences.py }
   Invoke-Checked 'check_microsoft_notices.py --self-test' { python -I tools\ci\check_microsoft_notices.py --self-test }
   Invoke-Checked 'check_microsoft_notices.py' { python -I tools\ci\check_microsoft_notices.py }
+  # The rest of CI's Core tests lints: 1.0.0-rc.1 was packaged with a string
+  # missing from the translation template, and CI failed only after the push.
+  Invoke-Checked 'check_contrast.py' { python -I tools\ci\check_contrast.py }
+  Invoke-Checked 'tokens.py --check' { python -I tools\ui\tokens.py --check }
+  Invoke-Checked 'extract_strings.py --check' { python -I tools\i18n\extract_strings.py --check }
   # The website (site/README.md) is made from docs this release changes: every link resolves
   Invoke-Checked 'build_site.py --check' { python -I tools\site\build_site.py --check }
   # No code GPL-3.0 cannot take in (DESIGN.md 16.5; src\common\str.hpp held
