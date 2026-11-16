@@ -29,6 +29,9 @@ testers by private link; the first stable release is in preparation, and
   everyone who was still in the match back to its lobby.
 - **Asking to join through a link or Discord joins by itself** once the host
   lets you in, also with "Follow hosts you join" off.
+- **No Hip-Fire Spread works for players who joined.** Their shots already went
+  to the middle, but their own crosshair, tracers and bullet holes still spread;
+  now their game takes the host's setting too, a few seconds after they spawn.
 
 ## [1.0.0-rc.1] - 2026-11-15
 

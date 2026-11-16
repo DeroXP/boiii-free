@@ -382,7 +382,7 @@ function show_settings()
 		text = add_setting(text, "Rounds to 999");
 	if (s.smart_zombies)
 		text = add_setting(text, "Smart zombies");
-	// said to everyone: a player who joined still sees a crosshair that spreads
+	// said to everyone: it changes every player's shots, and a joined player's own game follows it
 	if (s.no_hip_spread)
 		text = add_setting(text, "No hip-fire spread");
 	if (text != "")

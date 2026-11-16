@@ -9,11 +9,21 @@
 // setting on. The host's game runs the match's server in the same process, so
 // the shots of everyone in the match go where the crosshair is.
 //
-// Never in multiplayer or campaign, and never when this PC only joined: in any
-// other level (and in a hosted Zombies match with the setting off) every
-// changed weapon that is still loaded gets its spread back, before a shot can
-// be fired there. Weapons are only touched inside a level, in the game's own
-// frame: at other times the game may be loading or unloading them.
+// A player who joined draws their own crosshair, tracers and bullet holes from
+// their own game's weapons, which kept their spread: the shots landed in the
+// middle, but on their screen they still spread (the user, 2026-11-15: "it
+// doesn't exactly work yet"). So in a Zombies match this PC joined, the
+// host's setting counts here too: the host's game sends its settings to each
+// player (the hidden text of data/custom_scripts/zm/xerces_rounds.gsc), and
+// data/ui_scripts/xerces_settings puts this one in xerces_zm_matchNoHipSpread
+// once a second. That dvar is 0 again outside a level, so it never carries
+// into the next match.
+//
+// Never in multiplayer or campaign: in any other level (and in a Zombies match
+// with the setting off) every changed weapon that is still loaded gets its
+// spread back, before a shot can be fired there. Weapons are only touched
+// inside a level, in the game's own frame: at other times the game may be
+// loading or unloading them.
 
 #include <component/scheduler.hpp>
 #include <game/game.hpp>
@@ -82,12 +92,19 @@ bool in_level() {
              game::connstate_t::ACTIVE;
 }
 
-// sv_running and the setting are bool dvars: read as bools, not as the raw
+constexpr const char *MATCH_SETTING = "xerces_zm_matchNoHipSpread";
+
+// sv_running and the settings are bool dvars: read as bools, not as the raw
 // first four bytes of the value, of which only one is defined (review,
-// 2026-11-13).
-bool hosting_zombies() {
-  return game::com::Com_SessionMode_IsMode(game::eModes::ZOMBIES) &&
-         game::server_running();
+// 2026-11-13). A match this PC hosts takes its own setting, as it is now; one
+// it joined takes the host's.
+bool wanted() {
+  if (!game::com::Com_SessionMode_IsMode(game::eModes::ZOMBIES)) {
+    return false;
+  }
+  const char *setting =
+      game::server_running() ? "xerces_zm_noHipSpread" : MATCH_SETTING;
+  return game::get_dvar_bool(setting).value_or(false);
 }
 
 // Every weapon now loaded that still has its spread: noted and set to 0
@@ -158,14 +175,16 @@ void restore() {
 void frame() {
   if (!in_level()) {
     next_scan_ms = 0; // the first frame of the next level scans at once
+    if (game::get_dvar_bool(MATCH_SETTING).value_or(false)) {
+      game::set_dvar_bool(MATCH_SETTING, false, false);
+    }
     return;
   }
   const uint64_t now = GetTickCount64();
   if (now < next_scan_ms) {
     return;
   }
-  const auto setting = game::get_dvar_bool("xerces_zm_noHipSpread");
-  if (setting && *setting && hosting_zombies()) {
+  if (wanted()) {
     // a weapon loaded later in the match is caught on a later scan
     next_scan_ms = now + 5000;
     apply();
@@ -186,6 +205,10 @@ public:
     if (!game::is_client() || !game::is_new_client()) {
       return;
     }
+    game::register_dvar_bool(
+        MATCH_SETTING, false, game::DvarFlags{},
+        "Zombies: whether the host of the match this PC is in has No Hip-Fire "
+        "Spread on. Set by Xerces' in-match script; 0 outside a match.");
     scheduler::loop(frame, scheduler::main);
   }
 };

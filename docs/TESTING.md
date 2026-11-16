@@ -4478,3 +4478,10 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       0.50), hip slowdown 0.09 at 1 m and 0.18 from 3 m (0.18 and 0.26). The Release build of all four programs
       compiles and the 629 unit tests pass. Not tried in the game: the menu, the 2-to-1 change on a saved config,
       the simulated stick (`XERCES_AIM_TEST=1`) and the feel with a controller.
+- [x] No Hip-Fire Spread for players who joined (2026-11-15, the user: "it doesn't exactly work yet"; DESIGN.md
+      7.11): a guest's game zeroes its own weapons' hip spread when the host's settings mask has bit 16384, which
+      the in-match script reads once a second into `xerces_zm_matchNoHipSpread` (0 again outside a level); the
+      host still uses its own `xerces_zm_noHipSpread`. The Release build of all four programs compiles and the 629
+      unit tests pass; StyLua is clean. Not tried: two PCs (the guest's crosshair, tracers and bullet holes, and
+      the spread coming back in its next match with the setting off), and whether the timer on the UI root runs
+      in a Zombies level as `xp_bar`'s does.

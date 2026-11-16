@@ -2158,6 +2158,20 @@ Zombies match with the setting on, each one still loaded and still at 0 gets its
 spread back within a second of the level starting. Weapons are only touched inside
 a level, in the game's own frame.
 
+A player who joined draws their own crosshair, tracers and bullet holes from their
+own game's weapons, which kept their spread: the shots landed in the middle, but on
+their screen they still spread (the user, 2026-11-15: "it doesn't exactly work
+yet"). Since then a match this PC joined takes the host's setting: the host's game
+already sends its settings mask to each player in the hidden menu text (7.9), and
+`data/ui_scripts/xerces_settings` puts the No Hip-Fire Spread bit in the dvar
+`xerces_zm_matchNoHipSpread` once a second, from a timer on the UI root while a
+Zombies level runs. `zm_hip_spread.cpp` takes the host's own `xerces_zm_noHipSpread`
+when this PC runs the server and that dvar when it does not, and sets the dvar back
+to 0 outside a level, so it never carries into the next match. A host on an older
+Xerces with the setting on sends the same bit, so its guests on this version get
+it; a guest on an older Xerces keeps its spread on screen. Typing the dvar in the
+console of a match whose host has it off is overwritten by the next second's tick.
+
 ### 7.12 Zombies: every character mod's characters as slots (built 2026-11-12, beta.21)
 
 Asked for by the user on 2026-11-12: with DBZ Villain Characters, Girls' Frontline,

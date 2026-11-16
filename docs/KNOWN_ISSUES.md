@@ -197,8 +197,12 @@ worse.
   nothing. Unlike those games it
   moves the view up or down toward a zombie's torso-to-head band when you aim
   under or over it (never sideways).
-- **No Hip-Fire Spread is the host's setting.** It does nothing in a match you
-  joined, and the crosshair of players who joined still shows their own spread.
+- **No Hip-Fire Spread is the host's setting.** Your own setting does nothing in
+  a match you joined; the host's is used there. Players who joined get the
+  tight crosshair, tracers and bullet holes a few seconds after they spawn, once
+  the host's settings reach them, and only when they are on this version too:
+  on an older Xerces their shots still land in the middle, but their screen
+  shows the spread. Not yet tried on two PCs.
 
 ## Zombies round settings (XERCES SETTINGS)
 

@@ -952,6 +952,7 @@ std::string read_settings() {
       "xerces_upscalerSharpness",
       "xerces_zm_aimAssist",
       "xerces_zm_noHipSpread",
+      "xerces_zm_matchNoHipSpread",
       "xerces_zm_roundHud",
       "xerces_zm_selfRevives",
       "xerces_zm_roundSkips",

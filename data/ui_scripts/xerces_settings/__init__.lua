@@ -552,6 +552,30 @@ matchData = function()
   return found
 end
 
+-- No Hip-Fire Spread in a match: the host's game takes the spread off every
+-- weapon for the match's shots, but a player who joined draws their crosshair,
+-- tracers and bullet holes from their own game's weapons. Once a second the
+-- host's setting goes to this PC's game (xerces_zm_matchNoHipSpread), which
+-- takes the spread off here too (src/client/xerces/zm_hip_spread.cpp) and
+-- sets it back to 0 when the match ends. On the UI root, as the hidden text
+-- comes and goes.
+if Engine.GetCurrentMap() ~= "core_frontend" and Engine.CurrentSessionMode() == Enum.eModes.MODE_ZOMBIES then
+  local root = LUI.roots and LUI.roots.UIRoot0
+  if root and not root.xercesMatchSpread and LUI.UITimer and LUI.UITimer.newElementTimer then
+    root.xercesMatchSpread = LUI.UITimer.newElementTimer(1000, false, function()
+      local ok, match = pcall(matchData)
+      local value = 0
+      if ok and match and hasBit(match.mask, NO_HIP_SPREAD_BIT) then
+        value = 1
+      end
+      if Engine.DvarInt(nil, "xerces_zm_matchNoHipSpread") ~= value then
+        Engine.SetDvar("xerces_zm_matchNoHipSpread", value)
+      end
+    end)
+    root:addElement(root.xercesMatchSpread)
+  end
+end
+
 -- A win pays the bet times 2 at round 1, 0.1 more each round, at most 5
 -- (xerces_rounds.gsc flip_payout_tenths)
 local function payoutTenths(round)

@@ -189,7 +189,9 @@ hash (step 1) shows that the zip is the one we made.
   (XInput) controller, works in Zombies only and never with a mouse. In a match the
   console command `xerces_aim_debug` says whether it sees your controller.
 - **No Hip-Fire Spread (Zombies).** XERCES SETTINGS > ZOMBIES, when you host: shots
-  from the hip go where the crosshair is, for everyone in the match.
+  from the hip go where the crosshair is, for everyone in the match. Players who
+  joined see it on their own screen too (crosshair, tracers, bullet holes) a few
+  seconds after they spawn.
 - **Diagnostics** shows what Xerces found: the game, its build, the mods, the
   logs and crash bundles. "Copy report" puts all of it on the clipboard for a
   bug report.
