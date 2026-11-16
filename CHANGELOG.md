@@ -4,9 +4,14 @@ Every Xerces release and what changed for players, newest first, in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) way. The website's
 changelog page is made from this file (tools/site/build_site.py). Betas went to
 testers by private link; the first stable release is in preparation, and
-1.0.0-rc.1 is its first candidate.
+1.0.0-rc.2 is its second candidate.
 
 ## [Unreleased]
+
+## [1.0.0-rc.2] - 2026-11-16
+
+The second candidate: 1.0.0-rc.1 and the fixes from a two-player test of it,
+each player hosting in turn.
 
 ### Added
 
