@@ -4460,3 +4460,13 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       `// clang-format on` now, which every version honours; clang-format 23 is clean on them, and the tests and
       boiii.exe build, 629/629 pass. There is no clang-format 22 on this PC (Visual Studio's 19 cannot read the
       repo's .clang-format), so GitHub's run is the only 22 check.
+- [x] Join on a friend and the trip back to the host's lobby (2026-11-15, DESIGN.md 10.12), after the user's first
+      game with a friend on rc.1: their log shows the invite-link join at 18:57, the match on zm_blundeezy until
+      19:06 and then their own frontend, and joining a friend whose "Who can join" was Anyone still took an invite.
+      The backend's `POST /v1/friends/{id}/knock` (on launcher/friends-backend): 458 backend tests pass, three new
+      (a friend knocks without a link and is invited once let in, whatever their invite setting; strangers, oneself,
+      a removed friend and a bad mode are refused; a player let in can knock again, a pending knock stays one). The
+      client's `knock_friend` is checked against the fake backend (its URL and body, a bad id or mode sends
+      nothing). The Release build of all four programs compiles and the 629 unit tests pass. Not tried: two PCs,
+      the friend Join against the live backend (it is not deployed), and the game-side `lobbyReturn`, which needs a
+      host and a guest on two PCs.

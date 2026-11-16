@@ -981,6 +981,28 @@ outcome client::knock(std::string_view code, knock_info *out) {
   return result;
 }
 
+outcome client::knock_friend(std::string_view user_id, std::string_view mode,
+                             knock_info *out) {
+  if (!safe_id(user_id)) {
+    return bad_id();
+  }
+  if (mode != "zm" && mode != "mp" && mode != "cp") {
+    return bad_code("a game mode");
+  }
+  std::string body;
+  outcome result =
+      call("POST", "/v1/friends/" + std::string(user_id) + "/knock",
+           "{\"mode\":" + json::quote(mode) + "}", &body, true);
+  if (result.ok && out) {
+    const auto parsed = parse_object(body);
+    if (!parsed.ok || !parsed.document.IsObject()) {
+      return not_understood();
+    }
+    *out = knock_of(parsed.document);
+  }
+  return result;
+}
+
 outcome client::knocks(knock_list &out) {
   std::string body;
   outcome result = call("GET", "/v1/knocks", {}, &body, true);

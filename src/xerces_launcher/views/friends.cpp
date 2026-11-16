@@ -39,6 +39,9 @@ namespace core = xerces_core;
 struct friend_row {
   Rml::String id, name, status;
   bool online = false;
+  // In a game with its lobby open: Join asks them (DESIGN.md 10.12).
+  bool can_join = false;
+  std::string mode; // their game's, for the knock
 };
 struct person_row {
   Rml::String id, name;
@@ -97,6 +100,7 @@ public:
       row.RegisterMember("name", &friend_row::name);
       row.RegisterMember("status", &friend_row::status);
       row.RegisterMember("online", &friend_row::online);
+      row.RegisterMember("can_join", &friend_row::can_join);
     }
     if (auto row = model.RegisterStruct<person_row>()) {
       row.RegisterMember("id", &person_row::id);
@@ -202,8 +206,16 @@ public:
                      false, "following a host's invite");
       join_invite(received.id, false);
     };
-    service_->on_knock = [this](const account::knock_info &knock) {
+    service_->on_knock = [this](const account::knock_info &knock,
+                                bool at_once) {
       if (let_in_from_discord(knock)) {
+        return;
+      }
+      if (at_once && service_->snapshot().hosting) {
+        // A friend's Join, and this lobby is open to anyone.
+        service_->let_in(knock.id, knock.from_user_id, current_pack_json(),
+                         report(knock.from_username + " " +
+                                owner_->tr("is joining your lobby.")));
         return;
       }
       owner_->notify(knock.from_username + " " +
@@ -1018,8 +1030,13 @@ private:
     friends_.clear();
     std::size_t online = 0;
     for (const auto &entry : s.friends) {
-      friend_row row{entry.user_id, entry.username, status_text(entry.now),
-                     !entry.now.status.empty()};
+      friend_row row;
+      row.id = entry.user_id;
+      row.name = entry.username;
+      row.status = status_text(entry.now);
+      row.online = !entry.now.status.empty();
+      row.can_join = entry.now.status == "in_game" && entry.now.joinable;
+      row.mode = entry.now.mode.empty() ? "zm" : entry.now.mode;
       online += row.online ? 1 : 0;
       friends_.push_back(std::move(row));
     }
@@ -1313,6 +1330,19 @@ private:
         service_->invite(
             r->id, current_pack_json(),
             report(owner_->tr("Invite sent to") + " " + r->name + "."));
+      }
+    } else if (action == "join friend") {
+      if (const auto *r = at(friends_, index)) {
+        if (join_) {
+          owner_->notify(owner_->tr("Another join is under way. Cancel it "
+                                    "first."),
+                         true);
+          return;
+        }
+        service_->join_friend(
+            r->id, r->mode,
+            report(owner_->tr("Asked to join") + " " + r->name + ". " +
+                   owner_->tr("Xerces joins as soon as they let you in.")));
       }
     } else if (action == "remove" || action == "block") {
       const auto *r = at(friends_, index);

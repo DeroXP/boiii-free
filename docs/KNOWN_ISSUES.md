@@ -328,6 +328,11 @@ worse.
   forwarded, as direct connect does. Friends only see you while Xerces is open.
   Discord's Ask to Join has not been tried between two Discord accounts yet;
   connecting to the Discord app has.
+- **Join on a friend and going back to the host's lobby after a match are new
+  and untested between two PCs** (2026-11-15, after the first game with a
+  friend). Join needs the update to Xerces' server; until it is live, Join says
+  the server could not ask them, and an invite or an invite link still works.
+  Both players need a build with the change for the trip back to the lobby.
 - **Joining a friend on SHOOT HAUS dropped out of sync twice**
   (EXE_ERR_RELIABLE_CYCLED_OUT, "The server sent updates faster than your game
   could confirm them") on 2026-11-08, while the map loaded; other maps joined.

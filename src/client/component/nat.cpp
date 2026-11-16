@@ -93,6 +93,32 @@ struct lobby_request {
 lobby_request lobby_joining;
 std::function<void()> game_join_fallback;
 std::optional<game::net::netadr_t> server_lobby;
+
+// Xerces: back to the host's lobby after its match (DESIGN.md 10.12). The
+// engine drops the players who joined a lobby by address when the match
+// ends, and they land in menus of their own (seen 2026-11-15). So the host
+// remembers who played its match to the end, and once it is back in its
+// lobby, open to direct connect, calls them back ("lobbyReturn") for a
+// minute; each of them asks to join again, as Join does. Main thread only.
+constexpr std::chrono::seconds RETURN_SEEN_BEFORE_END = 15s;
+constexpr std::chrono::seconds RETURN_CALL_FOR = 60s;
+constexpr std::chrono::seconds RETURN_ACCEPT_FOR = 120s;
+constexpr std::chrono::seconds RETURN_ASK_EVERY = 5s;
+struct match_guest {
+  game::net::netadr_t address{};
+  std::chrono::steady_clock::time_point seen;
+};
+// The host's side: who is in its match, and when it ended.
+std::vector<match_guest> match_guests;
+bool hosted_match{};
+std::chrono::steady_clock::time_point match_ended{};
+// A guest's side: the host whose match it played, until that host answers
+// its request to go back (once: a guest who then leaves stays out), and when
+// it last asked.
+std::optional<game::net::netadr_t> match_host;
+std::chrono::steady_clock::time_point match_host_seen{};
+std::chrono::steady_clock::time_point return_asked{};
+bool return_asking{};
 std::mutex peers_mutex;
 typedef std::unordered_map<std::string, game::net::netadr_t> lobbyPeerMap_t;
 lobbyPeerMap_t lobby_peers;
@@ -853,6 +879,10 @@ void receive_lobby_join(const game::net::netadr_t &sender,
     network::send(sender, "lobbyDenied", parts[0] + " password");
     return;
   }
+  // Xerces: a player called back after the match is here; no more calls.
+  std::erase_if(match_guests, [&](const match_guest &guest) {
+    return network::are_addresses_equal(guest.address, sender);
+  });
 
   if (hosting_match() && !lobby_host_info(game::lobby::LobbyType::GAME)) {
     network::send(sender, "lobbyGame", hosting_token);
@@ -913,6 +943,13 @@ bool from_lobby_request(const game::net::netadr_t &sender,
       !is_lobby_address(sender))
     return false;
   lobby_joining.active = false;
+  // Xerces: the host answered the request to go back to its lobby; it is
+  // not asked again after this match.
+  if (return_asking && match_host &&
+      network::are_addresses_equal(*match_host, sender)) {
+    match_host.reset();
+  }
+  return_asking = false;
   game_join_fallback = std::exchange(lobby_joining.fallback, {});
   return true;
 }
@@ -981,6 +1018,102 @@ void receive_lobby_follow(const game::net::netadr_t &sender,
     });
   }
   scheduler::once([server] { party::connect(server); }, scheduler::main);
+}
+
+bool in_frontend_lobby_of_own() {
+  return !game::com::Com_IsInGame() && game::com::Com_IsRunningUILevel() &&
+         lobby_host_info() != nullptr;
+}
+
+// Xerces: the host's side of going back to its lobby, and the guest's
+// record of whose match it plays (see match_guests).
+void update_match_return() {
+  const std::chrono::steady_clock::time_point now =
+      std::chrono::steady_clock::now();
+
+  if (hosting_match()) {
+    hosted_match = true;
+    game::foreach_connected_client([&](game::sv::client_s &client) {
+      // Bots and this PC's own players have no address to call.
+      if (!network::is_connectable_address(client.address))
+        return;
+      const auto known =
+          std::ranges::find_if(match_guests, [&](const match_guest &guest) {
+            return network::are_addresses_equal(guest.address, client.address);
+          });
+      if (known != match_guests.end())
+        known->seen = now;
+      else
+        match_guests.push_back({client.address, now});
+    });
+  } else {
+    if (hosted_match) {
+      // The match ended here: those still in it at the end come back; a
+      // player who left before then does not.
+      hosted_match = false;
+      match_ended = now;
+      std::erase_if(match_guests, [now](const match_guest &guest) {
+        return now - guest.seen > RETURN_SEEN_BEFORE_END;
+      });
+      if (!match_guests.empty())
+        printf("[Friends] The match ended: calling %zu player(s) back to "
+               "the lobby\n",
+               match_guests.size());
+    }
+    if (!match_guests.empty() && now - match_ended > RETURN_CALL_FOR)
+      match_guests.clear();
+    // Back in the menus with the lobby open to direct connect.
+    if (!match_guests.empty() && !game::com::Com_IsInGame() &&
+        joinable_lobby() == "party") {
+      for (const match_guest &guest : match_guests)
+        network::send(guest.address, "lobbyReturn", "");
+    }
+  }
+
+  // The guest's side: whose match this game plays (a listen server, not a
+  // dedicated one, which has its own lobby follow).
+  if (!getinfo::is_host() && game::com::Com_IsInGame() &&
+      game::cg::clientUIActives->actives[0].connectionState ==
+          game::connstate_t::ACTIVE &&
+      !party::cl_connected_to_dedi.get_bool()) {
+    const game::net::netadr_t server = party::get_connected_server();
+    if (network::is_connectable_address(server)) {
+      match_host = server;
+      match_host_seen = now;
+    }
+  } else if (match_host && now - match_host_seen > RETURN_ACCEPT_FOR) {
+    match_host.reset();
+  }
+  if (return_asking && !lobby_joining.active) {
+    return_asking = false; // the host did not answer; it calls again
+  }
+}
+
+void receive_lobby_return(const game::net::netadr_t &sender,
+                          const network::data_view &, game::LocalClientNum_t) {
+  // Only from the host whose match this game just played.
+  if (!match_host || !network::are_addresses_equal(*match_host, sender))
+    return;
+  scheduler::once(
+      [sender] {
+        const std::chrono::steady_clock::time_point now =
+            std::chrono::steady_clock::now();
+        if (!match_host || !network::are_addresses_equal(*match_host, sender) ||
+            now - match_host_seen > RETURN_ACCEPT_FOR ||
+            now - return_asked < RETURN_ASK_EVERY || lobby_joining.active ||
+            joining.active || !in_frontend_lobby_of_own() ||
+            has_party_members())
+          return;
+        return_asked = now;
+        return_asking = true;
+        printf("[Friends] Back to the host's lobby after its match\n");
+        xerces_runtime::log_info("join.lobby_return",
+                                 "back to the host's lobby after its match");
+        // No answer (the host is not back yet) stays quiet; the host calls
+        // again.
+        request_lobby(sender, "match", [] {});
+      },
+      scheduler::main);
 }
 
 void receive_lobby_game(const game::net::netadr_t &sender,
@@ -1406,8 +1539,10 @@ public:
     network::on("lobbyGame", receive_lobby_game);
     network::on("lobbyFollow", receive_lobby_follow);
     network::on("lobbyDenied", receive_lobby_denied);
+    network::on("lobbyReturn", receive_lobby_return);
 
     scheduler::loop(update_punching, scheduler::main, 250ms);
+    scheduler::loop(update_match_return, scheduler::main, 2s);
     scheduler::loop(update_hosting, scheduler::main, REGISTER_INTERVAL);
   }
 

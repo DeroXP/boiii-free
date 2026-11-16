@@ -107,8 +107,10 @@ public:
   // An invite from a host this player asked to join (a knock) or joined
   // lately, with follow on: the screen joins it at once.
   std::function<void(const account::invite &)> on_auto_join;
-  // Someone knocked on this player's invite link.
-  std::function<void(const account::knock_info &)> on_knock;
+  // Someone knocked on this player's invite link, or a friend pressed Join.
+  // at_once: a friend, and this lobby is open to anyone (friends_invite_only
+  // off) and open now: the screen lets them in without asking.
+  std::function<void(const account::knock_info &, bool at_once)> on_knock;
   // The game restarted and hosts again: these players joined its last
   // lobby (user ids). The screen invites them again with the new mods.
   std::function<void(const std::vector<std::string> &)> on_party_back;
@@ -160,6 +162,10 @@ public:
   void look_up_link(std::string code, owner_found finished);
   // Asks the link's owner to let this player join.
   void knock(std::string code, std::string host_user_id, done finished);
+  // Join on a friend whose lobby is open: a knock without a link. Their
+  // launcher lets this player in at once when their lobby is open to anyone,
+  // or asks them; the invite that follows is taken at once.
+  void join_friend(std::string user_id, std::string mode, done finished);
   // Lets a knocking player in: accepts the knock and invites them.
   void let_in(std::string knock_id, std::string user_id, std::string pack_json,
               done finished);
@@ -226,8 +232,11 @@ private:
   std::map<std::string, std::string> pack_codes_;
   // Invites sent this session, for their hole punches.
   std::set<std::string> sent_invites_;
-  // Hosts this player knocked on or joined, with when (follow).
+  // Hosts this player joined, with when (follow).
   std::map<std::string, double> follow_hosts_;
+  // Hosts this player asked to join (Join, a link, Discord), with when: their
+  // invite is taken at once for an hour, whatever the follow setting.
+  std::map<std::string, double> asked_hosts_;
   // Players who joined this player's lobby (their punch came), with when
   // and which game process hosted it.
   struct party_member {

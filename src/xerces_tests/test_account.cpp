@@ -311,6 +311,23 @@ TEST_CASE("account: packs, links, knocks and the hole punch") {
   CHECK_EQ(knocked.to_username, std::string("bob"));
   CHECK_EQ(backend.seen.back().url,
            std::string("https://example.test/v1/links/XJN-AB12CD34/knock"));
+  // Join on a friend: a knock without a link, in their mode.
+  backend.answer(201,
+                 std::string(R"({"id":"0a0b0c0d-0000-4000-8000-000000000003",)"
+                             R"("from_user_id":")") +
+                     alice_id + R"(","from_username":"alice","to_user_id":")" +
+                     bob_id +
+                     R"(","to_username":"bob","mode":"zm",)"
+                     R"("status":"pending"})");
+  REQUIRE(api.knock_friend(bob_id, "zm", &knocked).ok);
+  CHECK_EQ(knocked.id, std::string("0a0b0c0d-0000-4000-8000-000000000003"));
+  CHECK_EQ(backend.seen.back().url,
+           std::string("https://example.test/v1/friends/") + bob_id + "/knock");
+  CHECK_EQ(backend.seen.back().body, std::string(R"({"mode":"zm"})"));
+  const std::size_t knocks_before = backend.seen.size();
+  CHECK(!api.knock_friend("../x", "zm").ok);
+  CHECK(!api.knock_friend(bob_id, "xx").ok);
+  CHECK_EQ(backend.seen.size(), knocks_before);
   backend.answer(200, R"({"incoming":[{"id":"k1","from_username":"carol",)"
                       R"("mode":"zm","status":"pending"}],"outgoing":[]})");
   knock_list knocks;

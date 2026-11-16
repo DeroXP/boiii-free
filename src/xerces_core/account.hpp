@@ -232,6 +232,10 @@ public:
   outcome delete_link();
   outcome link(std::string_view code, link_owner &out);
   outcome knock(std::string_view code, knock_info *out = nullptr);
+  // Join on a friend whose lobby is open: a knock without a link, in the
+  // mode their presence shows.
+  outcome knock_friend(std::string_view user_id, std::string_view mode,
+                       knock_info *out = nullptr);
   outcome knocks(knock_list &out);
   outcome accept_knock(std::string_view knock_id);
   outcome decline_knock(std::string_view knock_id);

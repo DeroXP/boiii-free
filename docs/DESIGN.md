@@ -2981,12 +2981,41 @@ Discord's developer portal for Discord join (id 1568827390010859623).
   well-formed code.
 - **Follow the host.** With "Follow hosts you join" on (the default,
   `friends_follow`), an invite from a host the player joined in the last 6
-  hours, or knocked on in the last hour, is taken at once: no question, the mods
-  check and the join run as for Join. The host's side: players whose punch
-  reached this launcher are remembered with the game process that hosted them;
-  when another game process opens a lobby within 6 hours (the host restarted,
-  perhaps with other mods), they are invited again, with the new mods. So a
-  party follows its host from game to game.
+  hours is taken at once: no question, the mods check and the join run as for
+  Join. An invite from a host the player asked to join in the last hour (Join on
+  a friend, a link, Discord) is taken at once whatever this setting (since
+  2026-11-15: they asked). The host's side: players whose punch reached this
+  launcher are remembered with the game process that hosted them; when another
+  game process opens a lobby within 6 hours (the host restarted, perhaps with
+  other mods), they are invited again, with the new mods. So a party follows its
+  host from game to game.
+- **Join on a friend (2026-11-15).** The user asked for it after the first game
+  with a friend: with "Who can join" on Anyone, joining still took an invite. A
+  friend whose presence shows a game with its lobby open now has Join on
+  Friends. It knocks without a link (`POST /v1/friends/{id}/knock`, friends
+  only, in the mode their presence shows; the backend answers 404 for anyone
+  else, so it says nothing about who exists). The host's launcher lets a friend
+  in at once when "Who can join" is Anyone and its game hosts an open lobby (the
+  in-game toast says "<name> is joining"): the knock is accepted and a normal
+  invite goes, with the mods and a ticket, which the joiner's launcher takes at
+  once. With Invited players, or the lobby closed, the host is asked as for a
+  link. A knock the host let in no longer stops a new one for its hour: the
+  player can come back to a new lobby. Link knocks still always ask.
+- **Back to the host's lobby after a match (2026-11-15).** On the user's first
+  game with a friend, the guest landed in menus of their own when the host's
+  match ended (their log: joined the lobby at 18:57, the match on zm_blundeezy
+  until 19:06, then their own frontend). Players who join a lobby by address
+  are not kept in the host's lobby by the engine when the match ends. So the
+  host's game (`nat.cpp`, `update_match_return`) notes every player connected
+  to its match by address, and the ones still connected in its last 15 s are
+  called back: once the host is in its menus again with the lobby open to
+  direct connect, it sends them `lobbyReturn` every 2 s for a minute. A guest's
+  game takes it only from the host whose match it just played (within 2
+  minutes), only while it sits in a lobby of its own without party members, and
+  then asks to join the host's lobby as Join does (the host's password or ticket
+  check still applies; a no-answer is quiet). It goes back once per match: when
+  the host answers, the guest is not called again, so a player who then leaves
+  stays out, and a player who left the match before its end is not called.
 - **Discord.** "Show on Discord" (off until the player turns it on, launcher
   setting `friends_discord`) connects the launcher to the Discord app on this PC
   through the vendored MIT `discord-rpc` (local IPC; the game's upstream

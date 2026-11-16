@@ -364,7 +364,11 @@ open the game's port by itself, the host forwards it by hand (KNOWN_ISSUES.txt).
   once they are here. Then their game joins yours from its main menu, restarts
   with your mods first (it asks), or starts with the join. Xerces asks your
   router to let them in (hole punching); most routers do, and if yours does not,
-  forward the game's port as above. Invites last 10 minutes. **Invite links**:
+  forward the game's port as above. Invites last 10 minutes. **Join**: when a
+  friend's lobby is open, Join is next to their name. With their "Who can join"
+  on Anyone you get in at once; with Invited players they are asked first. When
+  the host's match ends, everyone still in it goes back to the host's lobby.
+  **Invite links**:
   Make an invite link on Friends and share it anywhere; whoever opens it asks to
   join, and you Let them in (with your lobby open) or Ignore them. "Open invite
   links in Xerces" lets a click on a link open Xerces. **Follow hosts you join**

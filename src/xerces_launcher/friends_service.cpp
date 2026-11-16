@@ -553,9 +553,15 @@ void friends_service::handle(const std::string &message) {
       std::scoped_lock lock(mutex_);
       follow = follow_;
     }
+    // A host this player asked (Join on a friend, a link, Discord) is taken
+    // at once whatever the follow setting: they asked to join.
     const auto host = follow_hosts_.find(received.from_user_id);
-    const bool auto_join = follow && host != follow_hosts_.end() &&
-                           seconds_now() - host->second < join_follow_seconds;
+    const auto asked = asked_hosts_.find(received.from_user_id);
+    const bool auto_join =
+        (follow && host != follow_hosts_.end() &&
+         seconds_now() - host->second < join_follow_seconds) ||
+        (asked != asked_hosts_.end() &&
+         seconds_now() - asked->second < knock_follow_seconds);
     post_ui([this, received, auto_join] {
       if (auto_join && on_auto_join) {
         on_auto_join(received);
@@ -581,12 +587,28 @@ void friends_service::handle(const std::string &message) {
       return;
     }
     work_.knocks.insert(work_.knocks.begin(), knock);
-    post_ui([this, knock] {
+    // A friend's Join while this lobby is open to anyone: in at once, as
+    // the game would let anyone with the address in (the screen sends the
+    // invite, it has the mods).
+    bool open_to_anyone = false;
+    {
+      std::scoped_lock lock(mutex_);
+      open_to_anyone = !invite_only_;
+    }
+    const bool at_once = open_to_anyone && work_.hosting &&
+                         std::ranges::find(work_.friends, knock.from_user_id,
+                                           &account::friend_info::user_id) !=
+                             work_.friends.end();
+    post_ui([this, knock, at_once] {
       if (on_knock) {
-        on_knock(knock);
+        on_knock(knock, at_once);
       }
     });
-    toast(knock.from_username + " asks to join", "Let them in from Xerces");
+    if (at_once) {
+      toast(knock.from_username + " is joining", "Lobby open to anyone");
+    } else {
+      toast(knock.from_username + " asks to join", "Let them in from Xerces");
+    }
   } else if (push->type == "punch") {
     // The player this launcher invited is about to connect: open the host's
     // router to them. Only for invites sent from here.
@@ -662,6 +684,7 @@ void friends_service::ended() {
   work_.available = base_url_.has_value();
   sent_invites_.clear();
   follow_hosts_.clear();
+  asked_hosts_.clear();
   party_.clear();
   watching_.reset();
   guests_told_ = false; // invite-only follows the sign-in
@@ -1145,10 +1168,27 @@ void friends_service::knock(std::string code, std::string host_user_id,
       [this, code = std::move(code), host_user_id = std::move(host_user_id)] {
         const account::outcome result = client_->knock(code);
         if (result.ok) {
-          // Their invite is taken at once, within the hour (follow).
-          follow_hosts_[host_user_id] =
-              seconds_now() - (join_follow_seconds - knock_follow_seconds);
+          // Their invite is taken at once, within the hour.
+          asked_hosts_[host_user_id] = seconds_now();
           log_info("launcher.friends.knocked", "asked to join through a link");
+        }
+        return result;
+      },
+      std::move(finished));
+}
+
+void friends_service::join_friend(std::string user_id, std::string mode,
+                                  done finished) {
+  act(
+      [this, user_id = std::move(user_id), mode = std::move(mode)] {
+        const account::outcome result = client_->knock_friend(user_id, mode);
+        if (result.ok) {
+          asked_hosts_[user_id] = seconds_now();
+          log_info("launcher.friends.knocked", "asked a friend to join");
+        } else if (result.status == 404) {
+          // An older Xerces server, or no longer friends.
+          return failed("Xerces' server could not ask them. Ask them to "
+                        "invite you, or to share an invite link.");
         }
         return result;
       },

@@ -116,6 +116,7 @@
 						<div class="friend-status">{{f.status}}</div>
 					</div>
 					<div class="row-actions">
+						<button class="small-button" data-if="f.can_join" data-attr-id="'friend-join-' + i" data-event-click="row('join friend', i)"><span>Join</span></button>
 						<button class="small-button" data-if="hosting" data-attr-id="'friend-invite-' + i" data-event-click="row('invite', i)"><span>Invite</span></button>
 						<button class="small-button" data-attr-id="'friend-remove-' + i" data-event-click="row('remove', i)"><span>Remove</span></button>
 						<button class="small-button" data-attr-id="'friend-block-' + i" data-event-click="row('block', i)"><span>Block</span></button>

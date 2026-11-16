@@ -8,6 +8,21 @@ testers by private link; the first stable release is in preparation, and
 
 ## [Unreleased]
 
+### Added
+
+- **Join a friend's open lobby from Friends.** When a friend's lobby is open,
+  Join is next to their name. If their "Who can join" is Anyone you get in at
+  once, with their mods; if it is Invited players, they are asked first. Needs
+  the update to Xerces' server.
+
+### Fixed
+
+- **After a match you stay with the host.** Players who joined a friend's lobby
+  landed in their own menus when the match ended; the host's game now calls
+  everyone who was still in the match back to its lobby.
+- **Asking to join through a link or Discord joins by itself** once the host
+  lets you in, also with "Follow hosts you join" off.
+
 ## [1.0.0-rc.1] - 2026-11-15
 
 The first candidate for the first stable release: beta.27 and a night of
