@@ -4497,3 +4497,10 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       override. The Release build of all four programs compiles and the 630 unit tests pass (one new: every offset
       is fixed bytes of the pattern). Not tried in the game: shots and the crosshair with the setting on, solo
       and joined.
+- [x] **The 1.0.0-rc.2 package** (2307b652; xerces-main fast-forwarded to it, local, not pushed; `tools\release.ps1`):
+      zip 9.9 MB, 243 files, SHA-256 ccc5bb6e2622ae0ae65f7a473aed8f51e87498d8458f87eccfc7e202e3a5bacb; source archive
+      1a22c86b84de085d8b55c3f7178d2be0689f27c93605bf4ab08daeb871ece022. The script's lints all ok, 630 of 630 tests,
+      CLI smoke ok. Unzipped to `C:\Games\xerces-1.0.0-rc.2` with the DLSS DLLs (`src/xerces_dlss` unchanged since
+      rc.1): every file matches SHA256SUMS.txt; its `xerces_cli` says 1.0.0-rc.2 and resolves 20 of 20 signatures
+      on the 0x6531394 dump. Not started; not played: the hip spread, the aim assist, Join (needs the backend's
+      551065de, not deployed: until then Join says the server could not ask them) and the return to the host's lobby.
