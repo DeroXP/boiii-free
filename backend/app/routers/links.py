@@ -2,8 +2,10 @@
 
 A host makes a link (XJN- plus 8 characters, kept a day) and shares it anywhere. Someone who
 follows it, signed in, "knocks": the host's launcher shows who asks to join, and accepting lets the
-host send them a normal game invite for an hour although they are not friends. Nothing here
-carries a server address: that still travels only in the invite, to the one person accepted.
+host send them a normal game invite for an hour although they are not friends. A friend knocks
+without a link (Join on the Friends tab); the host's launcher lets them in at once when its lobby
+is open to anyone. Nothing here carries a server address: that still travels only in the invite,
+to the one person accepted.
 """
 
 import html
@@ -17,7 +19,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import DbDep, ServicesDep, UserDep
+from app.deps import DbDep, Services, ServicesDep, UserDep
 from app.errors import ApiError, not_found
 from app.log import log_event
 from app.models import InviteLink, Knock, User, utcnow
@@ -32,7 +34,7 @@ from app.schemas import (
     LinksOut,
     normalize_link_code,
 )
-from app.social import is_blocked_either_way, usernames
+from app.social import are_friends, is_blocked_either_way, usernames
 
 router = APIRouter(tags=["links"])
 
@@ -204,6 +206,28 @@ async def knock(
     host = await db.get(User, link.owner_id)
     if host is None:
         raise not_found("Link not found.")
+    return await _knock_on(db, services, user, host, link.mode)
+
+
+@router.post("/v1/friends/{user_id}/knock", status_code=201, response_model=KnockOut)
+async def knock_on_friend(
+    user_id: uuid.UUID, body: LinkIn, user: UserDep, db: DbDep, services: ServicesDep
+) -> KnockOut:
+    """Join on a friend whose lobby is open: a knock without a link. The friend's launcher lets
+    them in at once when its lobby is open to anyone, or asks, as for a link. `mode` is the one
+    the friend's presence showed."""
+    services.limiter.enforce("knock", str(user.id))
+    if user_id == user.id:
+        raise ApiError(409, "own_link", "You cannot join yourself.")
+    host = await db.get(User, user_id)
+    if host is None or not await are_friends(db, user.id, host.id):
+        raise not_found("Friend not found.")
+    return await _knock_on(db, services, user, host, body.mode)
+
+
+async def _knock_on(
+    db: AsyncSession, services: Services, user: User, host: User, mode: str
+) -> KnockOut:
     services.limiter.enforce("knock_host", f"{user.id}:{host.id}")
     names = {user.id: user.username, host.id: host.username}
     now = utcnow()
@@ -213,15 +237,16 @@ async def knock(
         .order_by(Knock.created_at.desc())
         .limit(1)
     )
-    if existing is not None:
+    if existing is not None and existing.status != "accepted":
         # Knocking again changes nothing and tells the host nothing new: no second notice, and a
-        # declined knock still reads "pending" to the one who made it.
+        # declined knock still reads "pending" to the one who made it. One the host let in
+        # (an hour) does knock again: they played and want back in, perhaps in a new lobby.
         return knock_out(existing, names, outgoing=True)
     row = Knock(
         id=uuid.uuid4(),
         from_user_id=user.id,
         to_user_id=host.id,
-        mode=link.mode,
+        mode=mode,
         created_at=now,
         expires_at=now + KNOCK_TTL,
         status="pending",

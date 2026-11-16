@@ -213,6 +213,76 @@ async def test_a_block_removes_knocks(client: httpx.AsyncClient) -> None:
     assert (await _invite(client, host, guest)).status_code == 403
 
 
+async def _knock_friend(
+    client: httpx.AsyncClient, user: TestUser, friend: TestUser, mode: str = "zm"
+) -> httpx.Response:
+    return await client.post(
+        f"/v1/friends/{friend.id}/knock", json={"mode": mode}, headers=user.headers
+    )
+
+
+async def test_a_friend_knocks_without_a_link(client: httpx.AsyncClient, app: FastAPI) -> None:
+    host = await register(client, "host")
+    guest = await register(client, "guest")
+    # Not friends yet: nothing to knock on, and nothing said about who exists.
+    assert (await _knock_friend(client, guest, host)).status_code == 404
+    await befriend(client, guest, host)
+    patched = await client.patch("/v1/me/privacy", json={"invites": "nobody"}, headers=guest.headers)
+    assert patched.status_code == 200, patched.text
+    host_ws, _ = await ws_login(app, host)
+    try:
+        knocked = await _knock_friend(client, guest, host, "mp")
+        assert knocked.status_code == 201, knocked.text
+        knock = knocked.json()
+        assert knock["mode"] == "mp" and knock["status"] == "pending"
+        assert knock["from_username"] == "guest" and knock["to_username"] == "host"
+        push = await host_ws.receive_until("knock")
+        assert push["id"] == knock["id"]
+    finally:
+        await host_ws.close()
+    # The guest's invite setting says nobody, but they asked: once let in, the invite goes.
+    assert (await _invite(client, host, guest)).status_code == 403
+    await client.post(f"/v1/knocks/{knock['id']}/accept", headers=host.headers)
+    assert (await _invite(client, host, guest)).status_code == 201
+
+
+async def test_friend_knocks_need_a_friend(client: httpx.AsyncClient) -> None:
+    host = await register(client, "host")
+    guest = await register(client, "guest")
+    assert (await client.post(f"/v1/friends/{host.id}/knock", json={})).status_code == 401
+    own = await _knock_friend(client, host, host)
+    assert own.status_code == 409
+    missing = await client.post(
+        "/v1/friends/00000000-0000-0000-0000-000000000000/knock",
+        json={"mode": "zm"},
+        headers=guest.headers,
+    )
+    assert missing.status_code == 404
+    await befriend(client, guest, host)
+    assert (await _knock_friend(client, guest, host, "xx")).status_code == 422
+    # A friend removed is no friend to knock on.
+    assert (await client.delete(f"/v1/friends/{host.id}", headers=guest.headers)).status_code == 204
+    assert (await _knock_friend(client, guest, host)).status_code == 404
+
+
+async def test_a_let_in_player_can_knock_again(client: httpx.AsyncClient, app: FastAPI) -> None:
+    host = await register(client, "host")
+    guest = await register(client, "guest")
+    await befriend(client, guest, host)
+    first = (await _knock_friend(client, guest, host)).json()
+    await client.post(f"/v1/knocks/{first['id']}/accept", headers=host.headers)
+    # Back after a match, perhaps to a new lobby: the host hears of it again.
+    host_ws, _ = await ws_login(app, host)
+    try:
+        again = await _knock_friend(client, guest, host)
+        assert again.status_code == 201 and again.json()["id"] != first["id"]
+        assert (await host_ws.receive_until("knock"))["id"] == again.json()["id"]
+    finally:
+        await host_ws.close()
+    # A knock still waiting for the host stays the one knock.
+    assert (await _knock_friend(client, guest, host)).json()["id"] == again.json()["id"]
+
+
 async def test_own_link_and_bad_codes(client: httpx.AsyncClient) -> None:
     host = await register(client, "host")
     link = await _link(client, host)

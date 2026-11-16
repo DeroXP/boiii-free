@@ -73,6 +73,7 @@ Outside production the interactive docs are served at `/docs`.
 | DELETE | `/v1/links`                         | yes         | 204, your links stop working                                 |
 | GET    | `/v1/links/{code}`                  | yes         | whose link it is, or 404                                     |
 | POST   | `/v1/links/{code}/knock`            | yes         | 201, asks the link's owner to let you join                   |
+| POST   | `/v1/friends/{id}/knock`            | yes         | 201, the same without a link, friends only (`{"mode"}`)      |
 | GET    | `/v1/knocks`                        | yes         | pending knocks on your links, and your own knocks            |
 | POST   | `/v1/knocks/{id}/accept`            | yes         | host only; they may invite you for an hour                   |
 | POST   | `/v1/knocks/{id}/decline`           | yes         | host only, 204                                               |
