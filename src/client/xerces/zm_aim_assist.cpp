@@ -21,8 +21,10 @@
 // live ones the player can see (below). It is off in multiplayer
 // and campaign, in menus and the console, while the window is not in front,
 // and without a controller (it reads the sticks itself, so a mouse never gets
-// it). xerces_zm_aimAssist: 0 the game's own only, 1 "Modern", 2 "Modern,
-// Stronger"; saved on this PC.
+// it). xerces_zm_aimAssist: 0 the game's own only, 1 "Modern"; saved on this
+// PC. 2 was "Modern, Stronger" until 2026-11-15: a PC that saved it gets
+// "Modern" (the dvar still takes 2, or the saved setting would be refused and
+// the assist turned off).
 //
 // The numbers started as those games' own (60% rotation, 50% slowdown, 0.6 of
 // the slowdown from the hip, rotation fading in from nothing at 0 m to full at
@@ -55,6 +57,14 @@
 //   with a zombie in the bubble and the stick in use, the view drifts back to
 //   the nearer edge. That much is a pull, up and down only, because the user
 //   asked for it.
+//
+// On 2026-11-15 the user found "Modern" still too sticky and asked for
+// "Stronger" to go. "Modern" is down again: 40% rotation and 30% slowdown,
+// 0.6 of it from the hip, a bubble about three quarters the size (0.13 by
+// 0.17), rotation full only from 4 m and slowdown from 3 m, and the drift back
+// to the torso-to-head band slower (three times what is left a second, never
+// more than 12 degrees a second). Against beta.25's: about 60% of the rotation
+// at 1 to 3 m, half the slowdown at 1 m and two thirds of it from 3 m.
 //
 // Where the game keeps things was measured in the running game on 2026-11-11
 // (xerces_aim_debug), because Xerces' layouts of this data are not exact:
@@ -109,38 +119,23 @@ struct rules {
 };
 // Those games' own: slowdown from nothing at 0 m to full at 3 m; rotation
 // from nothing at 0 m to full at 6 m, 0.3 at 50 m and 0.05 at 70 m.
-// "Modern": a little of each up close, all of it from 2 m and 3 m.
+// "Modern": a little of each up close, all of it from 3 m and 4 m.
 constexpr ramp_point MODERN_SLOWDOWN[] = {
-    {0.0f, 0.35f}, {2.0f, 1.0f}, {50.0f, 1.0f}, {100.0f, 0.0f}};
-constexpr ramp_point MODERN_ROTATION[] = {{0.0f, 0.2f},   {3.0f, 1.0f},
+    {0.0f, 0.25f}, {3.0f, 1.0f}, {50.0f, 1.0f}, {100.0f, 0.0f}};
+constexpr ramp_point MODERN_ROTATION[] = {{0.0f, 0.15f},  {4.0f, 1.0f},
                                           {35.0f, 1.0f},  {50.0f, 0.5f},
                                           {70.0f, 0.15f}, {95.0f, 0.0f}};
-// "Stronger": what "Modern" was until 2026-11-13
-constexpr ramp_point STRONGER_SLOWDOWN[] = {
-    {0.0f, 0.5f}, {1.0f, 1.0f}, {50.0f, 1.0f}, {100.0f, 0.0f}};
-constexpr ramp_point STRONGER_ROTATION[] = {{0.0f, 0.35f},  {1.5f, 1.0f},
-                                            {35.0f, 1.0f},  {50.0f, 0.5f},
-                                            {70.0f, 0.15f}, {95.0f, 0.0f}};
 // Those games' own are 0.60 rotation, 0.50 slowdown, 0.6 from the hip and a
 // bubble of 0.14 by 0.19; see the top for these
-constexpr rules GAME_STRENGTH{0.50f,
-                              0.40f,
-                              0.65f,
-                              0.15f,
-                              0.20f,
-                              MODERN_ROTATION,
-                              std::size(MODERN_ROTATION),
-                              MODERN_SLOWDOWN,
-                              std::size(MODERN_SLOWDOWN)};
-constexpr rules STRONGER{0.95f,
-                         0.75f,
-                         0.85f,
-                         0.19f,
-                         0.25f,
-                         STRONGER_ROTATION,
-                         std::size(STRONGER_ROTATION),
-                         STRONGER_SLOWDOWN,
-                         std::size(STRONGER_SLOWDOWN)};
+constexpr rules MODERN{0.40f,
+                       0.30f,
+                       0.60f,
+                       0.13f,
+                       0.17f,
+                       MODERN_ROTATION,
+                       std::size(MODERN_ROTATION),
+                       MODERN_SLOWDOWN,
+                       std::size(MODERN_SLOWDOWN)};
 
 constexpr float ROTATION_PITCH = 0.85f; // the vertical share of rotation
 constexpr float STRAFE_MIN = 0.15f;     // left stick sideways that counts
@@ -159,8 +154,8 @@ constexpr float BODY_CROWN = 0.78f; // the leeway's upper edge
 constexpr float BODY_TOP = 0.80f;   // the bubble's upper edge on it
 // Outside the leeway the view drifts back to its nearer edge: this share of
 // what is left a second, and never more than SETTLE_MAX degrees a second
-constexpr float SETTLE_GAIN = 4.0f;
-constexpr float SETTLE_MAX = 20.0f;
+constexpr float SETTLE_GAIN = 3.0f;
+constexpr float SETTLE_MAX = 12.0f;
 // A dead actor's state flags (lerp.eFlags), from the frame it dies
 constexpr int32_t ACTOR_DEAD = 0x10;
 // What blocks the player's sight: solid, foliage, and the brushes that stop
@@ -629,7 +624,12 @@ void frame() {
     reset();
     return;
   }
-  const rules &r = *level >= 2 ? STRONGER : GAME_STRENGTH;
+  // "Modern, Stronger" (2) is gone: a PC that saved it gets "Modern", in the
+  // menu too, and the config keeps 1 from the next save
+  if (*level > 1) {
+    game::set_dvar_int("xerces_zm_aimAssist", 1, false);
+  }
+  const rules &r = MODERN;
 
   // nothing is read, the controller included, outside a Zombies level
   if (!in_zombies_level()) {
@@ -900,7 +900,7 @@ public:
         "xerces_zm_aimAssist", 0, 0, 2, saved,
         "Zombies only, on this PC: controller aim assist like the newer Call "
         "of Duty games' (slowdown and rotational). 0 the game's own, 1 "
-        "modern, 2 modern and stronger.");
+        "modern (2, the old stronger, is modern).");
     load_xinput();
     wchar_t buffer[4];
     test_pad = GetEnvironmentVariableW(L"XERCES_AIM_TEST", buffer, 4) > 0 &&

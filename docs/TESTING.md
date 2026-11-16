@@ -4470,3 +4470,11 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       nothing). The Release build of all four programs compiles and the 629 unit tests pass. Not tried: two PCs,
       the friend Join against the live backend (it is not deployed), and the game-side `lobbyReturn`, which needs a
       host and a guest on two PCs.
+- [x] The aim assist after the user's word on 2026-11-15 ("get rid of the stronger aim assist option and nerf the
+      modern option some more since it's still too sticky"; DESIGN.md 7.11): "Modern, Stronger" is out of the
+      CONTROLLER tab and a saved 2 is set back to 1 (Modern), and Modern is 40% rotation, 30% slowdown, 0.6 of it
+      from the hip, a 0.13 by 0.17 bubble, full only from 4 m and 3 m, and a drift to the neck of at most 12 degrees
+      a second. Worked out from the rules, not measured: rotation 0.15 at 1 m and 0.32 at 3 m (beta.25: 0.23 and
+      0.50), hip slowdown 0.09 at 1 m and 0.18 from 3 m (0.18 and 0.26). The Release build of all four programs
+      compiles and the 629 unit tests pass. Not tried in the game: the menu, the 2-to-1 change on a saved config,
+      the simulated stick (`XERCES_AIM_TEST=1`) and the feel with a controller.

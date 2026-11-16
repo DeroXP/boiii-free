@@ -2033,8 +2033,8 @@ with the rules in their aim trainer AimTuner). Both are for Zombies only; neithe
 exists in multiplayer or campaign.
 
 **Aim assist** (`src/client/xerces/zm_aim_assist.cpp`, dvar `xerces_zm_aimAssist`,
-saved on this PC: 0 the game's own only, 1 "Modern (MW3)", 2 "Modern, Stronger"; in
-XERCES SETTINGS' CONTROLLER tab). The game's own assist stays as it is; its tuning
+saved on this PC: 0 the game's own only, 1 "Modern (MW3)"; 2 was "Modern, Stronger"
+until 2026-11-15 and now reads as 1; in XERCES SETTINGS' CONTROLLER tab). The game's own assist stays as it is; its tuning
 dvars (`aim_lockon_*`, `aim_slowdown_*`) are not in the released game, so Xerces'
 works on the client's own view angles, every frame. The rules and numbers are the
 ones AimTuner documents for Modern Warfare III / Black Ops 6 (its README "Aim
@@ -2097,6 +2097,22 @@ around the neck with leeway to the head and the torso):
   the user asked for it.
 - The bubble's height on a zombie is its shins to the top of its head (0.16 to
   0.80 of the box), not the whole box, which goes on 20 units over the head.
+
+On 2026-11-15 the user found "Modern" still too sticky and asked for "Stronger" to
+go:
+
+- "Stronger" is gone from the menu. The dvar still takes 2, because a saved value
+  out of its range would be refused and leave the assist off; the assist sets a 2
+  back to 1 on its first frame, so the menu shows Modern and the next config save
+  keeps 1.
+- "Modern" is 40% rotation and 30% slowdown, 0.6 of the slowdown from the hip, a
+  bubble of 0.13 by 0.17 (about three quarters of the area; those games' own is
+  0.14 by 0.19), rotation full only from 4 m (0.15 of it at 0 m) and slowdown from
+  3 m (a quarter at 0 m). Worked out from the rules, against beta.25's: about 60%
+  of the rotation at 1 to 3 m (0.15 at 1 m, 0.32 at 3 m), half the hip slowdown at
+  1 m (0.09) and two thirds of it from 3 m (0.18).
+- The drift back to the torso-to-head band is three times what is left a second,
+  never more than 12 degrees a second (four times and 20 before).
 
 It reads the controller itself (XInput), so a mouse never gets it, and it is off in
 menus, in the console and while the window is not in front. Zombies are the game's

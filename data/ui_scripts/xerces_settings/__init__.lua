@@ -189,17 +189,15 @@ local CONTROLLER = {
   {
     dvar = "xerces_zm_aimAssist",
     name = "Aim Assist (Zombies)",
-    values = { 0, 1, 2 },
+    values = { 0, 1 },
     default = 0,
     text = function(value)
       if value == 1 then
         return "Modern (MW3)"
-      elseif value == 2 then
-        return "Modern, Stronger"
       end
       return "Game's Own"
     end,
-    description = "Controller aim assist in Zombies that works like the newer Call of Duty games' (Modern Warfare III): your look speed is slowed while a zombie is near the crosshair, and the view turns with a zombie as it moves or you strafe. As in those games it needs stick input (the left stick sideways, or the right stick), has no snap to targets, and fades far away. Modern is a little under those games' own strength; Stronger keeps the same rules with much more of each, from arm's length and from the hip. The view settles between a zombie's torso and head, around the neck, and leaves the height inside that to you. Live zombies you can see only; never with a mouse, never in multiplayer.",
+    description = "Controller aim assist in Zombies that works like the newer Call of Duty games' (Modern Warfare III): your look speed is slowed while a zombie is near the crosshair, and the view turns with a zombie as it moves or you strafe. As in those games it needs stick input (the left stick sideways, or the right stick), has no snap to targets, and fades far away. Modern is well under those games' own strength, so it helps without holding your aim. The view settles between a zombie's torso and head, around the neck, and leaves the height inside that to you. Live zombies you can see only; never with a mouse, never in multiplayer.",
   },
 }
 

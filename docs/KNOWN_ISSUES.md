@@ -179,20 +179,22 @@ worse.
 - **The modern aim assist is off until you turn it on.** XERCES SETTINGS >
   CONTROLLER > Aim Assist (Zombies) starts on Game's Own, which is the game's own
   assist and nothing of Xerces'.
-- **Its feel was tuned by play once.** After a controller playtest,
-  Modern was cut to about half of what it was at 1 to 3 m (50% rotation, 40%
-  slowdown, all of it only from 3 m), dying and hidden zombies stopped being
-  targets, and the view settles around the neck. Stronger is what Modern was
-  plus more (95% and 75%). Played again, it felt right. Say what feels
-  off: strength and ranges are single numbers.
+- **Its feel was tuned by play twice.** After a controller playtest,
+  Modern was cut to about half of what it was at 1 to 3 m, dying and hidden
+  zombies stopped being targets, and the view settles around the neck. Played
+  again it felt right, then too sticky: on 2026-11-15 it was cut again (40%
+  rotation, 30% slowdown, a smaller bubble, all of it only from 3 to 4 m, a
+  slower drift to the neck) and Stronger was removed; a PC that had Stronger
+  gets Modern. The new numbers are not played yet. Say what feels off: strength
+  and ranges are single numbers.
 - **It needs an XInput controller.** A controller in another mode (DualShock or
   Switch mode without a wrapper) is not seen; `xerces_aim_debug` in a match says
   "controller NOT found". It is tied to this build of the game: after a game update
   it turns itself off and writes `xerces.aim_assist.off` to the log.
 - **The game's own aim assist still runs under it.** Game's Own leaves only that.
-- **It is not exactly Modern Warfare III's numbers.** Modern is a little under
-  them and keeps some of the assist at point blank, where theirs fades to nothing;
-  Stronger is full from 1.5 m and nearly full from the hip. Unlike those games it
+- **It is not exactly Modern Warfare III's numbers.** Modern is well under
+  them and keeps a little of the assist at point blank, where theirs fades to
+  nothing. Unlike those games it
   moves the view up or down toward a zombie's torso-to-head band when you aim
   under or over it (never sideways).
 - **No Hip-Fire Spread is the host's setting.** It does nothing in a match you

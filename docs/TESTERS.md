@@ -179,11 +179,11 @@ hash (step 1) shows that the zip is the one we made.
   and say whose place each takes: the game still names and voices you as that
   character.
 - **Aim assist like the newer Call of Duty games (Zombies, controller).** XERCES
-  SETTINGS > CONTROLLER > Aim Assist (Zombies): Game's Own, Modern (MW3) or Modern,
-  Stronger. It is on Game's Own until you change it. Modern slows your look speed
-  while a zombie is near the crosshair and turns the view with a zombie as it moves
-  or you strafe; like those games it needs stick input and has no snap. Modern
-  is a little under those games' own strength; Stronger is well above it. It takes only live
+  SETTINGS > CONTROLLER > Aim Assist (Zombies): Game's Own or Modern (MW3). It is
+  on Game's Own until you change it. Modern slows your look speed while a zombie is
+  near the crosshair and turns the view with a zombie as it moves or you strafe;
+  like those games it needs stick input and has no snap. It is well under those
+  games' own strength, so it helps without holding your aim. It takes only live
   zombies you can see, and it settles the view between a zombie's torso and head,
   around the neck, leaving the height inside that to you. It needs an Xbox-style
   (XInput) controller, works in Zombies only and never with a mouse. In a match the

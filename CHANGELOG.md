@@ -15,6 +15,13 @@ testers by private link; the first stable release is in preparation, and
   once, with their mods; if it is Invited players, they are asked first. Needs
   the update to Xerces' server.
 
+### Changed
+
+- **The Modern aim assist is less sticky** (Zombies, controller): less rotation
+  and slowdown, a smaller area around the crosshair, none of it full until 3 to
+  4 m away, and a slower drift to a zombie's neck. Modern, Stronger is gone; if
+  you had it, you get Modern.
+
 ### Fixed
 
 - **After a match you stay with the host.** Players who joined a friend's lobby
