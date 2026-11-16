@@ -29,9 +29,11 @@ testers by private link; the first stable release is in preparation, and
   everyone who was still in the match back to its lobby.
 - **Asking to join through a link or Discord joins by itself** once the host
   lets you in, also with "Follow hosts you join" off.
-- **No Hip-Fire Spread works for players who joined.** Their shots already went
-  to the middle, but their own crosshair, tracers and bullet holes still spread;
-  now their game takes the host's setting too, a few seconds after they spawn.
+- **No Hip-Fire Spread works.** It never took the spread off: it changed other
+  numbers of each weapon instead. It now changes the ones the game reads for hip
+  spread, so shots from the hip go where the crosshair is and the crosshair stays
+  closed. Players who joined get it on their own screen too, a few seconds after
+  they spawn.
 
 ## [1.0.0-rc.1] - 2026-11-15
 

@@ -2147,11 +2147,46 @@ held sideways and logs each second what the assist did (`xerces.aim_assist.test`
 
 **No hip-fire spread** (`src/client/xerces/zm_hip_spread.cpp`, host setting
 `xerces_zm_noHipSpread`, "No Hip-Fire Spread" in XERCES SETTINGS' ZOMBIES tab, bit
-16384 of the match's settings). The game's `SetSpreadOverride` only holds spread at
-a weapon's smallest hip spread, so while this PC hosts a Zombies match with the
-setting on, every loaded weapon's hip spread (smallest and largest when standing,
-crouched, prone and sliding, and what firing, turning, moving and sprinting add) is
-set to 0. The host's game runs the server, so it holds for everyone in the match.
+16384 of the match's settings). The game's `SetSpreadOverride` is a script's, per
+player, so while this PC hosts a Zombies match with the setting on, every loaded
+weapon's hip spread (smallest and largest when standing, crouched, prone and
+sliding) is set to 0. The host's game runs the server, so it holds for everyone in
+the match.
+
+Where those numbers are was measured in the game's code on 2026-11-15, after the
+user found the setting did nothing ("it's almost like it doesn't work at all",
+solo and with a friend). Until then it wrote to the hip-spread fields of
+`game::weapon::WeaponDef` in `src/client/game/structs`, at 0xFA0 to 0xFD0, and
+nothing in the game reads a float there: that layout is 0x1D4 bytes off at this
+point, so no spread ever changed and, while the setting was on, 12 other numbers of
+each weapon were 0 (in the game's own field table those are explosion and coverage
+values; put back when the setting went off). beta.20's test misread it:
+`spread-compare.png` shows the same open crosshair and about the same group of holes
+both ways. What was found:
+
+- The game's weapon field table (cspField entries, name, offset, type, at
+  0x1435DB130 in build 0x6531394) has `hipSpreadStandMin` at 0x10CC of the whole
+  weapon (a 0x300-byte variant, then the WeaponDef): WeaponDef+0xDCC.
+- The function that gives a weapon's smallest and largest hip spread for the
+  player's stance (0x142657270) reads WeaponDef+0xDCC, 0xDD0, 0xDD4, 0xDD8 (smallest:
+  standing, crouched, prone, sliding) and 0xDDC to 0xDE8 (largest), where WeaponDef
+  is what the weapon's variant points at 0x18 (0x142670E50). The spread getter
+  (0x1426575E0, three callers) calls it and then only multiplies, unless a script
+  set a spread override (the player's state at 0x310: 2 makes both the override, 1
+  the largest). A shot's spread is the smallest plus a share of the gap to the
+  largest, so with both 0 it is 0 and the crosshair stays closed.
+- The aim-spread update (0x14265AAFF) divides by largest minus smallest, but only
+  uses it with a script's override, where it divides the decay by infinity (0).
+  Nothing else in the game reads these as floats.
+
+So `zm_hip_spread.cpp` writes 0 at those eight offsets
+(`xerces_core::hip_spread_signatures::offsets`), and only when the registry entry
+`bg.weapon_hip_spread` (feature `zm_hip_spread`) matches: its pattern is the whole
+function, with every one of those offsets as fixed bytes, so a match proves where
+this build keeps them (a unit test checks that each offset is in the pattern).
+Otherwise the setting does nothing and the log says so once
+(`xerces.hip_spread.unavailable`). What firing, turning and moving add stays: it
+only moves the share between two zeros.
 A weapon's zone can stay loaded into the next level (64 of 94 did in the test), so
 the weapons changed are remembered by name and, in any level that is not a hosted
 Zombies match with the setting on, each one still loaded and still at 0 gets its

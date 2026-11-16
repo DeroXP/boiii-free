@@ -105,6 +105,25 @@ inline constexpr std::array all = {wanted_insertion_call, loaded_insertion_call,
                                    compare};
 } // namespace stream_sort_signatures
 
+// The registry entry No Hip-Fire Spread relies on (src/client/xerces/
+// zm_hip_spread.cpp, docs/DESIGN.md 7.11): the game's function that gives a
+// weapon's smallest and largest hip spread for the player's stance. Nothing is
+// written there; its pattern covers the whole function, with every offset it
+// reads into the weapon's data as fixed bytes, so a match proves where this
+// build keeps those numbers. A miss turns only No Hip-Fire Spread off.
+namespace hip_spread_signatures {
+inline constexpr std::string_view weapon_hip_spread = "bg.weapon_hip_spread";
+
+inline constexpr std::array all = {weapon_hip_spread};
+
+// Where that function reads in the weapon's data (WeaponDef, what a weapon
+// variant points at 0x18): the smallest spread standing, crouched, prone and
+// sliding, then the largest in the same order. Measured 2026-11-15; the
+// WeaponDef layout in src/client/game/structs puts these 0x1D4 further on.
+inline constexpr std::array<std::size_t, 8> offsets = {
+    0xDCC, 0xDD0, 0xDD4, 0xDD8, 0xDDC, 0xDE0, 0xDE4, 0xDE8};
+} // namespace hip_spread_signatures
+
 // Whether code about to be detoured is exactly what the detour was written
 // for (DESIGN.md 4.3: no code bytes are written before the whole expected
 // instruction sequence is checked). `entry` is the bytes the detour's jmp

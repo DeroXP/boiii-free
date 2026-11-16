@@ -2,12 +2,23 @@
 
 // xerces_zm_hip_spread: the Zombies setting "No Hip-Fire Spread"
 // (xerces_zm_noHipSpread, docs/DESIGN.md 7.11). The game's own spread override
-// (SetSpreadOverride) only holds spread at a weapon's smallest hip spread, so
+// (SetSpreadOverride) only holds spread at one value for one player, so
 // instead every loaded weapon's hip spread (the smallest and largest when
-// standing, crouched, prone and sliding, and what firing, turning, moving and
-// sprinting add) is set to 0 while this PC hosts a Zombies match with the
-// setting on. The host's game runs the match's server in the same process, so
-// the shots of everyone in the match go where the crosshair is.
+// standing, crouched, prone and sliding) is set to 0 while this PC hosts a
+// Zombies match with the setting on. The game's spread is the smallest plus a
+// share of the gap to the largest, then only multiplied (perks, dual wield),
+// so it is 0 for every shot and the crosshair stays closed. The host's game
+// runs the match's server in the same process, so the shots of everyone in
+// the match go where the crosshair is.
+//
+// Where a weapon keeps those eight numbers was measured in the game's own code
+// on 2026-11-15 (xerces_core::hip_spread_signatures::offsets). Until then this
+// wrote to the WeaponDef fields of src/client/game/structs, which are 0x1D4
+// bytes off there: it never changed any spread (the user: "it's almost like it
+// doesn't work at all"), and while it was on it set 12 other numbers of each
+// weapon to 0. Now the registry's pattern for that function (the whole of it,
+// with every offset it reads) must match this game build, or the setting does
+// nothing and says so once in the log.
 //
 // A player who joined draws their own crosshair, tracers and bullet holes from
 // their own game's weapons, which kept their spread: the shots landed in the
@@ -30,38 +41,41 @@
 #include <game/utils.hpp>
 #include <loader/component_loader.hpp>
 
+#include <xerces_core/sigruntime.hpp>
+
 #include "runtime.hpp"
+#include "signatures.hpp"
 
 namespace xerces_zm_hip_spread {
 namespace {
 using game::weapon::WeaponDef;
 namespace xasset = game::db::xasset;
 
-constexpr int FIELDS = 12;
+namespace ids = xerces_core::hip_spread_signatures;
+
+constexpr std::size_t FIELDS = ids::offsets.size();
 using values = std::array<float, FIELDS>;
 
-std::array<float *, FIELDS> fields_of(WeaponDef *def) {
-  return {&def->fHipSpreadStandMin, &def->fHipSpreadDuckedMin,
-          &def->fHipSpreadProneMin, &def->fHipSpreadSlideMin,
-          &def->hipSpreadStandMax,  &def->hipSpreadDuckedMax,
-          &def->hipSpreadProneMax,  &def->hipSpreadSlideMax,
-          &def->fHipSpreadFireAdd,  &def->fHipSpreadTurnAdd,
-          &def->fHipSpreadMoveAdd,  &def->fHipSpreadSprintAdd};
+// Whether this game build keeps the spread where the offsets say (the
+// registry's pattern matched); decided once, in post_unpack
+bool layout_ok = false;
+
+float *field(WeaponDef *def, const std::size_t i) {
+  return reinterpret_cast<float *>(reinterpret_cast<std::uint8_t *>(def) +
+                                   ids::offsets[i]);
 }
 
 values read(WeaponDef *def) {
-  const auto fields = fields_of(def);
   values out{};
-  for (int i = 0; i < FIELDS; ++i) {
-    out[i] = *fields[i];
+  for (std::size_t i = 0; i < FIELDS; ++i) {
+    out[i] = *field(def, i);
   }
   return out;
 }
 
 void write(WeaponDef *def, const values &in) {
-  const auto fields = fields_of(def);
-  for (int i = 0; i < FIELDS; ++i) {
-    *fields[i] = in[i];
+  for (std::size_t i = 0; i < FIELDS; ++i) {
+    *field(def, i) = in[i];
   }
 }
 
@@ -173,6 +187,9 @@ void restore() {
 }
 
 void frame() {
+  if (!layout_ok) {
+    return;
+  }
   if (!in_level()) {
     next_scan_ms = 0; // the first frame of the next level scans at once
     if (game::get_dvar_bool(MATCH_SETTING).value_or(false)) {
@@ -209,6 +226,14 @@ public:
         MATCH_SETTING, false, game::DvarFlags{},
         "Zombies: whether the host of the match this PC is in has No Hip-Fire "
         "Spread on. Set by Xerces' in-match script; 0 outside a match.");
+    layout_ok = xerces_signatures::feature_enabled("zm_hip_spread");
+    if (!layout_ok) {
+      xerces_runtime::log_warn(
+          "xerces.hip_spread.unavailable",
+          xerces_signatures::feature_message(
+              "zm_hip_spread", "No Hip-Fire Spread",
+              "The setting does nothing; every weapon keeps its spread."));
+    }
     scheduler::loop(frame, scheduler::main);
   }
 };

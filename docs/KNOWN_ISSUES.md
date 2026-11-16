@@ -197,6 +197,10 @@ worse.
   nothing. Unlike those games it
   moves the view up or down toward a zombie's torso-to-head band when you aim
   under or over it (never sideways).
+- **No Hip-Fire Spread did nothing before this version.** It changed the wrong
+  numbers of each weapon, so the spread and the crosshair stayed as they were. It
+  is fixed (the right numbers, checked against the game's own code), but not yet
+  seen working in a match.
 - **No Hip-Fire Spread is the host's setting.** Your own setting does nothing in
   a match you joined; the host's is used there. Players who joined get the
   tight crosshair, tracers and bullet holes a few seconds after they spawn, once

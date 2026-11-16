@@ -4485,3 +4485,15 @@ until 12:00. Scripts in `C:\Users\Ginld\XercesDev\bench\20261114-night`.
       unit tests pass; StyLua is clean. Not tried: two PCs (the guest's crosshair, tracers and bullet holes, and
       the spread coming back in its next match with the setting off), and whether the timer on the UI root runs
       in a Zombies level as `xp_bar`'s does.
+- [x] No Hip-Fire Spread did nothing at all (the user, 2026-11-15: "it's almost like it doesn't work at all", solo
+      and with a friend; their log at 20:06 says "No hip-fire spread on 112 weapons", so it ran). Measured in the
+      game's code (the 2026-11-04 dump of build 0x6531394, tools/dev/re): nothing reads a float at the WeaponDef
+      offsets it wrote (0xFA0 to 0xFD0); the game's weapon field table puts `hipSpreadStandMin` at WeaponDef+0xDCC,
+      and the function that picks the smallest and largest hip spread by stance (0x142657270) reads exactly
+      0xDCC to 0xDE8. beta.20's `spread-compare.png` was misread: the crosshair is as open with the setting on
+      and the groups are alike. Now: those eight offsets, gated on the new registry entry `bg.weapon_hip_spread`
+      (the whole function as its pattern). `xerces_cli sig check --dump`: 20 of 20, the new one at 0x2657270;
+      the one other reader that divides by the gap (the aim-spread update) uses it only with a script's spread
+      override. The Release build of all four programs compiles and the 630 unit tests pass (one new: every offset
+      is fixed bytes of the pattern). Not tried in the game: shots and the crosshair with the setting on, solo
+      and joined.

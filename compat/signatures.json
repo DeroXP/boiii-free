@@ -262,6 +262,21 @@
       },
       "features": ["stream_sort"],
       "note": "rcx the (empty) predicate object, edx an image part, r8d the part it is compared with; al is 1 when the first goes before the second: parts whose importance is over 0.75 first, then by whether the part number is 0, then by the low 6 bits of the part's file field, then by its offset. The engine's std::sort for the streamer's lists (0x141D02C30) calls it; Xerces only calls it, nothing is written here. Made with sigmaker.py --through 0x141D036E0."
+    },
+    {
+      "id": "bg.weapon_hip_spread",
+      "symbol": "the weapon's hip spread for the player's stance",
+      "kind": "function",
+      "section": ".text",
+      "patterns": [
+        "48 8B C4 48 89 58 08 48 89 70 10 57 48 81 EC 80 00 00 00 0F 29 70 E8 0F 29 78 D8 44 0F 29 40 C8 48 8B D9 48 8B CA 49 8B F9 49 8B F0 44 0F 29 48 B8 44 0F 29 50 A8 44 0F 29 58 98 E8 ?? ?? ?? ?? 4C 8B D0 F3 44 0F 10 80 DC 0D 00 00 F3 44 0F 10 88 CC 0D 00 00 8B 83 34 03 00 00 45 0F 28 D0 45 0F 28 D9 85 C0 74 1D FF C8 0F 84 ?? ?? ?? ?? FF C8 0F 84 ?? ?? ?? ?? FF C8 0F 84 ?? ?? ?? ?? 83 F8 02 75 12 F3 45 0F 10 92 E4 0D 00 00 F3 45 0F 10 9A D4 0D 00 00 8B 8B 38 03 00 00 85 C9 74 19 FF C9 0F 84 ?? ?? ?? ?? FF C9 74 1F FF C9 0F 84 ?? ?? ?? ?? 83 F9 02 75 12 F3 45 0F 10 82 E4 0D 00 00 F3 45 0F 10 8A D4 0D 00 00 48 8B CB E8 ?? ?? ?? ?? 48 8B CB F3 0F 10 BB 24 03 00 00 F3 0F 5C F8 E8 ?? ?? ?? ?? 48 8B CB 0F 28 F0 E8 ?? ?? ?? ?? 4C 8D 9C 24 80 00 00 00 49 8B 5B 10 F3 45 0F 5C D9 F3 45 0F 5C D0 F3 0F 5C F0 F3 0F 5E FE 0F 28 74 24 70 F3 44 0F 59 DF F3 44 0F 59 D7 0F 28 7C 24 60 F3 45 0F 58 D9 45 0F 28 4B C0 F3 45 0F 58 D0 45 0F 28 43 D0 F3 44 0F 11 1E 45 0F 28 5B A0 F3 44 0F 11 17 49 8B 73 18 45 0F 28 53 B0 49 8B E3 5F C3 F3 45 0F 10 92 E8 0D 00 00 F3 45 0F 10 9A D8 0D 00 00 E9 ?? ?? ?? ?? 45 0F 28 D0 45 0F 28 D9 E9 ?? ?? ?? ?? F3 45 0F 10 92 E0 0D 00 00 F3 45 0F 10 9A D0 0D 00 00 E9 ?? ?? ?? ?? F3 45 0F 10 82 E8 0D 00 00 F3 45 0F 10 8A D8 0D 00 00 E9 ?? ?? ?? ?? F3 45 0F 10 82 E0 0D 00 00 F3 45 0F 10 8A D0 0D 00 00"
+      ],
+      "offset": 0,
+      "known": {
+        "0x6531394": "0x2657270"
+      },
+      "features": ["zm_hip_spread"],
+      "note": "rcx the player's state, rdx the weapon, r8 and r9 where the smallest and largest hip spread go. It reads the weapon's data (WeaponDef, from the variant at 0x18) at 0xDCC, 0xDD0, 0xDD4 and 0xDD8 (smallest: standing, crouched, prone, sliding) and 0xDDC to 0xDE8 (largest), picked by the stance at 0x334 and 0x338 and blended by its transition. The weapon spread getter (0x1426575E0) calls it, then only multiplies the result, unless a script set a spread override. No Hip-Fire Spread (zm_hip_spread.cpp) writes 0 at those offsets; nothing is written here, and the whole function is the pattern so that a match proves the offsets. Made 2026-11-15 with sigmaker.py --through 0x142657420."
     }
   ]
 }

@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <stdexcept>
 #include <thread>
 
@@ -114,6 +115,40 @@ TEST_CASE("signature registry: the shipped file has every multi-mod hook") {
     if (has(entry.features, "multi_mod")) {
       CHECK(std::ranges::find(multi_mod_signatures::all, entry.id) !=
             multi_mod_signatures::all.end());
+    }
+  }
+}
+
+TEST_CASE(
+    "signature registry: No Hip-Fire Spread's function pins its offsets") {
+  // zm_hip_spread.cpp writes at these offsets of a weapon's data only when
+  // the registry's pattern matched, so every one of them must be fixed bytes
+  // of the pattern (a disp32 read), and the entry is its feature alone.
+  const auto file = xerces_tests::fixtures_dir().parent_path().parent_path() /
+                    "compat" / "signatures.json";
+  REQUIRE(std::filesystem::exists(file));
+  const signature_registry registry =
+      parse_signature_registry(xerces_tests::read_file(file));
+  REQUIRE(registry.ok());
+  const auto entry =
+      std::ranges::find_if(registry.signatures, [](const signature &s) {
+        return s.id == hip_spread_signatures::weapon_hip_spread;
+      });
+  REQUIRE(entry != registry.signatures.end());
+  CHECK(entry->features == std::vector<std::string>{"zm_hip_spread"});
+  CHECK(entry->kind == symbol_kind::function);
+  CHECK(entry->known.contains(0x6531394u));
+  REQUIRE(entry->patterns.size() == 1);
+  for (const std::size_t offset : hip_spread_signatures::offsets) {
+    char bytes[16];
+    std::snprintf(bytes, sizeof(bytes), "%02X %02X 00 00",
+                  static_cast<unsigned>(offset & 0xFF),
+                  static_cast<unsigned>((offset >> 8) & 0xFF));
+    CHECK(entry->patterns[0].find(bytes) != std::string::npos);
+  }
+  for (const auto &other : registry.signatures) {
+    if (has(other.features, "zm_hip_spread")) {
+      CHECK(other.id == hip_spread_signatures::weapon_hip_spread);
     }
   }
 }
